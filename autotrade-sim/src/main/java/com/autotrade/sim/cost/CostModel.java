@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
  *   <li>{@link #id()}는 프로필 ID + 표 전체 내용 해시 앞 12자리다. 표 내용이 바뀌면 ID도 바뀐다
  *       ({@code ExperimentSpec#costModelId}).</li>
  *   <li>{@link #tableHash}는 실험 기간과 겹치는 구간만 넣은 해시다. 미래 구간을 추가해도 과거 실험의 해시는 그대로다.</li>
- *   <li>세그먼트 판별({@code segmentOf})은 해시에 들어가지 않는다. 국내 소속부는 시점별 이력이 필요하다(Q-012).</li>
+ *   <li>세그먼트 판별({@code segmentOf})은 해시에 들어가지 않는다. 국내 소속부는 시점별 이력이 필요하다(Q-012).
+ *       주입하는 {@code segmentOf}도 순수 함수이고 스레드 안전해야 한다.</li>
  * </ul>
  */
 public final class CostModel {

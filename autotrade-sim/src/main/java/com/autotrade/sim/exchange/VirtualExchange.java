@@ -317,22 +317,34 @@ public final class VirtualExchange implements OrderGateway {
                 if (limit != null && (buy ? level.price().compareTo(limit) > 0 : level.price().compareTo(limit) < 0)) {
                     break;
                 }
+                // 대기 중인 지정가와 같은 가격의 반대편 잔량은 교차가 아니다. 앞선 잔량 규칙(체결 틱)으로만 체결한다
+                if (o.resting && level.price().compareTo(limit) == 0) {
+                    break;
+                }
                 long available = level.quantity() - taken.getOrDefault(level.price(), 0L);
                 if (available <= 0) {
                     continue;
                 }
                 long qty = Math.min(available, o.remaining());
-                BigDecimal impact = level.price().subtract(best).abs().multiply(BigDecimal.valueOf(qty));
-                long done = fill(o, book, level.price(), qty, impact);
+                // 이미 대기 중이던 지정가는 먼저 와 있던 주문이므로 지정가로 체결한다(체결 틱 경로와 같다)
+                BigDecimal price = o.resting ? limit : level.price();
+                BigDecimal impact = o.resting ? BigDecimal.ZERO
+                        : level.price().subtract(best).abs().multiply(BigDecimal.valueOf(qty));
+                long done = fill(o, book, price, qty, impact);
                 taken.merge(level.price(), done, Long::sum);
             }
             if (limit != null && o.isOpen() && o.remaining() > 0) {
                 updateQueue(o, buy ? book.bids() : book.asks(), buy);
+                o.resting = true;
             }
         }
     }
 
-    /** 지정가 대기 주문의 앞선 잔량을 스냅샷으로 맞춘다. 처음이면 같은 가격 잔량으로 시작한다. */
+    /**
+     * 지정가 대기 주문의 앞선 잔량을 스냅샷으로 맞춘다. 처음이면 같은 가격 잔량으로 시작한다.
+     * 지정가가 표시된 호가 범위 밖이면 앞선 잔량을 알 수 없으므로 정하지 않고(null) 둔다.
+     * 정해지기 전에는 지정가보다 유리한 체결로만 체결된다.
+     */
     private void updateQueue(VirtualOrder o, List<PriceLevel> sameSide, boolean buy) {
         BigDecimal limit = o.request.limitPrice();
         Long levelQty = null;
@@ -343,11 +355,14 @@ public final class VirtualExchange implements OrderGateway {
             }
         }
         if (levelQty == null) {
-            // 표시된 호가 범위 안인데 그 가격이 없으면 앞선 잔량 0, 범위 밖이면 알 수 없어 그대로(처음이면 0)
+            // 표시된 호가 범위 안인데 그 가격이 없으면 앞선 잔량 0, 범위 밖이면 알 수 없으므로 그대로 둔다
             boolean withinRange = !sameSide.isEmpty() && (buy
                     ? limit.compareTo(sameSide.get(sameSide.size() - 1).price()) >= 0
                     : limit.compareTo(sameSide.get(sameSide.size() - 1).price()) <= 0);
-            levelQty = withinRange || o.queueAhead == null ? 0L : o.queueAhead;
+            if (!withinRange) {
+                return;
+            }
+            levelQty = 0L;
         }
         o.queueAhead = o.queueAhead == null ? levelQty : Math.min(o.queueAhead, levelQty);
     }
@@ -384,6 +399,7 @@ public final class VirtualExchange implements OrderGateway {
             if (through) {
                 qty = Math.min(o.remaining(), tickLeft);
             } else if (atLimit && hasBook && o.queueAhead != null) {
+                // 한계: 같은 가격에 이 계좌 주문이 둘 이상이면 뒤 주문의 앞선 잔량에 앞 주문 수량을 넣지 않는다(소액 전제)
                 long ahead = o.queueAhead;
                 long excess = tickLeft - ahead;
                 o.queueAhead = Math.max(0L, ahead - tickLeft);
@@ -471,6 +487,8 @@ public final class VirtualExchange implements OrderGateway {
         private BigDecimal filledNotional = BigDecimal.ZERO;
         private int fillCount;
         private Long queueAhead;
+        /** 한 번이라도 호가 스냅샷을 지나 대기한 지정가 주문인가. */
+        private boolean resting;
         private BigDecimal referencePrice;
         private Money reserved = Money.zero(ledger.currency());
 

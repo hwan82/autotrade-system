@@ -103,6 +103,9 @@ class CostModelTest {
         assertThat(KR.covers(LocalDate.of(2025, 1, 1), LocalDate.of(2026, 12, 31))).isTrue();
         assertThat(KR.covers(LocalDate.of(2024, 12, 31), LocalDate.of(2025, 1, 10))).isFalse();
         assertThat(US.covers(LocalDate.of(2025, 6, 1), LocalDate.of(2026, 2, 1))).isFalse();
+        // TAF 표는 Q-004에서 확인한 2028-12-31까지만 덮는다
+        assertThat(US.covers(LocalDate.of(2028, 12, 1), LocalDate.of(2028, 12, 31))).isTrue();
+        assertThat(US.covers(LocalDate.of(2028, 12, 1), LocalDate.of(2029, 1, 2))).isFalse();
         assertThatThrownBy(() -> KR.fees(Side.SELL, SAMSUNG, LocalDate.of(2024, 6, 3), BigDecimal.TEN, 1))
                 .isInstanceOf(IllegalStateException.class);
     }

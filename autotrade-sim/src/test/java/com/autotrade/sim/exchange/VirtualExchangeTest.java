@@ -118,6 +118,39 @@ class VirtualExchangeTest {
     }
 
     @Test
+    void 표시_범위_밖_지정가는_그_가격이_표시될_때까지_앞선_잔량을_정하지_않는다() {
+        event(book(1000, asks("70100x60"), bids("70000x400", "69900x300")));
+        submit(Side.BUY, OrderType.LIMIT, "69800", 10);
+        event(book(2000, asks("70100x60"), bids("70000x400", "69900x300"))); // 69800은 표시 범위 밖
+        // 앞선 잔량을 모르는 동안 그 가격 체결로는 체결하지 않는다
+        assertThat(event(trade(3000, "69800", 50))).isEmpty();
+        event(book(4000, asks("70100x60"), bids("69900x300", "69800x200"))); // 앞선 200
+        assertThat(event(trade(5000, "69800", 150))).isEmpty(); // 앞선 50
+        assertThat(event(trade(6000, "69800", 55))).singleElement()
+                .satisfies(a -> assertFill(a, 5, "69800", 1, 0));
+        // 지정가보다 유리한 체결은 앞선 잔량과 무관
+        assertThat(event(trade(7000, "69700", 100))).singleElement()
+                .satisfies(a -> assertFill(a, 5, "69800", 2, 0));
+    }
+
+    @Test
+    void 대기_중이던_지정가가_나중_호가와_교차하면_지정가로_체결된다() {
+        event(book(1000, asks("70100x60"), bids("70000x400")));
+        submit(Side.BUY, OrderType.LIMIT, "70000", 10);
+        event(book(2000, asks("70100x60"), bids("70000x400"))); // 대기 시작
+        assertThat(event(book(3000, asks("69900x100"), bids("69800x400")))).singleElement()
+                .satisfies(a -> assertFill(a, 10, "70000", 1, 0));
+    }
+
+    @Test
+    void 대기_중인_지정가와_같은_가격의_반대편_호가는_즉시_체결이_아니다() {
+        event(book(1000, asks("70100x60"), bids("70000x400")));
+        submit(Side.BUY, OrderType.LIMIT, "70000", 10);
+        event(book(2000, asks("70100x60"), bids("70000x400"))); // 대기, 앞선 400
+        assertThat(event(book(3000, asks("70000x100"), bids("69900x400")))).isEmpty();
+    }
+
+    @Test
     void 지정가_매수가_매도_호가에_닿으면_지정가_이내만_즉시_체결된다() {
         event(book(1000, asks("70100x60", "70200x500"), bids("70000x400")));
         submit(Side.BUY, OrderType.LIMIT, "70100", 100);

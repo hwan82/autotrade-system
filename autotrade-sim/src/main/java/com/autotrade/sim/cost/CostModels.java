@@ -70,7 +70,8 @@ public final class CostModels {
         Levy taf = new Levy.PerShareLevy("taf", CostCategory.TAX, Side.SELL, RoundingMode.HALF_UP, PeriodTable.of(
                 Period.closed(US_TABLE_START, LocalDate.of(2026, 9, 30), PerShareFee.of("0.000195", "9.79")),
                 Period.closed(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 12, 31), PerShareFee.of("0", "0")),
-                Period.open(LocalDate.of(2027, 1, 1), PerShareFee.of("0.000195", "9.79"))));
+                // Q-004 2.1에서 확인한 구간까지만 둔다. 그 뒤 기간 실험은 비용 표 없음으로 거부된다
+                Period.closed(LocalDate.of(2027, 1, 1), LocalDate.of(2028, 12, 31), PerShareFee.of("0.000195", "9.79"))));
         return new CostModel(profileId, Market.US, List.of(commission, sec, taf), DEFAULT_SLIPPAGE,
                 s -> SegmentRates.ALL);
     }
