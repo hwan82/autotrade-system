@@ -18,6 +18,8 @@ pm-lead, architect, data-engineer, sim-engine, strategy-researcher, risk-ops, ui
 작업이 특정 역할에 해당하면 해당 에이전트에 위임한다. 실전 주문 경로, RealTradingGuard, 블랙리스트, 장애 대응을 건드리는 변경은 반드시 risk-ops 검토를 거친다.
 
 ## 빌드와 테스트
-- 빌드: `./gradlew build`
-- 테스트: `./gradlew test`
-(뼈대 생성 후 실제 명령으로 갱신)
+- 전체 빌드(컴파일, 테스트, 순수 모듈 금지 의존 검사, ArchUnit): `./gradlew build`
+- 테스트만: `./gradlew test`, 모듈 하나: `./gradlew :autotrade-domain:test`
+- 실험실 프로세스 실행: `./gradlew :autotrade-app:bootRun`
+- DB 스키마: `autotrade-app/src/main/resources/db/migration/V*.sql` (CI가 PostgreSQL 16에 적용하고 `scripts/ci/schema-smoke.sql` 실행)
+- 모듈 구조와 계약: docs/adr/ADR-001-module-structure.md, 설정 키: docs/config/config-keys.md
