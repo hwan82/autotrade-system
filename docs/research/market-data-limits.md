@@ -84,7 +84,7 @@ data-engineer는 결정 로그와 다른 역할 문서를 직접 고치지 않�
 | 대상 | 내용 | 담당 |
 |---|---|---|
 | broker-and-fault-design.md 2장 표, 31행, 4.1 표 | 토스 "실시간 없음" 문구 수정, 한도 수치를 이 문서 링크로 대체 | pm-lead (risk-ops 검토, 장애 대응 문서) |
-| overseas-design.md 2·6장, 9장 OV5 | 토스 실시간 반영, OV5를 "3사 실시간 무료 확인, 장중 전략 가능"으로 갱신 | pm-lead |
+| overseas-design.md 2·6장, 9장 OV5 | 토스 실시간 반영, OV5를 "키움·한국투자 미국 실시간 무료 확인(토스는 추론), 장중 전략 가능"으로 갱신 | pm-lead |
 | role-guides.md 55행 | "토스는 실시간이 없으므로" 문구 수정 | pm-lead |
 | 설정 예시 `priority`, `toss-polling-scope`, 연결 수 설정 키 | A안이면 `priority: [KIWOOM, TOSS, KIS]`, 토스 연결 배분 키 추가 제안 | architect (risk-ops 검토) |
 | 시뮬레이션 비용·체결 가정 | 미국 시세가 통합 시세가 아님(슬리피지 보수적), 토스 시세 LOSSY로 녹화 공백 표시 필요 | sim-engine, strategy-researcher |
