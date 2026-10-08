@@ -3,8 +3,26 @@ spring:
     name: autotrade-lab
   main:
     banner-mode: off
+  jackson:
+    # 금액·비율은 DTO에서 문자열로 내보낸다(부동소수점 손실 방지). 날짜는 ISO 문자열
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  # 로컬 전용(D-020, UI-01). 루프백이 아닌 주소로 바꾸면 기동을 거부한다(LoopbackBindingCheck)
+  address: 127.0.0.1
+  port: ${AUTOTRADE_UI_PORT:8480}
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-exception: false
+    whitelabel:
+      enabled: false
 
 autotrade:
   # runtime-config.json·secrets.json이 있는 폴더. 비워 두면 -Dautotrade.config-dir → AUTOTRADE_CONFIG_DIR → ~/.autotrade.
   # 비밀값은 이 파일이 아니라 저장소 밖 secrets.json에만 둔다(CFG-03).
   config-dir: ""
+  lab:
+    # 전략 프로필 YAML 폴더(ADR-005 4장). 상대 경로는 실행 폴더 기준이며 bootRun은 저장소 루트에서 돈다
+    strategies-dir: strategies

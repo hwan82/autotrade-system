@@ -27,6 +27,15 @@
 | `real-trading.accounts` | 배열 | `[]` | 항목은 `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가)·`broker`(KIS·KIWOOM·TOSS)·`market`(KRX·US)만. **활성화 키(`enabled` 등)는 없다**: 넣으면 그 파일 전체를 쓰지 않는다(CFG-02). RealTradingGuard는 기동 시 모든 계좌 OFF | 계좌 교체 절차(CFG-05, 구현 전까지 UI 변경 불가) | 실전 엔진 | [ADR-002](../adr/ADR-002-real-trading-guard.md), D-010, D-016 |
 | `real-trading.account-numbers.<id>` 🔒 | 문자열 맵 | `{}` | 키는 `accounts`의 id만 쓴다. 목록에 없는 항목은 그 항목만 무시하고 건수만 경고한다(값·별칭은 남기지 않음). 값이 없는 계좌는 활성화할 수 없다 | 계좌 교체 절차 | 실전 엔진(증권사 플러그인에 전달) | [ADR-002](../adr/ADR-002-real-trading-guard.md) 2.4 |
 
+## 실험실 프로세스 속성 (Spring, `application.yml`)
+설정 파일 계층(runtime-config.json)이 아니라 실험실 프로세스 기동 속성이다. 실행 중에 바뀌지 않는다.
+
+| 속성 | 기본값 | 설명 | 근거 |
+|---|---|---|---|
+| `server.address` | `127.0.0.1` | 대시보드 바인딩 주소. 루프백이 아니거나 비우면 기동을 거부한다 | D-020, [ADR-005](../adr/ADR-005-ui-dashboard.md) |
+| `server.port` | `8480` (환경 변수 `AUTOTRADE_UI_PORT`) | 대시보드 포트 | ADR-005 |
+| `autotrade.lab.strategies-dir` | `strategies` (실행 폴더 기준, bootRun은 저장소 루트) | 전략 프로필 YAML 폴더 | ADR-005 4장 |
+
 ## 아직 없는 키 (담당 작업에서 추가)
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).

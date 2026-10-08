@@ -1,18 +1,30 @@
 # 전략 프로필 (YAML)
 
-매매 기법 하나 = 파일 하나(`<프로필ID>.yaml`, STR-01). 파일 이름과 `id`가 같아야 한다. 담당: strategy-researcher.
-읽기는 `ProfileYaml`(autotrade-strategy), 해석·검증은 `CatalogStrategyFactory`가 한다. 결정: [D-027](../docs/decisions/D-027-strategy-lab-protocol.md).
+매매 기법 하나 = 프로필 ID 하나(STR-01). 파일 배치는 `strategies/<프로필ID>/v<버전>.yaml`입니다([ADR-005](../docs/adr/ADR-005-ui-dashboard.md) 4장). 대시보드의 전략 프로필 화면이 이 폴더를 읽고 씁니다. 담당: strategy-researcher.
+읽기는 UI가 `StrategyProfileStore`(app-lab), 실험 실행기가 `ProfileYaml`(autotrade-strategy)이고, 두 읽기가 같은 해시를 내는지 app-lab `ProfileFileCompatibilityTest`가 확인합니다. 해석·검증은 `CatalogStrategyFactory`가 합니다. 결정: [D-026](../docs/decisions/D-026-ui-frontend.md)(배치), [D-027](../docs/decisions/D-027-strategy-lab-protocol.md)(키와 실험 절차).
+
+- 저장된 버전 파일은 고치지 않습니다. 바꾸려면 새 버전을 만듭니다(새 해시). 실험 결과가 해시로 프로필을 가리키기 때문입니다.
+- 버전 사이에 `market`·`style`은 바꿀 수 없습니다. 다른 시장·스타일은 복제해 새 ID로 만듭니다.
+- 파라미터는 점으로 이은 키와 문자열 값입니다(예: `entry.signal: range-breakout`, `exit.stop-loss-pct: "3"`).
 
 ## 형식
 
-YAML 부분집합만 받는다. 벗어나면 줄 번호와 함께 거절한다.
+```yaml
+id: "kr-orb-30"
+version: 1
+market: "KRX"          # KRX, US
+style: "INTRADAY"      # INTRADAY, SWING
+created-at: "2026-10-08T00:00:00Z"
+parameters:
+  logic: "orb"
+  exit.stop-loss-pct: "1.5"
+```
 
-- 공백 2칸 들여쓰기의 중첩 맵, 값은 문자열 스칼라. 목록·앵커·여러 줄 문자열·흐름 표기(`[ ]`, `{ }`)는 쓰지 않는다.
-- 값은 문자열 그대로 해시에 들어간다. `1.5`와 `1.50`은 다른 프로필이다.
-- 비율 파라미터는 소수점을 붙여 쓴다(`3.0`). 실험 실행기의 ±20% 변형이 소수점 없는 값을 정수(개수·분·일)로 보고 반올림하기 때문이다.
-- 최상위 `id`, `version`, `market`(KRX, US), `style`(INTRADAY, SWING)은 프로필 필드, 나머지는 점으로 이은 파라미터(`exit.stop-loss-pct`)가 된다.
-- 로직이 쓰지 않는 키는 거절한다(오타가 해시에만 섞여 결과 추적이 어긋나는 것을 막음). 예외: `hypothesis`, `study.*`, `notes.*`.
-- 내용을 바꾸면 `version`을 올린다. 같은 `id@version`에 다른 내용을 두면 실험 추적이 깨진다.
+- 최상위 키는 `id`, `version`, `market`, `style`, `based-on`, `created-at`, `note`, `parameters`뿐입니다. `based-on`·`created-at`·`note`는 기록용이라 해시에 들어가지 않습니다.
+- 손으로 쓸 때도 `parameters` 아래 평평한 점 키(공백 2칸 들여쓰기)로 씁니다. 목록·앵커·흐름 표기(`[ ]`, `{ }`)·블록 문자열(`|`, `>`)은 쓰지 않습니다. 벗어나면 `ProfileYaml`이 줄 번호와 함께 거절합니다.
+- 값은 큰따옴표로 감쌉니다(UI도 항상 감쌉니다). 값은 문자열 그대로 해시에 들어가므로 `1.5`와 `1.50`은 다른 프로필입니다.
+- 비율 파라미터는 소수점을 붙여 씁니다(`"3.0"`). 실험 실행기의 ±20% 변형이 소수점 없는 값을 정수(개수·분·일)로 보고 반올림하기 때문입니다.
+- 로직이 쓰지 않는 키는 거절합니다(오타가 해시에만 섞여 결과 추적이 어긋나는 것을 막음). 예외: `hypothesis`, `study.*`, `notes.*`.
 
 ## 공통 키 (장중·스윙 `ManagedStrategy` 로직)
 

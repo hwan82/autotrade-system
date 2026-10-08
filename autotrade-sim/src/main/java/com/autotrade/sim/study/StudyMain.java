@@ -49,9 +49,10 @@ public final class StudyMain {
     static final int NULL_SEEDS = 20;
     static final List<Duration> LATENCIES = List.of(
             Duration.ZERO, Duration.ofMillis(500), Duration.ofMillis(1500), Duration.ofMillis(2000));
+    /** 사전 등록한 프로필 {@code ID@버전}(계좌 번호 순). 버전 파일은 고치지 않으므로(ADR-005 4장) 버전까지 고정한다. */
     static final List<String> PROFILE_ORDER = List.of(
-            "kr-bh-baseline", "kr-orb-30", "kr-vwap-reclaim", "kr-pdh-breakout", "kr-volume-surge",
-            "kr-book-imbalance", "kr-pullback", "kr-ma-trend", "kr-random-control");
+            "kr-bh-baseline@1", "kr-orb-30@1", "kr-vwap-reclaim@1", "kr-pdh-breakout@1", "kr-volume-surge@1",
+            "kr-book-imbalance@1", "kr-pullback@1", "kr-ma-trend@1", "kr-random-control@1");
     static final List<SymbolSpec> SYMBOLS = List.of(
             new SymbolSpec("900010", new BigDecimal("8000"), 3_000, 300, 220),
             new SymbolSpec("900020", new BigDecimal("23000"), 2_000, 200, 200),
@@ -99,12 +100,16 @@ public final class StudyMain {
 
     static List<StrategyProfile> loadProfiles(Path dir) {
         List<StrategyProfile> out = new ArrayList<>();
-        for (String id : PROFILE_ORDER) {
-            Path file = dir.resolve(id + ".yaml");
+        for (String ref : PROFILE_ORDER) {
+            int at = ref.indexOf('@');
+            String id = ref.substring(0, at);
+            int version = Integer.parseInt(ref.substring(at + 1));
+            Path file = dir.resolve(id).resolve("v" + version + ".yaml");
             try {
                 StrategyProfile p = ProfileYaml.parse(Files.readString(file, StandardCharsets.UTF_8), file.toString());
-                if (!p.id().equals(id)) {
-                    throw new IllegalArgumentException(file + ": 파일 이름과 프로필 ID가 다릅니다: " + p.id());
+                if (!p.id().equals(id) || p.version() != version) {
+                    throw new IllegalArgumentException(file + ": 경로와 프로필 ID·버전이 다릅니다: "
+                            + p.id() + "@" + p.version());
                 }
                 out.add(p);
             } catch (IOException e) {

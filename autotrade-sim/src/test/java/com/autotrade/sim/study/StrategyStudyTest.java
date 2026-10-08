@@ -82,7 +82,7 @@ class StrategyStudyTest {
     @Test
     void 저장소_프로필로도_실험이_시작된다() {
         List<StrategyProfile> profiles = StudyMain.loadProfiles(Path.of("../strategies"));
-        assertThat(profiles).extracting(StrategyProfile::id).containsExactlyElementsOf(StudyMain.PROFILE_ORDER);
+        assertThat(profiles).extracting(p -> p.id() + "@" + p.version()).containsExactlyElementsOf(StudyMain.PROFILE_ORDER);
         CatalogStrategyFactory factory = new CatalogStrategyFactory(RULES);
         profiles.forEach(factory::validate);
     }

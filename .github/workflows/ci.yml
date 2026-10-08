@@ -35,7 +35,19 @@ jobs:
           for p in engine gateway watchdog; do
             "autotrade-app-$p/build/install/autotrade-$p/bin/autotrade-$p"
           done
-          java -jar autotrade-app-lab/build/libs/autotrade-app-lab-*-SNAPSHOT.jar --spring.main.banner-mode=off
+          # 실험실은 대시보드 웹 서버(127.0.0.1)를 띄우고 계속 돈다(ADR-005). 응답을 확인한 뒤 끈다
+          java -jar autotrade-app-lab/build/libs/autotrade-app-lab-*-SNAPSHOT.jar --spring.main.banner-mode=off \
+            --server.port=18480 > lab.log 2>&1 &
+          LAB_PID=$!
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:18480/api/session; then break; fi
+            if ! kill -0 "$LAB_PID" 2>/dev/null; then cat lab.log; exit 1; fi
+            sleep 1
+          done
+          curl -fsS -o /dev/null http://127.0.0.1:18480/ || { cat lab.log; exit 1; }
+          # 루프백이 아닌 Host는 거부해야 한다(DNS rebinding 방지, UI-01)
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:18480/api/session)" = "403"
+          kill "$LAB_PID"
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
