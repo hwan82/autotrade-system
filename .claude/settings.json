@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew build *)",
+      "Bash(./gradlew test *)",
+      "Bash(./gradlew check *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": [
+      "Read(./config/runtime-config.json)",
+      "Read(./**/runtime-config.json)",
+      "Read(./.env)",
+      "Read(./**/*.secret.*)"
+    ]
+  }
+}

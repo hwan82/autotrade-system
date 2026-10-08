@@ -1,3 +1,26 @@
+# 비밀값과 런타임 설정 (커밋 금지)
+.env
+**/runtime-config.json
+**/*.secret.*
+.claude/settings.local.json
+
+# 빌드 산출물
+build/
+.gradle/
+out/
+*.class
+
+# 시세 녹화·실험 원본 데이터 (용량 큼)
+data/
+recordings/
+experiments/**/raw/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Java 기본 (저장소 초기 템플릿)
 # Compiled class file
 *.class
 
@@ -22,3 +45,6 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Gradle wrapper는 커밋
+!gradle/wrapper/gradle-wrapper.jar
