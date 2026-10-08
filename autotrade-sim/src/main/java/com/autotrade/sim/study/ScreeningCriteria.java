@@ -81,7 +81,7 @@ public final class ScreeningCriteria {
     /**
      * 신호 계산에 지난 거래일이 필요한 프로필의 예열 일수({@code study.warmup-days}, 사전 등록). 실행기는 구간마다 전략을 새로
      * 만들고 구간 밖 시세를 주지 않으므로, 구간 앞 이 일수만큼은 신호가 날 수 없다. C6의 하루 평균은 이 일수를 뺀 날로 나눈다.
-     * 예열을 실행기 계약으로 넣는 일은 sim-engine 변경 제안이다(D-026).
+     * 예열을 실행기 계약으로 넣는 일은 sim-engine 변경 제안이다(D-027).
      */
     static int warmupDays(StrategyProfile p) {
         String v = p.parameters().get("study.warmup-days");

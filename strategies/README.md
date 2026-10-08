@@ -1,7 +1,7 @@
 # 전략 프로필 (YAML)
 
 매매 기법 하나 = 파일 하나(`<프로필ID>.yaml`, STR-01). 파일 이름과 `id`가 같아야 한다. 담당: strategy-researcher.
-읽기는 `ProfileYaml`(autotrade-strategy), 해석·검증은 `CatalogStrategyFactory`가 한다. 결정: [D-026](../docs/decisions/D-026-strategy-lab-protocol.md).
+읽기는 `ProfileYaml`(autotrade-strategy), 해석·검증은 `CatalogStrategyFactory`가 한다. 결정: [D-027](../docs/decisions/D-027-strategy-lab-protocol.md).
 
 ## 형식
 
