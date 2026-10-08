@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 
 /**
  * 전략 프로필: 매매 기법 하나를 정의하는 불변 데이터(종목 선정, 진입, 비중, 청산, 한도 파라미터).
- * 실행 로직(신호 생성)은 프로필을 입력으로 받는 별도 인터페이스이며 3·4단계에서 정의한다.
+ * 실행 로직(신호 생성)은 {@link Strategy}이고 {@link StrategyFactory}가 프로필로 만든다(ADR-004).
  *
  * <p>{@link #profileHash()}는 내용 기반 SHA-256이다. 실험 결과(virtual_trade_log.profile_hash)에 남겨
  * "어떤 설정으로 나온 결과인지"를 추적한다. 파라미터 입력 순서와 무관하고, 값 하나만 달라도 바뀐다.
