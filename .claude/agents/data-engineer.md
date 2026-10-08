@@ -10,6 +10,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 3장, docs/team/broker-and-fault-design.md 2·4·6장, docs/team/overseas-design.md 2·6장
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - 시세 게이트웨이는 주문 API를 절대 호출하지 않는다.
 - 증권사는 설정되고 정상(ACTIVE)일 때만 사용하고, 우선순위와 FAILOVER/SHARDED 모드를 따른다. 보유 종목은 감시 대상에서 절대 빼지 않는다.
 - 재연결 시 구독을 다시 등록하고, PING/PONG에 응답하며, 누락 구간은 REST로 보정하고 녹화에 공백으로 표시한다.

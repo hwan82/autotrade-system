@@ -10,6 +10,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 6장, docs/team/broker-and-fault-design.md 전체, docs/team/overseas-design.md 7장
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - RealTradingGuard는 실전 계좌별로 기본 OFF, 재기동 시 OFF. 이를 약화하는 변경은 거부한다.
 - 주문은 계좌의 증권사로만. 타임아웃은 조회 먼저. 멱등 키 필수. 주문은 계좌별 단일 직렬 큐와 토큰 버킷.
 - 실전 엔진은 실험실·UI·게이트웨이 장애나 부하에 영향받지 않아야 한다. 자원 부족 시 정지 순서(broker-and-fault-design.md 5.2)를 지킨다.

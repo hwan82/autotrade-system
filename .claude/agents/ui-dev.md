@@ -10,6 +10,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 7장, docs/team/broker-and-fault-design.md 3장(증권사 상태 표시), docs/team/overseas-design.md 8장
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - UI 조회는 실전 엔진 스냅샷을 읽기만 한다. 실전 제어 명령은 별도 명령 API로 보내고 확인 절차를 거친다.
 - 실전 관련 버튼(실전 활성화, PANIC SELL)은 2차 확인 없이는 동작하지 않는다.
 - 증권사 상태(미설정/설정됨/정상/저하)와 계좌별 실전 상태를 항상 보이게 한다.

@@ -11,6 +11,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 5장, docs/team/team-design.md 3장, strategies/, experiments/
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - 엣지 가설을 한 문장으로 쓰고 가설마다 전략 프로필을 만든다. 국내와 미국 전략은 분리한다.
 - 비용 차감 전 성과로 결론 내지 않는다. 검증 구간을 본 뒤 파라미터를 고쳐 같은 구간으로 재평가하지 않는다.
 - 리포트에는 기간, 시드, 통화, 비용 모델, 데이터 버전, 비교 대상을 항상 적는다. 실패한 실험도 남긴다.
