@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.account.BrokerId;
+import com.autotrade.domain.market.Market;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileSystems;
@@ -11,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,7 +36,7 @@ class RuntimeConfigHolderTest {
                 new RuntimeConfig.Lab(8, c.lab().defaultSeedCapitalKrw(), c.lab().defaultSeedCapitalUsd()),
                 new RuntimeConfig.Notification(
                         new RuntimeConfig.Slack(true, Secret.of(FAKE_SECRET)), c.notification().kakao()),
-                c.brokers()));
+                c.brokers(), c.realTrading()));
 
         assertThat(holder.current()).isEqualTo(updated);
         LoadedConfig reloaded = loader.load(paths);
@@ -73,18 +75,52 @@ class RuntimeConfigHolderTest {
         assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
                         new RuntimeConfig.MarketData(List.of(BrokerId.KIS), c.marketData().mode(),
                                 c.marketData().tossPollingScope()),
-                        c.lab(), c.notification(), c.brokers())))
+                        c.lab(), c.notification(), c.brokers(), c.realTrading())))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
                         c.marketData(), c.lab(), c.notification(),
                         new RuntimeConfig.Brokers(
                                 new RuntimeConfig.BrokerKeys(Secret.of(FAKE_SECRET), Secret.of(FAKE_SECRET)),
-                                c.brokers().kiwoom(), c.brokers().toss()))))
+                                c.brokers().kiwoom(), c.brokers().toss()),
+                        c.realTrading())))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(holder.current()).isEqualTo(before);
         assertThat(paths.runtimeFile()).doesNotExist();
         assertThat(paths.secretsFile()).doesNotExist();
+    }
+
+    @Test
+    void 실전_계좌는_실시간으로_바꿀_수_없다() {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        RuntimeConfigHolder holder = new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(paths));
+
+        assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
+                        c.marketData(), c.lab(), c.notification(), c.brokers(),
+                        new RuntimeConfig.RealTrading(
+                                List.of(new RuntimeConfig.RealAccount("KIS-1", BrokerId.KIS, Market.KRX)), Map.of()))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("CFG-05");
+        assertThat(paths.runtimeFile()).doesNotExist();
+    }
+
+    @Test
+    void 계좌번호는_저장할_때_secrets로만_간다() throws IOException {
+        ConfigPaths paths = ConfigPaths.in(dir.resolve("conf"));
+        RuntimeConfig withAccount = new RuntimeConfig(
+                loader.defaults().marketData(), loader.defaults().lab(), loader.defaults().notification(),
+                loader.defaults().brokers(),
+                new RuntimeConfig.RealTrading(
+                        List.of(new RuntimeConfig.RealAccount("KIS-US-1", BrokerId.KIS, Market.US)),
+                        Map.of("KIS-US-1", Secret.of(FAKE_SECRET))));
+
+        new RuntimeConfigStore(paths).save(withAccount);
+
+        assertThat(Files.readString(paths.runtimeFile())).contains("KIS-US-1").doesNotContain(FAKE_SECRET);
+        assertThat(Files.readString(paths.secretsFile())).contains(FAKE_SECRET).doesNotContain("\"broker\"");
+        LoadedConfig reloaded = loader.load(paths);
+        assertThat(reloaded.warning()).isEmpty();
+        assertThat(reloaded.config()).isEqualTo(withAccount);
     }
 
     @Test
@@ -95,7 +131,8 @@ class RuntimeConfigHolderTest {
         RuntimeConfig before = holder.current();
 
         assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
-                        c.marketData(), new RuntimeConfig.Lab(1, 1L, 1L), c.notification(), c.brokers())))
+                        c.marketData(), new RuntimeConfig.Lab(1, 1L, 1L), c.notification(), c.brokers(),
+                        c.realTrading())))
                 .isInstanceOf(UncheckedIOException.class);
         assertThat(holder.current()).isEqualTo(before);
     }

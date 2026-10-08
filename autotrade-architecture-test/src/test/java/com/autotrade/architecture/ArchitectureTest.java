@@ -5,7 +5,11 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.autotrade.app.engine.order.RealOrderGateways;
+import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
+import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.domain.account.AccountRef;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -112,6 +116,15 @@ class ArchitectureTest {
             .that().resideInAPackage("com.autotrade.app.gateway..")
             .should().dependOnClassesThat().resideInAPackage("com.autotrade.domain.order..");
 
+    /**
+     * 실전 주문 출구는 RealTradingGuard 허가를 받는 한 곳에서만 연다(RSK-01, ADR-002, 안전 불변식 2).
+     * 증권사 플러그인 구현이 자기 출구를 만드는 것은 {@code orderGateway} 호출이 아니므로 이 규칙과 무관하다.
+     */
+    static final ArchRule ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY = noClasses()
+            .that().doNotHaveFullyQualifiedName(RealOrderGateways.class.getName())
+            .should().callMethod(BrokerPlugin.class, "orderGateway", AccountRef.class)
+            .because("실전 주문은 RealTradingGuard를 거친 출구로만 나가야 한다(RSK-01)");
+
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
@@ -170,6 +183,11 @@ class ArchitectureTest {
     }
 
     @Test
+    void 실전_주문_출구는_Guard_팩토리만_연다() {
+        ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.check(PRODUCTION);
+    }
+
+    @Test
     void 프로세스_진입점끼리_참조하지_않는다() {
         PROCESSES_ARE_INDEPENDENT.check(PRODUCTION);
     }
@@ -193,5 +211,9 @@ class ArchitectureTest {
         assertThat(random.hasViolation()).isTrue();
         assertThat(random.getFailureReport().getDetails()).hasSize(3);
         assertThat(money.getFailureReport().getDetails()).hasSize(2);
+
+        EvaluationResult bypass = ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(
+                new ClassFileImporter().importClasses(BypassRealTradingGuard.class, RealOrderGateways.class));
+        assertThat(bypass.getFailureReport().getDetails()).hasSize(1);
     }
 }
