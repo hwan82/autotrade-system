@@ -1,6 +1,7 @@
 # 비밀값과 런타임 설정 (커밋 금지)
 .env
 **/runtime-config.json
+**/secrets.json
 **/*.secret.*
 .claude/settings.local.json
 
