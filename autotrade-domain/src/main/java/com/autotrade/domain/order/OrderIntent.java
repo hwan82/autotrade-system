@@ -12,8 +12,11 @@ public enum OrderIntent {
     /** 손절. 큐에서 가장 먼저 처리한다. */
     STOP_LOSS;
 
-    /** 보유 종목 보호를 위한 주문인지(청산·손절). */
+    /**
+     * 보유 종목 보호를 위한 주문인지(청산·손절). 허용 목록 방식이라 새 값을 추가하면 기본은 보호 주문이 아니다
+     * (보호 모드·서킷 1단계에서 새 진입성 의도가 실수로 통과하지 않게, ADR-002).
+     */
     public boolean isProtective() {
-        return this != ENTRY;
+        return this == EXIT || this == STOP_LOSS;
     }
 }

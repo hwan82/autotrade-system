@@ -24,9 +24,11 @@
 | `notification.kakao.access-token` 🔒 | 문자열 | 빈 값 | | 즉시 | 알림 | |
 | `brokers.{kis,kiwoom,toss}.app-key` 🔒 | 문자열 | 빈 값 | 비어 있으면 그 증권사는 NOT_CONFIGURED | 재연결 절차 | 증권사 플러그인 | broker-and-fault-design.md 3장 |
 | `brokers.{kis,kiwoom,toss}.app-secret` 🔒 | 문자열 | 빈 값 | 키움은 secret-key, 토스는 secret을 여기에 넣는다 | 재연결 절차 | 증권사 플러그인 | |
+| `real-trading.accounts` | 배열 | `[]` | 항목은 `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가)·`broker`(KIS·KIWOOM·TOSS)·`market`(KRX·US)만. **활성화 키(`enabled` 등)는 없다**: 넣으면 그 파일 전체를 쓰지 않는다(CFG-02). RealTradingGuard는 기동 시 모든 계좌 OFF | 계좌 교체 절차(CFG-05, 구현 전까지 UI 변경 불가) | 실전 엔진 | [ADR-002](../adr/ADR-002-real-trading-guard.md), D-010, D-016 |
+| `real-trading.account-numbers.<id>` 🔒 | 문자열 맵 | `{}` | 키는 `accounts`의 id만 쓴다. 목록에 없는 항목은 그 항목만 무시하고 건수만 경고한다(값·별칭은 남기지 않음). 값이 없는 계좌는 활성화할 수 없다 | 계좌 교체 절차 | 실전 엔진(증권사 플러그인에 전달) | [ADR-002](../adr/ADR-002-real-trading-guard.md) 2.4 |
 
 ## 아직 없는 키 (담당 작업에서 추가)
-- 실전 계좌(`real-trading.accounts`), RealTradingGuard, 리스크 한도, 블랙리스트: risk-ops. 설정 파일 로딩이 실전 활성화를 켤 수 없어야 한다(CFG-02). 키 구조 제안은 [ADR-001 2.6.1](../adr/ADR-001-module-structure.md)(계좌번호는 secrets.json, `enabled`는 저장하지 않음).
+- 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): D-021 기준으로 3단계 sim-engine 작업에서 추가.
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
 
@@ -35,7 +37,8 @@
 ```json
 {
   "lab": { "max-parallel-runs": 2 },
-  "notification": { "slack": { "enabled": true } }
+  "notification": { "slack": { "enabled": true } },
+  "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] }
 }
 ```
 `secrets.json`
@@ -44,6 +47,7 @@
   "notification": { "slack": { "webhook-url": "<SLACK_WEBHOOK_URL>" } },
   "brokers": {
     "kiwoom": { "app-key": "<KIWOOM_APP_KEY>", "app-secret": "<KIWOOM_SECRET_KEY>" }
-  }
+  },
+  "real-trading": { "account-numbers": { "KIS-US-1": "<ACCOUNT_NUMBER>" } }
 }
 ```
