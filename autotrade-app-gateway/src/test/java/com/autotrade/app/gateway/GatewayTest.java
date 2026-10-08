@@ -1,0 +1,145 @@
+package com.autotrade.app.gateway;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.autotrade.config.MarketDataMode;
+import com.autotrade.domain.account.BrokerId;
+import com.autotrade.domain.market.DataGap;
+import com.autotrade.domain.market.Market;
+import com.autotrade.domain.market.Symbol;
+import com.autotrade.domain.market.TradeTick;
+import com.autotrade.marketdata.ConnectionState;
+import com.autotrade.marketdata.recording.RecordedDay;
+import com.autotrade.marketdata.recording.RecordingCodec;
+import com.autotrade.marketdata.recording.RecordingLayout;
+import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class GatewayTest {
+
+    static final Instant T0 = Instant.parse("2026-10-08T01:00:00Z"); // 10:00 KST
+    static final Symbol SAMSUNG = new Symbol(Market.KRX, "005930");
+    static final Symbol HYNIX = new Symbol(Market.KRX, "000660");
+    static final Symbol KAKAO = new Symbol(Market.KRX, "035720");
+
+    @TempDir
+    Path dir;
+
+    /** 시험 중 앞으로 옮길 수 있는 시계. */
+    static final class Mutable extends Clock {
+        Instant now = T0;
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    final Mutable clock = new Mutable();
+    final FakePlugin kiwoom = new FakePlugin(BrokerId.KIWOOM, 2);
+    final FakePlugin kis = new FakePlugin(BrokerId.KIS, 2);
+
+    Gateway start(WatchList watch) {
+        Gateway g = Gateway.start(MarketDataMode.AUTO, List.of(kiwoom, kis), watch, dir, clock);
+        kiwoom.source.set(ConnectionState.CONNECTED);
+        kis.source.set(ConnectionState.CONNECTED);
+        return g;
+    }
+
+    @Test
+    void 기동하면_두_소스에_나눠_구독하고_연결을_시작한다() {
+        try (Gateway g = start(new WatchList(List.of(SAMSUNG), List.of(HYNIX, KAKAO)))) {
+            assertThat(kiwoom.source.started).isTrue();
+            assertThat(kiwoom.source.registered()).containsExactlyInAnyOrder(SAMSUNG, HYNIX);
+            assertThat(kis.source.registered()).containsExactly(KAKAO);
+            assertThat(g.hubs()).containsOnlyKeys(Market.KRX);
+        }
+        assertThat(kiwoom.source.closed).isTrue();
+    }
+
+    @Test
+    void 키움이_끊기면_보유_종목을_한투로_옮기고_전환_공백을_녹화한다() {
+        Gateway g = start(new WatchList(List.of(SAMSUNG), List.of(HYNIX, KAKAO)));
+        Instant down = T0.plusSeconds(5);
+        clock.now = down;
+        kiwoom.source.set(ConnectionState.DISCONNECTED);
+
+        // 한투 한도 2: 보유(삼성) 먼저, 후보 1순위(하이닉스). 카카오는 제외
+        assertThat(kis.source.registered()).containsExactly(HYNIX, SAMSUNG);
+        assertThat(kiwoom.source.registered()).isEmpty();
+        assertThat(kis.source.maxUnion).isLessThanOrEqualTo(2);
+        SourcePlan plan = g.hubs().get(Market.KRX).currentPlan();
+        assertThat(plan.mode()).isEqualTo(MarketDataMode.FAILOVER);
+        assertThat(plan.excluded()).containsExactly(KAKAO);
+
+        // 재접속 시도 중(CONNECTING)에는 아직 되돌리지 않는다
+        clock.now = T0.plusSeconds(8);
+        kiwoom.source.set(ConnectionState.CONNECTING);
+        assertThat(kiwoom.source.registered()).isEmpty();
+
+        kis.source.emit(new TradeTick(SAMSUNG, 1, clock.now, clock.now, new BigDecimal("70000"), 10));
+        g.close();
+
+        RecordedDay day = RecordedDay.open(new RecordingLayout(dir).dayDir(Market.KRX, LocalDate.of(2026, 10, 8)));
+        List<DataGap> gaps = day.lines().stream().map(RecordingCodec.Line::event)
+                .filter(DataGap.class::isInstance).map(DataGap.class::cast).toList();
+        assertThat(gaps).extracting(DataGap::symbol).containsExactly(HYNIX, SAMSUNG);
+        assertThat(gaps).allSatisfy(gap -> {
+            assertThat(gap.reason()).isEqualTo(DataGap.GapReason.SOURCE_SWITCH);
+            assertThat(gap.gapStart()).isEqualTo(down);
+            assertThat(gap.gapEnd()).isEqualTo(down);
+        });
+        assertThat(day.lines()).anySatisfy(l -> {
+            assertThat(l.sourceId()).isEqualTo("KIS-FAKE");
+            assertThat(l.event()).isInstanceOf(TradeTick.class);
+        });
+    }
+
+    @Test
+    void 키움이_다시_연결되면_1순위로_되돌린다() {
+        try (Gateway g = start(new WatchList(List.of(SAMSUNG), List.of(HYNIX, KAKAO)))) {
+            kiwoom.source.set(ConnectionState.DISCONNECTED);
+            kiwoom.source.set(ConnectionState.CONNECTED);
+
+            assertThat(kiwoom.source.registered()).containsExactlyInAnyOrder(SAMSUNG, HYNIX);
+            assertThat(kis.source.registered()).containsExactly(KAKAO);
+            assertThat(g.hubs().get(Market.KRX).currentPlan().mode()).isEqualTo(MarketDataMode.SHARDED);
+        }
+    }
+
+    @Test
+    void 감시_종목이_없으면_시장을_열지_않는다() {
+        try (Gateway g = Gateway.start(MarketDataMode.AUTO, List.of(kiwoom, kis), WatchList.empty(), dir, clock)) {
+            assertThat(g.hubs()).isEmpty();
+            assertThat(kiwoom.source.started).isFalse();
+        }
+    }
+
+    @Test
+    void 감시_종목_파일을_읽는다() throws Exception {
+        Path f = dir.resolve(WatchList.FILE_NAME);
+        Files.writeString(f, "{\"held\":[\"KRX:005930\"],\"candidates\":[\"KRX:000660\",\"US:AAPL\"]}");
+        WatchList w = WatchList.load(f);
+        assertThat(w.held()).containsExactly(SAMSUNG);
+        assertThat(w.forMarket(Market.US).candidates()).containsExactly(new Symbol(Market.US, "AAPL"));
+        assertThat(WatchList.load(dir.resolve("none.json"))).isEqualTo(WatchList.empty());
+    }
+}

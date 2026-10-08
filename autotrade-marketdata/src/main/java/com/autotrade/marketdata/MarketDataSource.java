@@ -4,18 +4,18 @@ import com.autotrade.domain.market.Symbol;
 import java.util.Set;
 
 /**
- * 실시간·리플레이 시세 소스(푸시 방식). 구현: LiveQuoteSource(실전 API 실시간, 시세 게이트웨이 프로세스),
- * RecordedReplaySource(녹화 리플레이). 일봉 조회(기간 풀 방식, 수정주가·상장폐지 포함)는 별도 인터페이스로
- * 2단계 ADR에서 정한다. 구독 증분 갱신, 연결 상태 콜백, 누락 구간 표시도 2단계 ADR 범위다.
+ * 실시간·리플레이 시세 소스(푸시 방식). 구현: {@link LiveMarketDataSource}(실전 API 실시간, 시세 게이트웨이 프로세스,
+ * {@code live.StreamingMarketDataSource}), {@code recording.RecordedReplaySource}(녹화 리플레이).
+ * 일봉은 {@code daily.DailyBarSource}로 따로 읽는다. 연결 상태와 누락 구간 표시는 ADR-002.
  *
  * <p>계약
  * <ul>
  *   <li>시세 소스는 주문 API를 호출하지 않는다(안전 불변식 8).</li>
  *   <li>한 소스가 내보내는 {@code MarketEvent.sequence()}는 모든 종목에 걸쳐 단조 증가한다.
  *       리플레이는 녹화 순서를 그대로 재현한다.</li>
- *   <li>{@link #maxSubscriptions()}를 넘는 구독 요청은 {@link IllegalArgumentException}으로 거절한다
- *       (한도 수치는 Q-001 결과로 채운다).</li>
- *   <li>연결 끊김·누락 구간은 이벤트를 지어내지 않고, 품질 메타데이터로 표시한다(별도 계약, 2단계).</li>
+ *   <li>모든 구독의 종목 합집합이 {@link #maxSubscriptions()}를 넘는 구독 요청은 {@link IllegalArgumentException}으로
+ *       거절한다(한도 수치: docs/research/market-data-limits.md 1장).</li>
+ *   <li>연결 끊김·누락 구간은 가격 이벤트를 지어내지 않고 {@link com.autotrade.domain.market.DataGap}으로 표시한다.</li>
  * </ul>
  */
 public interface MarketDataSource {

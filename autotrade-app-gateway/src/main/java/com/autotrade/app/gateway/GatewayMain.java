@@ -1,27 +1,105 @@
 package com.autotrade.app.gateway;
 
+import com.autotrade.broker.BrokerCredentials;
+import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.broker.kis.KisPlugin;
+import com.autotrade.broker.kiwoom.KiwoomPlugin;
 import com.autotrade.config.ConfigPaths;
+import com.autotrade.config.LoadedConfig;
 import com.autotrade.config.ProcessStartup;
+import com.autotrade.config.RuntimeConfig;
+import com.autotrade.domain.account.BrokerId;
+import com.autotrade.marketdata.live.JdkHttpPort;
+import com.autotrade.marketdata.live.JdkScheduler;
+import com.autotrade.marketdata.live.JdkWsTransport;
+import com.autotrade.marketdata.live.LiveRuntime;
+import com.autotrade.marketdata.live.SerialDispatcher;
+import java.io.IOException;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
+import java.net.http.HttpClient;
+import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 
 /**
- * 시세 게이트웨이(D-013 ②). 1단계는 설정 로딩까지만 하는 진입점이다. 시세 수신·녹화는 2단계(data-engineer). 주문 API는 호출하지 않는다(MD-01).
+ * 시세 게이트웨이(D-013 ②). 키움·한국투자 실시간 시세를 받아 녹화한다(ADR-002). 주문 API는 호출하지 않는다(MD-01).
+ * 토스는 폴링 전용이라 게이트웨이에서 쓰지 않는다(D-008, 보유 종목 보호는 실전 엔진 몫).
  *
  * <p>시스템 시계를 만드는 곳은 이 진입점뿐이다. 나머지 코드는 주입받은 {@link Clock}만 쓴다(ArchitectureTest).
  */
 public final class GatewayMain {
 
     static final String PROCESS = "gateway";
+    /** 녹화 폴더. 설정 키 {@code market-data.recording-dir}는 제안 상태라 2단계는 설정 폴더 아래 고정(ADR-002 6장). */
+    static final String RECORDINGS_DIR = "recordings";
+    static final int DISPATCH_QUEUE = 50_000;
+
+    private static final Logger LOG = System.getLogger(GatewayMain.class.getName());
 
     private GatewayMain() {}
 
-    public static void main(String[] args) {
-        System.exit(run(ConfigPaths.defaultLocation(), Clock.systemUTC()));
+    public static void main(String[] args) throws InterruptedException {
+        ConfigPaths paths = ConfigPaths.defaultLocation();
+        Clock clock = Clock.systemUTC();
+        JdkScheduler scheduler = new JdkScheduler("gateway-scheduler");
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        LiveRuntime runtime = new LiveRuntime(new JdkWsTransport(client, Duration.ofSeconds(10)),
+                new JdkHttpPort(client, Duration.ofSeconds(10)), clock, scheduler,
+                id -> SerialDispatcher.threaded("dispatch-" + id, DISPATCH_QUEUE));
+        Gateway gateway;
+        try {
+            gateway = start(paths, runtime);
+        } catch (IOException | RuntimeException e) {
+            LOG.log(Level.ERROR, "게이트웨이 기동 실패: {0}", e.getMessage());
+            scheduler.close();
+            System.exit(1);
+            return;
+        }
+        CountDownLatch stopped = new CountDownLatch(1);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            gateway.close();
+            scheduler.close();
+            stopped.countDown();
+        }, "gateway-shutdown"));
+        stopped.await();
     }
 
-    /** 기동 절차. 종료 코드를 돌려준다(0: 정상). */
+    /** 기동 점검. 설정만 읽고 연결하지 않는다. 종료 코드를 돌려준다(0: 정상). */
     static int run(ConfigPaths paths, Clock clock) {
         ProcessStartup.start(PROCESS, paths, clock);
         return 0;
+    }
+
+    /** 설정과 감시 종목을 읽고 수신·녹화를 시작한다. */
+    static Gateway start(ConfigPaths paths, LiveRuntime runtime) throws IOException {
+        LoadedConfig loaded = ProcessStartup.start(PROCESS, paths, runtime.clock());
+        RuntimeConfig config = loaded.config();
+        Path dir = paths.runtimeFile().toAbsolutePath().getParent();
+        WatchList watch = WatchList.load(dir.resolve(WatchList.FILE_NAME));
+        List<BrokerPlugin> plugins = new ArrayList<>();
+        for (BrokerId id : config.marketData().priority()) {
+            plugin(id, config.brokers().of(id), runtime).ifPresent(plugins::add);
+        }
+        if (plugins.isEmpty()) {
+            LOG.log(Level.WARNING, "실시간 시세용 증권사 키가 설정되지 않았습니다. 수신 없이 대기합니다");
+        }
+        return Gateway.start(config.marketData().mode(), plugins, watch, dir.resolve(RECORDINGS_DIR), runtime.clock());
+    }
+
+    private static Optional<BrokerPlugin> plugin(BrokerId id, RuntimeConfig.BrokerKeys keys, LiveRuntime runtime) {
+        if (!keys.isConfigured()) {
+            return Optional.empty();
+        }
+        BrokerCredentials creds = new BrokerCredentials(keys.appKey().reveal(), keys.appSecret().reveal());
+        return switch (id) {
+            case KIWOOM -> Optional.of(KiwoomPlugin.create(creds, runtime));
+            case KIS -> Optional.of(KisPlugin.create(creds, runtime));
+            case TOSS -> Optional.empty();
+        };
     }
 }

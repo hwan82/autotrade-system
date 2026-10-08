@@ -18,4 +18,8 @@ dependencies {
     implementation(project(":autotrade-marketdata"))
     implementation(project(":autotrade-broker-api"))
     implementation(project(":autotrade-config"))
+    implementation(project(":autotrade-broker-kiwoom"))
+    implementation(project(":autotrade-broker-kis"))
+    implementation(platform(libs.jackson.bom))
+    implementation(libs.jackson.databind)
 }

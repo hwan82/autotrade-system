@@ -29,6 +29,7 @@
 - 실전 계좌(`real-trading.accounts`), RealTradingGuard, 리스크 한도, 블랙리스트: risk-ops. 설정 파일 로딩이 실전 활성화를 켤 수 없어야 한다(CFG-02). 키 구조 제안은 [ADR-001 2.6.1](../adr/ADR-001-module-structure.md)(계좌번호는 secrets.json, `enabled`는 저장하지 않음).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): D-021 기준으로 3단계 sim-engine 작업에서 추가.
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
+- 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-002 6장](../adr/ADR-002-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정. DEGRADED 시 재배분 동작은 ADR-002 2.2.
 
 ## 예시 (자리표시자)
 `runtime-config.json`

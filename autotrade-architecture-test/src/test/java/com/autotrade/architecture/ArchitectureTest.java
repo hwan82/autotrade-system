@@ -117,6 +117,11 @@ class ArchitectureTest {
             .matching("com.autotrade.app.(*)..")
             .should().notDependOnEachOther();
 
+    /** 증권사 플러그인끼리 참조하지 않는다(ADR-001, ADR-002 2.1). 공통 계약은 broker-api 패키지에만 둔다. */
+    static final ArchRule PLUGINS_ARE_INDEPENDENT = slices()
+            .matching("com.autotrade.broker.(*)..")
+            .should().notDependOnEachOther();
+
     /** double 금액 금지(ARC-08): 도메인·리스크·증권사 계약에는 실수형 필드와 double 기반 BigDecimal 생성이 없다. */
     static final ArchRule NO_FLOATING_POINT_MONEY = fields()
             .that().areDeclaredInClassesThat().resideInAnyPackage(
@@ -172,6 +177,11 @@ class ArchitectureTest {
     @Test
     void 프로세스_진입점끼리_참조하지_않는다() {
         PROCESSES_ARE_INDEPENDENT.check(PRODUCTION);
+    }
+
+    @Test
+    void 증권사_플러그인끼리_참조하지_않는다() {
+        PLUGINS_ARE_INDEPENDENT.check(PRODUCTION);
     }
 
     @Test

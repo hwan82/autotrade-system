@@ -1,0 +1,25 @@
+package com.autotrade.marketdata;
+
+/**
+ * 증권사 실시간 시세 소스(ADR-002 2.1). {@link MarketDataSource} 계약에 연결 수명과 상태 알림을 더한다.
+ *
+ * <p>계약
+ * <ul>
+ *   <li>{@link #start()}는 한 번만 부른다. 접속·재연결은 소스가 스스로 하고, 끊긴 구간은 재연결 뒤
+ *       {@link com.autotrade.domain.market.DataGap}으로 구독 종목마다 한 번씩 알린다.</li>
+ *   <li>구독은 {@code start()} 전후 언제든 할 수 있다. 연결되면 현재 구독 전체를 다시 등록한다.</li>
+ *   <li>상태 조회는 블로킹하지 않는다.</li>
+ *   <li>주문 API를 호출하지 않는다(안전 불변식 8).</li>
+ * </ul>
+ */
+public interface LiveMarketDataSource extends MarketDataSource, AutoCloseable {
+
+    void start();
+
+    ConnectionState state();
+
+    void addStateListener(SourceStateListener listener);
+
+    @Override
+    void close();
+}

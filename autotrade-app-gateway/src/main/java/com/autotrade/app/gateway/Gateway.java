@@ -1,0 +1,82 @@
+package com.autotrade.app.gateway;
+
+import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.config.MarketDataMode;
+import com.autotrade.domain.market.Market;
+import com.autotrade.marketdata.calendar.ExchangeCalendar;
+import com.autotrade.marketdata.recording.MarketEventRecorder;
+import com.autotrade.marketdata.recording.RecordingLayout;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeMap;
+
+/**
+ * 시세 게이트웨이 조립(ADR-002 2.2). 시장마다 녹화기 하나와 {@link MarketHub} 하나를 만든다.
+ * 감시 종목이 없는 시장이나 실시간 소스가 없는 시장은 만들지 않는다.
+ *
+ * <p>2단계 범위는 수신과 녹화까지다. 실전 엔진·실험실로 실시간 전달(IPC)은 후속 작업이다(ADR-002 5장).
+ */
+public final class Gateway implements AutoCloseable {
+
+    /** 녹화 큐 크기. 키움 200종목 × 초당 수십 건을 몇 초 버틴다. 넘치면 버리고 공백을 남긴다. */
+    static final int RECORDER_QUEUE = 100_000;
+    static final Duration FLUSH_INTERVAL = Duration.ofSeconds(1);
+    static final String LICENSE = "증권사 Open API 시세. 개인 연구용 저장만, 재배포 금지(ADR-002 4장)";
+
+    private final Map<Market, MarketHub> hubs;
+    private final Map<Market, MarketEventRecorder> recorders;
+
+    private Gateway(Map<Market, MarketHub> hubs, Map<Market, MarketEventRecorder> recorders) {
+        this.hubs = hubs;
+        this.recorders = recorders;
+    }
+
+    /**
+     * @param byPriority {@code market-data.priority} 순서의 플러그인(설정된 것만)
+     */
+    public static Gateway start(MarketDataMode mode, List<BrokerPlugin> byPriority, WatchList watch, Path recordingRoot,
+            Clock clock) {
+        Objects.requireNonNull(watch, "watch");
+        Map<Market, MarketHub> hubs = new EnumMap<>(Market.class);
+        Map<Market, MarketEventRecorder> recorders = new EnumMap<>(Market.class);
+        for (Market market : Market.values()) {
+            WatchList w = watch.forMarket(market);
+            List<BrokerPlugin> sources = new ArrayList<>();
+            for (BrokerPlugin p : byPriority) {
+                if (p.marketData(market).isPresent()) {
+                    sources.add(p);
+                }
+            }
+            if (sources.isEmpty() || (w.held().isEmpty() && w.candidates().isEmpty())) {
+                continue;
+            }
+            Map<String, String> scopes = new TreeMap<>();
+            sources.forEach(p -> scopes.put(p.marketData(market).orElseThrow().sourceId(), "실시간 체결·호가 " + market));
+            scopes.put(MarketHub.SOURCE_ID, "소스 전환 공백 표시");
+            MarketEventRecorder recorder = new MarketEventRecorder(new RecordingLayout(recordingRoot), market,
+                    ExchangeCalendar.bundled(market).zone(), clock, scopes, LICENSE, RECORDER_QUEUE, FLUSH_INTERVAL);
+            MarketHub hub = new MarketHub(market, mode, sources, w, recorder, clock);
+            recorders.put(market, recorder);
+            hubs.put(market, hub);
+            hub.start();
+        }
+        return new Gateway(hubs, recorders);
+    }
+
+    Map<Market, MarketHub> hubs() {
+        return hubs;
+    }
+
+    /** 소스를 먼저 끊고 녹화기를 닫는다(남은 큐를 파일에 쓰고 메타를 닫는다). */
+    @Override
+    public void close() {
+        hubs.values().forEach(MarketHub::close);
+        recorders.values().forEach(MarketEventRecorder::close);
+    }
+}
