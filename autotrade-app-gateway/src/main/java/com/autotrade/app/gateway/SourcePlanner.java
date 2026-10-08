@@ -19,7 +19,8 @@ import java.util.TreeSet;
  *   <li>AUTO: 쓸 수 있는 소스가 둘 이상이면 SHARDED, 하나면 FAILOVER. SHARDED를 지정해도 하나뿐이면 FAILOVER로 돈다.
  *       세 곳 동시 SHARDED는 D-009 범위 밖이라 앞의 두 곳만 쓴다.</li>
  *   <li>종목 순서: 보유 먼저, 그다음 후보 우선순위. 앞에서부터 1순위 소스 한도까지, 넘치면 2순위 소스로 채운다(SHARDED).</li>
- *   <li>한도를 넘는 후보는 뒤에서부터 뺀다. 보유 종목은 빼지 않는다: 한도를 넘는 보유 종목은 {@code unservedHeld}로 알린다
+ *   <li>한도를 넘는 후보는 뒤에서부터 뺀다. 보유 종목은 빼지 않는다: 활성 소스가 차면 FAILOVER라도 쓸 수 있는 다음
+ *       소스로 넘기고, 그래도 넘치는 보유 종목은 {@code unservedHeld}로 알린다
  *       (증권사 한도를 넘겨 구독할 수는 없으므로 경보로 대응한다).</li>
  * </ul>
  */
@@ -37,6 +38,20 @@ public final class SourcePlanner {
 
     private SourcePlanner() {}
 
+    /** 앞 순위 소스부터 남은 자리에 넣는다. */
+    private static boolean assign(Symbol s, List<Candidate> sources, Map<BrokerId, Integer> used,
+            Map<BrokerId, SortedSet<Symbol>> assignments) {
+        for (Candidate c : sources) {
+            int n = used.getOrDefault(c.broker(), 0);
+            if (n < c.capacity()) {
+                used.put(c.broker(), n + 1);
+                assignments.computeIfAbsent(c.broker(), b -> new TreeSet<>()).add(s);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static SourcePlan plan(MarketDataMode configured, List<Candidate> byPriority, WatchList watch) {
         Objects.requireNonNull(configured, "configured");
         List<Candidate> usable = byPriority.stream().filter(Candidate::usable).toList();
@@ -47,33 +62,19 @@ public final class SourcePlanner {
         List<Candidate> active = usable.subList(0, Math.min(usable.size(), mode == MarketDataMode.SHARDED ? 2 : 1));
 
         Map<BrokerId, SortedSet<Symbol>> assignments = new EnumMap<>(BrokerId.class);
+        Map<BrokerId, Integer> used = new EnumMap<>(BrokerId.class);
         List<Symbol> excluded = new ArrayList<>();
         List<Symbol> unservedHeld = new ArrayList<>();
-        int slot = 0;
-        int used = 0;
+        // 보유 종목은 활성 소스가 차면 쓸 수 있는 다음 소스까지 넘친다(FAILOVER라도 보유 종목은 빼지 않는다)
         for (Symbol s : watch.held()) {
-            while (slot < active.size() && used >= active.get(slot).capacity()) {
-                slot++;
-                used = 0;
-            }
-            if (slot >= active.size()) {
+            if (!assign(s, usable, used, assignments)) {
                 unservedHeld.add(s);
-                continue;
             }
-            assignments.computeIfAbsent(active.get(slot).broker(), b -> new TreeSet<>()).add(s);
-            used++;
         }
         for (Symbol s : watch.candidates()) {
-            while (slot < active.size() && used >= active.get(slot).capacity()) {
-                slot++;
-                used = 0;
-            }
-            if (slot >= active.size()) {
+            if (!assign(s, active, used, assignments)) {
                 excluded.add(s);
-                continue;
             }
-            assignments.computeIfAbsent(active.get(slot).broker(), b -> new TreeSet<>()).add(s);
-            used++;
         }
         return new SourcePlan(mode, assignments, excluded, unservedHeld);
     }

@@ -217,13 +217,17 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     }
 
     private void onConnectFailed(int gen) {
+        ConnectionState changed;
         synchronized (lock) {
             if (gen != generation || state == ConnectionState.CLOSED) {
                 return;
             }
             stats.connectFailures++;
+            // 접속 실패도 끊김으로 알린다. 기동 직후부터 못 붙는 소스를 게이트웨이가 배분에서 빼야 한다(ADR-002 2.2)
+            changed = setState(ConnectionState.DISCONNECTED);
             scheduleReconnect();
         }
+        fire(changed);
     }
 
     private void onOpened(int gen, WsConnection conn, List<String> opening) {
@@ -251,7 +255,11 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         Instant now = clock.instant();
         if (gapStart != null) {
             for (Symbol s : gapSymbols) {
-                emit(new RawGap(s, gapStart, now, DataGap.GapReason.DISCONNECTED), now);
+                if (!emit(new RawGap(s, gapStart, now, DataGap.GapReason.DISCONNECTED), now)) {
+                    // 큐가 차서 공백 표시를 못 넘겼다. 다음 체결 앞에 넘침 공백으로 끊긴 시각부터 표시한다
+                    overflowSince.putIfAbsent(s, gapStart);
+                    stats.overflowDropped++;
+                }
             }
             stats.gaps++;
             gapStart = null;
@@ -287,10 +295,6 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     private void scheduleReconnect() {
         if (state == ConnectionState.CLOSED) {
             return;
-        }
-        if (state != ConnectionState.DISCONNECTED) {
-            // 접속 실패도 끊김 상태로 본다(상태 알림은 dropConnection에서만 한다)
-            state = ConnectionState.DISCONNECTED;
         }
         if (pendingTask != null) {
             pendingTask.cancel();

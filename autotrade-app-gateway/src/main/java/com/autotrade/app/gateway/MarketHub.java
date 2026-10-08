@@ -72,7 +72,7 @@ final class MarketHub implements AutoCloseable {
     /** 배분하고 소스를 연결한다. */
     void start() {
         for (BrokerPlugin p : byPriority) {
-            live(p).ifPresent(src -> src.addStateListener((id, st) -> onState(p.brokerId(), st)));
+            live(p).ifPresent(src -> src.addStateListener((id, st) -> onState(p.brokerId())));
         }
         replan();
         for (BrokerPlugin p : byPriority) {
@@ -84,11 +84,17 @@ final class MarketHub implements AutoCloseable {
         return p.marketData(market).filter(LiveMarketDataSource.class::isInstance).map(LiveMarketDataSource.class::cast);
     }
 
-    private synchronized void onState(BrokerId broker, ConnectionState state) {
+    /**
+     * 알림의 상태값은 쓰지 않고 소스의 현재 상태를 다시 읽는다. 알림은 서로 다른 스레드에서 잠금 밖으로 오므로
+     * 끊김과 재연결 알림의 도착 순서가 뒤바뀔 수 있다.
+     */
+    private synchronized void onState(BrokerId broker) {
         if (closed) {
             return;
         }
-        if (state == ConnectionState.DISCONNECTED) {
+        BrokerPlugin p = byPriority.stream().filter(x -> x.brokerId() == broker).findFirst().orElseThrow();
+        ConnectionState state = live(p).map(LiveMarketDataSource::state).orElse(ConnectionState.CLOSED);
+        if (state == ConnectionState.DISCONNECTED || state == ConnectionState.CLOSED) {
             downSince.putIfAbsent(broker, clock.instant());
         } else if (state == ConnectionState.CONNECTED) {
             downSince.remove(broker);

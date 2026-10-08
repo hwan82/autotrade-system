@@ -137,6 +137,17 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
+    void 기동_직후_접속_실패도_끊김으로_알린다() {
+        StreamingMarketDataSource s = source(SerialDispatcher.direct());
+        transport.failNext(1);
+        s.start();
+        scheduler.runDue();
+
+        assertThat(s.state()).isEqualTo(ConnectionState.DISCONNECTED);
+        assertThat(states).containsExactly(ConnectionState.CONNECTING, ConnectionState.DISCONNECTED);
+    }
+
+    @Test
     void 인증_준비_실패도_재연결_대기로_넘긴다() {
         protocol.failPrepare = true;
         StreamingMarketDataSource s = source(SerialDispatcher.direct());
@@ -239,6 +250,47 @@ class StreamingMarketDataSourceTest {
         });
         assertThat(received).extracting(MarketEvent::sequence).containsExactly(1L, 2L, 3L);
         assertThat(s.stats().overflowDropped()).isEqualTo(1);
+    }
+
+    @Test
+    void 재연결_때_큐가_차서_끊김_표시를_못_넘기면_다음_체결_앞에_끊긴_시각부터_표시한다() {
+        List<Runnable> queue = new ArrayList<>();
+        boolean[] full = {false};
+        SerialDispatcher bounded = new SerialDispatcher() {
+            @Override
+            public boolean offer(Runnable task) {
+                if (full[0]) {
+                    return false;
+                }
+                queue.add(task);
+                return true;
+            }
+
+            @Override
+            public void close() {}
+        };
+        StreamingMarketDataSource s = source(bounded);
+        s.subscribe(Set.of(SAMSUNG), received::add);
+        s.start();
+        scheduler.runDue();
+        transport.last().push("LOGIN OK");
+        clock.set(T0.plusSeconds(10));
+        transport.last().push("T 005930 71500 1 1791446400");
+        transport.last().serverClose();
+        scheduler.advance(Duration.ofSeconds(1));
+        full[0] = true;
+        transport.last().push("LOGIN OK"); // 끊김 공백을 넘기지 못함
+        full[0] = false;
+        clock.set(T0.plusSeconds(20));
+        transport.last().push("T 005930 71600 1 1791446420");
+        queue.forEach(Runnable::run);
+
+        assertThat(received).hasSize(3);
+        assertThat(received.get(1)).isInstanceOfSatisfying(DataGap.class, g -> {
+            assertThat(g.gapStart()).isEqualTo(T0.plusSeconds(10));
+            assertThat(g.gapEnd()).isEqualTo(T0.plusSeconds(20));
+        });
+        assertThat(received.get(2)).isInstanceOf(TradeTick.class);
     }
 
     @Test

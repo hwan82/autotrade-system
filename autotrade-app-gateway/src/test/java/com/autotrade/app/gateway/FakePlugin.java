@@ -121,7 +121,12 @@ final class FakePlugin implements BrokerPlugin {
 
         void set(ConnectionState next) {
             state = next;
-            listeners.forEach(l -> l.onStateChanged(id, next));
+            fireOnly(next);
+        }
+
+        /** 상태는 그대로 두고 알림만 보낸다(늦게 도착한 알림 흉내). */
+        void fireOnly(ConnectionState reported) {
+            listeners.forEach(l -> l.onStateChanged(id, reported));
         }
 
         @Override

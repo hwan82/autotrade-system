@@ -105,6 +105,11 @@ public final class MarketEventRecorder implements AutoCloseable {
         return dropped;
     }
 
+    /** 쓰기 스레드가 살아 있는지. 디스크 오류로 녹화가 멈췄으면 false(감시 지표). */
+    public boolean isWriting() {
+        return writer.isAlive();
+    }
+
     public synchronized long acceptedCount() {
         return accepted;
     }
@@ -159,7 +164,11 @@ public final class MarketEventRecorder implements AutoCloseable {
             closed = true;
         }
         try {
-            queue.put(STOP);
+            // 쓰기 스레드가 이미 죽었으면 큐가 비지 않으므로 기다리지 않는다
+            if (writer.isAlive() && !queue.offer(STOP, timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                LOG.log(Level.ERROR, "{0} 녹화 큐를 비우지 못해 종료합니다(남은 {1}건)", market, queue.size());
+                writer.interrupt();
+            }
             writer.join(timeout.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

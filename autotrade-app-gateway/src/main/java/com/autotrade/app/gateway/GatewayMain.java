@@ -55,7 +55,7 @@ public final class GatewayMain {
         try {
             gateway = start(paths, runtime);
         } catch (IOException | RuntimeException e) {
-            LOG.log(Level.ERROR, "게이트웨이 기동 실패: {0}", e.getMessage());
+            LOG.log(Level.ERROR, "게이트웨이 기동 실패: {0}", e.getClass().getName());
             scheduler.close();
             System.exit(1);
             return;

@@ -126,6 +126,34 @@ class GatewayTest {
     }
 
     @Test
+    void 끊김과_재연결_알림의_순서가_뒤바뀌어도_소스의_현재_상태를_따른다() {
+        try (Gateway g = start(new WatchList(List.of(SAMSUNG), List.of(HYNIX, KAKAO)))) {
+            // 이미 재연결된 뒤에 늦게 도착한 끊김 알림
+            kiwoom.source.state = ConnectionState.CONNECTED;
+            kiwoom.source.set(ConnectionState.CONNECTED);
+            kiwoom.source.state = ConnectionState.DISCONNECTED;
+            kiwoom.source.set(ConnectionState.DISCONNECTED);
+            kiwoom.source.state = ConnectionState.CONNECTED;
+            kiwoom.source.fireOnly(ConnectionState.DISCONNECTED); // 늦은 알림, 실제 상태는 CONNECTED
+
+            assertThat(kiwoom.source.registered()).containsExactlyInAnyOrder(SAMSUNG, HYNIX);
+            assertThat(g.hubs().get(Market.KRX).currentPlan().mode()).isEqualTo(MarketDataMode.SHARDED);
+        }
+    }
+
+    @Test
+    void 기동부터_접속하지_못한_소스의_종목은_다음_소스가_받는다() {
+        try (Gateway g = Gateway.start(MarketDataMode.AUTO, List.of(kiwoom, kis), new WatchList(List.of(SAMSUNG), List.of()),
+                dir, clock)) {
+            assertThat(kiwoom.source.registered()).containsExactly(SAMSUNG);
+            kiwoom.source.set(ConnectionState.DISCONNECTED); // 첫 접속 실패
+            assertThat(kis.source.registered()).containsExactly(SAMSUNG);
+            assertThat(g.hubs().get(Market.KRX).currentPlan().mode()).isEqualTo(MarketDataMode.FAILOVER);
+            assertThat(kiwoom.source.registered()).isEmpty();
+        }
+    }
+
+    @Test
     void 감시_종목이_없으면_시장을_열지_않는다() {
         try (Gateway g = Gateway.start(MarketDataMode.AUTO, List.of(kiwoom, kis), WatchList.empty(), dir, clock)) {
             assertThat(g.hubs()).isEmpty();

@@ -2,6 +2,7 @@ package com.autotrade.marketdata.live;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -36,6 +37,7 @@ public interface SerialDispatcher extends AutoCloseable {
 
     final class Threaded implements SerialDispatcher {
         private static final Runnable POISON = () -> {};
+        private static final java.time.Duration CLOSE_TIMEOUT = java.time.Duration.ofSeconds(5);
         private final BlockingQueue<Runnable> queue;
         private final AtomicBoolean closed = new AtomicBoolean();
         private final Thread worker;
@@ -76,8 +78,13 @@ public interface SerialDispatcher extends AutoCloseable {
         @Override
         public void close() {
             if (closed.compareAndSet(false, true)) {
-                queue.clear();
-                if (!queue.offer(POISON)) {
+                // 이미 받은 이벤트는 다 넘긴 뒤 멈춘다(녹화 누락 방지). 수신자가 막혀 큐가 비지 않으면 끊는다
+                try {
+                    if (!queue.offer(POISON, CLOSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                        worker.interrupt();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                     worker.interrupt();
                 }
             }

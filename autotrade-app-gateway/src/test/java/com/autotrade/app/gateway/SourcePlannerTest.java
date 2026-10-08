@@ -62,6 +62,18 @@ class SourcePlannerTest {
     }
 
     @Test
+    void FAILOVER라도_넘치는_보유_종목은_다음_소스로_보내고_후보는_보내지_않는다() {
+        SourcePlan p = SourcePlanner.plan(MarketDataMode.FAILOVER,
+                List.of(new Candidate(BrokerId.KIWOOM, true, 2), new Candidate(BrokerId.KIS, true, 20)),
+                new WatchList(krx(1, 3), krx(10, 2)));
+
+        assertThat(p.assignments().get(BrokerId.KIWOOM)).containsExactlyElementsOf(krx(1, 2));
+        assertThat(p.assignments().get(BrokerId.KIS)).containsExactly(krx(3, 1).get(0));
+        assertThat(p.unservedHeld()).isEmpty();
+        assertThat(p.excluded()).containsExactlyElementsOf(krx(10, 2));
+    }
+
+    @Test
     void 모든_소스가_장애면_보유_종목_전체가_경보_대상이다() {
         SourcePlan p = SourcePlanner.plan(MarketDataMode.AUTO,
                 List.of(new Candidate(BrokerId.KIWOOM, false, 200), new Candidate(BrokerId.KIS, false, 20)),
