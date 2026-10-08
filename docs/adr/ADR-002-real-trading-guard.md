@@ -42,7 +42,8 @@
 - 내려가는 전이(보호 모드, 출발 상태로 복귀, OFF)는 확인 없이 즉시 일어난다. **자동으로 올라가는 경로는 없다**(D-023 공통 원칙 2).
 - 감사 로그: 올라가는 전이는 기록이 성공해야 일어나고, 내려가는 전이는 기록 실패와 상관없이 먼저 일어난다(안전 쪽 전이를 저장소 장애가 막지 않게).
 - 판정은 `RiskDecision`(규칙 ID `REAL_TRADING_GUARD`)으로 돌려줘 실전 검증 체인의 맨 앞에 다른 규칙과 같은 방식으로 놓인다(D-023 공통 원칙 3).
-- 계좌별 독립 상태, 계좌별 잠금. 한 계좌 전이는 다른 계좌에 영향이 없다(지침 4장 6항).
+- 계좌별 독립 상태. 전이는 계좌별 잠금으로 직렬화하고, 계좌 상태(상태, 활성화 출발 상태, 세대)는 불변 스냅샷 하나를 volatile로 바꿔 끼운다. 주문마다 지나는 판정·취소 허용·허가 유효성 검사는 잠금 없이 한 번 읽고 끝나므로, 감사 로그 저장이 느려도(7단계 DB) 손절이 기다리지 않는다. 내려가는 전이의 감사 기록은 잠금 밖에서 한다. 한 계좌 전이는 다른 계좌에 영향이 없다(지침 4장 6항).
+- `OrderIntent.isProtective()`는 허용 목록(`EXIT`, `STOP_LOSS`)으로 바꿨다. 나중에 진입성 의도를 추가해도 보호 모드에서 기본으로 막힌다.
 
 ### 2.2 "OFF 계좌는 주문 세션을 만들지 않는다"를 구조로 강제
 
@@ -59,7 +60,8 @@ RealOrderGateways.open(guard, plugin, account)   ← 유일한 출구 생성 지
 
 - `OrderSessionPermit`은 발급 당시 세대(epoch)에 묶인다. 계좌가 OFF로 내려가면 세대가 바뀌어 그전 허가와 그 허가로 만든 출구는 **다시 열어도 살아나지 않는다**. 새로 열면 새 출구를 받아야 한다.
 - `GuardedOrderGateway`는 호출마다 허가 유효성과 Guard 판정을 다시 본다. 막힌 주문은 증권사로 나가지 않고 `REJECTED`(사유 접두 `REAL_TRADING_GUARD`)로 돌아온다. 막힌 취소는 원주문 상태를 모르므로 `UNKNOWN`(호출자는 조회부터, 지침 4장 2항), 막힌 조회는 `Indeterminate`(재발주 금지).
-- ArchUnit `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`: `RealOrderGateways` 외에는 누구도 `BrokerPlugin.orderGateway(AccountRef)`를 부를 수 없다. 일부러 위반한 픽스처(`archfixture/BypassRealTradingGuard`)를 규칙이 잡는지도 테스트한다.
+- ArchUnit `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`: `RealOrderGateways` 외에는 `BrokerPlugin`을 구현·상속한 어떤 타입의 `orderGateway`도 호출하거나 메서드 참조로 넘길 수 없다. 위반 픽스처(`archfixture/BypassRealTradingGuard`)의 네 가지 우회(인터페이스·구체 타입·하위 인터페이스 호출, 메서드 참조)를 모두 잡는지 테스트한다.
+- ArchUnit `ONLY_COMMAND_CHANNEL_RAISES_GUARD`: Guard를 올리는 조작(`SecondConfirmation` 생성, `beginActivation`, `enterProtective`, `completeStep`)은 7단계 명령 채널 패키지(`com.autotrade.app.engine.command`, 아직 없음)에서만 부를 수 있다. 지금은 운영 코드 어디서도 실전을 열 수 없다.
 
 ### 2.3 "재기동 시 OFF"를 구조로 강제 (CFG-02)
 
@@ -78,7 +80,7 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | 키 | 위치 | 규칙 |
 |---|---|---|
 | `real-trading.accounts[]` | runtime-config | `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가), `broker`(KIS·KIWOOM·TOSS), `market`(KRX·US). 이 셋 외 키는 파일 거부 |
-| `real-trading.account-numbers.<id>` 🔒 | secrets | `accounts`에 있는 id만. 없으면 secrets 파일 거부(경고에 키도 값도 남기지 않음: 별칭 자리에 계좌번호를 잘못 적었을 수 있음). 값이 없는 계좌는 활성화 불가 경고 |
+| `real-trading.account-numbers.<id>` 🔒 | secrets | `accounts`에 있는 id만 쓴다. 목록에 없는 항목은 **그 항목만 버리고** 건수만 경고한다(키도 값도 남기지 않음: 별칭 자리에 계좌번호를 잘못 적었을 수 있음). 파일 전체를 거부하지 않는 이유: runtime-config.json 하나가 깨지거나 계좌를 지웠을 때 secrets.json의 증권사 키까지 잃어 시세 게이트웨이가 멈추면 안 된다(D-013). 값이 없는 계좌는 활성화 불가 경고 |
 
 - 실시간 변경 불가(`RuntimeConfigHolder.update`가 거부). 계좌 추가·교체는 CFG-05 절차(Guard OFF, 보유 0, 미체결 0)를 구현하는 작업에서 연다.
 - **ADR-001 제안과 다른 점**: 제안은 secrets에 `real-trading.accounts.<id>.account-number`(객체)를 두었다. runtime-config의 `accounts`는 배열이라 로더의 병합 규칙(객체는 재귀 병합, 배열은 통째 교체)상 secrets의 객체가 배열을 덮어써 계좌 목록이 깨진다. 그래서 별도 키 `account-numbers`(별칭 → 계좌번호 맵)로 바꿨다.
@@ -118,7 +120,10 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | 위험 | 영향 | 대응 |
 |---|---|---|
 | 증권사 호출 중 Guard가 내려가도 그 주문은 진행됨 | 최대 1건(계좌별 직렬 큐) | 계좌별 직렬 큐 가정(OrderGateway 계약). 잠금을 잡고 네트워크 호출하면 OFF 전환이 늦어져 더 위험하다고 판단 `[추론]` |
-| `SecondConfirmation`은 누구나 만들 수 있는 record | 엔진 안 코드가 확인 없이 활성화를 호출할 수 있음 | 지금은 활성화 명령 채널이 없어 호출 지점이 없다. 7단계 명령 채널 작업에서 비밀번호 검증기만 만들 수 있게 바꾸는 것을 완료 기준에 넣는다(3장 되돌릴 조건) |
+| `SecondConfirmation`은 public record | 명령 채널 안 코드는 비밀번호 검증 없이 만들 수 있음 | 명령 채널 밖 생성·상향 호출은 ArchUnit이 막는다. 7단계 명령 채널 작업에서 비밀번호 검증기만 만들 수 있게 바꾸는 것을 완료 기준에 넣는다(3장 되돌릴 조건) |
+| 플러그인 출구 구현을 직접 생성하는 우회(`new KisOrderGateway(...)`) | 플러그인 모듈이 생기면 `orderGateway` 호출 없이 출구를 얻을 수 있음 | 2단계 플러그인 작업에 규칙 추가: `OrderGateway` 구현 생성자는 그 플러그인 패키지 밖에서 호출 금지, 엔진은 플러그인 내부 패키지에 의존 금지(data-engineer 작업 범위로 전달) |
+| Guard OFF 뒤에는 조회도 막힘 | 킬스위치 직전 타임아웃으로 UNKNOWN이 된 주문은 다음 활성화의 첫 대사(ORD-07)까지 확정할 수 없음 | OFF면 주문 세션이 없다는 D-023과 일관. 재기동·재활성화 시 ORD-07 절차가 확정한다 |
+| 상향 전이 감사 기록 중에는 같은 계좌의 하향 전이가 잠금을 기다림 | 감사 저장이 멈추면 OFF 전환이 늦어짐 | 주문 경로는 잠금을 잡지 않으므로 손절은 영향 없음. 7단계 영속 감사 로그에 쓰기 시간 상한을 둔다 |
 | 감사 로그가 프로세스 로그뿐 | 재기동 후 조회 불가 | 실전 엔진 저장소 작업에서 영속 구현으로 교체. 인터페이스(`GuardAuditLog`)는 그대로 |
 | PROTECTIVE에서 다시 여는 중 실패하면 PROTECTIVE로 복귀 | 세션이 깨진 채 보호 모드일 수 있음 | 보호 모드 손절이 계속돼야 한다는 D-023 원칙 1을 우선. 세션 상태는 장애 매트릭스 #3·#7 처리(7단계)가 DEGRADED로 다룬다 |
 | ACTIVATING(OFF 출발) 중에는 취소가 허용됨 | 대사 단계에서 남은 미체결 정리가 필요할 수 있어 허용 | 취소는 보호 동작(D-023 원칙 1). 신규 주문은 막힘 |
@@ -139,8 +144,10 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | 계좌 격리 | 한 계좌 OFF가 다른 계좌 OPEN에 영향 없음 |
 | D-010 | 다른 증권사 플러그인으로 출구 생성 거부, 다른 계좌 허가·주문 거부 |
 | CFG-02 | `ConfigLoaderTest` `enabled`·`guard` 등 5종이 든 파일 거부, `EngineMainTest` enabled 파일로 기동해도 열 계좌 없음 |
-| CFG-03·04 | 계좌번호가 runtime-config에 있으면 거부, 목록에 없는 별칭이면 secrets 거부(값 미노출), 저장 시 계좌번호는 secrets로만, 실시간 변경 거부 |
-| 우회 금지 | ArchUnit 규칙 + 위반 픽스처 1건 검출 |
+| CFG-03·04 | 계좌번호가 runtime-config에 있으면 거부, 목록에 없는 별칭은 그 항목만 무시(값 미노출), 저장 시 계좌번호는 secrets로만, 실시간 변경 거부 |
+| 우회 금지 | ArchUnit 규칙 2개 + 위반 픽스처(출구 우회 4건, 명령 채널 밖 상향 2건) 검출 |
+| 감사 로그 지연 | 상향 감사 기록이 멈춘 동안 판정·취소 허용·허가 검사가 바로 돌아옴 |
+| secrets 독립성 | runtime-config가 깨지거나 목록에 없는 계좌번호가 있어도 증권사 키 유지, 무시 건수만 경고(값·별칭 미노출), 키에 `/`가 있어도 예외 없이 그 파일만 거부 |
 
 ## 6. 범위 밖 (후속 작업)
 
@@ -163,3 +170,19 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 4. PROTECTIVE에서 다시 열다 실패하면 PROTECTIVE로 돌아간다(OFF가 아님). D-023 원칙 1(보호 동작은 막지 않음)에서 끌어낸 해석 `[추론]`.
 5. ACTIVATING 중 취소 허용, OFF 출발 활성화 중 청산·손절은 차단(보유가 없다고 확인된 상태에서 연 것이므로).
 6. 2차 확인 유효 시간 60초 `[가정]`.
+7. 목록에 없는 계좌번호는 secrets 파일 전체가 아니라 그 항목만 버린다(architect R-1 대안 a).
+8. `OrderIntent.isProtective()`를 허용 목록 방식으로 바꾼다(architect R-5).
+
+## 8. 교차 검토 반영 (architect, 2026-10-08)
+
+| 지적 | 등급 | 반영 |
+|---|---|---|
+| B-1 ArchUnit 규칙이 구체 타입·하위 인터페이스 호출과 메서드 참조를 못 잡음(실측 0건) | 차단 | 규칙을 `orderGateway` 이름 + 소유 타입 `assignableTo(BrokerPlugin)` 접근으로 바꾸고 픽스처 4건 고정 |
+| R-1 계좌번호 교차 검증이 secrets.json 전체를 버려 증권사 키 손실 | 권장 | 그 항목만 버리고 건수 경고(2.4) |
+| R-2 주문 경로가 계좌 잠금을 잡고, 잠금 안에서 감사 기록 | 권장 | 불변 스냅샷 volatile 읽기, 하향 감사는 잠금 밖(2.1) |
+| R-3 Guard 상향 경로를 아무 코드나 부를 수 있음 | 권장 | ArchUnit `ONLY_COMMAND_CHANNEL_RAISES_GUARD`(2.2) |
+| R-4 플러그인 출구 직접 생성 우회 | 권장 | 2단계 플러그인 작업으로 넘김(4장) |
+| R-5 `isProtective()`가 새 값을 기본 허용 | 권장 | 허용 목록 방식 |
+| N-1 키에 `/`가 있으면 NPE 경고 | 참고 | 경로 가드 복원, 테스트 추가 |
+| N-3 OFF 뒤 조회 불가 | 참고 | 4장에 한계 기록 |
+| N-2·N-4·N-5 | 참고 | 변경 없음(안전한 방향, 4장 범위 안) |

@@ -232,21 +232,49 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void 목록에_없는_계좌의_계좌번호는_secrets를_거부하고_값을_남기지_않는다() throws IOException {
+    void 목록에_없는_계좌의_계좌번호는_버리고_증권사_키는_지키며_값을_남기지_않는다() throws IOException {
         runtime("""
                 { "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] } }
                 """);
         // 별칭 자리에 계좌번호를 잘못 적은 경우
         secrets("""
-                { "real-trading": { "account-numbers": { "%s": "%s" } } }
-                """.formatted(FAKE_SECRET, FAKE_SECRET));
+                { "brokers": { "kis": { "app-key": "%s", "app-secret": "%s" } },
+                  "real-trading": { "account-numbers": { "%s": "%s" } } }
+                """.formatted(FAKE_SECRET, FAKE_SECRET, FAKE_SECRET, FAKE_SECRET));
 
         LoadedConfig loaded = loader.load(paths);
 
         assertThat(loaded.source()).isEqualTo(ConfigSource.RUNTIME_FILE);
-        assertThat(loaded.warning()).contains("secrets.json").doesNotContain(FAKE_SECRET);
+        assertThat(loaded.warning()).contains("1개를 무시").doesNotContain(FAKE_SECRET);
+        assertThat(loaded.config().brokers().kis().isConfigured()).isTrue();
         assertThat(loaded.config().realTrading().accounts()).hasSize(1);
         assertThat(loaded.config().realTrading().accountNumbers()).isEmpty();
+    }
+
+    @Test
+    void runtime_config가_깨져도_계좌번호_때문에_증권사_키를_잃지_않는다() throws IOException {
+        // 시세 게이트웨이가 runtime-config.json 문제로 증권사 키까지 잃으면 안 된다(D-013 프로세스 독립)
+        runtime("{ \"lab\": ");
+        secrets("""
+                { "brokers": { "kis": { "app-key": "%s", "app-secret": "%s" } },
+                  "real-trading": { "account-numbers": { "KIS-US-1": "%s" } } }
+                """.formatted(FAKE_SECRET, FAKE_SECRET, FAKE_SECRET));
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
+        assertThat(loaded.config().brokers().kis().isConfigured()).isTrue();
+        assertThat(loaded.config().realTrading().accountNumbers()).isEmpty();
+        assertThat(loaded.warning()).contains("1개를 무시").doesNotContain(FAKE_SECRET).doesNotContain("KIS-US-1");
+    }
+
+    @Test
+    void 키_이름에_슬래시가_있어도_예외_없이_그_파일만_거부한다() throws IOException {
+        secrets("""
+                { "brokers/kis": { "app-key": "%s" } }
+                """.formatted(FAKE_SECRET));
+        LoadedConfig loaded = loader.load(paths);
+        assertThat(loaded.warning()).contains("secrets.json").doesNotContain("NullPointer").doesNotContain(FAKE_SECRET);
     }
 
     @Test

@@ -61,6 +61,9 @@ final class SecretPaths {
             String[] parts = path.split("/");
             ObjectNode parent = navigate(tree, parts);
             String leaf = parts[parts.length - 1];
+            if (parent == null || !parent.has(leaf)) {
+                continue; // 키 이름에 '/'가 들어 있어 경로로 찾을 수 없다. 그런 키는 바인딩에서 모르는 키로 거부된다
+            }
             JsonNode value = parent.remove(leaf);
             if (value.isTextual() && !value.asText().isBlank()) {
                 ensure(secrets, parts).set(leaf, value);
@@ -74,8 +77,9 @@ final class SecretPaths {
         List<String> found = new ArrayList<>();
         for (String path : secretLeaves(tree)) {
             String[] parts = path.split("/");
-            JsonNode value = navigate(tree, parts).get(parts[parts.length - 1]);
-            if (!value.isNull() && !value.asText().isBlank()) {
+            ObjectNode parent = navigate(tree, parts);
+            JsonNode value = parent == null ? null : parent.get(parts[parts.length - 1]);
+            if (value != null && !value.isNull() && !value.asText().isBlank()) {
                 found.add(path);
             }
         }

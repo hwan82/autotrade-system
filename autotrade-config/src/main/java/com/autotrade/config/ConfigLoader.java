@@ -32,6 +32,25 @@ public final class ConfigLoader {
 
     public LoadedConfig load(ConfigPaths paths) {
         Objects.requireNonNull(paths, "paths");
+        ObjectNode[] secretsTree = new ObjectNode[1];
+        LoadedConfig loaded = loadLayers(paths, secretsTree);
+        String secretsName = paths.secretsFile().getFileName().toString();
+        if (secretsTree[0] == null || loaded.warning().contains(secretsName + "을(를) 쓰지 않고")) {
+            return loaded;
+        }
+        // 쓴 secrets.json의 계좌번호 중 최종 계좌 목록에 없어 버려진 수(RuntimeConfig.RealTrading이 버림)
+        int orphans = countAccountNumbers(secretsTree[0]) - loaded.config().realTrading().accountNumbers().size();
+        if (orphans <= 0) {
+            return loaded;
+        }
+        // 별칭도 남기지 않는다: 별칭 자리에 계좌번호를 잘못 적었을 수 있다
+        String extra = secretsName + "의 real-trading.account-numbers 중 real-trading.accounts에 없거나 값이 빈 항목 "
+                + orphans + "개를 무시했습니다";
+        return new LoadedConfig(loaded.config(), loaded.source(),
+                loaded.warning().isEmpty() ? extra : loaded.warning() + "; " + extra);
+    }
+
+    private LoadedConfig loadLayers(ConfigPaths paths, ObjectNode[] secretsTree) {
         ObjectNode defaults = readDefaults();
         List<String> warnings = new ArrayList<>();
 
@@ -63,6 +82,9 @@ public final class ConfigLoader {
                 secrets = null;
                 warnings.add(secretsWarning(paths, describe(e)));
             }
+        }
+        if (secrets != null) {
+            secretsTree[0] = secrets;
         }
 
         // 2. 합쳐서 값 검증. 실패하면 일반 설정 → 비밀값 순으로 빼 보며 원인 파일을 찾는다
@@ -120,6 +142,11 @@ public final class ConfigLoader {
             merge(merged, secrets);
         }
         return merged;
+    }
+
+    private static int countAccountNumbers(ObjectNode secrets) {
+        JsonNode numbers = secrets.path("real-trading").path("account-numbers");
+        return numbers.isObject() ? numbers.size() : 0;
     }
 
     private static String runtimeWarning(ConfigPaths paths, String reason) {

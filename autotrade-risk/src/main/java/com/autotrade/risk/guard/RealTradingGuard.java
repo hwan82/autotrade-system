@@ -33,7 +33,9 @@ import java.util.TreeMap;
  *   <li>계좌끼리 상태를 공유하지 않는다. 한 계좌의 전이는 다른 계좌에 영향이 없다(지침 4장 6항).</li>
  * </ul>
  *
- * <p>스레드 안전: 계좌별 잠금. {@link #check}는 잠금 없이 최신 상태를 읽는다.
+ * <p>스레드 안전: 전이는 계좌별 잠금으로 직렬화한다. 계좌 상태(상태, 활성화 출발 상태, 세대)는 불변 스냅샷 하나를
+ * volatile로 바꿔 끼우므로, 주문마다 지나는 {@link #check}·{@link #mayCancel}·허가 유효성 검사는 잠금 없이 한 번 읽고 끝난다.
+ * 감사 로그 저장이 느려도 주문 경로(손절 포함)는 기다리지 않는다. 내려가는 전이의 감사 기록은 잠금 밖에서 한다.
  *
  * <p>가상 계좌는 이 Guard를 쓰지 않는다. 실험실 프로세스는 실전 주문 경로가 없고(ARC-03), Guard 판정은
  * {@link RiskDecision}으로 돌려주므로 실전 엔진의 검증 체인 맨 앞에 다른 규칙과 같은 방식으로 놓인다(D-023 공통 원칙 3).
@@ -76,14 +78,15 @@ public final class RealTradingGuard {
     }
 
     public GuardState state(AccountId account) {
-        return guard(account).state;
+        return guard(account).snapshot.state();
     }
 
     /** 이 계좌에서 통과한 활성화 단계. ACTIVATING이 아니면 비어 있다. */
     public Set<ActivationStep> completedSteps(AccountId account) {
         AccountGuard g = guard(account);
         synchronized (g) {
-            return g.state == GuardState.ACTIVATING ? EnumSet.copyOf(g.completed) : EnumSet.noneOf(ActivationStep.class);
+            return g.snapshot.state() == GuardState.ACTIVATING
+                    ? EnumSet.copyOf(g.completed) : EnumSet.noneOf(ActivationStep.class);
         }
     }
 
@@ -97,12 +100,13 @@ public final class RealTradingGuard {
         if (g == null) {
             return RiskDecision.reject(RULE_ID, "실전 계좌로 등록되지 않은 계좌입니다: " + order.account());
         }
-        GuardState s = g.state;
+        Snapshot snap = g.snapshot;
+        GuardState s = snap.state();
         boolean protective = order.intent().isProtective();
         boolean allowed = switch (s) {
             case OPEN -> true;
             case PROTECTIVE -> protective;
-            case ACTIVATING -> protective && g.activationOrigin == GuardState.PROTECTIVE;
+            case ACTIVATING -> protective && snap.activationOrigin() == GuardState.PROTECTIVE;
             case OFF -> false;
         };
         if (allowed) {
@@ -114,7 +118,7 @@ public final class RealTradingGuard {
 
     /** 취소 요청을 보내도 되는지. 취소는 보호 동작이라 주문 세션이 있는 상태(OFF가 아닌 상태)면 모두 허용한다. */
     public boolean mayCancel(AccountId account) {
-        return guard(account).state != GuardState.OFF;
+        return guard(account).snapshot.state() != GuardState.OFF;
     }
 
     /**
@@ -125,15 +129,16 @@ public final class RealTradingGuard {
     public OrderSessionPermit issueSessionPermit(AccountId account) {
         AccountGuard g = guard(account);
         synchronized (g) {
-            boolean allowed = switch (g.state) {
+            Snapshot snap = g.snapshot;
+            boolean allowed = switch (snap.state()) {
                 case OPEN, PROTECTIVE -> true;
                 case ACTIVATING -> g.completed.contains(ActivationStep.AUTHENTICATED);
                 case OFF -> false;
             };
             if (!allowed) {
-                throw new GuardClosedException(account + " Guard " + g.state + ": 주문 세션을 만들 수 없습니다");
+                throw new GuardClosedException(account + " Guard " + snap.state() + ": 주문 세션을 만들 수 없습니다");
             }
-            return new OrderSessionPermit(account, g.epoch, this);
+            return new OrderSessionPermit(account, snap.epoch(), this);
         }
     }
 
@@ -145,9 +150,8 @@ public final class RealTradingGuard {
         if (g == null) {
             return false;
         }
-        synchronized (g) {
-            return g.state != GuardState.OFF && g.epoch == permit.epoch();
-        }
+        Snapshot snap = g.snapshot;
+        return snap.state() != GuardState.OFF && snap.epoch() == permit.epoch();
     }
 
     // ---- 올라가는 전이: 2차 확인 필요 ----
@@ -161,15 +165,14 @@ public final class RealTradingGuard {
     public void beginActivation(SecondConfirmation confirmation) {
         AccountGuard g = guard(confirmation.account());
         synchronized (g) {
-            if (g.state != GuardState.OFF && g.state != GuardState.PROTECTIVE) {
-                throw new GuardClosedException(g.ref.id() + " Guard " + g.state + "에서는 활성화를 시작할 수 없습니다");
+            GuardState from = g.snapshot.state();
+            if (from != GuardState.OFF && from != GuardState.PROTECTIVE) {
+                throw new GuardClosedException(g.ref.id() + " Guard " + from + "에서는 활성화를 시작할 수 없습니다");
             }
             accept(g, confirmation);
-            // check()는 잠금 없이 state(volatile)만 읽으므로 출발 상태를 먼저 적고 state를 마지막에 바꾼다
-            g.activationOrigin = g.state;
             g.operator = confirmation.operator();
             g.completed.clear();
-            raise(g, GuardState.ACTIVATING, confirmation.operator(), "활성화 시작");
+            raise(g, GuardState.ACTIVATING, from, confirmation.operator(), "활성화 시작");
         }
     }
 
@@ -182,15 +185,15 @@ public final class RealTradingGuard {
         Objects.requireNonNull(step, "step");
         AccountGuard g = guard(account);
         synchronized (g) {
-            if (g.state != GuardState.ACTIVATING) {
-                throw new GuardClosedException(account + " Guard " + g.state + ": 활성화 중이 아닙니다");
+            if (g.snapshot.state() != GuardState.ACTIVATING) {
+                throw new GuardClosedException(account + " Guard " + g.snapshot.state() + ": 활성화 중이 아닙니다");
             }
             ActivationStep expected = ActivationStep.values()[g.completed.size()];
             if (step != expected) {
                 throw new GuardClosedException(account + " 활성화 순서 위반: " + expected + " 차례에 " + step);
             }
             if (step == ActivationStep.FIRST_RECONCILIATION) {
-                raise(g, GuardState.OPEN, g.operator, "활성화 단계 모두 통과");
+                raise(g, GuardState.OPEN, GuardState.OFF, g.operator, "활성화 단계 모두 통과");
                 g.completed.clear();
             } else {
                 g.completed.add(step);
@@ -207,11 +210,12 @@ public final class RealTradingGuard {
     public void enterProtective(SecondConfirmation confirmation) {
         AccountGuard g = guard(confirmation.account());
         synchronized (g) {
-            if (g.state != GuardState.OFF) {
-                throw new GuardClosedException(g.ref.id() + " Guard " + g.state + ": OFF에서만 보호 모드로 올릴 수 있습니다");
+            if (g.snapshot.state() != GuardState.OFF) {
+                throw new GuardClosedException(
+                        g.ref.id() + " Guard " + g.snapshot.state() + ": OFF에서만 보호 모드로 올릴 수 있습니다");
             }
             accept(g, confirmation);
-            raise(g, GuardState.PROTECTIVE, confirmation.operator(), "재기동 후 보유 보호");
+            raise(g, GuardState.PROTECTIVE, GuardState.OFF, confirmation.operator(), "재기동 후 보유 보호");
         }
     }
 
@@ -220,11 +224,13 @@ public final class RealTradingGuard {
     /** 활성화 중 단계 실패. 출발 상태(OFF 또는 PROTECTIVE)로 돌아간다. ACTIVATING이 아니면 아무것도 하지 않는다. */
     public void failActivation(AccountId account, String reason) {
         AccountGuard g = guard(account);
+        GuardTransition t;
         synchronized (g) {
-            if (g.state == GuardState.ACTIVATING) {
-                lower(g, g.activationOrigin, GuardTransition.SYSTEM, "활성화 실패: " + reason);
-            }
+            Snapshot snap = g.snapshot;
+            t = snap.state() == GuardState.ACTIVATING
+                    ? lower(g, snap.activationOrigin(), GuardTransition.SYSTEM, "활성화 실패: " + reason) : null;
         }
+        audit(t);
     }
 
     /**
@@ -233,33 +239,37 @@ public final class RealTradingGuard {
      */
     public void deactivate(AccountId account, String actor, String reason) {
         AccountGuard g = guard(account);
+        GuardTransition t;
         synchronized (g) {
-            switch (g.state) {
+            Snapshot snap = g.snapshot;
+            t = switch (snap.state()) {
                 case OPEN -> lower(g, GuardState.PROTECTIVE, actor, reason);
-                case ACTIVATING -> lower(g, g.activationOrigin, actor, reason);
-                case OFF, PROTECTIVE -> { }
-            }
+                case ACTIVATING -> lower(g, snap.activationOrigin(), actor, reason);
+                case OFF, PROTECTIVE -> null;
+            };
         }
+        audit(t);
     }
 
     /** 보호 모드 계좌의 보유·미체결이 0이 됐다. PROTECTIVE → OFF(주문 세션 종료). 다른 상태면 아무것도 하지 않는다. */
     public void holdingsCleared(AccountId account) {
         AccountGuard g = guard(account);
+        GuardTransition t;
         synchronized (g) {
-            if (g.state == GuardState.PROTECTIVE) {
-                lower(g, GuardState.OFF, GuardTransition.SYSTEM, "보유·미체결 0");
-            }
+            t = g.snapshot.state() == GuardState.PROTECTIVE
+                    ? lower(g, GuardState.OFF, GuardTransition.SYSTEM, "보유·미체결 0") : null;
         }
+        audit(t);
     }
 
     /** 어떤 상태에서든 즉시 OFF(PANIC SELL 마지막 단계, 킬스위치). 이미 OFF면 아무것도 하지 않는다. */
     public void shutdown(AccountId account, String actor, String reason) {
         AccountGuard g = guard(account);
+        GuardTransition t;
         synchronized (g) {
-            if (g.state != GuardState.OFF) {
-                lower(g, GuardState.OFF, actor, reason);
-            }
+            t = g.snapshot.state() != GuardState.OFF ? lower(g, GuardState.OFF, actor, reason) : null;
         }
+        audit(t);
     }
 
     // ---- 내부 ----
@@ -284,35 +294,51 @@ public final class RealTradingGuard {
         g.lastConfirmation = c.confirmedAt();
     }
 
-    /** 올라가는 전이: 감사 기록이 성공해야 상태를 바꾼다. */
-    private void raise(AccountGuard g, GuardState to, String actor, String reason) {
-        audit.record(new GuardTransition(g.ref.id(), g.state, to, actor, reason, clock.instant()));
-        g.state = to;
+    /**
+     * 올라가는 전이: 감사 기록이 성공해야 상태를 바꾼다. 사람이 드물게 하는 조작이라 잠금 안에서 기록한다
+     * (그동안 같은 계좌의 내려가는 전이는 기다리지만 주문 경로는 스냅샷만 읽으므로 기다리지 않는다).
+     *
+     * @param origin ACTIVATING으로 갈 때의 출발 상태. 다른 전이에서는 쓰지 않는다
+     */
+    private void raise(AccountGuard g, GuardState to, GuardState origin, String actor, String reason) {
+        Snapshot before = g.snapshot;
+        audit.record(new GuardTransition(g.ref.id(), before.state(), to, actor, reason, clock.instant()));
+        g.snapshot = new Snapshot(to, to == GuardState.ACTIVATING ? origin : GuardState.OFF, before.epoch());
     }
 
-    /** 내려가는 전이: 상태를 먼저 바꾸고, 감사 기록 실패는 경고만 남긴다. */
-    private void lower(AccountGuard g, GuardState to, String actor, String reason) {
-        GuardState from = g.state;
-        if (to == GuardState.OFF) {
-            g.epoch++;
-        }
-        g.state = to;
+    /** 내려가는 전이: 잠금 안에서 상태만 바꾸고, 감사 기록할 전이를 돌려준다(기록은 잠금 밖에서 {@link #audit}). */
+    private GuardTransition lower(AccountGuard g, GuardState to, String actor, String reason) {
+        Snapshot before = g.snapshot;
+        long epoch = to == GuardState.OFF ? before.epoch() + 1 : before.epoch();
+        g.snapshot = new Snapshot(to, GuardState.OFF, epoch);
         g.completed.clear();
-        try {
-            audit.record(new GuardTransition(g.ref.id(), from, to, actor, reason, clock.instant()));
-        } catch (RuntimeException e) {
-            LOG.log(Level.WARNING, "Guard 감사 기록 실패(전이는 적용됨): {0} {1}→{2}", g.ref.id(), from, to);
+        return new GuardTransition(g.ref.id(), before.state(), to, actor, reason, clock.instant());
+    }
+
+    /** 내려가는 전이의 감사 기록. 실패해도 전이는 이미 적용됐으므로 경고만 남긴다. */
+    private void audit(GuardTransition t) {
+        if (t == null) {
+            return;
         }
+        try {
+            audit.record(t);
+        } catch (RuntimeException e) {
+            LOG.log(Level.WARNING, "Guard 감사 기록 실패(전이는 적용됨): {0} {1}→{2}", t.account(), t.from(), t.to());
+        }
+    }
+
+    /** 계좌 상태의 불변 스냅샷. 주문 경로는 이 참조 하나만 읽는다. */
+    private record Snapshot(GuardState state, GuardState activationOrigin, long epoch) {
+        static final Snapshot INITIAL = new Snapshot(GuardState.OFF, GuardState.OFF, 0);
     }
 
     private static final class AccountGuard {
         final AccountRef ref;
-        volatile GuardState state = GuardState.OFF;
-        GuardState activationOrigin = GuardState.OFF;
+        volatile Snapshot snapshot = Snapshot.INITIAL;
+        // 아래는 잠금(this) 안에서만 읽고 쓴다
         final EnumSet<ActivationStep> completed = EnumSet.noneOf(ActivationStep.class);
         String operator = GuardTransition.SYSTEM;
         Instant lastConfirmation;
-        long epoch;
 
         AccountGuard(AccountRef ref) {
             this.ref = ref;

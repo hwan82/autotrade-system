@@ -139,7 +139,7 @@ public record RuntimeConfig(
      * 실전 계좌가 설정돼 있어도 RealTradingGuard는 기동 시 모든 계좌를 OFF로 시작한다.
      *
      * @param accounts 실전 계좌 목록(runtime-config.json). 별칭은 겹치지 않는다
-     * @param accountNumbers 계좌 별칭 → 증권사 계좌번호(secrets.json, 🔒). 목록에 없는 별칭은 거부한다.
+     * @param accountNumbers 계좌 별칭 → 증권사 계좌번호(secrets.json, 🔒). 목록에 없는 별칭은 버린다(경고는 로더).
      *     계좌번호가 없는 계좌는 활성화할 수 없다(NOT_CONFIGURED)
      */
     public record RealTrading(List<RealAccount> accounts, Map<String, Secret> accountNumbers) {
@@ -154,13 +154,10 @@ public record RuntimeConfig(
             Map<String, Secret> numbers = new TreeMap<>();
             if (accountNumbers != null) {
                 for (Map.Entry<String, Secret> e : accountNumbers.entrySet()) {
-                    if (!ids.contains(e.getKey())) {
-                        // 키도 메시지에 넣지 않는다: 별칭 자리에 계좌번호를 잘못 적었을 수 있다
-                        throw new IllegalArgumentException(
-                                "real-trading.account-numbers의 키는 real-trading.accounts의 id여야 합니다");
-                    }
                     Secret value = e.getValue() == null ? Secret.empty() : e.getValue();
-                    if (value.isPresent()) {
+                    // accounts에 없는 별칭은 버린다. 파일 전체를 거부하면 secrets.json의 증권사 키까지 잃어
+                    // 시세 게이트웨이가 멈춘다(D-013). 버린 건수는 ConfigLoader가 경고로 남긴다(ADR-002 2.4)
+                    if (ids.contains(e.getKey()) && value.isPresent()) {
                         numbers.put(e.getKey(), value);
                     }
                 }

@@ -6,6 +6,7 @@ import static com.autotrade.risk.guard.GuardFixtures.KIWOOM_KR;
 import static com.autotrade.risk.guard.GuardFixtures.order;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.autotrade.domain.account.AccountId;
 import com.autotrade.domain.account.AccountRef;
@@ -21,6 +22,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -297,6 +300,38 @@ class RealTradingGuardTest {
         guard.failActivation(KIS_KR, "없음");
         guard.holdingsCleared(KIS_KR);
         assertThat(guard.state(KIS_KR)).isEqualTo(GuardState.OFF);
+    }
+
+    @Test
+    void 감사_기록이_느려도_주문_판정은_기다리지_않는다() throws Exception {
+        open(KIS_KR);
+        OrderSessionPermit permit = guard.issueSessionPermit(KIS_KR);
+        CountDownLatch auditEntered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        RealTradingGuard slow = new RealTradingGuard(ACCOUNTS, clock, t -> {
+            auditEntered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        SecondConfirmation c = confirm(KIWOOM_KR);
+        Thread raiser = new Thread(() -> slow.beginActivation(c));
+        raiser.start();
+        try {
+            assertThat(auditEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            // 상향 전이가 계좌 잠금을 잡고 감사 기록에서 멈춘 동안에도 판정·허가 검사는 바로 돌아온다
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                assertThat(slow.check(order(KIWOOM_KR, OrderIntent.STOP_LOSS)).isApproved()).isFalse();
+                assertThat(slow.mayCancel(KIWOOM_KR)).isFalse();
+                assertThat(permit.isValid()).isTrue();
+            });
+        } finally {
+            release.countDown();
+            raiser.join();
+        }
+        assertThat(slow.state(KIWOOM_KR)).isEqualTo(GuardState.ACTIVATING);
     }
 
     // ---- 계좌 격리 ----

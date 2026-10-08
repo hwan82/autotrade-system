@@ -1,5 +1,9 @@
 package com.autotrade.architecture;
 
+import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.target;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
+import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
@@ -9,7 +13,10 @@ import com.autotrade.app.engine.order.RealOrderGateways;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.broker.BrokerPlugin;
-import com.autotrade.domain.account.AccountRef;
+import com.autotrade.domain.account.AccountId;
+import com.autotrade.risk.guard.ActivationStep;
+import com.autotrade.risk.guard.RealTradingGuard;
+import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -118,12 +125,31 @@ class ArchitectureTest {
 
     /**
      * 실전 주문 출구는 RealTradingGuard 허가를 받는 한 곳에서만 연다(RSK-01, ADR-002, 안전 불변식 2).
-     * 증권사 플러그인 구현이 자기 출구를 만드는 것은 {@code orderGateway} 호출이 아니므로 이 규칙과 무관하다.
+     * BrokerPlugin을 구현·상속한 어떤 타입의 {@code orderGateway}든, 호출이든 메서드 참조든 막는다.
+     * 플러그인이 출구 구현을 직접 생성하는 우회는 플러그인 모듈이 생기는 2단계에서 규칙을 더한다(ADR-002 6장).
      */
     static final ArchRule ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY = noClasses()
             .that().doNotHaveFullyQualifiedName(RealOrderGateways.class.getName())
-            .should().callMethod(BrokerPlugin.class, "orderGateway", AccountRef.class)
+            .should().accessTargetWhere(target(name("orderGateway"))
+                    .and(target(owner(assignableTo(BrokerPlugin.class)))))
             .because("실전 주문은 RealTradingGuard를 거친 출구로만 나가야 한다(RSK-01)");
+
+    /** Guard를 올리는 조작이 허용되는 곳: 7단계 활성화 명령 채널 패키지(아직 없음). */
+    static final String GUARD_COMMAND_CHANNEL = "com.autotrade.app.engine.command..";
+
+    /**
+     * Guard를 올리는 경로(2차 확인 생성, 활성화 시작·단계 통과, 보호 모드 진입)는 명령 채널에서만 부른다.
+     * 엔진 코드가 사람의 확인 없이 실전을 여는 것을 빌드로 막는다(D-023 공통 원칙 2, ADR-002 4장).
+     */
+    static final ArchRule ONLY_COMMAND_CHANNEL_RAISES_GUARD = noClasses()
+            .that().resideOutsideOfPackages(GUARD_COMMAND_CHANNEL, "com.autotrade.risk.guard..")
+            .should().callConstructor(SecondConfirmation.class,
+                    AccountId.class, String.class, Instant.class)
+            .orShould().callMethod(RealTradingGuard.class, "beginActivation", SecondConfirmation.class)
+            .orShould().callMethod(RealTradingGuard.class, "enterProtective", SecondConfirmation.class)
+            .orShould().callMethod(RealTradingGuard.class, "completeStep",
+                    AccountId.class, ActivationStep.class)
+            .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
 
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
@@ -188,6 +214,11 @@ class ArchitectureTest {
     }
 
     @Test
+    void Guard를_올리는_조작은_명령_채널에서만_한다() {
+        ONLY_COMMAND_CHANNEL_RAISES_GUARD.check(PRODUCTION);
+    }
+
+    @Test
     void 프로세스_진입점끼리_참조하지_않는다() {
         PROCESSES_ARE_INDEPENDENT.check(PRODUCTION);
     }
@@ -212,8 +243,14 @@ class ArchitectureTest {
         assertThat(random.getFailureReport().getDetails()).hasSize(3);
         assertThat(money.getFailureReport().getDetails()).hasSize(2);
 
-        EvaluationResult bypass = ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(
-                new ClassFileImporter().importClasses(BypassRealTradingGuard.class, RealOrderGateways.class));
-        assertThat(bypass.getFailureReport().getDetails()).hasSize(1);
+        JavaClasses bypassFixture = new ClassFileImporter().importClasses(
+                BypassRealTradingGuard.class, BypassRealTradingGuard.ConcretePlugin.class,
+                BypassRealTradingGuard.SubPlugin.class, RealOrderGateways.class);
+        // 인터페이스·구체 타입·하위 인터페이스 호출, 메서드 참조 각 1건. RealOrderGateways는 허용
+        assertThat(ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(bypassFixture)
+                .getFailureReport().getDetails()).hasSize(4);
+        // 2차 확인 생성, beginActivation 각 1건
+        assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
+                .getFailureReport().getDetails()).hasSize(2);
     }
 }
