@@ -91,56 +91,90 @@
 
 ## 4. 설정 키 제안 (architect 검토용 변경 제안)
 
-설정 키 체계는 architect 소유(1단계 B 작업)라 직접 정하지 않고 제안으로 남긴다. 키 이름은 B의 체계에 맞춰 바뀔 수 있다.
+설정 키 체계는 architect 소유(1단계 B 작업)라 직접 정하지 않고 제안으로 남긴다. 키 이름과 실린 형식(runtime-config.json 등)은 B의 체계와 ADR에 맞춰 바뀔 수 있다. 아래 YAML은 구조를 보이기 위한 표기다.
 
 ```yaml
 autotrade:
   cost:
     # 실험은 cost.profile-id 하나를 고정한다. 결과에 profile-id와 표 해시를 기록.
+    # 숫자는 모두 문자열로 받아 BigDecimal로 파싱한다(double을 거치지 않음).
     profiles:
       KR-DEFAULT:
         market: KRX
-        currency: KRW
-        commission:              # 매수·매도 모두
-          rate: 0.00015          # [가정] 3사 공통 보수적 기본값
-          rounding: FLOOR_1      # 원 미만 절사
-        sell-tax:                # 매도만, 체결 거래일 기준으로 구간 선택
-          rounding: FLOOR_1
-          schedule:
-            - { from: 2025-01-01, to: 2025-12-31, KOSPI: { stt: 0.0000, rural: 0.0015 }, KOSDAQ: { stt: 0.0015 }, KONEX: { stt: 0.0010 } }
-            - { from: 2026-01-01,                 KOSPI: { stt: 0.0005, rural: 0.0015 }, KOSDAQ: { stt: 0.0020 }, KONEX: { stt: 0.0010 } }
-        slippage: { model: FIXED_RATE, rate: 0.0015 }   # D6 기본값, 이 조사 범위 밖
+        currency: KRW            # scale 0
+        commission:              # 매수·매도 모두. 증권사·계좌 기준 (BrokerFeeSchedule)
+          rate: "0.00015"        # [가정] 3사 공통 보수적 기본값
+          rounding: FLOOR        # java.math.RoundingMode
+        sell-tax:                # 매도만. 시장 기준 (MarketRules)
+          rounding: FLOOR
+          schedule:              # 체결 거래일(거래소 현지 날짜)로 구간 선택
+            - { from: 2025-01-01, to: 2025-12-31, KOSPI: { stt: "0.0000", rural: "0.0015" }, KOSDAQ: { stt: "0.0015" }, KONEX: { stt: "0.0010" } }
+            - { from: 2026-01-01,                 KOSPI: { stt: "0.0005", rural: "0.0015" }, KOSDAQ: { stt: "0.0020" }, KONEX: { stt: "0.0010" } }
+        slippage: { model: FIXED_RATE, rate: "0.0015" }   # D6 기본값, 이 조사 범위 밖
       US-DEFAULT:
         market: US
-        currency: USD
-        commission: { rate: 0.0025, rounding: HALF_UP_CENT }   # [가정] 이벤트 없는 온라인 기본
+        currency: USD            # scale 2
+        commission: { rate: "0.0025", rounding: HALF_UP }   # [가정] 이벤트 없는 온라인 기본
         regulatory:              # 매도만
           sec-section31:
             pass-through: true
-            rounding: CEIL_CENT
+            rounding: CEILING
             schedule:
-              - { from: 2025-05-14, to: 2026-04-03, per-million: 0.00 }   # from은 [추론], SEC FY2025 #2 고시로 확인
-              - { from: 2026-04-04,                 per-million: 20.60 }
+              - { from: 2025-05-14, to: 2026-04-03, per-million: "0.00" }   # from은 [추론], SEC FY2025 #2 고시로 확인
+              - { from: 2026-04-04,                 per-million: "20.60" }
           finra-taf:
             pass-through: true
-            rounding: HALF_UP_CENT
+            rounding: HALF_UP
             schedule:
-              - { from: 2026-01-01, to: 2026-09-30, per-share: 0.000195, max-per-trade: 9.79 }
-              - { from: 2026-10-01, to: 2026-12-31, per-share: 0.0,      max-per-trade: 0.0 }
-              - { from: 2027-01-01, to: 2028-12-31, per-share: 0.000195, max-per-trade: 9.79 }
-        slippage: { model: FIXED_RATE, rate: 0.0015 }   # [가정] D6 국내값 준용, 미국 별도 근거 없음
-      US-TOSS:                   # US-DEFAULT에서 commission.rate만 0.001
+              - { from: 2026-01-01, to: 2026-09-30, per-share: "0.000195", max-per-trade: "9.79" }
+              - { from: 2026-10-01, to: 2026-12-31, per-share: "0",        max-per-trade: "0" }
+              - { from: 2027-01-01,                 per-share: "0.000195", max-per-trade: "9.79" }  # 2028-12-31까지 확정(출처 6), 이후는 고시 확인
+        slippage: { model: FIXED_RATE, rate: "0.0015" }   # [가정] D6 국내값 준용, 미국 별도 근거 없음
+      US-TOSS:
+        extends: US-DEFAULT
+        commission: { rate: "0.001" }
     reporting:
-      fx: { spread-rate: 0.0025 }   # [가정] 원화 환산 표시용, 매매 비용 아님
+      fx: { spread-rate: "0.0025" }   # [가정] 원화 환산 표시용, 매매 비용 아님
 ```
 
-설계 요점
-- 금액 계산은 `BigDecimal`(국내 원, 미국 센트)로 하고 반올림 규칙을 항목마다 명시한다. 부동소수점 금지(결정론).
-- 구간 선택 기준은 **체결 거래일(거래소 현지 날짜)** 이다. 미국은 America/New_York 날짜로 고른다(project-instructions.md 4장 9항). FINRA도 결제일이 아닌 거래일 기준으로 부과한다(출처 5).
-- 표에 구간이 없는 날짜의 체결은 실험을 실패시킨다(조용히 0원 처리 금지). 미래 구간이 비어 있는 상태로 실시간 모의가 돌다가 세율이 바뀌면 바로 드러나게 하기 위함이다. 마지막 구간은 `to` 없이 열어 둔다.
-- 비용 계산은 시장 차이이므로 `MarketRules`(또는 그 아래 `CostModel`) 안에서만 다룬다.
+### 4.1 키별 기본값·범위·변경 가능 여부
 
-## 5. 손 계산 예시 (비용 모델 단위 테스트 기대값으로 사용 가능)
+| 키 | 기본값 | 허용 범위 | 실시간 변경 |
+|---|---|---|---|
+| `cost.profiles.*.commission.rate` | KR "0.00015", US "0.0025" | 0 이상 0.01 이하 | 불가 (실험 시작 시 스냅샷) |
+| `cost.profiles.*.sell-tax.schedule` | 위 표 | 세율 0 이상 0.01 이하, 구간 규칙 4.2 | 불가 |
+| `cost.profiles.*.regulatory.*.schedule` | 위 표 | 0 이상, 구간 규칙 4.2 | 불가 |
+| `cost.profiles.*.regulatory.*.pass-through` | true | true/false | 불가 |
+| `cost.profiles.*.*.rounding` | 위 표 | `java.math.RoundingMode` 값 | 불가 |
+| `cost.profiles.*.slippage.rate` | "0.0015" | 0 이상 0.05 이하 | 불가 |
+| `cost.reporting.fx.spread-rate` | "0.0025" | 0 이상 0.05 이하 | 가능 (표시용, 성과 계산에 안 씀) |
+
+비용 표는 실험 시작 시 한 번 읽어 불변 객체로 스냅샷한다. 실험 도중 설정이 바뀌어도 진행 중인 실험에는 반영하지 않는다(결정론).
+
+### 4.2 구간 규칙과 검증
+
+- 항목마다 마지막 구간은 `to` 없이 연다. 세율 변경 감지는 코드가 아니라 운영 절차로 한다: 분기마다(그리고 SEC·FINRA·기재부 고시가 나올 때) strategy-researcher가 출처를 다시 확인하고 표에 줄을 추가한다.
+- 로드 시 검증: 구간이 `from` 순으로 정렬되어 있는지, `from <= to`, 겹침 없음, 빈틈 없음, 열린 구간은 마지막 하나뿐. 위반하면 설정 로드를 실패시킨다.
+- 실험 시작 시 검증: 실험 기간 전체(시작일~종료일, 실시간 모의는 시작일~열린 구간)가 모든 항목의 표에 들어가는지 확인하고, 안 들어가면 실험을 시작하지 않는다. 체결 시점에 처음 실패하는 일이 없게 한다.
+- 이 검증과 실패는 **시뮬레이션 실험실 안에서만** 일어난다. 실전 엔진의 주문·청산·손절 경로는 이 비용 표에 의존하지 않는다(project-instructions.md 4장 6항, D-013). 실전은 증권사가 돌려준 실제 체결 비용을 기록하고, 추정 비용이 필요한 화면 표시에서 표가 비어 있으면 경고만 낸다.
+
+### 4.3 계산 단위 (결정론)
+
+- 시뮬레이션의 비용 계산 단위는 **체결 건(fill) 하나**다. 부분 체결은 체결 건마다 따로 계산한다.
+- 항목마다 따로 반올림한다. 국내는 위탁수수료, 증권거래세, 농특세를 각각 원 단위(scale 0)로 절사하고, 미국은 위탁수수료, SEC fee, TAF를 각각 센트 단위(scale 2)로 반올림·올림한다.
+- TAF의 건당 상한(`max-per-trade`)도 체결 건 단위로 적용한다.
+- [가정] 실제 증권사는 주문 단위나 일 단위로 합산해 절사할 수 있다. 차이는 건당 1원·1센트 미만이고, 실전 대사에서 확인해 필요하면 계산 단위를 바꾼다. 바꾸면 새 비용 모델 버전이 되므로 이전 실험과 직접 비교하지 않는다.
+- 구간 선택 날짜는 `Clock`의 현재 시각이 아니라 **체결 이벤트의 거래소 현지 날짜**다(미국은 America/New_York). FINRA도 결제일이 아닌 거래일 기준으로 부과한다(출처 5).
+
+### 4.4 경계
+
+- 세금·규제 수수료는 시장 기준이라 `MarketRules`에, 위탁수수료는 계좌·증권사 기준이라 `BrokerFeeSchedule`에 두고, 둘을 `CostModel`로 묶는다. 모두 Spring 의존 없는 순수 Java(domain/sim)로 둔다.
+- 국내 세율은 소속부(KOSPI·KOSDAQ·KONEX)로 갈리므로 **체결 당시 소속부**가 필요하다. 이전상장 종목에 현재 소속부를 쓰면 미래 정보를 쓰는 셈이 된다. 종목 마스터의 시점별 소속부 이력을 data-engineer의 유니버스 데이터 요구사항으로 넘긴다.
+- 비용 표 해시는 정규화한 표(키 정렬, `stripTrailingZeros`)로 계산하고, 실험 기간에 실제로 쓰인 구간만 넣는다. 그래야 미래 구간이 추가돼도 과거 실험과 같은 비용 모델로 계속 비교할 수 있다.
+
+## 5. 손 계산 예시
+
+단위 테스트 기대값으로는 슬리피지를 뺀 명시 비용(국내 23,000원, 미국 50.21달러)만 쓴다. 시뮬레이션은 슬리피지를 체결가에 반영하므로, 슬리피지를 넣으면 세금 기준 금액도 달라진다. 슬리피지 포함 수치는 크기 비교용 근사다.
 
 **국내, 코스피, 2026년, 1,000만 원 매수 후 같은 가격에 전량 매도**
 - 매수 수수료: 10,000,000 × 0.015% = 1,500원
@@ -161,7 +195,7 @@ autotrade:
 |---|---|---|
 | 증권사 수수료가 2차 자료 수치 | 미국은 0.25%↔0.1% 차이로 왕복 0.3%p. 미국 단타 전략의 순위가 뒤집힐 수 있음 | 미국 실험은 0.25%(보수)로 돌리고 0.1%로 민감도 실험을 함께 리포트. 실전 체결 내역으로 대사 |
 | 국내 증권사가 SEC fee·TAF를 그대로 넘기는지 미확인 | 건당 몇 센트, 성과에 미미 | `pass-through` 스위치로 대응, 실전 대사 시 확인 |
-| SEC 2027 회계연도 요율 변경 | 요율이 바뀐 뒤 실시간 모의 비용이 틀림 | 비어 있는 미래 구간 정책(4장)과 별개로, 분기마다 SEC 고시 확인. 바뀌면 표에 한 줄 추가 |
+| SEC 2027 회계연도 요율 변경 | 요율이 바뀐 뒤 실시간 모의 비용이 틀림 | 분기마다 SEC 고시 확인(4.2 운영 절차). 바뀌면 표에 한 줄 추가 |
 | TAF 면제를 SEC가 정지 | 2026-10~12 매도에 TAF 부과 | 건당 최대 9.79달러, 100주 매도 시 0.02달러 수준이라 영향 작음. 정지 공고 시 표 수정 |
 | 국내 세율 시행령 원문 미확인 | 낮음. 증권사 공식 고시와 기재부 개정안이 일치 | law.go.kr 접근 가능한 환경에서 연혁 확인 |
 | 슬리피지 0.15%는 이 조사 범위 밖 | 단타 전략에서 가장 큰 비용 항목 | 3단계에서 sim-engine이 호가 기반 체결로 대체하고 녹화 데이터로 오차 측정 |
@@ -170,7 +204,8 @@ autotrade:
 
 - pm-lead: D6의 거래세 `[가정]`을 이 문서의 세율로 갱신하고 Q-004를 닫는다. 증권사 수수료 공식 확인은 새 미확정 항목으로 남기길 제안(담당 data-engineer 또는 risk-ops, 실전 대사 단계).
 - architect: 4장 설정 키 제안을 1단계 설정 체계에 반영할지 검토.
-- sim-engine: 3단계 비용 모델 구현 시 5장 예시를 단위 테스트 기대값으로 사용.
+- sim-engine: 3단계 비용 모델 구현 시 4.2·4.3 규칙을 따르고 5장 예시를 단위 테스트 기대값으로 사용.
+- data-engineer: 종목 마스터에 시점별 소속부 이력 제공(4.4).
 
 ## 출처
 
