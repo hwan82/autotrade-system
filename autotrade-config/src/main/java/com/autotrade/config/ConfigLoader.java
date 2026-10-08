@@ -35,7 +35,7 @@ public final class ConfigLoader {
         ObjectNode[] secretsTree = new ObjectNode[1];
         LoadedConfig loaded = loadLayers(paths, secretsTree);
         String secretsName = paths.secretsFile().getFileName().toString();
-        if (secretsTree[0] == null || loaded.warning().contains(secretsName + "을(를) 쓰지 않고")) {
+        if (secretsTree[0] == null || loaded.warning().contains(secretsWarningPrefix(paths))) {
             return loaded;
         }
         // 쓴 secrets.json의 계좌번호 중 최종 계좌 목록에 없어 버려진 수(RuntimeConfig.RealTrading이 버림)
@@ -154,7 +154,12 @@ public final class ConfigLoader {
     }
 
     private static String secretsWarning(ConfigPaths paths, String reason) {
-        return paths.secretsFile().getFileName() + "을(를) 쓰지 않고 비밀값 없이 기동: " + reason;
+        return secretsWarningPrefix(paths) + reason;
+    }
+
+    /** secrets.json을 버렸다는 경고의 앞부분. load()가 secrets.json 사용 여부를 이것으로 판단하므로 문구를 한곳에 둔다. */
+    private static String secretsWarningPrefix(ConfigPaths paths) {
+        return paths.secretsFile().getFileName() + "을(를) 쓰지 않고 비밀값 없이 기동: ";
     }
 
     /** 내장 default만 읽는다. 내장 파일이 깨진 것은 빌드 오류이므로 예외. */

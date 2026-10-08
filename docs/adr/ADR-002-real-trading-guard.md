@@ -61,7 +61,7 @@ RealOrderGateways.open(guard, plugin, account)   ← 유일한 출구 생성 지
 - `OrderSessionPermit`은 발급 당시 세대(epoch)에 묶인다. 계좌가 OFF로 내려가면 세대가 바뀌어 그전 허가와 그 허가로 만든 출구는 **다시 열어도 살아나지 않는다**. 새로 열면 새 출구를 받아야 한다.
 - `GuardedOrderGateway`는 호출마다 허가 유효성과 Guard 판정을 다시 본다. 막힌 주문은 증권사로 나가지 않고 `REJECTED`(사유 접두 `REAL_TRADING_GUARD`)로 돌아온다. 막힌 취소는 원주문 상태를 모르므로 `UNKNOWN`(호출자는 조회부터, 지침 4장 2항), 막힌 조회는 `Indeterminate`(재발주 금지).
 - ArchUnit `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`: `RealOrderGateways` 외에는 `BrokerPlugin`을 구현·상속한 어떤 타입의 `orderGateway`도 호출하거나 메서드 참조로 넘길 수 없다. 위반 픽스처(`archfixture/BypassRealTradingGuard`)의 네 가지 우회(인터페이스·구체 타입·하위 인터페이스 호출, 메서드 참조)를 모두 잡는지 테스트한다.
-- ArchUnit `ONLY_COMMAND_CHANNEL_RAISES_GUARD`: Guard를 올리는 조작(`SecondConfirmation` 생성, `beginActivation`, `enterProtective`, `completeStep`)은 7단계 명령 채널 패키지(`com.autotrade.app.engine.command`, 아직 없음)에서만 부를 수 있다. 지금은 운영 코드 어디서도 실전을 열 수 없다.
+- ArchUnit `ONLY_COMMAND_CHANNEL_RAISES_GUARD`: Guard를 올리는 조작(`SecondConfirmation` 생성, `beginActivation`, `enterProtective`, `completeStep`)은 7단계 명령 채널 패키지(`com.autotrade.app.engine.command`, 아직 없음)에서만 호출하거나 메서드·생성자 참조로 넘길 수 있다. 지금은 운영 코드 어디서도 실전을 열 수 없다. 위반 픽스처 6건(호출 2, 참조 4)을 잡는지 테스트한다.
 
 ### 2.3 "재기동 시 OFF"를 구조로 강제 (CFG-02)
 
@@ -145,7 +145,7 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | D-010 | 다른 증권사 플러그인으로 출구 생성 거부, 다른 계좌 허가·주문 거부 |
 | CFG-02 | `ConfigLoaderTest` `enabled`·`guard` 등 5종이 든 파일 거부, `EngineMainTest` enabled 파일로 기동해도 열 계좌 없음 |
 | CFG-03·04 | 계좌번호가 runtime-config에 있으면 거부, 목록에 없는 별칭은 그 항목만 무시(값 미노출), 저장 시 계좌번호는 secrets로만, 실시간 변경 거부 |
-| 우회 금지 | ArchUnit 규칙 2개 + 위반 픽스처(출구 우회 4건, 명령 채널 밖 상향 2건) 검출 |
+| 우회 금지 | ArchUnit 규칙 2개 + 위반 픽스처(출구 우회 4건, 명령 채널 밖 상향 6건) 검출 |
 | 감사 로그 지연 | 상향 감사 기록이 멈춘 동안 판정·취소 허용·허가 검사가 바로 돌아옴 |
 | secrets 독립성 | runtime-config가 깨지거나 목록에 없는 계좌번호가 있어도 증권사 키 유지, 무시 건수만 경고(값·별칭 미노출), 키에 `/`가 있어도 예외 없이 그 파일만 거부 |
 
@@ -186,3 +186,5 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | N-1 키에 `/`가 있으면 NPE 경고 | 참고 | 경로 가드 복원, 테스트 추가 |
 | N-3 OFF 뒤 조회 불가 | 참고 | 4장에 한계 기록 |
 | N-2·N-4·N-5 | 참고 | 변경 없음(안전한 방향, 4장 범위 안) |
+
+재검토(같은 날, 승인): 명령 채널 규칙이 메서드·생성자 참조를 못 잡는 점(권장 1)을 같은 방식(`accessTargetWhere`)으로 고치고 픽스처 4건 추가. 느린 감사 로그 테스트가 다른 Guard의 허가를 검사하던 점(N-6)과 secrets 사용 판정의 문자열 의존(N-8)도 고쳤다. 감사 기록 순서(N-7)는 7단계 영속 감사 로그에 계좌별 일련번호를 넣는 것으로 넘긴다.

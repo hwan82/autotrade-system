@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -304,27 +305,32 @@ class RealTradingGuardTest {
 
     @Test
     void 감사_기록이_느려도_주문_판정은_기다리지_않는다() throws Exception {
-        open(KIS_KR);
-        OrderSessionPermit permit = guard.issueSessionPermit(KIS_KR);
         CountDownLatch auditEntered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean blockAudit = new AtomicBoolean();
         RealTradingGuard slow = new RealTradingGuard(ACCOUNTS, clock, t -> {
-            auditEntered.countDown();
-            try {
-                release.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            if (blockAudit.get()) {
+                auditEntered.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
         });
+        slow.enterProtective(confirm(KIWOOM_KR));
+        OrderSessionPermit permit = slow.issueSessionPermit(KIWOOM_KR);
+        blockAudit.set(true);
         SecondConfirmation c = confirm(KIWOOM_KR);
         Thread raiser = new Thread(() -> slow.beginActivation(c));
         raiser.start();
         try {
             assertThat(auditEntered.await(5, TimeUnit.SECONDS)).isTrue();
-            // 상향 전이가 계좌 잠금을 잡고 감사 기록에서 멈춘 동안에도 판정·허가 검사는 바로 돌아온다
+            // 상향 전이가 계좌 잠금을 잡고 감사 기록에서 멈춘 동안에도 판정·취소 허용·허가 검사는 바로 돌아온다
             assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
-                assertThat(slow.check(order(KIWOOM_KR, OrderIntent.STOP_LOSS)).isApproved()).isFalse();
-                assertThat(slow.mayCancel(KIWOOM_KR)).isFalse();
+                assertThat(slow.check(order(KIWOOM_KR, OrderIntent.STOP_LOSS)).isApproved()).isTrue();
+                assertThat(slow.check(order(KIWOOM_KR, OrderIntent.ENTRY)).isApproved()).isFalse();
+                assertThat(slow.mayCancel(KIWOOM_KR)).isTrue();
                 assertThat(permit.isValid()).isTrue();
             });
         } finally {

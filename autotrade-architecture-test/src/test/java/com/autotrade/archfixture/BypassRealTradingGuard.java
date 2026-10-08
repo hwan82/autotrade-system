@@ -4,10 +4,13 @@ import com.autotrade.broker.BrokerPlugin;
 import com.autotrade.domain.account.AccountId;
 import com.autotrade.domain.account.AccountRef;
 import com.autotrade.domain.order.OrderGateway;
+import com.autotrade.risk.guard.ActivationStep;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -41,6 +44,22 @@ public final class BypassRealTradingGuard {
     /** 명령 채널 밖에서 2차 확인을 만들어 Guard를 올린다. */
     public static void raiseWithoutCommandChannel(RealTradingGuard guard) {
         guard.beginActivation(new SecondConfirmation(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
+    }
+
+    /** 명령 채널 밖에서 참조로 Guard를 올린다. */
+    public static void raiseByReference(RealTradingGuard guard) {
+        Consumer<SecondConfirmation> begin = guard::beginActivation;
+        Consumer<SecondConfirmation> protect = guard::enterProtective;
+        BiConsumer<AccountId, ActivationStep> step = guard::completeStep;
+        TriFunction<AccountId, String, Instant, SecondConfirmation> confirm = SecondConfirmation::new;
+        begin.accept(confirm.apply(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
+        protect.accept(null);
+        step.accept(null, ActivationStep.AUTHENTICATED);
+    }
+
+    @FunctionalInterface
+    public interface TriFunction<A, B, C, R> {
+        R apply(A a, B b, C c);
     }
 
     public abstract static class ConcretePlugin implements BrokerPlugin {

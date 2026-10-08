@@ -3,6 +3,7 @@ package com.autotrade.architecture;
 import static com.tngtech.archunit.core.domain.JavaAccess.Predicates.target;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
@@ -13,8 +14,6 @@ import com.autotrade.app.engine.order.RealOrderGateways;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.broker.BrokerPlugin;
-import com.autotrade.domain.account.AccountId;
-import com.autotrade.risk.guard.ActivationStep;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -143,12 +142,10 @@ class ArchitectureTest {
      */
     static final ArchRule ONLY_COMMAND_CHANNEL_RAISES_GUARD = noClasses()
             .that().resideOutsideOfPackages(GUARD_COMMAND_CHANNEL, "com.autotrade.risk.guard..")
-            .should().callConstructor(SecondConfirmation.class,
-                    AccountId.class, String.class, Instant.class)
-            .orShould().callMethod(RealTradingGuard.class, "beginActivation", SecondConfirmation.class)
-            .orShould().callMethod(RealTradingGuard.class, "enterProtective", SecondConfirmation.class)
-            .orShould().callMethod(RealTradingGuard.class, "completeStep",
-                    AccountId.class, ActivationStep.class)
+            .should().accessTargetWhere(target(owner(assignableTo(RealTradingGuard.class)))
+                    .and(target(nameMatching("beginActivation|enterProtective|completeStep"))))
+            .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
+                    .and(target(name("<init>"))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
 
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
@@ -249,8 +246,8 @@ class ArchitectureTest {
         // 인터페이스·구체 타입·하위 인터페이스 호출, 메서드 참조 각 1건. RealOrderGateways는 허용
         assertThat(ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(4);
-        // 2차 확인 생성, beginActivation 각 1건
+        // 2차 확인 생성·beginActivation 호출 2건, 메서드·생성자 참조 4건
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
-                .getFailureReport().getDetails()).hasSize(2);
+                .getFailureReport().getDetails()).hasSize(6);
     }
 }
