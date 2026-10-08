@@ -40,15 +40,16 @@ public record RuntimeConfig(MarketData marketData, Lab lab, Notification notific
      * 시뮬레이션 실험실.
      *
      * @param maxParallelRuns 동시에 도는 Run 수 상한(1~64). 실전 엔진 자원 보호용
-     * @param defaultSeedCapitalKrw 실험 생성 화면의 기본 시드머니(원). 1,000만 원은 [가정] D6 기록 전 잠정값
+     * @param defaultSeedCapitalKrw 국내 실험 기본 시드머니(원, D-021)
+     * @param defaultSeedCapitalUsd 미국 실험 기본 시드머니(달러, D-021)
      */
-    public record Lab(int maxParallelRuns, long defaultSeedCapitalKrw) {
+    public record Lab(int maxParallelRuns, long defaultSeedCapitalKrw, long defaultSeedCapitalUsd) {
         public Lab {
             if (maxParallelRuns < 1 || maxParallelRuns > 64) {
                 throw new IllegalArgumentException("lab.max-parallel-runs는 1~64여야 합니다: " + maxParallelRuns);
             }
-            if (defaultSeedCapitalKrw < 1) {
-                throw new IllegalArgumentException("lab.default-seed-capital-krw는 1 이상이어야 합니다");
+            if (defaultSeedCapitalKrw < 1 || defaultSeedCapitalUsd < 1) {
+                throw new IllegalArgumentException("lab.default-seed-capital-krw/-usd는 1 이상이어야 합니다");
             }
         }
     }

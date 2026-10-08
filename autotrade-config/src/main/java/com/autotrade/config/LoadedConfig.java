@@ -5,7 +5,8 @@ import java.util.Objects;
 /**
  * 기동 시 로딩 결과.
  *
- * @param warning 파일을 못 쓴 이유(JSON 경로와 검증 메시지만, 값은 담지 않음). 문제가 없으면 빈 문자열
+ * @param source runtime-config.json 사용 여부
+ * @param warning runtime-config.json·secrets.json을 못 쓴 이유(JSON 경로와 규칙만, 값은 담지 않음). 문제가 없으면 빈 문자열
  */
 public record LoadedConfig(RuntimeConfig config, ConfigSource source, String warning) {
 

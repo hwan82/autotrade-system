@@ -59,7 +59,7 @@ class ExperimentSpecTest {
     }
 
     private static ExperimentSpec spec(LocalDate from, LocalDate to, Money seed, List<StrategyProfile> profiles) {
-        return new ExperimentSpec(new ExperimentId("EXP-TEST-01"), from, to, 42L, seed, "cost-default", "rec-test", profiles);
+        return new ExperimentSpec(new ExperimentId("EXP-TEST-01"), from, to, 42L, seed, "cost-kr-default", "rec-test", ClockMode.REPLAY, profiles);
     }
 
     private static StrategyProfile profile(String id, Market market) {

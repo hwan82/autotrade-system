@@ -6,7 +6,8 @@
   },
   "lab": {
     "max-parallel-runs": 4,
-    "default-seed-capital-krw": 10000000
+    "default-seed-capital-krw": 10000000,
+    "default-seed-capital-usd": 10000
   },
   "notification": {
     "slack": { "enabled": false, "webhook-url": "" },

@@ -13,7 +13,7 @@ description: 자동매매 시스템(Java 21, Spring Boot 멀티 모듈)의 코�
 
 ## 모듈 경계
 - `autotrade-domain`, `autotrade-strategy`, `autotrade-sim`, `autotrade-risk`는 순수 Java. Spring, 증권사 SDK, DB 드라이버 의존 금지.
-- Spring 연결, 스케줄러, REST, SSE는 `autotrade-app`에만 둔다.
+- Spring 연결, 스케줄러, REST, SSE는 실험실 프로세스 `autotrade-app-lab`에만 둔다. 실전 엔진·시세 게이트웨이·감시 프로세스(`autotrade-app-{engine,gateway,watchdog}`)는 순수 Java다(ADR-001).
 - 증권사 연동은 `autotrade-broker-api` 인터페이스 뒤 플러그인(kis, kiwoom, toss)으로만. 플러그인끼리 참조 금지. 각 플러그인은 능력(REALTIME_QUOTE, POLLING_QUOTE, ORDER, BALANCE, SERVER_SIDE_STOP)과 상태(NOT_CONFIGURED, CONFIGURED, ACTIVE, DEGRADED)를 선언한다.
 - 시장별 차이(거래 시간, 통화, 가격 단위, 주문 유형, 비용)는 `MarketRules`로만 다룬다. 엔진 코드에 시장 분기를 흩뿌리지 않는다.
 - `autotrade-notification-jar`, `autotrade-monitor-agent-jar`는 자동매매 도메인을 몰라야 한다.
@@ -45,7 +45,7 @@ description: 자동매매 시스템(Java 21, Spring Boot 멀티 모듈)의 코�
 - 테스트를 끄거나 지워서 통과시키지 않는다.
 
 ## 설정
-- 기동 순서: 외부 `runtime-config.json` → 없거나 깨지면 내장 default.
+- 기동 순서: 내장 default → 외부 `runtime-config.json` → 외부 `secrets.json`(비밀값만). 없거나 깨진 파일은 빼고 기동.
 - 실시간 변경 대상은 RuntimeConfigHolder로만 읽는다. 매 틱 참조.
 - 증권사 키 변경은 미체결·보유 확인 → 세션 종료 → 재연결 순서.
 - 새 설정 키는 기본값, 범위, 실시간 변경 가능 여부를 문서화.

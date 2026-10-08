@@ -25,41 +25,49 @@ class RuntimeConfigHolderTest {
     private final ConfigLoader loader = new ConfigLoader();
 
     @Test
-    void 변경은_디스크에_먼저_쓰고_재기동하면_그대로_읽힌다() {
-        Path file = dir.resolve("conf").resolve("runtime-config.json");
-        RuntimeConfigHolder holder = new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(file));
+    void 변경은_디스크에_먼저_쓰고_재기동하면_그대로_읽힌다() throws IOException {
+        ConfigPaths paths = ConfigPaths.in(dir.resolve("conf"));
+        RuntimeConfigHolder holder = new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(paths));
 
         RuntimeConfig updated = holder.update(c -> new RuntimeConfig(
                 c.marketData(),
-                new RuntimeConfig.Lab(8, c.lab().defaultSeedCapitalKrw()),
+                new RuntimeConfig.Lab(8, c.lab().defaultSeedCapitalKrw(), c.lab().defaultSeedCapitalUsd()),
                 new RuntimeConfig.Notification(
                         new RuntimeConfig.Slack(true, Secret.of(FAKE_SECRET)), c.notification().kakao()),
                 c.brokers()));
 
         assertThat(holder.current()).isEqualTo(updated);
-        LoadedConfig reloaded = loader.load(file);
+        LoadedConfig reloaded = loader.load(paths);
         assertThat(reloaded.source()).isEqualTo(ConfigSource.RUNTIME_FILE);
+        assertThat(reloaded.warning()).isEmpty();
         assertThat(reloaded.config()).isEqualTo(updated);
-        assertThat(reloaded.config().notification().slack().webhookUrl().reveal()).isEqualTo(FAKE_SECRET);
+        // 비밀값은 secrets.json에만 있다
+        assertThat(Files.readString(paths.runtimeFile())).doesNotContain(FAKE_SECRET).doesNotContain("webhook-url");
+        assertThat(Files.readString(paths.secretsFile())).contains(FAKE_SECRET);
     }
 
     @Test
-    void 저장_파일은_소유자만_읽을_수_있고_임시_파일이_남지_않는다() throws IOException {
-        Path file = dir.resolve("runtime-config.json");
-        new RuntimeConfigStore(file).save(loader.defaults());
+    void 저장_파일과_폴더는_소유자만_접근하고_임시_파일이_남지_않는다() throws IOException {
+        Path conf = dir.resolve("conf");
+        new RuntimeConfigStore(ConfigPaths.in(conf)).save(loader.defaults());
 
         if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
-            assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(file))).isEqualTo("rw-------");
+            assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(conf))).isEqualTo("rwx------");
+            for (String name : List.of(ConfigPaths.RUNTIME_FILE, ConfigPaths.SECRETS_FILE)) {
+                assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(conf.resolve(name))))
+                        .isEqualTo("rw-------");
+            }
         }
-        try (Stream<Path> files = Files.list(dir)) {
-            assertThat(files.map(p -> p.getFileName().toString())).containsExactly("runtime-config.json");
+        try (Stream<Path> files = Files.list(conf)) {
+            assertThat(files.map(p -> p.getFileName().toString()))
+                    .containsExactlyInAnyOrder(ConfigPaths.RUNTIME_FILE, ConfigPaths.SECRETS_FILE);
         }
     }
 
     @Test
     void 시세_구성과_증권사_키는_실시간으로_바꿀_수_없다() {
-        Path file = dir.resolve("runtime-config.json");
-        RuntimeConfigHolder holder = new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(file));
+        ConfigPaths paths = ConfigPaths.in(dir);
+        RuntimeConfigHolder holder = new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(paths));
         RuntimeConfig before = holder.current();
 
         assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
@@ -75,18 +83,19 @@ class RuntimeConfigHolderTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(holder.current()).isEqualTo(before);
-        assertThat(file).doesNotExist();
+        assertThat(paths.runtimeFile()).doesNotExist();
+        assertThat(paths.secretsFile()).doesNotExist();
     }
 
     @Test
     void 저장에_실패하면_메모리도_바뀌지_않는다() throws IOException {
         Path blocker = Files.writeString(dir.resolve("not-a-dir"), "x");
         RuntimeConfigHolder holder =
-                new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(blocker.resolve("runtime-config.json")));
+                new RuntimeConfigHolder(loader.defaults(), new RuntimeConfigStore(ConfigPaths.in(blocker)));
         RuntimeConfig before = holder.current();
 
         assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
-                        c.marketData(), new RuntimeConfig.Lab(1, 1L), c.notification(), c.brokers())))
+                        c.marketData(), new RuntimeConfig.Lab(1, 1L, 1L), c.notification(), c.brokers())))
                 .isInstanceOf(UncheckedIOException.class);
         assertThat(holder.current()).isEqualTo(before);
     }

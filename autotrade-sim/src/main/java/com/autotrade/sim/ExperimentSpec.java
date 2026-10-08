@@ -20,7 +20,8 @@ import java.util.Set;
  * @param seedCapital 계좌별 시드머니. 계좌 통화 기준
  * @param costModelId 비용 모델 ID(수수료·거래세·슬리피지 묶음). 내용이 바뀌면 ID도 바뀌는 불변 ID여야 한다
  *     (예: 내용 해시 포함). 정의는 3단계
- * @param dataVersion 불변 시세 데이터 스냅샷 ID(녹화일 또는 일봉 스냅샷). 같은 ID면 같은 데이터다
+ * @param dataSnapshotVersion 불변 데이터 스냅샷 ID(녹화일 또는 일봉 스냅샷, D-019). 같은 ID면 같은 데이터다
+ * @param clockMode 실시간 모의인지 녹화 리플레이인지
  * @param profiles 실행 순서가 결과에 영향을 주지 않아야 하지만, 계좌 번호 부여는 이 목록 순서를 따른다
  */
 public record ExperimentSpec(
@@ -30,7 +31,8 @@ public record ExperimentSpec(
         long randomSeed,
         Money seedCapital,
         String costModelId,
-        String dataVersion,
+        String dataSnapshotVersion,
+        ClockMode clockMode,
         List<StrategyProfile> profiles) {
 
     public ExperimentSpec {
@@ -39,7 +41,8 @@ public record ExperimentSpec(
         Objects.requireNonNull(to, "to");
         Objects.requireNonNull(seedCapital, "seedCapital");
         Objects.requireNonNull(costModelId, "costModelId");
-        Objects.requireNonNull(dataVersion, "dataVersion");
+        Objects.requireNonNull(dataSnapshotVersion, "dataSnapshotVersion");
+        Objects.requireNonNull(clockMode, "clockMode");
         if (to.isBefore(from)) {
             throw new IllegalArgumentException("종료일이 시작일보다 앞섭니다: " + from + " ~ " + to);
         }

@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: autotrade-lab
+  main:
+    banner-mode: off
+
+autotrade:
+  # runtime-config.json·secrets.json이 있는 폴더. 비워 두면 -Dautotrade.config-dir → AUTOTRADE_CONFIG_DIR → ~/.autotrade.
+  # 비밀값은 이 파일이 아니라 저장소 밖 secrets.json에만 둔다(CFG-03).
+  config-dir: ""
