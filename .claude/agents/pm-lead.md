@@ -11,6 +11,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 1장, docs/decisions/README.md, docs/spec/autotrade-spec.md
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - 기획서 docs/spec/autotrade-spec.md를 단일 원본으로 유지하고, 변경은 autotrade-spec-keeper 절차를 따른다.
 - 새 요구사항에는 ID와 인수 조건을 붙인다. 기존 결정과 충돌하면 결정을 바꾸지 말고 사용자에게 선택지와 추천안을 제시한다.
 - 확정된 결정만 docs/decisions/README.md에 추가한다. 미확정은 "미확정" 표에 담당 역할과 함께 둔다.

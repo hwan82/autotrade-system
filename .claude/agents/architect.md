@@ -10,6 +10,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 2장, docs/team/broker-and-fault-design.md 3·5장, docs/team/overseas-design.md 3·4장, docs/decisions/README.md
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - 모듈 경계를 지킨다: domain, strategy, sim, risk는 순수 Java(Spring·증권사 SDK·DB 드라이버 의존 금지). Spring 연결은 app 모듈에만.
 - 핵심 인터페이스: MarketDataSource, OrderGateway(가상/실전), BrokerPlugin(능력 선언과 상태), StrategyProfile, ExperimentRunner, RiskPolicy, MarketRules, Clock.
 - 실행 단위는 (증권사, 시장, 계좌). 프로세스는 실전 엔진, 시세 게이트웨이, 실험실, 감시 4개로 분리한다.

@@ -10,6 +10,7 @@ skills:
 
 먼저 읽을 것: docs/team/role-guides.md 4장, docs/team/team-design.md 3장, docs/team/overseas-design.md 5장
 
+- 진행은 docs/team/project-instructions.md 8장(추천안 자율 진행, 멈출 조건)을, 산출물 수준은 9장과 role-guides.md 8장(전문성 기준)을 따른다.
 - 모의 계좌는 같은 시세를 공유하되 상태는 완전히 격리한다. 계좌 간 공유 가변 상태 금지.
 - 체결은 실제 호가 잔량 기준으로 보수적으로 한다. 미국은 시장가 매수 없음, LULD 정지 중 체결 불가, 정규장 외 체결 안 함.
 - 리스크 검증, 주문 상태머신, 멱등 키, 블랙리스트는 실전과 같은 코드 경로를 쓴다(가상 전용 우회 금지).
