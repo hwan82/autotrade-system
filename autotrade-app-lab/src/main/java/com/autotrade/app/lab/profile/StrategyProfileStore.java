@@ -56,8 +56,8 @@ public final class StrategyProfileStore {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.yaml = new ObjectMapper(new YAMLFactory()
                 .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
-                .enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)
-                .enable(YAMLGenerator.Feature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS))
+                // 문자열은 항상 따옴표로 쓴다. 따옴표를 줄이면 .inf·.nan 같은 값이 다시 읽을 때 숫자로 해석된다
+                .disable(YAMLGenerator.Feature.MINIMIZE_QUOTES))
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
@@ -136,6 +136,10 @@ public final class StrategyProfileStore {
             throw new IllegalArgumentException("바뀐 파라미터가 없습니다");
         }
         StrategyProfile profile = new StrategyProfile(id, latest.version() + 1, latest.market(), latest.style(), next);
+        if (Files.exists(dir(id).resolve("v" + profile.version() + ".yaml"))) {
+            throw new ProfileConflictException("v" + profile.version() + " 파일이 이미 있지만 읽을 수 없습니다. "
+                    + "실험실 로그의 경고를 보고 그 파일을 고친 뒤 다시 저장하세요");
+        }
         return write(profile, id + "@" + latest.version(), note);
     }
 
@@ -153,7 +157,9 @@ public final class StrategyProfileStore {
             if (value.length() > MAX_VALUE_LENGTH) {
                 throw new IllegalArgumentException("파라미터 값은 " + MAX_VALUE_LENGTH + "자까지입니다: " + e.getKey());
             }
-            out.put(e.getKey().strip(), value);
+            if (out.put(e.getKey().strip(), value) != null) {
+                throw new IllegalArgumentException("같은 파라미터 키가 두 번 있습니다: " + e.getKey().strip());
+            }
         }
         return out;
     }
@@ -171,6 +177,11 @@ public final class StrategyProfileStore {
             Path tmp = Files.createTempFile(dir, ".v" + profile.version(), ".tmp");
             try {
                 Files.writeString(tmp, HEADER + yaml.writeValueAsString(ProfileFile.of(stored)));
+                // 쓴 파일을 다시 읽어 같은 프로필(같은 해시)인지 확인한다. 못 읽는 파일을 성공으로 남기지 않는다
+                StoredProfile check = yaml.readValue(tmp.toFile(), ProfileFile.class).toStored();
+                if (!check.profile().profileHash().equals(profile.profileHash())) {
+                    throw new IllegalStateException("저장한 프로필을 다시 읽은 값이 다릅니다: " + profile.id());
+                }
                 // REPLACE_EXISTING 없이 옮긴다: 같은 버전 파일이 이미 있으면 덮어쓰지 않고 실패한다
                 Files.move(tmp, target);
             } finally {

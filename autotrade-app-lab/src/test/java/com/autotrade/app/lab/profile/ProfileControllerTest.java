@@ -79,9 +79,10 @@ class ProfileControllerTest {
                 .andExpect(jsonPath("$.basedOn").value("gap-up@2"))
                 .andExpect(jsonPath("$.market").value("KRX"));
 
-        mvc.perform(get("/api/profiles")).andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].id").value("gap-up"))
-                .andExpect(jsonPath("$[0].versions", hasSize(2)));
+        mvc.perform(get("/api/profiles")).andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items[0].id").value("gap-up"))
+                .andExpect(jsonPath("$.items[0].versions", hasSize(2)));
         mvc.perform(get("/api/profiles/gap-up")).andExpect(jsonPath("$", hasSize(2)));
         mvc.perform(get("/api/profiles/gap-up/versions/1")).andExpect(jsonPath("$.hash").value(v1Hash))
                 .andExpect(jsonPath("$.parameters['entry.limit-offset-pct']").value("0.2"));

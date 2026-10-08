@@ -1,5 +1,6 @@
 package com.autotrade.app.lab.experiment;
 
+import com.autotrade.app.lab.web.Page;
 import com.autotrade.domain.Money;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
@@ -12,6 +13,7 @@ import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.SimulationReport;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -30,9 +32,8 @@ public final class ExperimentViews {
             String costModelId, String costTableHash, String executionModelId, String dataSnapshotVersion,
             String clockMode, String codeCommit, boolean codeDirty, int runCount, int completedRuns, int failedRuns) {
 
-        static Summary of(ExperimentCatalog.Entry entry) {
-            ExperimentSpec s = entry.spec();
-            ExperimentResult r = entry.report().result();
+        static Summary of(ExperimentSpec s, SimulationReport report) {
+            ExperimentResult r = report.result();
             int completed = (int) r.runs().stream().filter(x -> x.status() == RunStatus.COMPLETED).count();
             int failed = (int) r.runs().stream().filter(x -> x.status() == RunStatus.FAILED).count();
             return new Summary(s.id().value(), s.profiles().get(0).market().name(),
@@ -46,9 +47,9 @@ public final class ExperimentViews {
     /** 실험 상세: 요약 + 계좌(Run)별 리더보드 행. 같은 실험 안의 계좌만 비교한다(같은 기간·시드·비용, 지침 5장). */
     public record Detail(Summary summary, String benchmarkNote, List<RunRow> runs) {
 
-        static Detail of(ExperimentCatalog.Entry entry) {
-            List<RunRow> rows = entry.report().runs().stream().map(RunRow::of).toList();
-            return new Detail(Summary.of(entry),
+        static Detail of(ExperimentSpec spec, SimulationReport report) {
+            List<RunRow> rows = report.runs().stream().map(RunRow::of).toList();
+            return new Detail(Summary.of(spec, report),
                     "같은 실험의 계좌들은 기간·시드·비용 모델·체결 모델이 같아 서로 비교할 수 있습니다. 다른 실험과는 비교하지 않습니다.",
                     rows);
         }
@@ -83,13 +84,13 @@ public final class ExperimentViews {
     /** 자산 곡선 겹쳐 보기. 계좌마다 거래일 마감 평가금액(비용 차감 후). */
     public record EquityOverlay(String currency, String seedCapital, List<EquitySeries> series) {
 
-        static EquityOverlay of(ExperimentCatalog.Entry entry) {
-            List<EquitySeries> series = entry.report().runs().stream()
+        static EquityOverlay of(ExperimentSpec spec, SimulationReport report) {
+            List<EquitySeries> series = report.runs().stream()
                     .map(r -> new EquitySeries(r.summary().runId(), r.profile().id(), r.profile().version(),
                             r.equityCurve().stream().map(EquityPointView::of).toList()))
                     .toList();
-            return new EquityOverlay(entry.spec().seedCapital().currency().getCurrencyCode(),
-                    plain(entry.spec().seedCapital()), series);
+            return new EquityOverlay(spec.seedCapital().currency().getCurrencyCode(),
+                    plain(spec.seedCapital()), series);
         }
     }
 
@@ -131,6 +132,10 @@ public final class ExperimentViews {
             return new RejectionRow(j.eventSeq(), j.key().toString(), j.symbol().code(), j.stage(), j.code(),
                     j.detail());
         }
+    }
+
+    /** 거절 로그 한 쪽과 거르기 전 전체의 사유별 건수. */
+    public record RejectionPage(Page<RejectionRow> page, List<RejectionCount> counts) {
     }
 
     /** 거절 사유 분포 한 줄({@code stage:code}별 건수). */

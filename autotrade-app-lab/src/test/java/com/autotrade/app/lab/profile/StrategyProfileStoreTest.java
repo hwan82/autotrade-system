@@ -35,8 +35,8 @@ class StrategyProfileStoreTest {
         Path file = dir.resolve("breakout/v1.yaml");
         assertThat(file).exists();
         String yaml = Files.readString(file);
-        assertThat(yaml).contains("id: breakout", "market: KRX", "style: SWING", "created-at: 2026-10-08T01:02:03Z",
-                "exit.stop-loss-pct: \"3\"");
+        assertThat(yaml).contains("id: \"breakout\"", "version: 1", "market: \"KRX\"", "style: \"SWING\"",
+                "created-at: \"2026-10-08T01:02:03Z\"", "exit.stop-loss-pct: \"3\"");
 
         StoredProfile reread = new StrategyProfileStore(dir, Clock.systemUTC()).find("breakout", 1).orElseThrow();
         assertThat(reread.profile().profileHash()).isEqualTo(saved.profile().profileHash());
@@ -92,7 +92,8 @@ class StrategyProfileStoreTest {
         // 다른 프로세스가 v2를 먼저 썼지만 아직 읽을 수 없는 상태(예: 쓰는 중)
         Files.writeString(dir.resolve("breakout/v2.yaml"), "깨진 파일");
         assertThatThrownBy(() -> store.createVersion("breakout", 1, Map.of("a", "2"), ""))
-                .isInstanceOf(StrategyProfileStore.ProfileConflictException.class);
+                .isInstanceOf(StrategyProfileStore.ProfileConflictException.class)
+                .hasMessageContaining("읽을 수 없습니다");
         assertThat(Files.readString(dir.resolve("breakout/v2.yaml"))).isEqualTo("깨진 파일");
     }
 
@@ -120,6 +121,26 @@ class StrategyProfileStoreTest {
         Files.writeString(dir.resolve("README.md"), "# 설명");
 
         assertThat(store.list()).extracting(StrategyProfileStore.ProfileSummary::id).containsExactly("good");
+    }
+
+    @Test
+    void YAML이_특별하게_읽는_값도_문자열로_왕복한다() {
+        java.util.Map<String, String> tricky = new java.util.TreeMap<>();
+        String[] values = {".inf", "-.inf", ".NaN", "null", "~", "true", "no", "0x10", "1e3", "4.10", "007",
+                "2026-01-01", "- a", "a: b", "# 주석", "'따옴표'", "\"큰따옴표\"", "줄\\n바꿈 아님"};
+        for (int i = 0; i < values.length; i++) {
+            tricky.put("k" + i, values[i]);
+        }
+        StoredProfile saved = store.create("tricky", Market.KRX, TradingStyle.SWING, tricky, "", "");
+        StoredProfile reread = new StrategyProfileStore(dir, Clock.systemUTC()).find("tricky", 1).orElseThrow();
+        assertThat(reread.profile().parameters()).isEqualTo(saved.profile().parameters());
+        assertThat(reread.profile().profileHash()).isEqualTo(saved.profile().profileHash());
+    }
+
+    @Test
+    void 공백을_떼면_같아지는_키는_거절한다() {
+        assertThatThrownBy(() -> store.create("dup", Market.KRX, TradingStyle.SWING, Map.of("a", "1", " a", "2"), "", ""))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("두 번");
     }
 
     @Test

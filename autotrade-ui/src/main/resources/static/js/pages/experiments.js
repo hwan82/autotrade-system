@@ -7,16 +7,16 @@ import { money, number, pct, ratio, signClass, time, shortHash, STATUS, MARKET, 
 const enc = encodeURIComponent;
 
 export async function experimentsPage() {
-  const list = await get('/api/experiments');
+  const first = await get('/api/experiments?page=0&size=50');
   const head = h('div', { class: 'page-head' }, h('div', {},
     h('h1', {}, '실험'),
     h('p', { class: 'muted' }, '같은 기간·시드·비용 모델로 여러 전략 계좌를 돌린 결과입니다. 실험을 열면 계좌끼리 비교합니다.')));
-  if (list.length === 0) {
+  if (first.total === 0) {
     return h('div', {}, head, h('div', { class: 'empty' },
       h('p', {}, '아직 실행한 실험이 없습니다.'),
       h('p', { class: 'muted small' }, '실험은 녹화 데이터와 전략 구현이 준비되면 이 화면에서 만들 수 있습니다. 지금은 실험 실행기가 결과를 등록하면 여기에 나타납니다. 실험실을 다시 띄우면 목록이 비워집니다(결과 DB 저장 전).')));
   }
-  return h('div', {}, head, table([
+  return h('div', {}, head, pagedSection('/api/experiments', [
     { label: '실험', render: e => h('a', { href: `#/experiments/${enc(e.id)}` }, e.id) },
     { label: '시장', render: e => MARKET[e.market] || e.market },
     { label: '기간', render: e => `${e.from} ~ ${e.to}` },
@@ -25,7 +25,7 @@ export async function experimentsPage() {
     { label: '계좌', num: true, render: e => `${e.completedRuns}/${e.runCount}${e.failedRuns ? ` (실패 ${e.failedRuns})` : ''}` },
     { label: '방식', render: e => e.clockMode === 'REPLAY' ? '녹화 리플레이' : '실시간 모의' },
     { label: '데이터', render: e => e.dataSnapshotVersion },
-  ], list));
+  ], '실험이 없습니다.'));
 }
 
 const METRIC_COLUMNS = [
@@ -164,7 +164,7 @@ export async function runPage(id, runId) {
     h('h2', {}, '거절 사유'), rejectionSection(base));
 }
 
-function pagedSection(url, columns, emptyText, size = 50, extra = () => '') {
+export function pagedSection(url, columns, emptyText, size = 50, extra = () => '') {
   const host = h('div', {});
   const load = async (page) => {
     const res = await get(`${url}?page=${page}&size=${size}${extra()}`);

@@ -1,6 +1,7 @@
 package com.autotrade.app.lab.profile;
 
 import com.autotrade.app.lab.web.ApiException;
+import com.autotrade.app.lab.web.Page;
 import com.autotrade.domain.market.Market;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.TradingStyle;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -31,8 +33,9 @@ public class ProfileController {
     }
 
     @GetMapping
-    public List<StrategyProfileStore.ProfileSummary> list() {
-        return store.list();
+    public Page<StrategyProfileStore.ProfileSummary> list(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        return Page.of(store.list(), page, size);
     }
 
     @GetMapping("/{id}")

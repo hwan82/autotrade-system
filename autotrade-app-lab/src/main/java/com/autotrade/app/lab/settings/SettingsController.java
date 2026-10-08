@@ -3,8 +3,10 @@ package com.autotrade.app.lab.settings;
 import com.autotrade.app.lab.web.ApiException;
 import com.autotrade.config.ConfigLoader;
 import com.autotrade.config.KakaoMode;
+import com.autotrade.config.LoadedConfig;
 import com.autotrade.config.RuntimeConfig;
 import com.autotrade.config.RuntimeConfigHolder;
+import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.config.Secret;
 import com.autotrade.domain.account.BrokerId;
 import java.io.UncheckedIOException;
@@ -36,7 +38,11 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>비밀값 입력은 쓰기 전용이다. 빈 값은 "그대로 두기"이고, 지우려면 {@code clearSecrets}에 키를 넣는다.</li>
  *   <li>시세 소스(재기동), 증권사 키(재연결 절차), 실전 계좌(계좌 교체 절차)는 읽기 전용이다. 그 절차를 구현하는
  *       작업에서 별도 경로로 연다(RuntimeConfigHolder가 막고 있음).</li>
- *   <li>카카오 알림톡(BIZ)은 유료라서 켜려면 {@code acknowledgePaid=true}가 필요하다(지침 8장 1번).</li>
+ *   <li>카카오 알림톡(BIZ)은 유료라서 BIZ로 바꾸거나 BIZ 상태에서 켤 때 {@code acknowledgePaid=true}가 필요하다
+ *       (지침 8장 1번).</li>
+ *   <li>저장은 메모리 스냅샷 전체를 두 파일에 다시 쓴다({@link RuntimeConfigStore}). 그래서 디스크가 메모리와 다르면
+ *       (기동 때 파일을 버렸거나, 실행 중 파일을 직접 고쳤거나, 고아 계좌번호를 버린 경우) 저장하지 않고 409로 거절한다.
+ *       그렇지 않으면 실험실 메모리의 옛 값이 실전 계좌·증권사 키 파일을 덮어쓴다(risk-ops 검토 B1).</li>
  * </ul>
  * 요청 본문과 비밀값은 로그에 남기지 않는다. 바뀐 키 이름만 남긴다.
  */
@@ -62,10 +68,14 @@ public class SettingsController {
     private static final Set<String> SECRETS = Set.of(SLACK_WEBHOOK, KAKAO_TOKEN);
 
     private final RuntimeConfigHolder holder;
+    private final RuntimeConfigStore store;
+    private final LoadedConfig startup;
     private final RuntimeConfig defaults;
 
-    public SettingsController(RuntimeConfigHolder holder) {
+    public SettingsController(RuntimeConfigHolder holder, RuntimeConfigStore store, LoadedConfig startup) {
         this.holder = holder;
+        this.store = store;
+        this.startup = startup;
         this.defaults = new ConfigLoader().defaults();
     }
 
@@ -99,33 +109,57 @@ public class SettingsController {
                 throw ApiException.badRequest("같은 키를 바꾸면서 지울 수 없습니다: " + key);
             }
         }
-        RuntimeConfig before = holder.current();
-        RuntimeConfig after;
+        boolean acknowledged = Boolean.TRUE.equals(request.acknowledgePaid());
+        Set<String> clearSet = Set.copyOf(clear);
         try {
-            after = apply(before, values, Set.copyOf(clear));
-        } catch (IllegalArgumentException e) {
-            // RuntimeConfig 검증 메시지는 키 이름과 범위만 담는다. 비밀값 형식 오류는 apply가 값 없이 만든다
-            throw ApiException.badRequest(e.getMessage());
-        }
-        if (after.notification().kakao().mode() == KakaoMode.BIZ
-                && before.notification().kakao().mode() != KakaoMode.BIZ
-                && !Boolean.TRUE.equals(request.acknowledgePaid())) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "PAID_CONFIRMATION_REQUIRED",
-                    "카카오 알림톡(BIZ)은 유료입니다. 비용을 확인했다는 표시가 있어야 바꿀 수 있습니다");
-        }
-        if (after.equals(before)) {
-            return view(before);
-        }
-        try {
-            RuntimeConfig saved = holder.update(c -> after);
+            // 검증·디스크 대조·저장을 Holder의 직렬화 안에서 한다. 두 탭이 동시에 저장해도 서로의 변경을 지우지 않는다
+            RuntimeConfig saved = holder.update(before -> {
+                requireDiskMatches(before);
+                RuntimeConfig after = apply(before, values, clearSet);
+                if (needsPaidConfirmation(before, after) && !acknowledged) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "PAID_CONFIRMATION_REQUIRED",
+                            "카카오 알림톡(BIZ)은 유료입니다. 비용을 확인했다는 표시가 있어야 켜거나 바꿀 수 있습니다");
+                }
+                return after;
+            });
             log.info("설정 변경(UI): {}", touched.stream().sorted().collect(Collectors.joining(", ")));
             return view(saved);
         } catch (IllegalArgumentException e) {
+            // RuntimeConfig 검증 메시지는 키 이름과 범위만 담는다. 비밀값 형식 오류는 apply가 값 없이 만든다
             throw ApiException.badRequest(e.getMessage());
         } catch (UncheckedIOException e) {
             log.error("설정 저장 실패: {}", e.getMessage());
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "SAVE_FAILED",
                     "설정 파일 저장에 실패해 바꾸지 않았습니다. 설정 폴더 권한과 디스크 공간을 확인하세요");
+        }
+    }
+
+    /** BIZ로 바꾸거나, BIZ인 상태에서 켤 때(과금 시작 시점). */
+    static boolean needsPaidConfirmation(RuntimeConfig before, RuntimeConfig after) {
+        RuntimeConfig.Kakao b = before.notification().kakao();
+        RuntimeConfig.Kakao a = after.notification().kakao();
+        boolean toBiz = a.mode() == KakaoMode.BIZ && b.mode() != KakaoMode.BIZ;
+        boolean enableBiz = a.mode() == KakaoMode.BIZ && a.enabled() && !b.enabled();
+        return toBiz || enableBiz;
+    }
+
+    /**
+     * 디스크의 두 설정 파일을 다시 읽어 메모리와 같을 때만 저장을 허용한다. 저장이 메모리 스냅샷 전체를 쓰기 때문에,
+     * 다르면 화면에서 바꾸지 않은 키(실전 계좌, 증권사 키 등)까지 옛 값으로 덮어쓴다.
+     */
+    private void requireDiskMatches(RuntimeConfig memory) {
+        if (!startup.warning().isEmpty()) {
+            throw new ApiException(HttpStatus.CONFLICT, "CONFIG_FILE_PROBLEM",
+                    "기동할 때 설정 파일 일부를 쓰지 못했습니다. 실험실 로그의 설정 파일 경고를 해결하고 재기동한 뒤 저장하세요");
+        }
+        LoadedConfig disk = new ConfigLoader().load(store.paths());
+        if (!disk.warning().isEmpty()) {
+            throw new ApiException(HttpStatus.CONFLICT, "CONFIG_FILE_PROBLEM",
+                    "설정 파일에 문제가 있어 저장하지 않았습니다. 실험실 로그의 설정 파일 경고를 확인하세요");
+        }
+        if (!disk.config().equals(memory)) {
+            throw new ApiException(HttpStatus.CONFLICT, "CONFIG_CHANGED_ON_DISK",
+                    "실행 중에 설정 파일이 바뀌었습니다. 덮어쓰지 않도록 저장을 멈췄습니다. 실험실을 재기동한 뒤 다시 저장하세요");
         }
     }
 

@@ -35,6 +35,14 @@ class LocalOnlyRequestFilterTest {
     }
 
     @Test
+    void 변경_요청의_Origin은_Host와_같은_출처여야_한다() {
+        assertThat(LocalOnlyRequestFilter.isSameLoopbackOrigin("http://127.0.0.1:8480", "127.0.0.1:8480")).isTrue();
+        assertThat(LocalOnlyRequestFilter.isSameLoopbackOrigin("http://localhost:3000", "localhost:8480")).isFalse();
+        assertThat(LocalOnlyRequestFilter.isSameLoopbackOrigin("http://localhost:8480", "127.0.0.1:8480")).isFalse();
+        assertThat(LocalOnlyRequestFilter.isSameLoopbackOrigin("http://127.0.0.1:8480", null)).isFalse();
+    }
+
+    @Test
     void CSRF_토큰은_짧으면_만들지_않고_문자열로_새지_않는다() {
         assertThatThrownBy(() -> new LocalOnlyRequestFilter.CsrfToken("short")).isInstanceOf(IllegalArgumentException.class);
         LocalOnlyRequestFilter.CsrfToken token = new LocalOnlyRequestFilter.CsrfToken("a".repeat(64));

@@ -57,7 +57,7 @@ public final class LocalOnlyRequestFilter extends OncePerRequestFilter {
         }
         if (!SAFE_METHODS.contains(request.getMethod().toUpperCase(Locale.ROOT))) {
             String origin = request.getHeader("Origin");
-            if (origin != null && !isLoopbackOrigin(origin)) {
+            if (origin != null && !isSameLoopbackOrigin(origin, host)) {
                 reject(response, "ORIGIN", "다른 출처에서 온 변경 요청은 받지 않습니다");
                 return;
             }
@@ -111,6 +111,15 @@ public final class LocalOnlyRequestFilter extends OncePerRequestFilter {
         } catch (IllegalArgumentException e) {
             return false;
         }
+    }
+
+    /** 루프백 출처이면서 요청 Host와 같은 출처(포트 포함)인지. 같은 PC의 다른 포트 페이지도 거부한다. */
+    static boolean isSameLoopbackOrigin(String origin, String hostHeader) {
+        if (!isLoopbackOrigin(origin) || hostHeader == null) {
+            return false;
+        }
+        String authority = URI.create(origin.strip()).getRawAuthority().toLowerCase(Locale.ROOT);
+        return authority.equals(hostHeader.strip().toLowerCase(Locale.ROOT));
     }
 
     private static void reject(HttpServletResponse response, String code, String message) throws IOException {

@@ -25,14 +25,17 @@ function form(view, redraw) {
     const clearSecrets = [];
     for (const c of controls) c.collect(values, clearSecrets);
     if (Object.keys(values).length === 0 && clearSecrets.length === 0) { toast('바뀐 값이 없습니다'); return; }
-    let acknowledgePaid = false;
-    if (values['notification.kakao.mode'] === 'BIZ') {
-      acknowledgePaid = window.confirm('카카오 알림톡(BIZ)은 건당 비용이 드는 유료 서비스입니다. 비용을 확인했고 바꾸겠습니까?');
-      if (!acknowledgePaid) return;
-    }
     save.disabled = true;
     try {
-      const next = await put('/api/settings', { values, clearSecrets, acknowledgePaid });
+      let next;
+      try {
+        next = await put('/api/settings', { values, clearSecrets, acknowledgePaid: false });
+      } catch (e) {
+        // 유료 선택(카카오 알림톡 BIZ)은 서버가 판단해 확인을 요구한다. 사용자가 확인하면 같은 변경을 다시 보낸다
+        if (e.code !== 'PAID_CONFIRMATION_REQUIRED') throw e;
+        if (!window.confirm('카카오 알림톡(BIZ)은 건당 비용이 드는 유료 서비스입니다. 비용을 확인했고 저장하겠습니까?')) return;
+        next = await put('/api/settings', { values, clearSecrets, acknowledgePaid: true });
+      }
       toast(`저장했습니다: ${[...Object.keys(values), ...clearSecrets].join(', ')}`);
       redraw(next);
     } catch (e) {

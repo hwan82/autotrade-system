@@ -39,10 +39,10 @@ UI 프로세스가 죽어도 실전 엔진에는 영향이 없다(UI-06). 실험
 |---|---|---|
 | 같은 PC 밖에서 접속 | 127.0.0.1 바인딩, 비루프백 주소면 기동 거부 | `LocalOnlyRequestFilterTest`, CI 기동 단계 |
 | DNS rebinding(외부 도메인이 127.0.0.1로 풀려 같은 출처처럼 접근) | Host 헤더가 `127.0.0.1`·`localhost`·`[::1]`(포트 선택)이 아니면 403. 조회도 막는다 | `WebSecurityIntegrationTest`, CI의 `Host: evil.example` 403 확인 |
-| CSRF(다른 사이트가 폼·fetch로 변경 요청) | GET·HEAD·OPTIONS 외 요청은 `X-CSRF-Token` 필수(기동마다 SecureRandom 256비트, 상수 시간 비교). Origin이 있으면 루프백 출처여야 하고 `Sec-Fetch-Site: cross-site`는 거부 | 같은 테스트 |
+| CSRF(다른 사이트가 폼·fetch로 변경 요청) | GET·HEAD·OPTIONS 외 요청은 `X-CSRF-Token` 필수(기동마다 SecureRandom 256비트, 상수 시간 비교). Origin이 있으면 Host와 같은 루프백 출처(포트 포함)여야 하고 `Sec-Fetch-Site: cross-site`는 거부 | 같은 테스트 |
 | 토큰 탈취 | 토큰은 같은 출처 `GET /api/session`으로만 읽힌다(CORS 헤더 없음). Host 검사로 rebinding 페이지도 못 읽음 | |
 | 클릭재킹·스니핑 | `Content-Security-Policy: default-src 'self' ...; frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, API는 `Cache-Control: no-store` | 같은 테스트 |
-| 오류로 값 누출 | 오류 응답은 `{code, message}`만. 프레임워크 예외 메시지·스택은 내보내지 않고(Boot `server.error.*` 끔), 로그에도 예외 종류와 위치만 | `SettingsControllerTest` |
+| 오류로 값 누출 | 오류 응답은 `{code, message}`만. 프레임워크 예외 메시지·스택은 내보내지 않고(Boot `server.error.*` 끔), 로그에도 예외 종류와 위치만. 없는 경로·메서드·형식은 404·405·415(ERROR 로그 아님) | `SettingsControllerTest`, `ExperimentControllerTest` |
 
 Spring Security를 쓰지 않은 이유: 인증 사용자가 없는 로컬 단일 사용자 도구라 필요한 것은 Host·Origin·CSRF 검사뿐이고, 필터 하나(약 150줄)로 동작을 테스트로 고정할 수 있다. 되돌릴 조건: 외부 접근이나 로그인(D-020 되돌릴 조건)이 생기면 Spring Security로 옮긴다.
 
@@ -66,7 +66,9 @@ parameters:
 
 규칙
 - 버전 파일은 append-only다. 편집은 항상 새 버전(= 새 `profileHash`)을 만든다. 실험 결과가 해시로 프로필을 가리키므로 옛 버전을 고치면 추적이 깨진다.
-- 새 버전은 "최신 버전을 기준으로 고친 것"만 받는다(`baseVersion` 불일치 → 409). 같은 버전 파일이 이미 있으면 덮어쓰지 않는다(`REPLACE_EXISTING` 없이 이동).
+- 새 버전은 "최신 버전을 기준으로 고친 것"만 받는다(`baseVersion` 불일치 → 409). 같은 버전 파일이 이미 있으면 덮어쓰지 않는다(`REPLACE_EXISTING` 없이 이동). 읽지 못하는 다음 버전 파일이 있으면 그 사실을 409 메시지로 알린다.
+- 문자열은 항상 따옴표로 쓰고, 옮기기 전에 임시 파일을 다시 읽어 해시가 같은지 확인한다(`.inf`·`.nan`·`null` 같은 값이 숫자·null로 바뀌어 저장 후 못 읽는 일을 막음, architect 검토 1).
+- 공백을 떼면 같아지는 파라미터 키는 거절한다.
 - 버전 사이에 시장·스타일은 못 바꾼다. 바꾸려면 복제해 새 ID로 만든다(D-006 한 프로필 한 스타일).
 - 파라미터는 평평한 `키: 문자열 값`이다(`StrategyProfile` 계약). 해시에 들어가지 않는 `based-on`·`created-at`·`note`는 이력 정보다.
 - 읽지 못하는 파일은 목록에서 빼고 경로만 경고한다.
@@ -77,18 +79,18 @@ parameters:
 
 ## 5. REST 계약 (`/api`, JSON)
 
-공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록은 `{items, page, size, total}` 페이징(`size` 1~200). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `CONFLICT` 409, `HOST`·`ORIGIN`·`CSRF` 403).
+공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403).
 
 | 메서드·경로 | 설명 |
 |---|---|
 | `GET /api/session` | 모드(`LAB`), `realOrderPath=false`, 증권사 키 설정 여부, 실전 계좌 별칭·계좌번호 설정 여부, CSRF 토큰 |
-| `GET /api/experiments` | 실험 목록(최근 ID 먼저): 시장·통화·기간·시드·시드머니·비용 모델·비용 표 해시·체결 모델·데이터 버전·실행 방식·코드·계좌 수 |
+| `GET /api/experiments` | 실험 목록(실험 ID 문자열 내림차순. `EXP-YYYYMMDD-NN` 형식이면 최근 실험이 위): 시장·통화·기간·시드·시드머니·비용 모델·비용 표 해시·체결 모델·데이터 버전·실행 방식·코드·계좌 수 |
 | `GET /api/experiments/{id}` | 요약 + 계좌별 행(프로필 ID·버전·해시, 상태, 실패 사유, 최종 평가금액, 지표 14개, 거절 건수) |
 | `GET /api/experiments/{id}/equity` | 계좌별 일별 평가금액(비용 차감 후)과 시드머니 |
 | `GET /api/experiments/{id}/runs/{runId}/fills` | 체결 내역(멱등 키, 체결 순번, 신호·체결 이벤트 순번과 시각, 비용 항목, 실현 손익) |
 | `GET /api/experiments/{id}/runs/{runId}/round-trips` | 왕복 거래 |
 | `GET /api/experiments/{id}/runs/{runId}/rejections?stage=&code=` | 거절 사유 로그 + 거르기 전 사유별 건수(`counts`) |
-| `GET /api/profiles` | 프로필 목록(최신 버전·해시, 버전 목록) |
+| `GET /api/profiles` | 프로필 목록(ID 이름순, 최신 버전·해시, 버전 목록) |
 | `GET /api/profiles/{id}` · `/versions/{v}` | 버전 이력 · 한 버전 |
 | `POST /api/profiles` | 새 프로필 v1. `basedOn: "id@v"`면 복제 |
 | `POST /api/profiles/{id}/versions` | `{baseVersion, parameters, note}` → 새 버전 |
@@ -98,7 +100,7 @@ parameters:
 같은 실험의 계좌만 한 화면에서 비교한다(같은 기간·시드·비용 모델·체결 모델, 지침 5장). 실험 사이 비교 화면은 만들지 않았다.
 
 ### 실험 결과 출처
-`ExperimentCatalog` 인터페이스로 읽는다. 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. 실험 결과 DB 저장(ADR-004 4장 후속)이 생기면 같은 인터페이스의 DB 구현으로 바꾸며 REST 응답은 바뀌지 않는다.
+`ExperimentCatalog` 인터페이스로 읽는다. 메서드는 화면 질의 단위(목록 한 쪽, 상세, 자산 곡선, 체결·왕복·거절 한 쪽)라서 DB 구현은 메서드마다 질의 하나로 옮기면 되고 실험 전체를 메모리로 되살릴 필요가 없다(architect 검토 3). 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. DB 구현으로 바꿔도 REST 응답은 바뀌지 않는다.
 
 ## 6. 설정 화면 (UI-04)
 
@@ -106,16 +108,24 @@ parameters:
 |---|---|
 | `lab.*`, `notification.*` | 편집 가능(실시간 변경 "즉시" 키). `RuntimeConfigHolder.update`로 디스크 먼저, 성공하면 메모리 |
 | `notification.*.webhook-url`·`access-token` 🔒 | 쓰기 전용 입력(`type=password`). 빈 입력은 그대로 두기, 지우기는 `clearSecrets`로 명시. 응답에는 `****`와 설정 여부만 |
-| `notification.kakao.mode=BIZ` | 유료라서 `acknowledgePaid=true`가 있어야 바뀜(화면은 확인 대화상자, 지침 8장 1번) |
+| `notification.kakao.mode=BIZ` | 유료라서 BIZ로 바꾸거나 BIZ 상태에서 켤 때 `acknowledgePaid=true`가 필요(서버가 판단, 화면은 확인 대화상자 후 재전송, 지침 8장 1번) |
 | `market-data.*` | 읽기 전용(재기동 필요) |
 | `brokers.*` 🔒 | 설정 여부만, 읽기 전용(재연결 절차 구현 전, `RuntimeConfigHolder`도 막음) |
 | `real-trading.accounts`, `account-numbers.*` 🔒 | 읽기 전용. 실전 활성화는 설정이 아니며 이 화면에 없다 |
 
 비밀값은 일부 글자(끝 4자리 등)도 보여 주지 않는다. 로그에는 바뀐 키 이름만 남긴다.
 
+**저장 안전장치(risk-ops 검토 B1)**: `RuntimeConfigStore.save`는 메모리 스냅샷 전체를 두 파일에 다시 쓴다. 그래서 화면에서 `lab.*` 하나만 바꿔도 `real-trading.*`·`brokers.*`가 함께 쓰인다. 메모리가 디스크와 다르면 실전 계좌·증권사 키·계좌번호를 옛 값(또는 빈 값)으로 덮어써, 실전 엔진이 재기동할 때 보유 계좌를 잃을 수 있다. 이를 막으려고 저장 전에(Holder의 직렬화 안에서) 다음을 확인하고 하나라도 걸리면 409로 거절하며 파일을 건드리지 않는다.
+- 기동할 때 설정 파일 경고가 있었다(파일을 버림, 고아 계좌번호를 버림 등) → `CONFIG_FILE_PROBLEM`
+- 지금 디스크를 다시 읽은 결과에 경고가 있다 → `CONFIG_FILE_PROBLEM`
+- 지금 디스크를 다시 읽은 설정이 메모리와 다르다(실행 중 파일을 직접 고침) → `CONFIG_CHANGED_ON_DISK`
+
+검사와 저장 사이에 다른 프로세스가 파일을 바꾸는 아주 짧은 경쟁은 남는다 `[추론]`. 근본 해결은 "바뀐 키만 파일 트리에 반영"하는 저장 방식이며, `autotrade-config`(architect 소유) 변경이라 후속 과제로 둔다.
+
 ## 7. 검증
 
-- `./gradlew build` 통과(새 테스트 6개 클래스: 보안 필터 단위·통합, 실험 API 필드 계약·페이징, 프로필 저장소·API, 설정 API 비밀값 누출 검사).
+- `./gradlew build` 통과. 실험실 테스트 64개(새 테스트 7개 클래스: 보안 필터 단위·통합, 실험 API 필드 계약·페이징, 프로필 저장소·API, 설정 API 비밀값 누출 검사, 설정 저장 안전장치).
+- 교차 검토: architect(차단 0, 중요 3건 모두 반영), risk-ops(차단 1건 B1 반영, 사소 S1·S2·S4 반영, S3는 후속). 반영 후 판정은 PR에 적는다.
 - 비밀값 누출 검사: 조회·변경·오류 응답 본문과 테스트 중 표준 출력(로그)에 자리표시자 비밀값 문자열이 없음을 확인(`SettingsControllerTest`).
 - 화면: `./gradlew :autotrade-app-lab:bootTestRun`(테스트 소스의 샘플 데이터, 배포본에는 없음)으로 띄워 Chromium에서 각 화면 열기, 프로필 새 버전 저장, 설정 저장(저장 후 DOM에 비밀값 없음), 거절 사유 필터, 390px 폭 화면을 확인했다. 콘솔 오류 0건.
 - 검증하지 못한 것: 실제 실험 실행기 출력으로 채운 화면(실험 생성·실행이 아직 없음), Windows에서의 실행, 대량 이력(수만 건) 페이징 응답 시간(UI-08 `[가정]` 기준 미정).
@@ -137,3 +147,5 @@ parameters:
 | 증권사 키 변경 화면(재연결 절차) | ui-dev, risk-ops | 재연결 절차 구현 후 |
 | 실험 간 비교(같은 기간·시드·비용 해시일 때만) | ui-dev, strategy-researcher | 4단계 전략 비교 시작 시 |
 | 지표 보강 표시(관측 일수, 판정 불가 표시, 최장 회복 기간 등) | ui-dev | ADR-004 4장 지표 보강 후 |
+| `RuntimeConfigStore`에 "바뀐 키만 반영" 저장 추가, 실험실이 증권사 키·계좌번호 평문을 들지 않게(설정 여부만) | architect, risk-ops | 7단계 전(risk-ops 검토 B1·S3) |
+| 실전 계좌가 있을 때 마지막 알림 채널을 끄면 경고, 감시 프로세스가 "긴급 채널 없음"을 이상으로 보고(MON-06) | ui-dev, risk-ops | 7단계 전 |

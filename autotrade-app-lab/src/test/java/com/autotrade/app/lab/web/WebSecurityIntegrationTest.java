@@ -96,8 +96,15 @@ class WebSecurityIntegrationTest {
     void 같은_출처와_토큰이면_변경을_받는다() throws Exception {
         mvc.perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(BODY)
                         .header(LocalOnlyRequestFilter.CSRF_HEADER, token.value())
+                        .header("Host", "127.0.0.1:8480")
                         .header("Origin", "http://127.0.0.1:8480")
                         .header("Sec-Fetch-Site", "same-origin"))
                 .andExpect(status().isOk());
+        // 같은 PC의 다른 포트 페이지
+        mvc.perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(BODY)
+                        .header(LocalOnlyRequestFilter.CSRF_HEADER, token.value())
+                        .header("Host", "127.0.0.1:8480")
+                        .header("Origin", "http://127.0.0.1:3000"))
+                .andExpect(status().isForbidden());
     }
 }

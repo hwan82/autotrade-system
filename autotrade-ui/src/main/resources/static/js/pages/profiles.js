@@ -1,5 +1,6 @@
 // 전략 프로필 편집(UI-03): 목록, 버전 보기, 편집(항상 새 버전과 새 해시), 새 프로필·복제.
 import { h, table, toast } from '../dom.js';
+import { pagedSection } from './experiments.js';
 import { get, post } from '../api.js';
 import { shortHash, MARKET, STYLE } from '../format.js';
 
@@ -7,24 +8,24 @@ const enc = encodeURIComponent;
 let cloneSource = null;
 
 export async function profilesPage() {
-  const list = await get('/api/profiles');
+  const first = await get('/api/profiles?page=0&size=50');
   const head = h('div', { class: 'page-head' },
     h('div', {}, h('h1', {}, '전략 프로필'),
       h('p', { class: 'muted' }, '매매 기법 하나의 파라미터 묶음입니다. 저장한 버전은 바뀌지 않고, 고치면 새 버전과 새 해시가 생깁니다.')),
     h('a', { class: 'btn', href: '#/profiles/new', onclick: () => { cloneSource = null; } }, '새 프로필 만들기'));
-  if (list.length === 0) {
+  if (first.total === 0) {
     return h('div', {}, head, h('div', { class: 'empty' },
       h('p', {}, '저장된 전략 프로필이 없습니다.'),
       h('p', { class: 'muted small' }, '새 프로필을 만들면 strategies/<프로필ID>/v1.yaml 파일로 저장됩니다.')));
   }
-  return h('div', {}, head, table([
+  return h('div', {}, head, pagedSection('/api/profiles', [
     { label: '프로필', render: p => h('a', { href: `#/profiles/${enc(p.id)}` }, p.id) },
     { label: '시장', render: p => MARKET[p.market] || p.market },
     { label: '스타일', render: p => STYLE[p.style] || p.style },
     { label: '최신 버전', num: true, render: p => `v${p.versions[p.versions.length - 1]}` },
     { label: '버전 수', num: true, render: p => p.versions.length },
     { label: '최신 해시', render: p => h('span', { class: 'hash', title: p.latestHash }, shortHash(p.latestHash)) },
-  ], list));
+  ], '프로필이 없습니다.'));
 }
 
 export async function profilePage(id, version) {

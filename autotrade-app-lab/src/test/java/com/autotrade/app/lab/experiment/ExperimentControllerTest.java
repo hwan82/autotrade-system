@@ -38,9 +38,12 @@ class ExperimentControllerTest {
     @Autowired
     ExperimentCatalog catalog;
 
+    @Autowired
+    com.autotrade.app.lab.web.LocalOnlyRequestFilter.CsrfToken token;
+
     @BeforeEach
     void register() {
-        if (catalog.find(new ExperimentId("EXP-20261008-01")).isPresent()) {
+        if (catalog.detail(new ExperimentId("EXP-20261008-01")).isPresent()) {
             return;
         }
         SampleReports.Sample older = SampleReports.krx("EXP-20260901-01", 5);
@@ -51,19 +54,23 @@ class ExperimentControllerTest {
 
     @Test
     void 목록은_최근_실험이_위이고_실험_조건을_담는다() throws Exception {
+        mvc.perform(get("/api/experiments").param("size", "1"))
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.total").value(2));
         mvc.perform(get("/api/experiments"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].id").value("EXP-20261008-01"))
-                .andExpect(jsonPath("$[0].market").value("KRX"))
-                .andExpect(jsonPath("$[0].currency").value("KRW"))
-                .andExpect(jsonPath("$[0].seedCapital").value("10000000"))
-                .andExpect(jsonPath("$[0].randomSeed").value(42))
-                .andExpect(jsonPath("$[0].costModelId").value("KR-DEFAULT-2026"))
-                .andExpect(jsonPath("$[0].executionModelId").value("BOOK-V1+500ms"))
-                .andExpect(jsonPath("$[0].runCount").value(3))
-                .andExpect(jsonPath("$[0].completedRuns").value(2))
-                .andExpect(jsonPath("$[0].failedRuns").value(1));
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value("EXP-20261008-01"))
+                .andExpect(jsonPath("$.items[0].market").value("KRX"))
+                .andExpect(jsonPath("$.items[0].currency").value("KRW"))
+                .andExpect(jsonPath("$.items[0].seedCapital").value("10000000"))
+                .andExpect(jsonPath("$.items[0].randomSeed").value(42))
+                .andExpect(jsonPath("$.items[0].costModelId").value("KR-DEFAULT-2026"))
+                .andExpect(jsonPath("$.items[0].executionModelId").value("BOOK-V1+500ms"))
+                .andExpect(jsonPath("$.items[0].runCount").value(3))
+                .andExpect(jsonPath("$.items[0].completedRuns").value(2))
+                .andExpect(jsonPath("$.items[0].failedRuns").value(1));
     }
 
     @Test
@@ -148,6 +155,10 @@ class ExperimentControllerTest {
         mvc.perform(get("/api/experiments/EXP-NOPE")).andExpect(status().isNotFound());
         mvc.perform(get("/api/experiments/exp-lower")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/experiments/EXP-20261008-01/runs/OTHER/fills")).andExpect(status().isNotFound());
+        mvc.perform(get("/api/nothing")).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/experiments")
+                        .header(com.autotrade.app.lab.web.LocalOnlyRequestFilter.CSRF_HEADER, token.value()))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
