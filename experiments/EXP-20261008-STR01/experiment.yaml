@@ -1,0 +1,46 @@
+# 실험 정의(사전 등록). StudyMain 상수에서 만든다. 결과를 본 뒤 바꾸지 않는다.
+id: EXP-20261008-STR01
+question: "같은 합성 시세·시드·비용에서 장중 진입 로직 7개와 스윙 1개 중 선발 기준(STR-04)을 통과하는 프로필이 있는가, 주문 지연 0~2초에 결과가 얼마나 흔들리는가"
+mode: REPLAY
+data:
+  kind: SYNTHETIC
+  snapshot: SYNTH-KRX-V1-S20261008-2026-03-02-40D-802da729bbda
+  model: SYNTH-KRX-V1
+  start: 2026-03-02
+  trading-days: 40
+  trend-per-mille: 350
+  symbols: "900010@8000/depth3000/qty300/vol220bp,900020@23000/depth2000/qty200/vol200bp,900030@61000/depth800/qty80/vol180bp,900040@145000/depth400/qty40/vol160bp"
+split:
+  train-days: 24
+  validation-days: 16
+seed: 20261008
+seed-capital: "10000000 KRW"
+cost-model: KR-DEFAULT-d24932dfcccd
+execution:
+  rules: BOOK-V1
+  base-latency-ms: 500
+  latencies-ms: "0,500,1500,2000"
+profiles:
+  kr-bh-baseline: "v1 a60529e48721164db947a26ada101800082845e84ebda249a5a64bce19a6152d"
+  kr-orb-30: "v1 5d0975f8e04383406b2d03eef222cf33094e6689801e5a5f6be35ee8d95616a5"
+  kr-vwap-reclaim: "v1 2b7152d753bc199765d82e766b8f0c2c00f27111f75d83798b6479a447f71eb8"
+  kr-pdh-breakout: "v1 a3129be1f675581934b1501b7c8fab64287ac2227f91e29a53c7a18a59fb8919"
+  kr-volume-surge: "v1 2318269b67f36112852a3a804f86f37b12037328fe857248a5b5154d80dcc280"
+  kr-book-imbalance: "v1 dc6a7f8ad699504748e18ec062b91c739dcec8a6282ee0ccb1932edbe99cb4a2"
+  kr-pullback: "v1 3ad7628851e0a63c7dd8729ca590dec19336a4e25ce28a9a2bbba4e28c67296c"
+  kr-ma-trend: "v1 503edb7c5a7b5315a617410a75ff4a9a9a0bc315f49541a72124280a1374cf91"
+  kr-random-control: "v1 1a98ec22f9d032c8e34770b77d44770617601ce2a67cddd92e7b6eb6aa9f5da0"
+baseline: kr-bh-baseline
+control: kr-random-control
+null-seeds: 20
+screening:
+  min-profit-factor: 1.3
+  max-drawdown: 0.20
+  min-sharpe: 1.0
+  min-round-trips: 30
+  min-oos-ratio: 0.6
+  min-perturbed-ratio: 0.5
+  min-perturbed-profit-factor: 1.0
+  stress-latency-ms: 2000
+  min-stress-profit-factor: 1.0
+  null-percentile: 0.95
