@@ -39,8 +39,8 @@ import org.springframework.test.web.servlet.ResultActions;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class SettingsControllerTest {
 
-    static final String BROKER_KEY = "PLACEHOLDER-KIS-APPKEY-0001";
-    static final String BROKER_SECRET = "PLACEHOLDER-KIS-SECRET-0002";
+    static final String BROKER_KEY = "PLACEHOLDER_APPKEY";
+    static final String BROKER_SECRET = "PLACEHOLDER_SECRET";
     static final String ACCOUNT_NO = "PLACEHOLDER-ACCT-0003";
     static final String OLD_TOKEN = "PLACEHOLDER-KAKAO-TOKEN-0004";
     static final String NEW_WEBHOOK = "PLACEHOLDER-SLACK-WEBHOOK-0005";
