@@ -1,0 +1,25 @@
+{
+  "market-data": {
+    "priority": ["KIWOOM", "KIS", "TOSS"],
+    "mode": "AUTO",
+    "toss-polling-scope": "HELD_ONLY"
+  },
+  "lab": {
+    "max-parallel-runs": 4,
+    "default-seed-capital-krw": 10000000,
+    "default-seed-capital-usd": 10000
+  },
+  "notification": {
+    "slack": { "enabled": false, "webhook-url": "" },
+    "kakao": { "enabled": false, "mode": "ME", "access-token": "" }
+  },
+  "brokers": {
+    "kis": { "app-key": "", "app-secret": "" },
+    "kiwoom": { "app-key": "", "app-secret": "" },
+    "toss": { "app-key": "", "app-secret": "" }
+  },
+  "real-trading": {
+    "accounts": [],
+    "account-numbers": {}
+  }
+}

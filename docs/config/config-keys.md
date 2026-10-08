@@ -1,0 +1,54 @@
+# 설정 키 목록
+
+설정 체계와 결정 배경은 [ADR-001](../adr/ADR-001-module-structure.md) 2.6절. 기본값 원본은 `autotrade-config/src/main/resources/autotrade-default.json`이며, 이 표와 다르면 그 파일이 맞고 이 표를 고친다.
+
+- 기동 순서: 내장 default → 외부 `runtime-config.json`(일반 키, 바꾼 키만 둬도 됨) → 외부 `secrets.json`(🔒 키만) → 운영 중 UI 변경.
+- 설정 폴더: `-Dautotrade.config-dir` → 환경 변수 `AUTOTRADE_CONFIG_DIR` → `~/.autotrade/`. 두 파일 모두 이 폴더에 두고 저장소 안에 두지 않는다. 저장 시 폴더 700, 파일 600(POSIX).
+- 🔒 키는 `secrets.json`에만 둔다(CFG-03). `runtime-config.json`에 🔒 키가 있거나 `secrets.json`에 일반 키가 있으면 그 파일을 쓰지 않는다.
+- 외부 파일이 깨지면(문법 오류, 모르는 키, 범위 위반) 그 파일 없이 기동하고 어느 파일이 문제인지 경고한다(값은 경고에 남기지 않음).
+- 실시간 변경: **즉시** = 다음 틱부터 반영, **재기동** = 해당 프로세스 재기동 필요, **재연결 절차** = 미체결·보유 확인 → 세션 종료 → 재연결(해당 작업에서 구현 전까지 UI 변경 불가).
+- 비밀값(🔒)은 화면·로그·REST 응답에 `****`로만 나온다.
+
+| 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
+|---|---|---|---|---|---|---|
+| `market-data.priority` | 증권사 배열 | `["KIWOOM","KIS","TOSS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 실시간 소스는 이 순서에서 REALTIME_QUOTE 능력이 있는 곳만 고르므로 토스는 폴링에만 쓰인다 | 재기동 | 시세 게이트웨이 | D-008(잠정, Q-001 후 확정) |
+| `market-data.mode` | enum | `AUTO` | AUTO·FAILOVER·SHARDED. AUTO는 실시간 소스 두 곳이 설정되어 있으면 SHARDED, 아니면 FAILOVER(D-009). 운용 중 한쪽이 DEGRADED가 되면 남은 쪽으로 넘기는 동작은 2단계 ADR에서 정한다 | 재기동 | 시세 게이트웨이 | D-009 |
+| `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF. ⚠️ OFF는 전 시세 끊김 시 보유 종목 폴링 손절 감시(장애표 2번)를 끈다. 실전 보유 종목이 있을 때의 검증은 risk-ops 검토 후 추가 | 재기동 | 실전 엔진(보호 폴링) | D-008 |
+| `lab.max-parallel-runs` | int | `4` | 1~64 | 즉시(새 Run부터) | 실험실 | ADR-001 3장 예산 `[가정]` |
+| `lab.default-seed-capital-krw` | long(원) | `10000000` | 1 이상 | 즉시 | 실험 생성 화면(국내) | D-021 |
+| `lab.default-seed-capital-usd` | long(달러) | `10000` | 1 이상 | 즉시 | 실험 생성 화면(미국) | D-021 |
+| `notification.slack.enabled` | bool | `false` | true면 webhook-url 필수 | 즉시 | 알림 | 원본 기획 v2.0 |
+| `notification.slack.webhook-url` 🔒 | 문자열 | 빈 값 | Slack Incoming Webhook URL | 즉시 | 알림 | |
+| `notification.kakao.enabled` | bool | `false` | true면 access-token 필수 | 즉시 | 알림 | |
+| `notification.kakao.mode` | enum | `ME` | ME(나에게 보내기, 무료)·BIZ(알림톡, 유료: 켜기 전 사용자 확인) | 즉시 | 알림 | 원본 기획 v4.0 |
+| `notification.kakao.access-token` 🔒 | 문자열 | 빈 값 | | 즉시 | 알림 | |
+| `brokers.{kis,kiwoom,toss}.app-key` 🔒 | 문자열 | 빈 값 | 비어 있으면 그 증권사는 NOT_CONFIGURED | 재연결 절차 | 증권사 플러그인 | broker-and-fault-design.md 3장 |
+| `brokers.{kis,kiwoom,toss}.app-secret` 🔒 | 문자열 | 빈 값 | 키움은 secret-key, 토스는 secret을 여기에 넣는다 | 재연결 절차 | 증권사 플러그인 | |
+| `real-trading.accounts` | 배열 | `[]` | 항목은 `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가)·`broker`(KIS·KIWOOM·TOSS)·`market`(KRX·US)만. **활성화 키(`enabled` 등)는 없다**: 넣으면 그 파일 전체를 쓰지 않는다(CFG-02). RealTradingGuard는 기동 시 모든 계좌 OFF | 계좌 교체 절차(CFG-05, 구현 전까지 UI 변경 불가) | 실전 엔진 | [ADR-002](../adr/ADR-002-real-trading-guard.md), D-010, D-016 |
+| `real-trading.account-numbers.<id>` 🔒 | 문자열 맵 | `{}` | 키는 `accounts`의 id만 쓴다. 목록에 없는 항목은 그 항목만 무시하고 건수만 경고한다(값·별칭은 남기지 않음). 값이 없는 계좌는 활성화할 수 없다 | 계좌 교체 절차 | 실전 엔진(증권사 플러그인에 전달) | [ADR-002](../adr/ADR-002-real-trading-guard.md) 2.4 |
+
+## 아직 없는 키 (담당 작업에서 추가)
+- 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
+- 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
+- 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
+- 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
+
+## 예시 (자리표시자)
+`runtime-config.json`
+```json
+{
+  "lab": { "max-parallel-runs": 2 },
+  "notification": { "slack": { "enabled": true } },
+  "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] }
+}
+```
+`secrets.json`
+```json
+{
+  "notification": { "slack": { "webhook-url": "<SLACK_WEBHOOK_URL>" } },
+  "brokers": {
+    "kiwoom": { "app-key": "<KIWOOM_APP_KEY>", "app-secret": "<KIWOOM_SECRET_KEY>" }
+  },
+  "real-trading": { "account-numbers": { "KIS-US-1": "<ACCOUNT_NUMBER>" } }
+}
+```
