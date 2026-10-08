@@ -3,7 +3,7 @@
 - 날짜: 2026-10-08
 - 상태: 확정, **추천안 채택(자율)** (project-instructions.md 8장). 모의 실험 규칙이며 실전 주문 경로·RealTradingGuard·실전 리스크 한도와 무관하다. 승격 기준 수치 확정은 Q-013으로 남긴다(사용자 결정)
 - 근거: 기획서 STR-01~14, SIM-05, autotrade-strategy-lab 스킬 1~5장, role-guides.md 5·8장, D-021, D-025, ADR-004
-- 담당: strategy-researcher. 검토: architect(모듈 경계·결정론·미래 정보·계약 사용, 조건부 승인. 지적 M2·M3·L1~L7은 이 PR에서 반영, M1은 임시 조치 + 변경 제안)
+- 담당: strategy-researcher. 검토: architect(모듈 경계·결정론·미래 정보·계약 사용, 조건부 승인. 지적 M2·M3·L1~L7은 이 PR에서 반영, M1은 임시 조치 + 변경 제안. D-026 파일 형식으로 옮긴 뒤 2차 검토 조건부 승인: M1(128자 키의 명시 키 표기)·M2(점 키 형식 불일치)·L1·L2(BOM)·L4·L5 반영과 경계 사례 회귀 테스트 추가, L3(손으로 쓴 파일의 이스케이프 끝 공백)·L6(테스트 경로)은 남김)
 
 ## 결정
 
@@ -45,6 +45,7 @@
 | 지정가 진입과 주문 취소 신호 | sim-engine | 지정가 진입 기법 비교 |
 | 실험 구간 앞 N일을 전략에만 흘리고 주문은 막는 예열 구간 | sim-engine, architect | 지난 거래일이 필요한 프로필의 구간 첫머리 불리함 제거(architect 검토 M1) |
 | `MarketRules`에 정규장 끝 시각 조회 | architect, data-engineer | 장 마감 청산 시각 검증(PR #10 캘린더와 함께) |
+| UI 프로필 저장 시점에 `CatalogStrategyFactory.validate`로 오타 키를 막기(지금은 실험 시작 때 거절) | ui-dev | architect 2차 검토 후속 과제 |
 | 프로필 형식과 `catalog`·`profile` 공개 타입을 ADR로 계약화, `StudyMain`을 실험실 UI 연동 때 app-lab으로 이동 | architect | UI·app-lab이 쓸 계약(architect 검토 L10) |
 
 ## 되돌릴 조건

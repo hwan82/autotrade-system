@@ -44,7 +44,8 @@ public final class ProfileYaml {
     private static final Set<String> TOP_KEYS =
             Set.of("id", "version", "market", "style", "based-on", "created-at", "note", PARAMETERS);
     private static final String TOP_KEY = "[a-z][a-z-]*";
-    private static final String PARAM_KEY = "[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)*";
+    /** 느슨하게만 거른다. 키 형식의 단일 원본은 {@link StrategyProfile} 생성자의 검사다. */
+    private static final String PARAM_KEY = "[a-z0-9][a-z0-9.-]*";
 
     private ProfileYaml() {
     }
@@ -56,6 +57,9 @@ public final class ProfileYaml {
     public static StrategyProfile parse(String text, String source) {
         TreeMap<String, String> top = new TreeMap<>();
         TreeMap<String, String> params = new TreeMap<>();
+        if (text.startsWith("\uFEFF")) {
+            text = text.substring(1);
+        }
         String[] lines = text.split("\r?\n", -1);
         boolean inParameters = false;
         boolean expectChild = false;
@@ -166,7 +170,26 @@ public final class ProfileYaml {
 
         String key(String pattern) {
             String key;
-            if (text.charAt(pos) == '"') {
+            if (text.startsWith("? ", pos)) {
+                // SnakeYAML은 128자 이상 키를 명시 키로 쓴다: "? 키" 다음 줄 ": 값"
+                pos += 2;
+                if (pos < text.length() && text.charAt(pos) == '"') {
+                    key = quoted();
+                } else {
+                    key = text.substring(pos).strip();
+                    pos = text.length();
+                }
+                if (!text.substring(pos).isBlank()) {
+                    throw fail("명시 키 뒤에 값이 더 있습니다");
+                }
+                line++;
+                if (line >= lines.length || !lines[line].startsWith(" ".repeat(indent) + ":")
+                        || lines[line].length() - lines[line].stripLeading().length() != indent) {
+                    throw fail("명시 키(?) 다음 줄은 같은 들여쓰기의 ': 값'이어야 합니다");
+                }
+                text = lines[line];
+                pos = indent;
+            } else if (text.charAt(pos) == '"') {
                 key = quoted();
                 if (pos >= text.length() || text.charAt(pos) != ':') {
                     throw fail("'키: 값' 형식이 아닙니다");
@@ -179,7 +202,7 @@ public final class ProfileYaml {
                 key = text.substring(pos, colon);
                 pos = colon;
             }
-            if (!key.matches(pattern)) {
+            if (!key.matches(pattern) || key.length() > 128) {
                 throw fail("키는 소문자·숫자·하이픈(파라미터는 점으로 이은 키)만 씁니다: " + key);
             }
             pos++;
@@ -267,9 +290,9 @@ public final class ProfileYaml {
                     case 'r' -> sb.append('\r');
                     case 'e' -> sb.append('\u001B');
                     case 'N' -> sb.append('\u0085');
-                    case '_' -> sb.append(' ');
-                    case 'L' -> sb.append(' ');
-                    case 'P' -> sb.append(' ');
+                    case '_' -> sb.append('\u00A0');
+                    case 'L' -> sb.append('\u2028');
+                    case 'P' -> sb.append('\u2029');
                     case 'x' -> sb.appendCodePoint(hex(2));
                     case 'u' -> sb.appendCodePoint(hex(4));
                     case 'U' -> sb.appendCodePoint(hex(8));
@@ -299,13 +322,16 @@ public final class ProfileYaml {
             if (pos + digits > text.length()) {
                 throw fail("16진 이스케이프가 짧습니다");
             }
-            try {
-                int cp = Integer.parseInt(text.substring(pos, pos + digits), 16);
-                pos += digits;
-                return cp;
-            } catch (NumberFormatException ex) {
-                throw fail("16진 이스케이프가 아닙니다");
+            String h = text.substring(pos, pos + digits);
+            if (!h.matches("[0-9a-fA-F]+")) {
+                throw fail("16진 이스케이프가 아닙니다: " + h);
             }
+            long cp = Long.parseLong(h, 16);
+            if (cp > Character.MAX_CODE_POINT) {
+                throw fail("유니코드 범위를 넘는 이스케이프입니다: " + h);
+            }
+            pos += digits;
+            return (int) cp;
         }
 
         private IllegalArgumentException fail(String message) {

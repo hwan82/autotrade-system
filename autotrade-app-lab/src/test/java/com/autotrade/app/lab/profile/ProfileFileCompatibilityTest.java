@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * UI 저장소(Jackson YAML)와 실험 실행기(순수 모듈 {@link ProfileYaml})가 같은 버전 파일을 같은 프로필(같은 해시)로 읽는다.
@@ -60,6 +62,49 @@ class ProfileFileCompatibilityTest {
                 "exit.stop-loss-pct", "1.50"), "", "메모");
 
         Path file = dir.resolve("kr-compat/v1.yaml");
+        StrategyProfile pure = ProfileYaml.parse(Files.readString(file, StandardCharsets.UTF_8), file.toString());
+
+        assertThat(pure.parameters()).isEqualTo(saved.profile().parameters());
+        assertThat(pure.profileHash()).isEqualTo(saved.profile().profileHash());
+    }
+
+    /**
+     * 저장소(Jackson·SnakeYAML)가 줄 접기·이스케이프·명시 키({@code ? 키})로 쓰는 경계 사례. 라이브러리가 올라가 쓰는 방식이 바뀌어도
+     * 여기서 잡힌다(architect 교차 검토 M1·M2).
+     */
+    static Stream<Map.Entry<String, String>> boundaryParameters() {
+        String fold = "가".repeat(30) + " ";
+        return Stream.of(
+                Map.entry("notes.k" + "a".repeat(121), "128자 키는 명시 키로 쓰인다"),
+                Map.entry("notes.k" + "b".repeat(120), "127자 키"),
+                Map.entry("notes.a..b", "점이 이어진 키"),
+                Map.entry("notes.a.-b", "하이픈으로 시작하는 마디"),
+                Map.entry("notes.end.", "점으로 끝나는 키"),
+                Map.entry("notes.nbsp", "a\u00A0b\u2028c\u2029d\u0085e"),
+                Map.entry("notes.control", "x\u0001y\u001Bz\u007F"),
+                Map.entry("notes.emoji", "이모지 \uD83D\uDE80 끝"),
+                Map.entry("notes.bom", "\uFEFF앞 BOM"),
+                Map.entry("notes.spaces-at-fold", (fold + "  ").repeat(6)),
+                Map.entry("notes.quote-at-fold", (fold + "\"").repeat(6)),
+                Map.entry("notes.backslash-at-fold", (fold + "\\").repeat(6)),
+                Map.entry("notes.tab-at-fold", (fold + "\t").repeat(6)),
+                Map.entry("notes.no-space", "x".repeat(300)),
+                Map.entry("notes.trailing-backslash", "끝\\"),
+                Map.entry("notes.crlf", "a\r\nb"),
+                Map.entry("notes.hash", "# 주석처럼 보이는 값"),
+                Map.entry("on", "yaml 1.1에서 true로 읽히는 키"),
+                Map.entry("null", "null 키"),
+                Map.entry("1.5", "숫자처럼 보이는 키"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("boundaryParameters")
+    void 경계_사례도_실험_실행기가_같은_해시로_읽는다(Map.Entry<String, String> param) throws IOException {
+        StrategyProfileStore store = new StrategyProfileStore(dir, CLOCK);
+        StoredProfile saved = store.create("kr-edge", Market.KRX, TradingStyle.SWING,
+                Map.of(param.getKey(), param.getValue()), "", "");
+
+        Path file = dir.resolve("kr-edge/v1.yaml");
         StrategyProfile pure = ProfileYaml.parse(Files.readString(file, StandardCharsets.UTF_8), file.toString());
 
         assertThat(pure.parameters()).isEqualTo(saved.profile().parameters());

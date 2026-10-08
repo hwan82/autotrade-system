@@ -102,6 +102,14 @@ class ProfileYamlTest {
     }
 
     @Test
+    void 명시_키와_BOM을_읽는다() {
+        String key = "notes." + "k".repeat(122);
+        String text = "\uFEFFid: x\nversion: 1\nmarket: KRX\nstyle: SWING\nparameters:\n  ? " + key
+                + "\n  : \"값\"\n  b: \"1\"\n";
+        assertThat(ProfileYaml.parse(text, "f").parameters()).containsEntry(key, "값").containsEntry("b", "1");
+    }
+
+    @Test
     void 부분집합_밖의_문법은_줄_번호와_함께_거절한다() {
         String head = "id: x\nversion: 1\nmarket: KRX\nstyle: SWING\nparameters:\n";
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  a:\n    - 1\n", "f")).hasMessageContaining("f:6");
@@ -115,8 +123,10 @@ class ProfileYamlTest {
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  a: -0.5\n", "f")).hasMessageContaining("따옴표");
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  a: \"열린 따옴표\n", "f")).hasMessageContaining("닫는 따옴표");
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  a: \"\\q\"\n", "f")).hasMessageContaining("이스케이프");
+        assertThatThrownBy(() -> ProfileYaml.parse(head + "  a: \"\\x+1\"\n", "f")).hasMessageContaining("16진");
+        assertThatThrownBy(() -> ProfileYaml.parse(head + "  a: \"\\U00110000\"\n", "f")).hasMessageContaining("f:6");
+        assertThatThrownBy(() -> ProfileYaml.parse(head + "  ? a\n  b: 1\n", "f")).hasMessageContaining("명시 키");
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  A: 1\n", "f")).hasMessageContaining("소문자");
-        assertThatThrownBy(() -> ProfileYaml.parse(head + "  a..b: 1\n", "f")).hasMessageContaining("소문자");
         assertThatThrownBy(() -> ProfileYaml.parse(head, "f")).hasMessageContaining("하위 키");
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  a:\n", "f")).hasMessageContaining("스칼라");
         assertThatThrownBy(() -> ProfileYaml.parse(head + "  a: 1\nlogic: orb\n", "f")).hasMessageContaining("최상위 키");
