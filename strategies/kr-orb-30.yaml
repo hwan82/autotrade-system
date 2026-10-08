@@ -1,0 +1,37 @@
+# 장중 시가 범위 돌파(ORB) 30분 + 거래량 확인
+id: kr-orb-30
+version: 1
+market: KRX
+style: INTRADAY
+hypothesis: "국내 장중 추세일에는 장 시작 30분 고가를 거래량을 동반해 넘는 방향으로 당일 추세가 이어지므로, 돌파에 사서 당일 안에 청산하면 비용 차감 후 수익이 난다"
+logic: orb
+signal:
+  range-minutes: 30
+entry:
+  window:
+    start: "09:30"
+    end: "13:00"
+  expiry-seconds: 600
+  confirm:
+    volume-ratio: 1.5
+    window-minutes: 5
+universe:
+  min-price: 1000
+sizing:
+  risk-per-trade-pct: 0.5
+  max-position-pct: 20
+  max-positions: 3
+  cash-buffer-pct: 5
+limits:
+  max-entries-per-day: 6
+  reentry-cooldown-minutes: 30
+  daily-loss-limit-pct: 2
+  max-consecutive-stops: 3
+exit:
+  stop-loss-pct: 1.5
+  take-profit-pct: 4
+  trailing-pct: 1.5
+  eod: FLATTEN
+  eod-time: "15:10"
+study:
+  key-param: signal.range-minutes

@@ -1,0 +1,32 @@
+# 대조군: 무작위 진입(진입 로직에 정보가 없을 때의 성과 분포)
+id: kr-random-control
+version: 1
+market: KRX
+style: INTRADAY
+hypothesis: "진입 시점을 무작위로 고르고 청산·비중·한도는 다른 장중 프로필과 같게 두면, 진입 로직이 정보를 갖지 않을 때의 비용 차감 후 성과(대조군)가 나온다"
+logic: random
+signal:
+  per-mille: 2
+entry:
+  window:
+    start: "09:30"
+    end: "14:30"
+  expiry-seconds: 600
+universe:
+  min-price: 1000
+sizing:
+  risk-per-trade-pct: 0.5
+  max-position-pct: 20
+  max-positions: 3
+  cash-buffer-pct: 5
+limits:
+  max-entries-per-day: 6
+  reentry-cooldown-minutes: 30
+  daily-loss-limit-pct: 2
+  max-consecutive-stops: 3
+exit:
+  stop-loss-pct: 1.5
+  take-profit-pct: 3
+  time-exit-minutes: 60
+  eod: FLATTEN
+  eod-time: "15:10"

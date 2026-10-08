@@ -1,0 +1,33 @@
+# 스윙 이동평균 추세(일봉 종가 3일 > 8일)
+id: kr-ma-trend
+version: 1
+market: KRX
+style: SWING
+hypothesis: "국내 종목의 3일 종가 평균이 8일 평균보다 높은 동안에는 며칠 단위 추세가 이어지므로, 그 기간에 보유하고 추세가 꺾인 다음 날 팔면 비용 차감 후 매수 후 보유보다 낫다"
+logic: ma-trend
+signal:
+  fast-days: 3
+  slow-days: 8
+entry:
+  window:
+    start: "09:05"
+    end: "10:00"
+  expiry-seconds: 600
+universe:
+  min-price: 1000
+sizing:
+  risk-per-trade-pct: 1.0
+  max-position-pct: 24
+  max-positions: 4
+  cash-buffer-pct: 2
+limits:
+  max-entries-per-day: 4
+  reentry-cooldown-minutes: 0
+  daily-loss-limit-pct: 5
+  max-consecutive-stops: 4
+exit:
+  stop-loss-pct: 5
+  eod: CARRY
+study:
+  warmup-days: 8   # 신호에 필요한 지난 거래일 수(C6 하루 평균에서 뺀다)
+  key-param: signal.slow-days

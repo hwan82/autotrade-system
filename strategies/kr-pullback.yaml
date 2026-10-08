@@ -1,0 +1,35 @@
+# 장중 눌림목
+id: kr-pullback
+version: 1
+market: KRX
+style: INTRADAY
+hypothesis: "국내 장중 시가 대비 1.5% 이상 오른 상승일에 고가 대비 1% 밀렸다가 0.3% 반등하면 상승 추세가 재개되므로, 반등에 사서 당일 안에 청산하면 비용 차감 후 수익이 난다"
+logic: pullback
+signal:
+  trend-pct: 1.5
+  pullback-pct: 1.0
+  bounce-pct: 0.3
+entry:
+  window:
+    start: "09:30"
+    end: "14:00"
+  expiry-seconds: 600
+universe:
+  min-price: 1000
+sizing:
+  risk-per-trade-pct: 0.5
+  max-position-pct: 20
+  max-positions: 3
+  cash-buffer-pct: 5
+limits:
+  max-entries-per-day: 6
+  reentry-cooldown-minutes: 30
+  daily-loss-limit-pct: 2
+  max-consecutive-stops: 3
+exit:
+  stop-loss-pct: 1.2
+  take-profit-pct: 2.5
+  eod: FLATTEN
+  eod-time: "15:10"
+study:
+  key-param: signal.pullback-pct
