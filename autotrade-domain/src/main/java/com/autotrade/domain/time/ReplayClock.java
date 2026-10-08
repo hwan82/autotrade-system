@@ -11,6 +11,10 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>비즈니스 로직은 {@code java.time.Clock}만 주입받으므로 실시간({@code Clock.system})과 리플레이가 같은 코드로 돈다.
  * {@link #withZone}으로 만든 시계는 같은 시각 상태를 공유한다. 스레드 안전하다.
+ *
+ * <p>Run(모의 계좌)마다 시계를 하나씩 만들고 Run끼리 공유하지 않는다. 리플레이 순서는 이벤트 {@code sequence}가 정하고,
+ * 시계는 지금까지 본 시각의 최댓값으로 옮긴다({@link #advanceToAtLeast}). 수신 시각이 순서와 어긋나는 이벤트가 있어도
+ * Run이 멈추지 않는다.
  */
 public final class ReplayClock extends Clock {
 
@@ -35,6 +39,12 @@ public final class ReplayClock extends Clock {
             }
             return target;
         });
+    }
+
+    /** 목표가 현재보다 뒤면 옮기고, 앞이면 그대로 둔다. 이벤트 수신 시각으로 시계를 따라갈 때 쓴다. */
+    public void advanceToAtLeast(Instant target) {
+        Objects.requireNonNull(target, "target");
+        current.accumulateAndGet(target, (now, t) -> t.isAfter(now) ? t : now);
     }
 
     @Override

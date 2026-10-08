@@ -46,7 +46,7 @@ public final class RuntimeConfigStore {
         Objects.requireNonNull(config, "config");
         try {
             Path dir = file.getParent();
-            Files.createDirectories(dir);
+            createOwnerOnlyDirectories(dir);
             Path tmp = Files.createTempFile(dir, ".runtime-config", ".tmp");
             try {
                 restrictToOwner(tmp);
@@ -61,6 +61,18 @@ public final class RuntimeConfigStore {
             }
         } catch (IOException e) {
             throw new UncheckedIOException("설정 저장 실패: " + file.getFileName(), e);
+        }
+    }
+
+    private static void createOwnerOnlyDirectories(Path dir) throws IOException {
+        if (Files.isDirectory(dir)) {
+            return;
+        }
+        if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+        } else {
+            // Windows: 사용자 홈 아래 기본 ACL에 맡긴다. 암호화 저장(DPAPI 등)은 7단계 전 risk-ops 검토 항목(ADR-001 4장)
+            Files.createDirectories(dir);
         }
     }
 

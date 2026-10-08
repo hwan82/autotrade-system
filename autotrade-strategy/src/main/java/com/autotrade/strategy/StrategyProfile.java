@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
  *
  * <p>{@link #profileHash()}는 내용 기반 SHA-256이다. 실험 결과(virtual_trade_log.profile_hash)에 남겨
  * "어떤 설정으로 나온 결과인지"를 추적한다. 파라미터 입력 순서와 무관하고, 값 하나만 달라도 바뀐다.
+ * 해시에 {@code Market}·{@link TradingStyle}의 enum 이름이 들어가므로 이 이름들은 바꾸지 않는다(골든 테스트가 지킴).
  *
  * @param parameters 키는 소문자·숫자·점·하이픈, 값은 문자열(숫자도 문자열로 저장해 표현이 흔들리지 않게 한다)
  */

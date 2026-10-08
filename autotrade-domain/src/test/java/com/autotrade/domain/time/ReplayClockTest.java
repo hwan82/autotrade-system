@@ -25,6 +25,14 @@ class ReplayClockTest {
     }
 
     @Test
+    void 최댓값_따라가기는_과거_시각을_무시한다() {
+        ReplayClock clock = new ReplayClock(START, ZoneOffset.UTC);
+        clock.advanceToAtLeast(START.plusSeconds(10));
+        clock.advanceToAtLeast(START.plusSeconds(3));
+        assertThat(clock.instant()).isEqualTo(START.plusSeconds(10));
+    }
+
+    @Test
     void 시간대만_바꾼_시계는_같은_시각을_공유한다() {
         ReplayClock clock = new ReplayClock(START, ZoneOffset.UTC);
         Clock seoul = clock.withZone(ZoneId.of("Asia/Seoul"));

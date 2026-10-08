@@ -10,9 +10,9 @@
 
 | 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
 |---|---|---|---|---|---|---|
-| `market-data.priority` | 증권사 배열 | `["KIWOOM","KIS","TOSS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음 | 재기동 | 시세 게이트웨이 | D-008(잠정, Q-001 후 확정) |
-| `market-data.mode` | enum | `AUTO` | AUTO·FAILOVER·SHARDED. AUTO는 실시간 소스 두 곳이 ACTIVE면 SHARDED | 재기동 | 시세 게이트웨이 | D-009 |
-| `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF | 재기동 | 실전 엔진(보호 폴링) | D-008 |
+| `market-data.priority` | 증권사 배열 | `["KIWOOM","KIS","TOSS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 실시간 소스는 이 순서에서 REALTIME_QUOTE 능력이 있는 곳만 고르므로 토스는 폴링에만 쓰인다 | 재기동 | 시세 게이트웨이 | D-008(잠정, Q-001 후 확정) |
+| `market-data.mode` | enum | `AUTO` | AUTO·FAILOVER·SHARDED. AUTO는 실시간 소스 두 곳이 설정되어 있으면 SHARDED, 아니면 FAILOVER(D-009). 운용 중 한쪽이 DEGRADED가 되면 남은 쪽으로 넘기는 동작은 2단계 ADR에서 정한다 | 재기동 | 시세 게이트웨이 | D-009 |
+| `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF. ⚠️ OFF는 전 시세 끊김 시 보유 종목 폴링 손절 감시(장애표 2번)를 끈다. 실전 보유 종목이 있을 때의 검증은 risk-ops 검토 후 추가 | 재기동 | 실전 엔진(보호 폴링) | D-008 |
 | `lab.max-parallel-runs` | int | `4` | 1~64 | 즉시(새 Run부터) | 실험실 | ADR-001 3장 예산 `[가정]` |
 | `lab.default-seed-capital-krw` | long(원) | `10000000` | 1 이상 | 즉시 | 실험 생성 화면 | team-design.md 8장 D6 `[가정]`, 결정 기록 대기 |
 | `notification.slack.enabled` | bool | `false` | true면 webhook-url 필수 | 즉시 | 알림 | 원본 기획 v2.0 |

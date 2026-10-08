@@ -22,12 +22,6 @@ class IdempotencyKeyTest {
     }
 
     @Test
-    void 다음_키는_seq만_하나_올린다() {
-        IdempotencyKey key = IdempotencyKey.parse("20261008-005930-BUY-1");
-        assertThat(key.next()).hasToString("20261008-005930-BUY-2");
-    }
-
-    @Test
     void 잘못된_형식은_거부한다() {
         assertThatThrownBy(() -> IdempotencyKey.parse("20261008-005930-BUY")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> IdempotencyKey.parse("20261008-005930-HOLD-1")).isInstanceOf(IllegalArgumentException.class);

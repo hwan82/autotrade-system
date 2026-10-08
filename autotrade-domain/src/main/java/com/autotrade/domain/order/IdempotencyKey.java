@@ -14,7 +14,8 @@ import java.util.Objects;
  *   <li>{@code side}: BUY 또는 SELL</li>
  *   <li>{@code seq}: 같은 날·종목·방향 안에서 1부터 증가하는 번호</li>
  * </ul>
- * 같은 키는 한 계좌에서 한 번만 전송될 수 있다. 키 발급·중복 차단은 주문 경로(별도 작업)에서 한다.
+ * 같은 키는 한 계좌에서 한 번만 전송될 수 있다. 새 키는 계좌별 영속 발급기만 만든다(seq를 직접 올려 만들지 않는다).
+ * 발급기와 "원키당 재발주 1회" 제한은 주문 경로(risk-ops 별도 작업)에서 구현한다.
  */
 public record IdempotencyKey(LocalDate date, String code, Side side, int seq) {
 
@@ -50,10 +51,6 @@ public record IdempotencyKey(LocalDate date, String code, Side side, int seq) {
         }
     }
 
-    /** 같은 날·종목·방향의 다음 번호 키. UNKNOWN 조회 결과 미접수일 때 1회 재발주에 쓴다. */
-    public IdempotencyKey next() {
-        return new IdempotencyKey(date, code, side, seq + 1);
-    }
 
     @Override
     public String toString() {

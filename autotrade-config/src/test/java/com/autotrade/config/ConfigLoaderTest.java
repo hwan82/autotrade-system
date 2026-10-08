@@ -98,6 +98,27 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void 실전_매매_키가_있는_파일은_받아들이지_않는다() throws IOException {
+        // RealTradingGuard와 실전 계좌는 설정 파일로 켤 수 없다(안전 불변식 1)
+        for (String json : new String[] {
+            "{ \"real-trading\": { \"accounts\": [ { \"id\": \"KIS-1\", \"broker\": \"KIS\", \"enabled\": true } ] } }",
+            "{ \"real-trading-guard\": true }",
+            "{ \"lab\": { \"real-trading\": true } }"
+        }) {
+            LoadedConfig loaded = loader.load(write(json));
+            assertThat(loaded.source()).as(json).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
+            assertThat(loaded.config()).isEqualTo(loader.defaults());
+        }
+    }
+
+    @Test
+    void 설정_스냅샷에는_실전_매매_항목이_없다() {
+        // 실전 키를 RuntimeConfig에 넣으려면 이 테스트를 바꾸는 별도 PR(risk-ops 검토, 사용자 직접 머지)이 필요하다
+        assertThat(java.util.Arrays.stream(RuntimeConfig.class.getRecordComponents()).map(c -> c.getName()))
+                .containsExactly("marketData", "lab", "notification", "brokers");
+    }
+
+    @Test
     void 알림을_켜면서_비밀값이_없으면_거부한다() throws IOException {
         Path file = write("""
                 { "notification": { "slack": { "enabled": true } } }

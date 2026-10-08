@@ -3,6 +3,8 @@ package com.autotrade.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Currency;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +22,14 @@ class MoneyTest {
         assertThat(price.times(13)).isEqualTo(Money.of("929500", Money.KRW));
         assertThat(Money.of("0.1", Money.USD).plus(Money.of("0.2", Money.USD))).isEqualTo(Money.of("0.3", Money.USD));
         assertThat(Money.of("100", Money.KRW).minus(Money.of("250", Money.KRW)).signum()).isNegative();
+    }
+
+    @Test
+    void 배율_곱셈은_정확하고_반올림은_명시해야_한다() {
+        Money fee = Money.of("929500", Money.KRW).times(new BigDecimal("0.00015"));
+        assertThat(fee).isEqualTo(Money.of("139.425", Money.KRW));
+        assertThat(fee.roundedToCurrency(RoundingMode.DOWN)).isEqualTo(Money.of("139", Money.KRW));
+        assertThat(Money.of("1.005", Money.USD).roundedToCurrency(RoundingMode.HALF_UP)).isEqualTo(Money.of("1.01", Money.USD));
     }
 
     @Test

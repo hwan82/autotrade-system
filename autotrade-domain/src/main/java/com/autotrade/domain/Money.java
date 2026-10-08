@@ -1,6 +1,7 @@
 package com.autotrade.domain;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Currency;
 import java.util.Objects;
 
@@ -45,6 +46,22 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
 
     public Money times(long quantity) {
         return new Money(amount.multiply(BigDecimal.valueOf(quantity)), currency);
+    }
+
+    /** 배율 곱셈(수수료율 등). 정확한 값이며 반올림하지 않는다. 반올림은 {@link #rounded}로 명시한다. */
+    public Money times(BigDecimal factor) {
+        Objects.requireNonNull(factor, "factor");
+        return new Money(amount.multiply(factor), currency);
+    }
+
+    /** 소수 {@code scale} 자리로 반올림. 비용 모델은 반올림 위치와 방향을 여기로만 정한다. */
+    public Money rounded(int scale, RoundingMode mode) {
+        return new Money(amount.setScale(scale, mode), currency);
+    }
+
+    /** 통화의 기본 소수 자릿수(KRW 0, USD 2)로 반올림. */
+    public Money roundedToCurrency(RoundingMode mode) {
+        return rounded(currency.getDefaultFractionDigits(), mode);
     }
 
     public Money negate() {

@@ -34,6 +34,7 @@ CREATE TABLE experiment_run (
     run_id          VARCHAR(64)    PRIMARY KEY,
     experiment_id   VARCHAR(48)    NOT NULL REFERENCES experiment (experiment_id),
     profile_hash    CHAR(64)       NOT NULL REFERENCES strategy_profile (profile_hash),
+    run_seed        BIGINT         NOT NULL,                -- H(random_seed, profile_hash), Run별 독립 난수열
     status          VARCHAR(16)    NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
     started_at      TIMESTAMPTZ,
     finished_at     TIMESTAMPTZ,
@@ -67,16 +68,22 @@ CREATE TABLE virtual_trade_log (
     symbol_code     VARCHAR(12)    NOT NULL,
     side            VARCHAR(4)     NOT NULL CHECK (side IN ('BUY', 'SELL')),
     quantity        BIGINT         NOT NULL CHECK (quantity > 0),
-    price           NUMERIC(20, 6) NOT NULL CHECK (price > 0),
+    price           NUMERIC(20, 6) NOT NULL CHECK (price > 0), -- 슬리피지 반영 후 체결가
     commission      NUMERIC(20, 4) NOT NULL CHECK (commission >= 0),
     tax             NUMERIC(20, 4) NOT NULL CHECK (tax >= 0),
-    slippage        NUMERIC(20, 4) NOT NULL CHECK (slippage >= 0),
+    slippage        NUMERIC(20, 4) NOT NULL CHECK (slippage >= 0), -- 기록용. price에 이미 반영됐으므로 다시 빼지 않는다
     currency        CHAR(3)        NOT NULL,
-    signal_time     TIMESTAMPTZ    NOT NULL,                -- 신호를 만든 T 시점
-    fill_time       TIMESTAMPTZ    NOT NULL,                -- 체결 시점(T 다음 시점)
+    lot_id          VARCHAR(64),                            -- 진입-청산 연결(승률·손익비·보유일 계산)
+    realized_pnl    NUMERIC(20, 4),                         -- 청산 체결의 비용 차감 후 실현 손익. 진입 체결은 NULL
+    signal_event_seq BIGINT        NOT NULL,                -- 신호를 만든 마지막 시세 이벤트 순번(T)
+    fill_event_seq  BIGINT         NOT NULL,                -- 체결가를 정한 시세 이벤트 순번(T 다음)
+    signal_time     TIMESTAMPTZ    NOT NULL,
+    fill_time       TIMESTAMPTZ    NOT NULL,
     exchange_date   DATE           NOT NULL,                -- 거래소 현지 날짜
-    -- 미래 정보 금지: 체결은 신호보다 뒤여야 한다(프로젝트 지침 5장)
-    CHECK (fill_time > signal_time),
+    -- 미래 정보 금지(프로젝트 지침 5장): 순서는 이벤트 순번으로 판단한다(같은 밀리초에 여러 이벤트가 올 수 있음)
+    CHECK (fill_event_seq > signal_event_seq),
+    CHECK (fill_time >= signal_time),
+    CHECK ((side = 'BUY' AND realized_pnl IS NULL) OR side = 'SELL'),
     FOREIGN KEY (run_id, experiment_id) REFERENCES experiment_run (run_id, experiment_id),
     FOREIGN KEY (run_id, profile_hash) REFERENCES experiment_run (run_id, profile_hash),
     FOREIGN KEY (account_id, run_id) REFERENCES virtual_account (account_id, run_id),

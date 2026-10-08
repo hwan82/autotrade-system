@@ -17,6 +17,7 @@ public record TradeTick(
         if (price.signum() <= 0) {
             throw new IllegalArgumentException("체결가는 0보다 커야 합니다: " + price);
         }
+        price = price.stripTrailingZeros(); // 직렬화 왕복 후에도 equals가 같도록 스케일 정규화
         if (quantity <= 0) {
             throw new IllegalArgumentException("체결 수량은 0보다 커야 합니다: " + quantity);
         }

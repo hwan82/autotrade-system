@@ -68,7 +68,8 @@ public final class ConfigLoader {
         try {
             return mapper.treeToValue(tree, RuntimeConfig.class);
         } catch (IOException e) {
-            throw new IllegalStateException(ConfigJson.describe(e), e);
+            // 원인 예외는 붙이지 않는다: Jackson 메시지에 원문 값이 실릴 수 있다
+            throw new IllegalStateException(ConfigJson.describe(e));
         }
     }
 

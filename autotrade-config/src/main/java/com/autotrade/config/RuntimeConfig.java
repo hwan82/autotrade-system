@@ -11,8 +11,9 @@ import java.util.Objects;
 /**
  * 실행 중 설정 스냅샷(불변). 키 목록·기본값·범위·실시간 변경 가능 여부는 docs/config/config-keys.md.
  *
- * <p>실전 매매 관련 키(실전 계좌, RealTradingGuard, 리스크 한도)는 여기 두지 않는다. risk-ops 작업에서 별도 계약으로 추가하며,
- * 설정 파일 로딩이 실전 활성화 상태를 켤 수 없어야 한다(안전 불변식 1).
+ * <p>실전 매매 관련 키(실전 계좌, RealTradingGuard, 리스크 한도)는 여기 두지 않는다. risk-ops 작업에서 별도 계약으로 추가한다.
+ * RealTradingGuard 상태는 이 스냅샷과 runtime-config.json에 절대 들어오지 않으며 메모리에만 둔다
+ * (설정 파일 로딩·UI 저장이 재기동 후 실전 활성화를 되살릴 수 없게, 안전 불변식 1). ConfigLoaderTest가 지킨다.
  */
 public record RuntimeConfig(MarketData marketData, Lab lab, Notification notification, Brokers brokers) {
 

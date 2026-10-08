@@ -45,7 +45,17 @@ class ExperimentSpecTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> spec(D1, D2, SEED, List.of(profile("a", Market.KRX), profile("b", Market.US))))
                 .isInstanceOf(IllegalArgumentException.class);
+        StrategyProfile sameKeyOtherContent =
+                new StrategyProfile("a", 1, Market.KRX, TradingStyle.SWING, new TreeMap<>(Map.of("k", "other")));
+        assertThatThrownBy(() -> spec(D1, D2, SEED, List.of(profile("a", Market.KRX), sameKeyOtherContent)))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> spec(D1, D2, SEED, List.of())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 시드머니_통화는_시장_통화와_같아야_한다() {
+        assertThatThrownBy(() -> spec(D1, D2, Money.of(10_000, Money.USD), List.of(profile("a", Market.KRX))))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static ExperimentSpec spec(LocalDate from, LocalDate to, Money seed, List<StrategyProfile> profiles) {
