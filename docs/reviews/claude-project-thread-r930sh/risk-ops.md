@@ -181,3 +181,65 @@
 - /home/claude/autotrade-system/autotrade-ui/src/main/resources/static/js/app.js
 - /home/claude/autotrade-system/autotrade-ui/src/main/resources/static/js/pages/real.js
 - /home/claude/autotrade-system/docs/spec/autotrade-spec.md (RSK-13, 185행)
+
+## 재검토 2026-10-09
+
+# risk-ops 검토: 실전 운영 화면(ADR-006) 1차 검토 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, 커밋 a3f31de / `git diff origin/main...HEAD`(origin/main c50ab6f 기준, 57개 파일). 1차 검토 대상 4ab3553 이후 변경(a3f31de)을 포함해 diff 전체를 다시 봤다
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew --offline build --rerun-tasks`: BUILD SUCCESSFUL, 91개 작업 모두 실행. 테스트 359건, 실패 0, 오류 0, 건너뜀 0(app-engine 47, control 18, architecture-test 13, risk 41, config 29, app-lab 97, 나머지 모듈 114). 처음 `./gradlew --offline build`는 캐시로 테스트가 UP-TO-DATE라 다시 강제 실행했다
+  - 엔진 기동 점검(CI 단계와 같은 내용을 로컬에서): `:autotrade-app-engine:installDist` 후 짧은 설정 폴더로 엔진 실행. `run` 700, `run/engine-control.sock` 600 확인. 같은 폴더로 두 번째 엔진은 종료 코드 1. 소켓 파일을 지운 뒤 세 번째 엔진도 종료 코드 1(engine.lock). 이때 첫 엔진은 계속 살아 있었다(아래 F2의 근거). SIGTERM 후 소켓 삭제 확인
+  - 긴 설정 폴더 경로(약 100바이트 초과)에서는 엔진이 "Unix domain path too long"으로 기동을 거부하는 것을 실제로 확인했다(ADR 2.2와 일치)
+  - 비밀값: diff 전체에서 `@Disabled`·`assume*`, 테스트 파일 삭제, 키·계좌번호·토큰·실제 해시 모양 문자열을 grep으로 찾았다. 결과 없음. gitleaks 바이너리가 로컬에 없어 gitleaks는 돌리지 못했다(CI에서 실행)
+- 코드는 고치지 않았다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk` 변경 없음(diff에 risk·domain·broker·sim·strategy·order 경로 없음). EngineMain.java:95-105가 설정 계좌로 Guard를 만들고 모두 OFF. 설정에 올리는 키 없음(autotrade-default.json에 `operator-password-hash`만 추가). 엔진 잠금은 메모리에만 있고 재기동 시 OFF(OperatorAuthenticator.java:17). EngineMainTest#실전_계좌가_설정돼_있어도_기동_직후_모두_OFF다, #설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다, EngineCommandHandlerTest#기동_직후_상태는_모든_계좌_OFF이고_비밀값을_담지_않는다 통과 |
+| A2 | 통과 | ArchitectureTest.java:136 `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY` 변경 없음(diff는 149행 주석 한 줄만). 새 규칙 161 `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`, 169·175 명령 채널 서버·클라이언트 위치 규칙과 위반 픽스처(ForgedConfirmation 2건, MisplacedControlChannel) 통과. `RealOrderGateways.open`을 부르는 운영 코드 없음. 연동 전 활성화는 AUTHENTICATED에서 실패(ActivationStepRunner.java:169-170, EngineMain.java:116-117), EngineMainTest#실제_배선으로_활성화하면_증권사_연동_전이라_첫_단계에서_OFF로_돌아간다 통과 |
+| A3 | 통과 | 이 변경에 주문 전송 코드가 없다. PanicLiquidator·ActivationStepRunner는 `AccountRef`(계좌의 broker 포함)만 받고 증권사를 고르는 인자가 없다(PanicLiquidator.java:141). 다른 증권사로 넘기는 경로 없음 |
+| A4 | 통과 | 주문 타임아웃 경로는 바뀌지 않았다. 명령 채널에도 같은 원칙이 적용됐다: ControlClient·RealOpsController·real.js에 재전송 없음(RealOpsController.java:87-90은 "다시 보내지 말고 상태를 새로 읽으라"로 503), 오래 기다린 ACTIVATE는 STALE로 버림(ControlServer.java:223-226). ControlChannelTest#오래_기다린_활성화는_버리고_PANIC은_기다렸어도_실행한다, RealOpsControllerTest#엔진이_꺼져_있으면_상태는_연결_안_됨으로_보이고_명령은_503이다 통과 |
+| A5 | 해당 없음 | 주문을 만드는 코드가 없다. 멱등 키 생성·검증 코드(domain) 변경 없음. 7단계 PanicLiquidator 매도 구현 때 다시 본다 |
+| A6 | 통과 | 이번 변경으로 생긴 자동 주문 경로가 없다(PANIC 증권사 단계는 NOT_AVAILABLE, PanicLiquidator.java:144-148). 블랙리스트·수동 보유 제외는 PanicLiquidator 계약(127행)과 ADR 2.5 4단계에 명시돼 7단계 구현 조건으로 남았다 |
+| A7 | 통과 | 계좌별 큐·토큰 버킷 코드 변경 없음. PANIC 1단계가 계좌별 Guard 전이만 하고(EngineCommandHandler.java:228-240) 다른 계좌 상태를 바꾸지 않음. 계좌별 순차 PANIC이 서로 기다리는 문제는 ADR 4장·6장에 7단계 완료 조건으로 기록됨. 단 대기열 상한이 PANIC도 거절할 수 있는 점은 F1로 따로 적는다 |
+| A8 | 통과 | 실험실은 클라이언트만, 엔진은 서버만(ArchUnit 169·175), 게이트웨이·감시는 control 모듈 금지(build.gradle.kts processIsolation). 서버 스레드는 모두 데몬, 명령 채널 장애는 Guard 판정에 영향 없음(Guard 변경 없음). 입력 크기 64KB·읽기 5초·연결 8개·대기열 2개 제한과 테스트 있음(ControlChannelTest 18건). Windows·macOS 소켓 권한은 ADR 5장에 "검증하지 못한 것"으로 명시됨 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. PANIC은 증권사 단계가 모두 DONE일 때만 OFF, 아니면 보호 모드 유지(EngineCommandHandler.java:261-266). 서버 측 손절 취소 후 매도 미완료는 긴급 표시(274-284), PanicLiquidator 계약에 재설정 의무(133-134). EngineCommandHandlerTest#서버_측_손절을_취소한_뒤_매도가_끝나지_않으면_긴급으로_알린다, #매도가_하나라도_끝나지_않으면_Guard를_끄지_않는다 통과 |
+| A10 | 통과 | 해시는 🔒 비밀값 경로에만(ConfigLoaderTest 비밀값 경로 목록, RuntimeConfigHolderTest 해시는 secrets.json으로만, SecretTest toString 마스킹). 테스트 픽스처는 `PLACEHOLDER-*`와 `<ACCOUNT_NUMBER>`만 쓰고 해시는 실행 중 생성(EngineMainTest.java:127-136). 요청 toString이 비밀번호·계좌 칸을 가림(ControlChannelTest#요청_문자열에는_비밀번호와_계좌_칸이_보이지_않는다), 감사 로그는 설정 별칭만(EngineCommandHandler.java:323-328), 실험실 로그는 명령 이름과 결과 코드만(RealOpsController.java:88·92, RealOpsControllerTest#활성화는_확인_문구와_비밀번호를_엔진에_넘기고_응답과_로그에는_남기지_않는다). 수동 grep으로 diff에 실제 값 없음. gitleaks는 로컬 미실행 |
+| A11 | 통과 | diff에 `@Disabled`·assume 없음, 삭제된 테스트 파일 없음. 바뀐 기존 테스트 줄은 생성자 인자 추가와 단언 강화(RuntimeConfigHolderTest의 `doesNotContain(FAKE_HASH)`, `contains(FAKE_HASH)` 추가)뿐이다. 새 동작에 실패 경우 테스트가 있다(틀린 확인, 잠금, 미설정, Error·감사 로그 실패, BUSY, STALE, 잠금 파일, 심볼릭 링크) |
+| A12 | 통과 | 장애 대응표 #8(엔진 크래시 후 재기동): 잠금은 프로세스 종료 시 OS가 풀고 남은 소켓은 지우고 시작(ControlChannelTest#죽은_엔진의_소켓은_지우고_시작한다) → 재기동을 막지 않는다. #9(실험실·UI 크래시): 실험실은 클라이언트일 뿐이라 엔진 영향 없음. 장애 테스트 8종의 전제(주문 경로, 큐, 대사)를 바꾸는 코드 없음. 해외 O1~O8 영향 없음(시장별 코드 없음) |
+| A13 | 해당 없음 | 시장별 분기·시간·금액 계산이 없다. 시간은 주입 Clock만(OperatorAuthenticator 잠금), 대기열 경과는 `System.nanoTime` 상대값(ControlServer.java:219-223)으로 ArchUnit `NO_SYSTEM_TIME` 통과 |
+| A14 | 통과 | ADR-006 7장에 사용자 결정 8건, Q-016·Q-017이 결정 로그 미확정 표에 추가됨(docs/decisions/README.md). 기획서 RSK-13(autotrade-spec.md:185)과의 차이 두 가지(1단계를 2차 확인 전에 함, 장 외 시간 Guard 유지)는 ADR 7장 4번과 Q-017에 명시돼 있다. 머지로 결정되면 autotrade-spec-keeper로 RSK-13 문구를 고쳐야 한다(F6) |
+
+### 1차 검토 지적 처리 확인
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| M1 응답 없음을 가상으로 표시 | 반영 | RealOpsController.java:51-61 `UP/NOT_RUNNING/UNKNOWN`+asOf, real.js:54-67 마지막 상태 유지·경고, RealOpsControllerTest#엔진이_답하지_않으면_상태를_알_수_없음으로_보여_준다. 남은 틈은 F2 |
+| M2 잠기면 PANIC 불가 | 반영 | EngineCommandHandler.java:176-183, 189-200. 테스트 3건(확인 실패·잠금·미설정) 통과 |
+| M3 서버 측 손절 문구 | 반영 | EngineCommandHandler.java:274-284, PanicStepResult urgent, 테스트 2건 |
+| M4 ACTIVATING 잔류, 배선 테스트 | 반영 | EngineCommandHandler.java:120-127(finally), 감사 로그 실패 74-80. EngineMainTest 배선 테스트 |
+| M5 ADR 보안 주장·알림·RSK-13 | 반영 | ADR 3장 B1, 4장 위험 표, 비밀번호 15자, Q-017 |
+| M6 단일 인스턴스 | 반영 | ControlServer.java:83-98, 로컬 실행으로 확인 |
+| M7 계좌별 순차 PANIC | 7단계 조건으로 기록 | ADR 4장, 6장 |
+| M8 서버 측 손절 재설정 계약 | 반영(계약)·7단계 테스트 조건 | PanicLiquidator.java:130-136, ADR 6장 |
+| M9 상태·내리기 대기 | 부분 반영 | STATUS·DEACTIVATE 직행(ControlServer.java:60, 212-214). PANIC 1단계는 여전히 대기열 뒤(ADR 4장 7단계 조건). 하향 명령용 연결 슬롯 예약은 하지 않음(F5) |
+| M10 늦은 ACTIVATE | 반영 | ControlServer.java:219-226, 테스트 |
+| R1~R10 | 반영 | R1 OperatorAuthenticator.java:97-109, R2 MAX_ITERATIONS, R3 감사 로그 try/catch, R4 serve 198행, R5 acceptLoop가 RuntimeException 포함, R6 toString 마스킹, R7 엄격 파싱, R8 심볼릭 링크 거부, R9 ADR 7장 Q-016 조건, R10 CI trap |
+
+## 점검표 밖 발견
+- **F1 (중요, 수정 필요) PANIC이 BUSY로 거절될 수 있다.**
+  - 근거: ControlServer.java:215-218. 대기열 세마포어 2개는 실행 중인 명령도 센다(MAX_QUEUED=2, 54행). ACTIVATE 하나가 실행 중이고 하나가 기다리면 PANIC_ACCOUNT·PANIC_ALL은 `BUSY`로 즉시 거절되고 1단계(보호 모드 고정)도 일어나지 않는다. ControlChannelTest#대기열이_차면_BUSY로_거절한다는 반대 방향(PANIC이 차 있을 때 ACTIVATE 거절)만 확인한다.
+  - 1차 수정 전에는 PANIC이 기다렸다가 실행됐는데, 대기열 상한을 넣으면서 거절로 바뀌었다. ADR 2.2는 "PANIC은 기다렸어도 실행한다"고 적어 이 경우를 다루지 않는다.
+  - 지금은 증권사 연동 전이라 OPEN 계좌가 생길 수 없어 실제 피해는 없다. 하지만 ACTIVATE 한 건은 PBKDF2 60만 회 검증 때문에 짧지 않고, 7단계에서는 더 길어진다.
+  - 수정 제안: PANIC은 BUSY로 거절하지 않는다(올리는 명령과 별도 상한을 두거나, 대기열에 넣기 전에 1단계 보호 모드 고정을 연결 스레드에서 바로 한다. 1단계는 DEACTIVATE와 같은 내려가는 전이라 스레드 안전 조건이 같다). 테스트: ACTIVATE 2건으로 대기열을 채운 상태에서 PANIC을 보내면 거절되지 않고 OPEN 계좌가 PROTECTIVE로 내려간다. 코드로 고치지 않을 경우 최소한 ADR 2.2·4장에 "대기열이 차면 PANIC도 BUSY, 그때는 내리기를 쓴다"를 적고 화면 BUSY 안내에 내리기를 명시하며, 7단계 완료 조건에 넣는다.
+- **F2 (중요, 수정 필요) 엔진이 살아 있는데 소켓 파일이 없으면 화면이 "가상 계좌만"으로 보인다.**
+  - 근거: ControlClient.java:50-52는 소켓 파일이 없으면 바로 `NOT_RUNNING`. real.js:47-53은 이때 버튼 없이 "실행 중이 아닙니다"를 보이고, 모드 띠는 NOT_RUNNING일 때만 가상으로 바꾼다(ADR 2.7). 실행 중에 `run/engine-control.sock`이 지워지면 engine.lock 덕분에 두 번째 엔진은 뜨지 않지만 첫 엔진은 계속 돈다(로컬 실행으로 확인: 소켓 삭제 후 첫 엔진 살아 있음). 이 상태에서 화면은 실전 계좌가 열려 있어도 "가상"으로 보이고, 내리기·PANIC을 보낼 길이 없다. ADR 2.3의 "NOT_RUNNING: 엔진 프로세스 없음"이 이 경우에는 틀리다. 1차 M1(UI-05 착각 방지)의 남은 틈이다.
+  - 지금은 열 수 있는 계좌가 없어 실제 피해는 없다.
+  - 수정 제안(택1 이상): (a) 엔진이 주기적으로 소켓 파일을 확인하고 없으면 다시 만들며 ERROR 로그를 남긴다. (b) 실험실은 소켓이 없더라도 `run/engine.lock`이 다른 프로세스에 잡혀 있으면 `UNKNOWN`으로 본다. 단, 실험실이 배타 잠금을 잡아 보면 그 순간 엔진 기동을 막을 수 있으므로 잠금을 잡지 않는 확인 방법을 쓴다. 최소한 ADR 2.3·4장 문구를 고치고 7단계 완료 조건에 넣는다.
+- **F3 (참고) DEACTIVATE가 동시에 진행 중인 ACTIVATE의 검증을 지울 수 있다.** EngineCommandHandler.java:71-73은 DEACTIVATE(연결 스레드에서 바로 실행)에서도 `discardVerification()`을 부른다. ACTIVATE가 `confirm()` 직후 `confirmationFor()` 전이면 활성화가 INVALID_STATE로 실패한다. 안전한 쪽(열리지 않음)이지만 실패 횟수는 이미 초기화됐고 사용자에게는 이유가 불분명하다. `verify`가 일회용 확인 객체를 돌려주게 하거나, 검증을 쓰는 명령(ACTIVATE·PANIC)에서만 버리게 하는 것을 권한다.
+- **F4 (참고) 화면 문구 불일치.** real.js:69 "비밀번호가 설정되지 않아 실전 활성화와 PANIC SELL을 받을 수 없습니다"는 실제 동작(PANIC 1단계는 됨, 82행·191행 안내)과 다르다. 급박할 때 PANIC을 누르지 않게 만들 수 있으니 "PANIC SELL은 보호 모드 고정까지만 됩니다"로 맞추는 것을 권한다.
+- **F5 (참고) 하향 명령용 연결 슬롯 예약 없음(1차 M9 일부).** ControlServer.java:154-158. 같은 OS 사용자 프로그램이 요청 없는 연결 8개를 5초씩 계속 열면 DEACTIVATE·PANIC 연결도 닫힌다. 공격 범위는 같은 사용자라 등급은 참고. 7단계 감시 프로세스(MON) 점검 항목에 넣는 것을 권한다.
+- **F6 (참고) 머지 후 기획서 갱신.** RSK-13 원문 "둘 다 2차 확인"과 "장 외 시간 Guard OFF"는 ADR 7장 4번과 Q-017 결정 결과에 따라 autotrade-spec-keeper로 고쳐야 한다.
+
+## 판정
+수정 필요(F1, F2). 점검표 A는 실패 0, 확인 못 함 0이다(gitleaks는 CI에 맡기고 수동 grep으로 확인). 1차 지적 M1~M6, M8, M10, R1~R10은 반영을 확인했고 M7·M9 일부는 ADR에 7단계 조건으로 남았다. F1·F2는 지금 열 수 있는 계좌가 없어 현재 계좌 피해는 없지만, F1은 이번 수정으로 생긴 PANIC 경로 회귀이고 F2는 1차 M1이 막으려던 "실전을 가상으로 착각"의 남은 경로다. 둘 다 코드로 고치거나, 최소한 ADR 2.2·2.3·4장 정정과 7단계 완료 조건 등록(F1은 화면 BUSY 안내 포함)을 하면 승인한다. 실전 경로 PR이므로 승인 후에도 머지는 사용자가 직접 한다(지침 10장).
