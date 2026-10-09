@@ -69,3 +69,41 @@
 - /home/claude/autotrade-system/autotrade-sim/src/test/resources/golden/krx-golden.report
 - /home/claude/autotrade-system/docs/adr/ADR-004-simulation-engine.md
 - /home/claude/autotrade-system/docs/decisions/D-025-simulation-engine-defaults.md
+
+## 재검토 2026-10-09
+
+# strategy-researcher 검토: PR #12 3단계 실험실 MVP (재검토)
+- 대상: PR #12 / squash 머지 커밋 6459d6f (지적 반영 커밋 5558dcf 포함) / `git diff ae4343d 6459d6f` 전체(59파일, +4025 −5). 작업 트리는 origin/main 0ea575d이며, PR #12가 만든 `autotrade-sim` 체결·비용·지표·실행기 파일은 6459d6f 이후 바뀌지 않았다(`git diff 6459d6f HEAD --stat`로 확인, 이후 PR은 `study`·`synthetic` 패키지 추가만)
+- 점검표: strategy-researcher 전용 고정 점검표는 `docs/qa/checklists.md`에 없다. 앞선 검토 지적 1~12를 R1~R12로 다시 판정하고, 실험·통계 관점에서 B4(결정론)·B5(금액 표현)·B6(테스트)를 함께 본다
+- 직접 실행한 것: `./gradlew :autotrade-sim:test :autotrade-strategy:test --offline` → EXIT 0. 결과 XML 기준 실패·건너뜀 0: VirtualExchangeTest 18, CostModelTest 9, SimulationExperimentRunnerTest 9, VirtualAccountTest 5, ExperimentSpecTest 5, MetricsCalculatorTest 4, RunSeedsTest 1, TradeSignalTest 2 (그 밖에 이후 PR 테스트도 통과). `./gradlew build` 전체는 돌리지 않았다(architect B1 범위). 골든 `krx-golden.report`의 A01·A02·A03 수치를 앞선 손 계산(10,055,715원 / 33,793원·16,207원 / RISK:BLACKLIST)과 다시 대조해 일치를 확인했다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| R1 (차단) 표시 범위 밖 지정가의 앞선 잔량 0 고정 | 통과 | VirtualExchange.java:348-368 범위 밖이면 `return`(null 유지), 범위 안인데 가격이 없을 때만 0, 정해진 뒤에는 `Math.min`. matchTrade 401행이 `queueAhead != null`일 때만 같은 가격 체결을 허용. 회귀 테스트 `표시_범위_밖_지정가는_그_가격이_표시될_때까지_앞선_잔량을_정하지_않는다`(VirtualExchangeTest.java:121) 통과. 이 테스트는 고치기 전 코드(앞선 잔량 0)에서는 3000ms 체결에서 10주가 체결돼 실패한다(손으로 따라가 확인) |
+| R2 대기 지정가의 교차 체결가 | 통과 | VirtualExchange.java:329-332 `resting`이면 체결가 = 지정가, 충격 0. 같은 가격(locked)은 교차로 보지 않음(321행). 테스트 `대기_중이던_지정가가_나중_호가와_교차하면_지정가로_체결된다`(137행), `대기_중인_지정가와_같은_가격의_반대편_호가는_즉시_체결이_아니다`(146행) 통과. ADR-004 2.2 3항에 반영 |
+| R3 장 시작·마감 단일가 구간 | 해당 없음(이연, 기록됨) | 코드 변경 없음. ADR-004 4장 115행에 담당(sim-engine·data-engineer·architect)과 시점("실제 녹화 데이터 첫 실험 전")이 적혀 있다. 머지를 막는 항목이 아니었고 이연 기록이 있어 이 PR 판정에는 영향 없음 |
+| R4 짧은 기간 샤프·CAGR | 해당 없음(이연, 기록됨) | MetricsCalculator.java:39-42, 103-124 그대로. ADR-004 4장 119행 "4단계 전략 비교 전 필요"로 이연. 점검표 밖 1 참고 |
+| R5 장중 MDD·최장 회복 기간 | 해당 없음(이연, 기록됨) | MetricsCalculator.java:44-61 그대로(일별 종가). ADR-004 4장 119행 |
+| R6 미청산 포지션, 손실 0일 때 손익비 | 해당 없음(이연, 기록됨) | MetricsCalculator.java:65-82 그대로. ADR-004 4장 119행. 점검표 밖 1 참고(이후 실험에서 실제로 문제가 됨) |
+| R7 충격 금액 합계 | 해당 없음(이연, 기록됨) | 체결마다 `slippage` 열은 남음(VirtualExchange.java:455), RunMetrics에 합계 없음. ADR-004 4장 110·119행 |
+| R8 우리 주문의 시장 영향, 참여율 | 해당 없음(이연, 기록됨) | D-025 4항 `[가정]` 유지, VirtualExchange.java:59-60 주석과 ADR-004 3장 96행에 되돌릴 조건("큰 주문 전략이 나오면")이 있음. 참여율 경고는 ADR-004 4장 119행 |
+| R9 지연 민감도, 취소 지연 | 통과(참고 사항 기록됨) | 체결 모델 ID `BOOK-V1;latency=PT0.5S`가 ExperimentResult와 골든 4행에 남음. ADR-004 5장 123행과 D-025 2항에 0·1.5·2초 민감도 요구. 취소는 여전히 즉시(VirtualExchange.java:173-182)지만 전략 쪽 취소 경로가 아직 없어 지금 결과에는 영향 없음 |
+| R10 회전율 라벨, 보유시간 | 통과(참고) | RunMetrics.java turnover 정의가 기간 값으로 명시됨. 분 단위 보유시간은 없음(단타 비교 시 보강 필요, 막는 항목 아님) |
+| R11 벤치마크 | 통과(참고) | ADR-004 2.5 표에 "벤치마크 종목 매수 후 보유, 비용 제외"로 명시. 지수 벤치마크는 2단계 지수 데이터 이후 |
+| R12 TAF 마지막 구간 닫기 | 통과 | CostModels.java:72-73 `Period.closed(2027-01-01, 2028-12-31)`. CostModelTest.java:106-108이 2029-01-02까지 덮지 않음을 확인, 통과 |
+| B4 결정론 | 통과 | SimulationExperimentRunnerTest(같은 실험 두 번, 병렬 1·3 동일, 실패 Run 격리) 통과. 골든 바이트 일치 통과. 지표는 BigDecimal만 사용(MetricsCalculator.java, DecimalMath) |
+| B5 금액 표현 | 통과 | `Money`·BigDecimal, 비용 항목별 반올림(CostModels.java), double 미사용 |
+| B6 새 동작 테스트 | 통과 | 반영 커밋 5558dcf에 VirtualExchangeTest +33행(위 3개 회귀 테스트), CostModelTest +3행. 삭제·건너뛴 테스트 없음(skipped 0) |
+
+미래 정보 차단 재확인: `live()`(VirtualExchange.java:288-290)가 `sequence > signalSeq`와 `receivedAt ≥ signalTime + latency`를 함께 요구하고, 골든 A01은 signal-seq=2 → fill-seq=4, A02 매도는 10 → 12로 신호 이벤트 자체에서 체결되지 않는다. [사실]
+
+## 점검표 밖 발견
+1. **R4~R8 지표 보강이 이연 조건("4단계 전략 비교 전")보다 늦어졌다.** [사실] PR #14(4단계, d27f309)는 `RunMetrics`·`MetricsCalculator`를 바꾸지 않았고(`git diff 6459d6f HEAD`에 metrics 변경 없음), 그 실험 리포트 experiments/EXP-20261008-STR01/report.md:73이 "kr-ma-trend의 PF 0.00과 수익 +2.58%가 엇갈림 … 수익 대부분은 미청산 포지션의 평가이익"이라고 적어 R6이 실제로 해석을 왜곡했다. [추론] 그 실험은 합성 데이터라 D-027 6항에 따라 후보 선정·승격 근거로 쓰지 않으므로 피해는 막혀 있다. 다만 **녹화 데이터로 같은 실험을 다시 돌리기 전**에 관측 일수와 짧은 기간 판정 불가 표시(R4), 장중 MDD(R5), 미청산 수·평가손익과 "손실 없음" 손익비(R6), 충격 합계(R7)는 반드시 들어가야 한다. 이건 PR #12의 결함이 아니라 후속 과제의 순서 문제라 이 판정을 막지 않는다. pm-lead가 녹화 재실행 작업의 선행 조건으로 걸어 두기를 제안한다.
+2. **R3(단일가 구간)도 같은 선행 조건이다.** 장 마감 청산 장중 프로필이 카탈로그에 들어왔으므로(PR #14), 녹화 데이터 첫 실험 전에 처리되지 않으면 장 마감 청산 체결이 매수 1호가 연속 체결로 과대평가된다. [추론]
+3. **같은 가격(locked) 처리는 보수적인 쪽이다.** 대기 매수 지정가와 같은 가격의 매도 호가가 보이면 실제로는 우리 주문이 체결됐을 가능성이 크지만, 코드는 그 가격 체결 틱이 올 때까지 기다린다(VirtualExchange.java:321-323). 이때 같은 쪽 그 가격 잔량이 사라져 앞선 잔량이 0이 되므로 다음 틱에 체결된다. 체결을 늦추는 방향이라 성과를 부풀리지 않는다. 고칠 필요는 없고 6단계 실측 비교 때 오차 항목으로 본다. [추론]
+4. **교차 체결 시 앞선 잔량을 보지 않는다.** 대기 주문이 교차 스냅샷에서 반대편 잔량만큼 바로 체결된다(VirtualExchange.java:324-334). 실제로 교차 호가는 우리 가격 이상의 매수 잔량이 모두 소진됐다는 뜻이라 대체로 맞지만, 스냅샷 간격이 길고 반대편 잔량이 커서 우리 앞 대기량보다 적게 소진된 경우에는 약간 과대평가할 수 있다. [추론] 영향은 작다고 보며 R5~R8 보강 때 참여율 지표로 함께 볼 수 있다.
+
+검증하지 못한 것: 실제 녹화 데이터에서의 동작, 실전 체결 기록과의 오차, `./gradlew build` 전체(ArchUnit 포함)는 이 재검토에서 돌리지 않았다. 이 결과는 투자 자문이 아니다.
+
+## 판정
+승인 (차단 항목 R1과 권장 R2·R12는 반영 확인. R3~R8은 ADR-004 4장에 이연 기록되어 있으며, 녹화 데이터 첫 실험 전 선행 조건으로 걸 것을 점검표 밖 1·2로 제안)
