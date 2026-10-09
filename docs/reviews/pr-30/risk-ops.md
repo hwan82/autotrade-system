@@ -33,3 +33,39 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-09
+- 대상: PR #30 / 커밋 55d8a96 / main 대비 diff (`git diff origin/main...HEAD`, merge-base = origin/main = 798b0eb)
+- 점검표: A
+- 직접 실행한 것:
+  - `git diff e7c0064 55d8a96`: 3개 파일. (1) `docs/decisions/README.md` D-036 행 근거 표기 `D-039` → `D-033→D-039`(N1 반영). (2) `docs/team/broker-and-fault-design.md:207` 1-T 시행 조건에 한 문장 추가: 게이트웨이의 토스 실시간이 미구현이면 "시행 불가(미구현)"로 기록하고 해당 없음으로 치지 않으며, 토스 실시간 연결 변경 뒤에 1-T를 시행해야 실전 활성화 조건을 채운다(N2 반영). (3) `docs/reviews/pr-30/risk-ops.md` 신규 추가. 이 파일의 커밋된 내용은 첫 검토에서 내가 쓴 원문과 같다(작업 트리 대비 차이 없음, 수정 흔적 없음).
+  - `git diff --name-only origin/main...HEAD -- '*.java' '*.json' '*.sql' '*.kts' '*.gradle'`: 0건. 코드·설정·스키마·빌드 변경 없음.
+  - `./gradlew build`: BUILD SUCCESSFUL.
+  - 테스트 결과를 지운 뒤(`cleanTest`) `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-config:test :autotrade-app-gateway:test`를 다시 실행: BUILD SUCCESSFUL. 결과 XML 집계(테스트/실패/오류/건너뜀) risk 55/0/0/0, architecture-test 28/0/0/0, app-engine 48/0/0/0, config 30/0/0/0, app-gateway 25/0/0/0.
+  - 새 문장의 전제 확인: `GatewayMain.java:126` `case TOSS -> Optional.empty()`(토스 실시간 미구현), `GatewayMainTest#기본_목록의_토스는_키가_있어도_실시간을_구현하기_전까지_건너뛴다` 통과.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드·설정 변경 0건. `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`, `#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `#자동으로_올라가는_경로는_없다`, `ConfigLoaderTest#실전_활성화_키가_있는_파일은_받아들이지_않는다` 재실행 통과 |
+| A2 | 통과 | 코드·ArchUnit 변경 0건. `ArchitectureTest`·`ModuleOwnershipTest`(28건), `GuardedOrderGatewayTest` 재실행 통과 |
+| A3 | 통과 | 추가 문장은 시험 기록 방식과 활성화 조건만 다루고 주문 라우팅을 바꾸지 않는다. broker-and-fault-design.md 4.2 "계좌의 증권사로만" 그대로. 코드 변경 0건 |
+| A4 | 통과 | 코드 변경 0건. 장애표 4번·장애 테스트 4번 문구 변경 없음. app-engine 48건 재실행 통과 |
+| A5 | 통과 | 코드 변경 0건. 멱등 키 관련 문서·코드 변경 없음. app-engine·risk 테스트 재실행 통과 |
+| A6 | 통과 | 코드 변경 0건. `BlacklistSnapshotTest`, `RiskChainTest` 재실행 통과 |
+| A7 | 통과 | 코드 변경 0건. `RealTradingGuardTest#한_계좌의_전이는_다른_계좌에_영향이_없다` 통과. 장애 테스트 5·8번 문구 변경 없음 |
+| A8 | 통과 | 5.1·5.2 문구 변경 없음. 정상 설정의 게이트웨이 차단 규칙(`GatewayMain.reservedForRealTrading`, `GatewayMainTest#계좌번호까지_설정된_실전_계좌의_증권사는_게이트웨이가_쓰지_않는다`) 그대로이고, 새 문장은 이 규칙을 우회하지 않는다 |
+| A9 | 통과 | 보호 시세 경로(HELD_ONLY)·서버 측 손절(6.1) 문구 변경 없음 |
+| A10 | 통과 | 바뀐 줄 전부 문서 문장. 키·계좌번호·토큰 없음(diff 전문 확인) |
+| A11 | 통과 | 테스트 파일 변경 0건. 보호 테스트 재실행 통과. 새 동작 없음(문서) |
+| A12 | 통과 | broker-and-fault-design.md:207. 새 문장은 1-T를 실행할 수 없는 상태(토스 실시간 미구현, `GatewayMain.java:126`)를 "해당 없음"이 아닌 "시행 불가"로 남기고, 토스 실시간 연결 뒤 시행을 활성화 조건으로 건다. 장애 테스트 1번을 건너뛸 여지를 줄이는 방향이며 완화가 아니다. 1-TK는 "1-T와 1-K가 각각 합격한 뒤에만"(:209)이라 1-T가 시행 불가인 동안 1-TK도 시행되지 않으므로 서로 맞다. 장애표 17종·테스트 8종의 개수와 합격 기준 변경 없음 |
+| A13 | 해당 없음 | 미국 시장 경로·`MarketRules`·시간대·통화를 건드리지 않음(diff 전문 확인) |
+| A14 | 통과 | D-039 결정 2, 기획서 MD-02(`docs/spec/autotrade-spec.md:111`), config-keys.md:15, `autotrade-default.json:3`이 `["KIWOOM","TOSS","KIS"]`로 일치. D-036 행은 `D-033→D-039`로 이력이 남았다. "시행 불가(미구현)"는 D-036의 결정 내용(토스 항목은 토스 시세를 켠 설정에서만)을 바꾸지 않고 기록 방식을 구체화한 것이라 새 결정 번호가 필요하지 않다고 본다 |
+
+## 점검표 밖 발견 (재검토)
+- N1: 해결. D-036 행이 `D-033→D-039`로 이력을 남긴다.
+- N2: 해결. 내가 권한 위치는 7단계 절차서(TST-07)였지만, 장애 테스트 시행 조건의 원본인 broker-and-fault-design.md 7.1에 넣은 것이 더 적절하다. 절차서는 7.1을 따르므로 따로 고칠 필요 없다.
+- N3(정보, 머지 차단 아님): 새 문장은 "토스 실시간을 연결하는 변경 뒤에 1-T를 시행해야" 한다고만 하고, 이미 활성화된 토스 계좌가 있는 상태에서 그 변경이 들어오는 경우는 다루지 않는다. [추론] 지금은 토스 실전 계좌를 활성화한 적이 없어 당장의 위험은 없다. 토스 실시간 연결 PR의 risk-ops 검토에서 "그 PR 머지 전 또는 해당 계좌 재활성화 전 1-T 시행"을 확인 항목으로 둔다(담당 risk-ops).
+- 분류: 장애 대응 문서(7장 장애 테스트)를 건드리는 실전 관련 PR이다. risk-ops 승인 뒤에도 사용자가 직접 확인하고 머지하며, 독립 QA 관문 대상이다.
+
+## 판정
+승인
