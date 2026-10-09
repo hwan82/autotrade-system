@@ -106,3 +106,63 @@
 - QA 지적 A14, 8.2·8.3, R-2는 해소되었고 R-3은 키움 계좌 단위로는 해소되었다. 변경은 RealTradingGuard·주문 경로·보호 시세 경로·정지 순서를 약화하지 않는다.
 - 남은 문제는 시험 절차가 계정·키 단위로 묶인 다른 실전 계좌와 토스 토큰을 다치게 할 수 있다는 점과, 이번 병합으로 들어온 게이트웨이 예약 규칙과 7.1이 맞지 않는 점이다. 장애 테스트는 실전 활성화의 유일한 차단 조건(TST-06)이라 이 문구가 그대로 시험 절차가 된다.
 - 장애 대응 문서를 건드리는 PR이므로 수정 뒤에도 project-instructions.md 10장에 따라 사용자가 직접 확인하고 머지한다.
+
+## 재검토 2 2026-10-09
+- 대상: PR #23 / 브랜치 `claude/project-thread-89zdzi` / 커밋 2d78c883287d4325719a0327e24266f5380f28d9 / `git diff origin/main...HEAD` (merge-base = origin/main 1bd0ddcb7a2b4181f92e6436d54c64749e20aceb)
+- 점검표: A (+ 지난 재검토 N-1~N-5, 독립 QA `docs/reviews/pr-23/qa.md` R-1·A14·8.2·8.3·R-2·R-3 해소 확인)
+- 변경 범위(직접 확인): `git diff --stat origin/main...HEAD` 6개 파일, 문서만(214줄 추가·6줄 삭제). 코드·설정·테스트·DB 마이그레이션 변경 없음. 검토 원문 2개(`docs/reviews/pr-23/qa.md`, `risk-ops.md`)를 빼면 실질 변경은 다음 4개.
+  - `docs/team/broker-and-fault-design.md:188` 1번 시나리오·합격 기준, `:199~:215` 7.1(1-0 차단 확인, 1-T·1-K·1-TK, 공통 전제·합격 지표·감지 기록)
+  - `docs/decisions/README.md:41` D-036 행 추가, `:55` Q-015에 키움 토큰 무효화 실측 명시
+  - `docs/spec/autotrade-spec.md:12·20·279·284` v14.2, 이력, TST-01 인수 조건, TST-07 (8)
+  - `docs/research/market-data-limits.md:110` D-036 채택 문구
+- 직접 실행한 것:
+  - `git merge-base origin/main HEAD` → 1bd0ddc(= origin/main). `git merge-tree --write-tree origin/main HEAD` → 충돌 없음. GitHub `pulls/23` → `head.sha` 2d78c88, `mergeable: true`.
+  - main 쪽 행 보존 확인: 3-dot diff에서 `decisions/README.md`의 D-037 행과 `autotrade-spec.md`의 v14.1 이력 행은 문맥 줄로만 나오고 바뀌지 않음. 결정 로그 변경은 D-036 행 추가와 미확정 Q-015 행 보강뿐(기존 결정 행 수정 없음).
+  - `./gradlew build --no-daemon --max-workers=2` (2d78c88) → `BUILD SUCCESSFUL` (104 tasks). 테스트 결과 XML 집계 전체 516건 실패 0·오류 0·건너뜀 0.
+  - `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-gateway:test --rerun-tasks --no-daemon` → `BUILD SUCCESSFUL` (54 tasks 모두 executed). autotrade-risk 55건, autotrade-architecture-test 28건, autotrade-app-engine 48건, autotrade-app-gateway 19건, 모두 실패·오류·건너뜀 0.
+  - GitHub REST `commits/2d78c88/check-runs`: 3건(Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary) 모두 completed·success. merge-base가 origin/main이므로 이 CI가 main 병합 결과 기준이다.
+  - 7.1 1-0과 코드 대조: `GatewayMain.java:86~:93`(예약 증권사를 건너뛰고 WARNING 로그), `:107~:115`(`reservedForRealTrading`), `GatewayMainTest.java:31~:40`. 키 구조 대조: `RuntimeConfig.java:93·:123`(증권사별 키 1벌), `ConfigPaths.java:27~:33`(프로세스별 설정 폴더 지정 가능), `config-keys.md:26~:28`.
+  - diff 전체에서 키·계좌번호·토큰 패턴 검색 → 실제 값 없음(검토 원문의 커밋 해시만 해당).
+
+### 지난 지적의 해소 상태
+| 지적 | 상태 | 근거 |
+|---|---|---|
+| N-1 / QA R-1 main과 충돌, CI | 해소 | merge-base가 origin/main 1bd0ddc, merge-tree 충돌 없음, `mergeable: true`. D-037·v14.1 행 보존. CI는 위 실행 결과 |
+| N-2(a) 1-T 키 분리·계정 단위 무보유 | 해소 | "게이트웨이는 실전 엔진과 다른 토스 키(클라이언트)를 쓴다. 같은 키로 붙으면 실전 토큰 무효화 시험이 되므로 금지", "그 토스 계정의 모든 계좌에 보유 종목과 미체결 주문이 없을 때만"(`broker-and-fault-design.md:208`). 토스가 3번째 연결을 거부하는지 기존 연결을 끊는지 `[가정]` 기록 문구는 없으나 4.1(`:92`)이 두 경우의 처리(토스 시세 끄고 다음 순위)를 이미 정해 두었으므로 아래 M-2 참고로 낮춤 |
+| N-2(b) 1-K 같은 키 전 계좌·실측 장소 | 해소 | "같은 앱키·사용자 ID를 쓰는 모든 키움 계좌에 보유·미체결 없음", 실측은 모의 도메인, 실전 도메인으로만 확인되면 장 외 시간·무보유 상태(`:209`) |
+| N-2(c) 예약 규칙 우회 명시·정상 설정 차단 기록 | 해소 | 1-0 차단 확인(항상 시행), 주입은 시험 설정에서만 우회·원복 확인(`:201~:204`). 코드와 일치: 예약 증권사를 건너뛰며 WARNING 로그(`GatewayMain.java:88~:91`) |
+| N-3 1-T 대상 존재 조건 | 해소 | "토스 실전 계좌가 있고"(`:208`) |
+| N-4 Q-015에 키움 무효화 실측 | 해소 | `decisions/README.md:55` "(D-036 1-K 선행 실측)" |
+| N-5 시험 모드 고정 주기 조회 | 해소 | 공통 전제(`:213`)에 "아직 코드가 없으며 TST-07 실패 테스트 계획", TST-07 (8)(`autotrade-spec.md:284`) |
+| QA A14·8.2·8.3·R-2·R-3 | 해소 | 단독 각각 합격 + 동시 추가(`:208~:210`, D-036 `decisions/README.md:41`), 토스 시세를 켠 설정에서만(`:208`), 합격 지표 (a)(b)(c)(`:214`), 시행 조건(`:208~:209`). 이력 v14.2(`autotrade-spec.md:20`) |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | diff에 RealTradingGuard 코드·설정·테스트 변경 없음(문서 6개). 회귀: `:autotrade-risk:test` 55건, `:autotrade-app-engine:test` 48건 `--rerun-tasks` 통과 |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음. `:autotrade-architecture-test:test` 28건 통과 |
+| A3 | 통과 | 7.1은 시세 연결 주입 중 실전 엔진의 주문 상태 **조회**만 본다(`broker-and-fault-design.md:213~:214`). 다른 증권사로 주문을 돌리는 문구 없음. 4.2 "계좌의 증권사로만"(`:99`) 그대로 |
+| A4 | 해당 없음 | 타임아웃·조회 우선 문구(장애 테스트 4번 `:191`, 장애표 4번) 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 관련 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 통과 | 지난 실패 원인(시험 대상 계좌만 무보유) 해소: 토스는 계정 전체, 키움은 같은 앱키·사용자 ID를 쓰는 전 계좌가 무보유·무미체결일 때만 시행(`:208~:209`). 그래서 연결·토큰이 묶인 다른 가동 계좌를 다치게 하는 시행이 절차상 배제된다. 실전 몫 토큰 버킷 `429` 0건이 합격 지표(`:214`(b)). 4.2 토큰 버킷 선확보 문구(`:101`) 그대로 |
+| A8 | 통과 | 게이트웨이의 잘못된 연결이 실전 엔진 조회를 끊지 않는지 시험하는 방향이고, 1-0이 정상 설정의 1차 방어(게이트웨이가 실전 증권사를 쓰지 않음, `GatewayMain.java:86~:93`)를 매번 확인한다. 5.2 정지 순서 변경 없음 |
+| A9 | 통과 | 지난 실패 원인(1-T 키 분리·무보유 조건 없음) 해소(`:208`). 같은 토스 키 사용은 금지로 명시돼 실전 토큰 무효화(ADR-003:137)를 시험이 일으키지 않는다. 기존 합격 기준 "3초 내 전환, 보유 종목 손절 감시 공백 없음"(`:188`) 유지, 보호 시세 경로(4.1)·서버 측 손절(6.1) 문구 변경 없음 |
+| A10 | 통과 | diff 6개 파일과 커밋 메시지(2d78c88)를 직접 열람·패턴 검색. 키·계좌번호·토큰 값 없음 |
+| A11 | 통과 | 테스트 삭제·비활성화·약화 없음. 장애 테스트 8종 유지, 1번은 하위 항목 추가만(`:188`). 새 코드 동작 없음. 아직 없는 시험 모드 조회는 TST-07 (8)로 실패 테스트 계획에 등록 |
+| A12 | 통과 | 지난 실패 원인(예약 규칙과 7.1 불일치) 해소: 1-0이 `reservedForRealTrading`(`GatewayMain.java:107~:115`, `GatewayMainTest.java:31~:40`)의 동작을 정상 설정에서 확인하고, 1-T·1-K는 우회 주입임을 명시(`:201~:204`). 장애표 17번(`:176`)의 대응 "끊긴 동안 REST 조회"가 합격 지표로, 감지는 기록 항목으로 연결(`:214~:215`). 장애표 17종·해외 O1~O8 본문 변경 없음. 8종 유지라 TST-01(`autotrade-spec.md:279`)과 맞음 |
+| A13 | 해당 없음 | 시장별 로직·시간대·통화 변경 없음 |
+| A14 | 통과 | D-036(`decisions/README.md:41`), 7.1(`:199~:215`), TST-01·TST-07(`autotrade-spec.md:279·284`), 이력 v14.2(`:20`), Q-015(`decisions/README.md:55`), 조사 문서(`:110`)가 서로 일치. main 병합 결과(1bd0ddc 기준)에서도 충돌 없음을 확인. D-036 세부 조건이 "사용자 결정"으로 적힌 점은 지난 F-6과 같고, TST-01 변경 규칙(`autotrade-spec.md:275`)과 지침 10장에 따라 사용자 직접 머지가 확인이 된다 |
+
+## 점검표 밖 발견 (재검토 2)
+- **M-1 (권고, 7단계 절차서·구현) 우회 수단을 코드 플래그로 만들지 말 것.** 현재 설정은 증권사별 키가 1벌(`RuntimeConfig.java:93·:123`)이고 게이트웨이도 같은 `brokers.*` 키를 읽으므로(`GatewayMain.java:92`), 1-T의 "다른 토스 키"와 1-T·1-K의 "규칙 우회"는 시험 때 게이트웨이만 별도 설정 폴더(`AUTOTRADE_CONFIG_DIR`, `ConfigPaths.java:27~:33`)로 띄우는 방식이 가장 안전하다 `[추론]`. 우회를 `runtime-config.json` 키나 코드 플래그로 구현하면 정상 운영 설정에 남을 수 있으므로, 그런 구현은 실전 관련 변경으로 risk-ops 검토를 받고, 실전 계좌가 설정된 상태에서 켜지면 기동을 거부하는 테스트를 함께 둘 것.
+- **M-2 (참고) 토스 3번째 연결 시 서버 동작은 미확인.** 토스가 새 연결을 거부하는지 기존 연결(실전 엔진 쪽일 수 있음)을 끊는지는 공식 근거가 없다 `[가정]`. 4.1(`:92`)의 처리 규칙으로 덮이고 시행 조건상 무보유 상태에서만 시험하므로 위험은 낮다. 첫 시행에서 관측 결과를 장애표 17번에 기록할 것.
+- **M-3 (참고) 1-0은 실전 계좌가 설정된 증권사가 없으면 관측할 것이 없다.** 그 경우 "해당 없음"으로 기록하도록 7단계 절차서에 적을 것. 판정에 영향 없음.
+
+## 판정
+승인
+
+- 지난 재검토의 실패 항목 A7·A9·A12와 N-1~N-5, 독립 QA의 R-1·A14·8.2·8.3·R-2·R-3이 모두 해소되었다. 점검표 A에 실패·확인 못 함 항목이 없다.
+- 변경은 문서만이며 RealTradingGuard, 주문 경로, 보호 시세 경로, 정지 순서를 약화하지 않는다. 장애 테스트 1번을 강화하고, 시험 시행이 다른 실전 계좌와 실전 토큰을 다치게 하지 않도록 범위를 좁혔다.
+- M-1~M-3은 7단계 절차서·구현에서 처리할 후속 과제이며 이 PR의 머지 조건이 아니다.
+- 장애 대응 문서와 TST-01을 바꾸는 PR이므로 project-instructions.md 10장과 기획서 TST 변경 규칙(`autotrade-spec.md:275`)에 따라 사용자가 직접 확인하고 머지한다. 독립 QA 재검토 판정도 머지 전에 받아야 한다(지침 11장).
