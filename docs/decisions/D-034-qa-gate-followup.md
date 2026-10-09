@@ -7,7 +7,7 @@
 
 | QA 항목 | 원인 | 처리 | 담당 | 시점 |
 |---|---|---|---|---|
-| F-1 패키지 이름 위장 우회 | ArchUnit 허용 범위를 패키지 이름으로만 정했고 JPMS가 없어 다른 모듈이 같은 패키지 이름을 쓸 수 있음 | 클래스 출처(모듈) 기준으로 패키지 루트 소유 모듈을 검사하는 새 테스트와 위반 픽스처 | architect | 이번 PR |
+| F-1 패키지 이름 위장 우회 | ArchUnit 허용 범위를 패키지 이름으로만 정했고 JPMS가 없어 다른 모듈이 같은 패키지 이름을 쓸 수 있음 | 패키지 소유 모듈 규칙 `ModuleOwnershipTest`(두 방향: 우리 모듈의 운영 클래스는 전부 그 모듈 소유 `com.autotrade` 패키지 안, `com.autotrade` 위치는 전부 소유 모듈), 아키텍처 테스트 클래스패스 자동 구성과 settings 교차 확인(risk-ops R-1), 프로젝트 경로 기준 모듈 식별(독립 QA PR #21 Q-2), `ArchitectureTest` 범위를 우리 모듈 운영 클래스 전체로 확대(Q-1), 위반 픽스처. 보장 범위와 남은 한계는 ADR-002 9장 | architect | 이번 PR |
 | A14-1 `OrderState` ≠ ORD-07 | D-023(v13)이 상태 집합을 바꿨지만 코드 계약을 맞추는 후속 작업이 없었음 | `OrderState`를 ORD-07 10개 상태로 맞춤(전이표 구현은 7단계) | architect | 이번 PR |
 | A14-2 RSK-01 문구 | v13 문구 "주문 클라이언트는 OPEN 이후에만"이 같은 문장의 활성화 순서(세션 → 대사 → OPEN)와 모순. ADR-002가 이유를 적었지만 기획서를 고치지 않음 | 기획서 v14 RSK-01을 ADR-002 2.1 표와 맞춤 | pm-lead | 이번 PR |
 | A14-3, A12 장애 대응표 종 수 | D-023(#15·#16), D-024(#17)가 표를 늘릴 때 기획서·역할 지침·점검표 숫자를 함께 고치지 않음 | 기준을 broker-and-fault-design.md 6장 표 하나로 정하고 17종으로 정정(기획서 RSK-08, role-guides.md 7장, qa/checklists.md A12) | pm-lead | 이번 PR |
@@ -29,7 +29,8 @@
 
 ## 남은 위험
 - `OrderState` 이름 변경(SUBMITTED → SUBMITTING, CANCELLED → CANCELED)은 열린 PR #19(sim 실행기)·#18과 겹칠 수 있다. 나중에 머지되는 쪽이 이름을 맞춘다.
-- F-1의 모듈 소유 표는 새 모듈이 생길 때마다 갱신해야 한다(열린 PR #18의 `autotrade-control` 모듈 포함). 처음 판에는 아키텍처 테스트 클래스패스가 손 목록이라, 어떤 모듈도 의존하지 않는 새 모듈은 표를 고치지 않아도 두 테스트를 모두 피했다(risk-ops PR #21 검토 R-1 실측). 지금은 클래스패스를 settings의 모든 Java 모듈에서 자동으로 만들고, settings 목록과 클래스패스·표가 다르면 `ModuleOwnershipTest`가 실패하므로 settings에 include한 모듈은 빠뜨릴 수 없다(ADR-002 9장). 남는 한계: settings에 include하지 않은 폴더나 Gradle 밖에서 만든 jar, 배포 시 런타임 클래스패스는 검사하지 않는다(런타임 split package 방어는 JPMS 재검토 조건).
+- F-1 보장 범위: settings에 include한 Gradle Java 프로젝트가 만든 운영 클래스(클래스 폴더·자원 폴더·jar 전체)는 패키지 이름과 상관없이 `ArchitectureTest`의 실전 경로 규칙과 `ModuleOwnershipTest`의 검사를 받는다. 이 범위에 이르기까지 두 번 구멍이 실측됐다: (1) 처음 판은 아키텍처 테스트 클래스패스가 손 목록이라 아무도 의존하지 않는 새 모듈이 두 테스트를 모두 피했다(risk-ops R-1). (2) 두 테스트가 `com.autotrade` 패키지만 가져와 `qa.probe` 같은 밖 패키지 클래스가 Guard를 올리거나 팩토리 밖 출구를 열어도 통과했고, 모듈을 폴더 이름으로 알아내 `:tools:autotrade-risk` 같은 같은 이름 중첩 프로젝트를 진짜 모듈로 인정했다(독립 QA Q-1·Q-2, E2·E3·E5). 지금은 셋 다 `./gradlew build` 실패로 재현 확인했다(ADR-002 9장).
+- F-1 남은 한계: (가) settings에 include하지 않은 폴더, Gradle 밖에서 만든 jar, 배포 시 런타임 클래스패스(설치본)는 보지 않는다. (나) 리플렉션·`MethodHandle` 등 바이트코드 호출로 드러나지 않는 접근은 ArchUnit 규칙 자체의 한계다. (다) 모듈 소유 표(`ModuleOwnershipTest.OWNERS`)는 새 모듈마다 갱신해야 한다(열린 PR #18의 `autotrade-control` 포함). 빠뜨리면 빌드가 실패하므로 놓칠 수는 없다. 런타임 split package 방어가 필요해지면 JPMS를 다시 검토한다.
 
 ## 부록: Q-021 추천 상한 계산 (`[가정]`, 사용자 결정 대기)
 전제: 시험은 매수 직후 바로 매도하는 왕복 1회 단위. 수수료는 D-021의 `[가정]`(국내 0.015%, 미국 0.25%), 세율·규제 수수료는 D-021 확정값.
