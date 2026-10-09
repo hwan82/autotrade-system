@@ -83,3 +83,50 @@
 
 - 앞 검토의 수정 필요 항목(A14, R-1)이 해소된 것을 직접 실행한 빌드와 변조 실험 E1~E3로 확인했다. 확인 못 함 항목은 없다(A5~A8·A13은 이 PR이 건드리지 않아 해당 없음, 미구현 상태는 TST-07로 7단계 완료 조건에 묶여 있다).
 - 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest` 계열 추가·확장, `GuardedOrderGatewayTest`·`RealOrderGatewaysTest` 수정, 실전·가상 공용 `OrderState` 계약 변경, 장애 설계 문서 수정). 이 승인은 risk-ops 역할 검토 결과일 뿐이다. 머지는 독립 QA 관문을 거친 뒤 사용자가 직접 한다(지침 10·11장).
+
+## 재검토 2 2026-10-09
+- 대상: PR #21 / 커밋 `74a0f41`(브랜치 `claude/project-thread-bl5qbg`) / main(`52ad85f`, 머지 기준점과 같음) 대비 diff 전체. 앞 재검토(`7dd0d78`) 뒤 커밋: `376d1a3`(architect 재검토 원문), `218942a`(이 원문 재검토), `6ec4a29`(독립 QA 원문 `qa.md`), `74a0f41`(QA Q-1·Q-2·Q-3 반영). `7dd0d78..74a0f41`에서 바뀐 코드: `autotrade-architecture-test/build.gradle.kts`, **`ArchitectureTest.java`(보호 테스트)**, `ModuleOwnershipTest.java`, 새 `OurModules.java`, 새 픽스처 `qa/probe/OutsideOpener.java`·`OutsideRaiser.java`. 문서: CLAUDE.md, ADR-002 9장(9.1~9.3), D-033, D-034. 운영 코드(`*/src/main/*`) 변경 0.
+- 점검표: A
+- 검토자: risk-ops 서브에이전트. QA 원문의 지적(Q-1~Q-3)은 확인 대상으로만 읽었고, 커밋 메시지와 ADR 9.3의 "검증" 서술은 근거로 쓰지 않았다.
+- 자기 정정: 앞 두 검토는 `ArchitectureTest`·`ModuleOwnershipTest`가 `com.autotrade` 패키지만 가져온다는 점(QA Q-1)을 놓쳤다. 앞 재검토의 A2 "통과"는 이 범위에서 틀렸다. 이번에는 Q-1 형태를 직접 재현해 고쳐졌는지 확인했다.
+- 직접 실행한 것:
+  - 새 분리 작업 트리에서 `./gradlew build --no-daemon -I <저장소 밖 미러 init 스크립트>` → **BUILD SUCCESSFUL**. 실패 0, 오류 0, 건너뜀 0. architecture-test 22(ArchitectureTest 12, ModuleOwnershipTest 10), risk 41, app-engine 7, config 30, domain 31, sim 75, app-lab 86, strategy 25, gateway 1, watchdog 1, broker-api 1. 보호 테스트 `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `RealOrderGatewaysTest` 4, `EngineMainTest` 3, `ArchitectureTest` 12 모두 통과(수 그대로).
+  - 변조 실험(모두 커밋하지 않았고, 실험 뒤 원복해 `git status` 깨끗함 확인):
+    - M1+M2(QA Q-1 E3·E2 형태): 실전 엔진 운영 소스 `org.sneaky.Opener`가 `BrokerPlugin.orderGateway`를 직접 부르고, 실험실 운영 소스 `com.autotarde.x.Raiser`(오타 패키지)가 `beginActivation`을 부름 → **실패**. `ArchitectureTest#실전_주문_출구는_Guard_팩토리만_연다`, `#Guard를_올리는_조작은_명령_채널에서만_한다`, `ModuleOwnershipTest#운영_클래스는_패키지를_소유한_모듈에만_있다`(2건 "소유 모듈 표에 없는 패키지 루트")가 함께 잡았다. Q-1이 닫힌 것을 확인했다.
+    - M3(QA Q-2 E5 형태): settings에 `tools:autotrade-risk`를 include하고 `com.autotrade.risk.guard.X`를 둠 → **실패**. `#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`가 "같은 이름의 프로젝트가 여럿", "클래스패스에 없는 프로젝트", "표에 없는 프로젝트" 3건을 냈다. (같은 이름 프로젝트가 `:autotrade-risk`에 의존하게 하면 Gradle이 순환 의존으로 구성 단계에서 실패해 의존 없는 형태로 확인했다.)
+    - M4(앞 검토 R-1 형태): settings에만 include한 `autotrade-rogue`의 `com.autotrade.risk.guard.X`가 `beginActivation`을 부름 → **실패**(소유 위반, 표에 없는 프로젝트).
+    - M5(손 목록 회귀): M4 상태에서 `autotrade-architecture-test/build.gradle.kts`를 `4224efb` 판으로 되돌림 → **실패**. 시스템 속성 `autotrade.projectDirs`가 없어 `OurModules`가 예외를 던지고 `ArchitectureTest` 클래스 초기화도 실패한다(닫힌 쪽).
+    - **M7(새 우회, 아래 R-7)**: 새 모듈 `autotrade-zz`를 settings에 include하고 `ModuleOwnershipTest.MODULES_WITHOUT_PACKAGES`에 "자원 전용 모듈"로 등록(자원 파일 1개). 그 모듈의 `compileJava` 출력 폴더를 `autotrade-risk/build/classes/java/zz`로 돌리고, `com.autotrade.risk.guard.X`가 `beginActivation`을 부르게 함 → **`./gradlew build` BUILD SUCCESSFUL**(ArchitectureTest 12/12, ModuleOwnershipTest 10/10). 클래스가 `:autotrade-risk` 폴더 아래에 있어 위치 → 프로젝트 매핑이 `:autotrade-risk`로 판정하고, `com.autotrade.risk.guard`는 명령 채널 규칙의 허용 패키지라 두 테스트 모두 통과한다. 같은 실험을 `MODULES_WITHOUT_PACKAGES` 없이 OWNERS에 정상 등록한 형태로 하면 `seenProjects` 불일치로 실패하므로, 표 수정과 출력 폴더 변경이 함께 있어야 한다.
+  - 비밀값: 추가 diff grep 0건. 픽스처는 별칭 `KIS-1`, `"nobody"`만 쓴다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 운영 코드 변경 없음(`*/src/main/*` 변경 0). `RealTradingGuard.java:332,337` 초기 OFF, `RealTradingGuardTest` 31/31, `EngineMainTest#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 통과. 사람 확인 없이 Guard를 올리는 코드는 `com.autotrade` 밖 패키지(M2)·새 모듈(M4)·중첩 프로젝트(M3)에서 빌드가 막는다. 단, R-7 형태는 막지 못한다(판정은 A2) |
+| A2 | 실패 | 고쳐진 것: `ArchitectureTest.PRODUCTION`이 우리 프로젝트 운영 항목 전체 + 예전 `com.autotrade` 위치의 합으로 넓어졌다(`ArchitectureTest.java:59-64`, `OurModules.architectureScope()`). `ModuleOwnershipTest#ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다`가 새 범위가 예전 범위를 포함함을 단언한다(보호 테스트 강화, 약화 아님). M1·M2·M3·M4·M5 모두 빌드 실패. 남은 것: 프로젝트 출력 폴더를 다른 모듈 폴더 안으로 돌리면 그 클래스가 다른 모듈 것으로 판정돼, 위장 패키지에서 Guard를 올리는 코드가 빌드를 통과한다(M7, R-7). "우회 경로 없음"을 빌드가 보장하는 범위에 구멍이 하나 남았다 |
+| A3 | 통과 | 라우팅 코드 변경 없음. `RealOrderGateways.java:31-33`, `RealOrderGatewaysTest` 4/4. 팩토리 밖 출구 생성은 밖 패키지에서도 `ArchitectureTest#실전_주문_출구는_Guard_팩토리만_연다`가 잡는다(M1) |
+| A4 | 통과(이 PR 범위) | 앞 검토와 같다. `UNKNOWN`·`CANCEL_REQUESTED`는 비종결(`OrderStateTest`)이고 `GuardedOrderGateway.java:85`도 그대로다. 재발주 로직은 미구현이며 TST-07 (7)에서 추적한다 |
+| A5 | 해당 없음 | `IdempotencyKey`·발급기 변경 없음(TST-07 (7)로 추적) |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음(F-2는 TST-07 (1)로 추적) |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 코드 변경 없음 |
+| A8 | 해당 없음 | 프로세스 런타임 의존·`processIsolation` 변경 없음. 바뀐 빌드 파일은 테스트 전용 모듈뿐이다 |
+| A9 | 통과 | 앞 재검토와 같다. `toss-polling-scope` 기본값 `HELD_ONLY`(`autotrade-default.json:5`), D-033 예외 문구(`D-033-unpriced-source-default-off.md:27`) |
+| A10 | 통과 | 추가 diff grep 0건 |
+| A11 | 통과 | 보호 테스트 `ArchitectureTest`는 검사 범위만 넓어졌다(`PRODUCTION` 정의 1곳, 규칙·픽스처·단언은 그대로 12/12). 예전 범위 포함은 별도 테스트가 단언하고, Gradle 밖 실행은 닫힌 쪽으로 실패한다(M5). 테스트 삭제·비활성화는 0건(`@Disabled`·`assume` 0건)이다. 새 실패 경우 테스트: `#com_autotrade_밖_패키지의_운영_클래스도_잡아낸다`(픽스처 `qa.probe.OutsideRaiser`·`OutsideOpener`, 두 실전 경로 규칙 위반 확인), `#같은_이름의_중첩_프로젝트는_소유_모듈로_인정하지_않는다`, `#위치를_프로젝트_경로_표로_매핑한다`. R-7을 잡는 테스트는 없다 |
+| A12 | 통과 | 장애 대응표·장애 테스트 8종 변경 없음 |
+| A13 | 해당 없음 | 시장·시각·금액 계산 변경 없음 |
+| A14 | 실패 | 맞춘 것: Q-1·Q-2 경위와 고친 방식이 ADR-002 9.1·9.2와 D-034 표·남은 위험에 정확히 적혔다. Q-3(이전 기본값이 저장된 파일)은 D-033에 토스 클라이언트 PR 전 이전 처리와 테스트를 요구하는 조건으로 기록됐다. 어긋난 것: ADR-002 9.3 "보장: settings에 include한 Gradle Java 프로젝트가 만든 운영 클래스는 패키지 이름과 상관없이 (1)…(2)…를 받는다. 그러므로 2.2의 '지금은 운영 코드 어디서도 실전을 열 수 없다'는 이 범위의 빌드 산출물에 대해 성립한다"와 D-034 "F-1 보장 범위"가 M7에서 사실이 아니다. 남은 한계 목록에 이 경우(출력 폴더를 다른 프로젝트 폴더 안으로 돌림)가 없다 |
+
+## 점검표 밖 발견 (재검토 2)
+- QA Q-1: 해소(M1·M2). Q-2: 해소(M3). 앞 검토 R-1: 계속 해소(M4·M5). Q-3: 기록으로 처리(코드 없음). 토스 시세 클라이언트 PR에서 risk-ops도 이전 처리 테스트를 확인 항목으로 둔다.
+- **R-7 [중간, 실측] 위치 → 프로젝트 매핑이 "어느 프로젝트 폴더 안에 있나"만 보므로, 다른 프로젝트 폴더 안으로 출력한 클래스는 그 프로젝트 것으로 판정된다.** `OurModules.projectOf`(`OurModules.java`의 `projectOf`, 가장 안쪽 `projectDir` 접두어)는 클래스패스 항목이 실제로 어느 프로젝트의 출력인지 확인하지 않는다. M7에서 이 점과 `MODULES_WITHOUT_PACKAGES`(클래스가 없다고 선언만 하고 확인하지 않음)가 겹쳐, `com.autotrade.risk.guard`로 위장한 Guard 상향 코드가 전체 빌드를 통과했다. 같은 종류의 변형으로, 운영 출력 폴더를 `DoNotIncludeTests` 패턴에 맞는 경로(예: `build/classes/test`)로 돌리면 두 테스트 모두 그 항목을 운영 코드로 보지 않는다. 이 변형은 `seenProjects` 불일치로 실패하지만, 같은 표(`NO_CLASSES_YET`·`MODULES_WITHOUT_PACKAGES`)를 고치면 피해 간다 `[추론, 실측 안 함]`.
+  - 위험 평가: 빌드 스크립트의 출력 경로 변경과 보호 테스트 표 수정이 함께 있어야 한다. 실수로 생기기는 어렵고 리뷰에서 보인다 `[추론]`. 그러나 표 수정은 "새 모듈을 만들면 표를 고친다"는 정상 절차와 겉보기가 같고, 이 PR의 목적이 "이름 위장을 빌드로 막는다"이며 ADR이 예외 없이 보장한다고 적었다. 그래서 고치거나 한계로 정확히 적어야 한다.
+  - 고칠 점(추천, 작은 변경): `build.gradle.kts`가 프로젝트마다 `projectDir`뿐 아니라 실제 운영 출력(`sourceSets.main.output.classesDirs`, 자원 폴더, `jar` 산출물 경로)도 시스템 속성으로 넘긴다. `OurModules`는 클래스패스 항목을 폴더 접두어가 아니라 **선언된 출력과 정확히 일치**하는지로 프로젝트에 매핑하고, 우리 `projectDir` 아래인데 어느 선언 출력과도 맞지 않는 항목은 실패로 본다. 또 각 프로젝트의 선언 출력이 자기 `projectDir` 밖에 있으면 실패로 본다. `MODULES_WITHOUT_PACKAGES`·`NO_CLASSES_YET` 모듈은 클래스 출력에 `.class` 파일이 하나라도 있으면 실패로 본다. M7 형태의 위반 테스트(가짜 표로 재현)를 함께 둔다.
+  - 최소 대안: 코드로 막지 않는다면 ADR-002 9.3과 D-034의 "보장" 문장에 이 예외를 정확히 적고, 리뷰 체크 항목에 "빌드 스크립트의 출력 경로 변경, `MODULES_WITHOUT_PACKAGES`·`NO_CLASSES_YET` 추가는 risk-ops 검토"를 넣는다. risk-ops는 추천안을 권한다. 보호 테스트 표 수정은 겉보기에 무해해 리뷰에만 기대기 어렵다.
+- 확인한 점: 새 범위는 Gradle 밖 실행에서 닫힌 쪽으로 실패한다(M5). 같은 이름 중첩 프로젝트는 Gradle이 같은 좌표로 의존을 합쳐 클래스패스에서 빠지지만, 범위 교차 확인이 이를 실패로 잡는다(M3).
+
+## 판정 (재검토 2)
+수정 필요(A2, A14, R-7)
+
+- 고칠 것: R-7. 클래스패스 항목을 프로젝트의 선언된 출력과 정확히 맞춰 매핑하고, 자원 전용·자리 모듈에 클래스가 생기면 실패하게 하며, 그 실패를 재현하는 테스트를 둔다. 그 결과에 맞춰 ADR-002 9.3·D-034 "F-1 보장 범위"를 고친다. 코드로 막지 않겠다면 위 최소 대안처럼 예외를 보장 문장에 정확히 적는다. 그 경우에도 이 검토자에게 다시 판정을 받는다.
+- 확인된 개선: QA Q-1·Q-2와 앞 검토 R-1은 직접 재현으로 닫힌 것을 확인했다. 보호 테스트 `ArchitectureTest` 변경은 범위 확대(강화)뿐이다.
+- 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest` 범위 변경 포함). risk-ops가 승인해도 독립 QA 관문을 거친 뒤 사용자가 직접 머지한다(지침 10·11장).
