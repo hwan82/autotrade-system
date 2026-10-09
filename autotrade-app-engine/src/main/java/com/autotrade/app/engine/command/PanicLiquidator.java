@@ -5,10 +5,10 @@ import com.autotrade.domain.account.AccountRef;
 import java.util.List;
 
 /**
- * PANIC SELL의 증권사 단계(RSK-13 2~5단계: 미체결 전부 취소 확인 → 서버 측 손절 취소 확인 → 매도 → 체결 확인).
+ * PANIC SELL의 증권사 단계(RSK-13 2~5단계: 미체결 취소 확인(매도 불가면 매수만) → 서버 측 손절 취소 확인 → 매도 → 체결 확인).
  * 1단계(보호 모드 고정)와 6단계(Guard OFF)는 {@link EngineCommandHandler}가 한다.
  *
- * <p>구현은 대상에서 블랙리스트·수동 보유 종목을 빼고(RSK-12), 매도를 낼 수 없으면(장 외 시간, 거래정지·LULD 정지 등)
+ * <p>구현은 대상에서 블랙리스트·수동 보유 종목을 빼고(RSK-12), 매도를 낼 수 없으면(장 외 시간, 거래정지·VI·LULD 정지 등. VI 분류는 ADR-006 6장에서 사용자 결정)
  * 매도하지 않는다(RSK-13). 이때 서버 측 손절은 취소하지 않고 미체결 매수만 취소한다(D-037, ADR-006 2.5).
  * 단계 이름은 {@link PanicSteps}의 상수를 쓴다.
  *
