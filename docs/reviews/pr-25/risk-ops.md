@@ -67,3 +67,34 @@
 
 ## 판정 (재검토)
 수정 필요(A14: ADR-006 2.5 표가 새 문단으로 끊김, 매도 불가 시 서버 측 손절 유지 규칙이 결정 로그 D-037에 없음)
+
+## 재검토 2026-10-09 (2차)
+- 대상: PR #25 / 커밋 799ddfa / main 대비 diff(`git diff origin/main...HEAD`: docs/adr/ADR-006-real-control-channel.md, docs/decisions/README.md, docs/reviews/pr-25/risk-ops.md, docs/spec/autotrade-spec.md 4개 파일. `docs/` 밖 변경 없음). 직전 재검토 이후 변경은 799ddfa 하나(ADR-006, decisions/README.md 2개 파일, +3 −5). 이 커밋은 검토 원문 파일을 건드리지 않았음(`git diff bd76f0a 799ddfa -- docs/reviews` 빈 결과)
+- 점검표: A
+- 직접 실행한 것: `./gradlew build --console=plain` → `BUILD SUCCESSFUL`(테스트 결과 XML 전체 411건, 실패 0·오류 0·건너뜀 0). `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test --rerun-tasks` → `BUILD SUCCESSFUL`, 각각 55·27·48건 모두 통과(실패·오류·건너뜀 0)
+- 함께 본 실전 경로 코드·문서: 직전 재검토와 같음(`PanicLiquidator.java`, `EngineCommandHandler.java`, `RealTradingGuard.java`, broker-and-fault-design.md 6장·6.1, overseas-design.md 7장 O8, ADR-006 2.5·6장)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드·설정 변경 없음. RealTradingGuard.java:26 그대로. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | ArchUnit·Guard 출구 코드 변경 없음. `:autotrade-architecture-test:test` 27건 통과 |
+| A3 | 통과 | 바뀐 문구(ADR-006 2.5 아래 목록, D-037 행)에 다른 증권사로 취소·매도를 보내는 내용 없음 |
+| A4 | 해당 없음 | 타임아웃·재주문 규칙 변경 없음. 현재 `PanicLiquidator`는 주문을 내지 않음 |
+| A5 | 해당 없음 | 멱등 키 관련 변경 없음 |
+| A6 | 통과 | RSK-13 대상 제한(블랙리스트·수동 보유 제외, autotrade-spec.md:188)과 PanicLiquidator.java:11 그대로 |
+| A7 | 통과 | 계좌별·전체 PANIC 문구 변경 없음. 새로 적은 "일부 종목만 매도 불가일 때 종목 단위/계좌 단위는 7단계에서 정함, 어느 쪽이든 Guard OFF 없음"(ADR-006 2.5 아래 첫 항목)은 다른 계좌에 영향 없음. `:autotrade-app-engine:test` 48건 통과 |
+| A8 | 통과 | 명령 채널·프로세스 구조 변경 없음 |
+| A9 | 통과 | 매도 불가 시 서버 측 손절 취소 금지·미체결 매수만 취소 규칙이 기획서 RSK-13(autotrade-spec.md:188), ADR-006 2.5(표 아래 첫 항목), D-037 행(decisions/README.md:40) 세 곳에 같은 내용으로 있음. Guard OFF는 2~5 모두 DONE일 때만(ADR-006 2.5 표 6행)이라 이 경우 보호 모드·서버 측 손절 유지. `PanicLiquidator` 주석 갱신은 ADR-006 6장 후속 표 "7단계 전 필수"로 남아 있음 |
+| A10 | 통과 | 799ddfa diff 전문 확인. API 키·계좌번호·토큰 없음 |
+| A11 | 통과 | 테스트 파일 변경 없음. 새 규칙의 실패 경우 테스트는 RSK-13 인수 조건과 ADR-006 6장 후속 항목으로 7단계 구현에 고정 |
+| A12 | 통과 | 장애표 #8·#11·#12(broker-and-fault-design.md:167·170·171), 6.1, 해외 O8의 전제(서버 측 손절이 PC·연결 장애 동안 보유를 지킴)를 유지. 대응표·장애 테스트 8종 변경 없음 |
+| A13 | 통과 | 매도 방식(국내 시장가, 미국 지정가+여유폭) 그대로. 시장 분기 코드 변경 없음 |
+| A14 | 통과 | 직전 수정 요청 2건 해소. (1) "매도를 낼 수 없을 때" 문단이 2.5 표 밖(6단계 행 뒤 목록 첫 항목)으로 옮겨져 1~6단계 표가 머리행·구분행 아래 하나로 이어짐(ADR-006 2.5 직접 확인). (2) D-037 행(decisions/README.md:40)에 새 규칙과 출처(PR #25 risk-ops 검토 반영, 사용자 머지로 결정)가 들어가 ADR-006·기획서의 "D-037" 근거와 일치. 점검표 밖 권고였던 ADR-006 "장 외 시간" 항목도 "v13·v14 RSK-13은 … 적었었고"로 과거형 정정. Q-016·Q-017·Q-018은 결정 로그 미확정 표와 기획서 15장(autotrade-spec.md:325-327) 양쪽에 있음 |
+
+## 점검표 밖 발견 (2차 재검토)
+- D-037 행의 "이 PR 사용자 머지로 결정"은 결정 로그 안에서 "이 PR"이 어느 PR인지 바로 앞의 "PR #25"로만 읽힌다. 뜻은 분명하므로 판정에 넣지 않는다.
+- 직전 재검토의 VI 판정 기준·종목 단위 처리 관련 메모는 7단계 `PanicLiquidator` 구현 검토 때 다시 본다.
+- 이 PR은 실전 장애 대응 규칙(RSK-13)을 바꾸므로 지침 10장에 따라 사용자가 직접 확인하고 머지하며, 머지 전 독립 QA 관문 대상이다.
+
+## 판정 (2차 재검토)
+승인
