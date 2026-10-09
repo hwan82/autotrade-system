@@ -46,6 +46,7 @@
 | 실험 구간 앞 N일을 전략에만 흘리고 주문은 막는 예열 구간 | sim-engine, architect | 지난 거래일이 필요한 프로필의 구간 첫머리 불리함 제거(architect 검토 M1) |
 | `MarketRules`에 정규장 끝 시각 조회 | architect, data-engineer | 장 마감 청산 시각 검증(PR #10 캘린더와 함께) |
 | UI 프로필 저장 시점에 `CatalogStrategyFactory.validate`로 오타 키를 막기(지금은 실험 시작 때 거절) | ui-dev | architect 2차 검토 후속 과제 |
+| 실험 실행기(`StudyMain`)의 승인만 하는 `RiskPolicy`를 실전과 같은 블랙리스트·리스크 검증 체인으로 바꾸고, 그 전에는 녹화 데이터로 돌지 않게 막기 | risk-ops, sim-engine | 안전 불변식(가상과 실전이 같은 리스크·블랙리스트 코드). 합성 데이터에는 제외 종목이 없어 지금 결과에는 영향 없음. 녹화 데이터 실험 전 필수(PR #14 architect 검토 L1) |
 | 프로필 형식과 `catalog`·`profile` 공개 타입을 ADR로 계약화, `StudyMain`을 실험실 UI 연동 때 app-lab으로 이동 | architect | UI·app-lab이 쓸 계약(architect 검토 L10) |
 
 ## 되돌릴 조건
