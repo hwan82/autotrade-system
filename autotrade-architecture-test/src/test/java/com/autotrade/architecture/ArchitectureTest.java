@@ -284,9 +284,9 @@ class ArchitectureTest {
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
 
-        // 리스크 모듈 밖의 승인만 하는 정책: 다른 패키지 1건(패키지·모듈 둘 다 위반), 리스크 패키지를 빌린 다른 모듈 1건
+        // 리스크 모듈 밖의 승인만 하는 정책: 다른 패키지 클래스 1개는 패키지·모듈 2건 위반, 리스크 패키지를 빌린 다른 모듈 클래스는 모듈 1건 위반
         assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
-                ApproveAllRiskPolicy.class)).hasViolation()).isTrue();
+                ApproveAllRiskPolicy.class)).getFailureReport().getDetails()).hasSize(2);
         assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
                 SplitPackageApproveAll.class)).getFailureReport().getDetails()).hasSize(1);
         // 리스크 모듈의 실제 구현은 통과한다(위치 판정이 모든 클래스를 거절하는 오류 방지)
