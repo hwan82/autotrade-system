@@ -297,3 +297,55 @@
 
 ## 판정
 수정 필요(G1). 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 2(A5, A13)다. 직전 지적 F1·F3·F4는 반영을 확인했고, F2는 리눅스에서 실제 프로세스로 해결을 확인했다. F5·F6은 ADR-006 6장에 7단계 조건·머지 직후 과제로 남았다. G1은 F2 수정이 Windows에서 위험 쪽 기본값(NOT_RUNNING → "가상" 표시)으로 떨어지는 문제로, 현재 계좌 피해는 없지만 F2와 같은 UI-05 착각 방지 항목이다. 한 줄 수정(그 밖의 IOException → UNKNOWN)과 테스트 1건, 또는 최소한 ADR-006 5장·6장에 Windows 미검증과 6단계 전 확인 조건을 적으면 승인한다. G2~G4는 참고다. 실전 경로 PR이므로 승인 후에도 머지는 사용자가 직접 한다(지침 10장).
+
+## 재검토 3 2026-10-09
+
+# risk-ops 검토: 실전 운영 화면(ADR-006) 재검토 2 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, 커밋 c4e1a18 / `git diff origin/main...HEAD`(origin/main 2dcea43 = merge-base, 9커밋, 57개 파일, +4577 −34). 직전 재검토(c7e158b) 이후 코드 변경은 c4e1a18(ControlClient·ControlChannelTest·real.js·ADR-006)이고 51387cb는 검토 원문 보존뿐이다. diff 전체와 영향받는 실전 경로(EngineMain, EngineCommandHandler, OperatorAuthenticator, RealTradingGuard 호출부, ControlServer/Client, RealOpsController, real.js·app.js)를 다시 봤다
+- 점검표: A
+- 직접 실행한 것(다른 작업과 겹치지 않게 HEAD를 scratchpad에 새로 clone해서 실행):
+  - `./gradlew build --rerun-tasks`(`git clean -xfd` 후): BUILD SUCCESSFUL, 91개 작업 모두 실행. 테스트 XML 집계 378건, 실패 0, 오류 0, 건너뜀 0. app-engine 48, control 20, architecture-test 13, risk 41, config 29, app-lab 97, sim 75, domain 27, strategy 25, gateway 1, watchdog 1, broker-api 1. 새 테스트 `ControlChannelTest#잠금_파일을_읽지_못하거나_내용이_PID가_아니면_알_수_없음이다` 통과
+  - 참고: 그 전 1회는 내가 `-Dorg.gradle.project.buildDir=x`를 잘못 넣어 빌드 폴더 이름이 바뀌었고, 그 때문에 ArchUnit `DO_NOT_INCLUDE_TESTS`가 테스트 픽스처를 운영 코드로 읽어 ArchitectureTest 5건이 실패했다. 검토자 실행 오류이며 위의 정상 실행으로 대체한다
+  - 실제 프로세스 점검(`:autotrade-app-engine:installDist`, 소켓 경로 길이 때문에 짧은 임시 설정 폴더 사용): 엔진 1 기동 → `run` 700, 소켓 600, `engine.lock`=PID. 이어서 **`run` 폴더의 소켓과 `engine.lock`을 지우고 같은 설정 폴더로 엔진 2를 띄우자 엔진 2가 정상 기동했고 엔진 1도 계속 살아 있었다**(두 PID 모두 `kill -0` 성공, 새 `engine.lock`에는 엔진 2 PID). 아래 H1의 근거. 점검 뒤 두 엔진을 종료하고 임시 폴더를 지웠다
+  - gitleaks 8.21.2: `gitleaks git --redact --log-opts=origin/main..HEAD` 7 commits no leaks found, 저장소 전 이력 58 commits no leaks found
+  - `scripts/ci/check-python-collectors.sh`: 종료 코드 0
+  - diff에 추가된 `@Disabled`·`@Ignore`·`assume*` 없음(검토 원문 인용 줄만 걸림), 삭제된 파일 없음(`git diff --diff-filter=D` 결과 없음)
+- 코드는 고치지 않았다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk` 변경 없음. EngineMain.java:85·95-97이 설정 계좌로 Guard를 만들고 모두 OFF로 시작. 설정에 올리는 키 없음(autotrade-default.json은 `operator-password-hash` 자리만). c4e1a18은 실험실 쪽 판정만 바꾸고 Guard와 무관. EngineMainTest#실전_계좌가_설정돼_있어도_기동_직후_모두_OFF다, #설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다, EngineCommandHandlerTest#기동_직후_상태는_모든_계좌_OFF이고_비밀값을_담지_않는다 통과. 엔진이 둘 떠도(H1) 각 엔진은 OFF로 시작한다 |
+| A2 | 통과 | ArchitectureTest의 `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`, `ONLY_COMMAND_CHANNEL_RAISES_GUARD`, `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`, 명령 채널 위치 규칙과 위반 픽스처 13건 통과. c4e1a18은 ArchitectureTest를 바꾸지 않음. `RealOrderGateways.open` 운영 호출 없음. 연동 전 활성화는 AUTHENTICATED에서 실패(EngineMain `BROKER_NOT_CONNECTED` 배선), EngineMainTest#실제_배선으로_활성화하면_증권사_연동_전이라_첫_단계에서_OFF로_돌아간다 통과 |
+| A3 | 통과 | 주문 전송 코드 없음. PanicLiquidator·ActivationStepRunner는 `AccountRef`만 받고 증권사 선택 인자 없음. 증권사 전환 경로 없음 |
+| A4 | 통과 | 주문 타임아웃 경로 변경 없음. 명령 채널은 재전송 없음(ControlClient.java:64-80, RealOpsController 503 안내). ACTIVATE는 오래 기다리면 STALE(ControlServer.java:233-244), PANIC은 BUSY 없이 실행(228-232). ControlChannelTest#대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다(222행), #오래_기다린_활성화는_버리고_PANIC은_기다렸어도_실행한다(258행) 통과 |
+| A5 | 해당 없음 | 주문을 만드는 코드 없음. 멱등 키 코드(domain) 변경 없음. 7단계 PanicLiquidator 매도 구현 때 다시 본다 |
+| A6 | 통과 | 새 자동 주문 경로 없음(PANIC 증권사 단계는 `BROKER_NOT_CONNECTED` 구현으로 수행 불가). 블랙리스트·수동 보유 제외는 PanicLiquidator 계약과 ADR-006 2.5에 7단계 조건으로 남음 |
+| A7 | 통과 | 계좌별 큐·토큰 버킷 코드 변경 없음. PANIC 1단계는 계좌별 Guard 전이만(EngineCommandHandler.java:242 부근). 계좌별 순차 PANIC, 기다리는 PANIC 시간 상한은 ADR-006 6장 7단계 조건 |
+| A8 | 통과 | 실험실은 클라이언트만, 엔진은 서버만(ArchUnit), 게이트웨이·감시 런타임에 control 금지(verifyProcessIsolation, build 통과). c4e1a18의 잠금 파일 읽기(ControlClient.java:90-107)는 실험실 쪽 읽기 전용이라 엔진에 영향 없음. 리눅스에서는 엔진의 `tryLock`이 권고 잠금이라 실험실 읽기가 엔진 잠금을 방해하지 않는다(실제 프로세스로 UP 확인). 명령 채널 장애는 Guard 판정에 영향 없음. 엔진 단일 인스턴스의 남은 틈은 H1(점검표 밖)으로 따로 적는다 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. PANIC은 증권사 단계 4개가 모두 DONE일 때만 OFF(EngineCommandHandler.java:262-268, 278-281), 서버 측 손절 취소 후 매도 미확정은 긴급 표시(291-301). EngineCommandHandlerTest#서버_측_손절을_취소한_뒤_매도가_끝나지_않으면_긴급으로_알린다, #매도가_하나라도_끝나지_않으면_Guard를_끄지_않는다 통과 |
+| A10 | 통과 | gitleaks 브랜치 7커밋·전 이력 58커밋 no leaks. 새 예외 메시지(ControlClient.java:97·99-100·103-104)는 고정 문구만이고 경로·PID·계좌를 넣지 않는다. 새 테스트는 빈 문자열과 폴더만 쓴다. 요청 toString 마스킹(ControlChannelTest#요청_문자열에는_비밀번호와_계좌_칸이_보이지_않는다), 실험실 로그는 명령 이름과 결과 코드만(RealOpsControllerTest#활성화는_확인_문구와_비밀번호를_엔진에_넘기고_응답과_로그에는_남기지_않는다) |
+| A11 | 통과 | 삭제·비활성화된 테스트 없음. c4e1a18이 바꾼 기존 테스트 줄은 죽은 프로세스를 `true` 대신 현재 JVM 실행 파일 `-version`으로 만드는 것(ControlChannelTest.java:309-310, OS 무관하게 하려는 변경, 단언 그대로)뿐이다. 새 동작(빈 파일·읽기 오류 → UNKNOWN)에 테스트 추가(321행). 단, 이 테스트는 읽기 오류를 "폴더"로 흉내 내므로 Windows 강제 잠금 자체는 검증하지 않는다(ADR-006 5장 "검증하지 못한 것"에 명시됨) |
+| A12 | 통과 | 대응표 #8(엔진 크래시 후 재기동): 남은 잠금 파일의 PID가 죽어 있으면 NOT_RUNNING, 재기동 시 잠금 재획득·PID 덮어쓰기 → 재기동을 막지 않음. 잠금 파일은 있지만 비었거나 읽지 못하면 이제 UNKNOWN인데, 이는 화면 표시만 보수적으로 바꾸고 재기동을 막지 않는다. #9(실험실·UI 크래시): 실험실은 클라이언트일 뿐. 장애 테스트 8종의 전제(주문 경로, 큐, 대사) 변경 없음. 해외 O1~O8 영향 없음 |
+| A13 | 해당 없음 | 시장별 분기·시간·금액 계산 없음. 대기 경과는 `System.nanoTime` 상대값으로 ArchUnit `NO_SYSTEM_TIME` 통과 |
+| A14 | 통과 | ADR-006 2.2(48행)·2.3(78행)의 판정 규칙("잠금 파일이 없을 때만 NOT_RUNNING, 판단할 수 없으면 언제나 UNKNOWN")이 ControlClient.java:90-107과 일치. 5장에 Windows 잠금 파일 읽기 미검증 추가, 6장 표에 기다리는 PANIC 시간 상한 추가. Q-016·Q-017 결정 로그에 있음. 다만 2.2(44행) "소켓 파일을 누가 지워도 두 번째 엔진이 뜨지 않는다"는 맞지만 "엔진은 설정 폴더당 하나"는 H1 때문에 무조건 참은 아니다(H1에서 정정 요구) |
+
+### 직전 재검토 지적 처리 확인
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| G1 Windows에서 잠금 파일 읽기 실패 → NOT_RUNNING | 반영 | ControlClient.java:94-101: `NoSuchFileException`만 NOT_RUNNING, 그 밖의 `IOException`·`NumberFormatException`은 UNKNOWN. ControlChannelTest#잠금_파일을_읽지_못하거나_내용이_PID가_아니면_알_수_없음이다 통과. Windows 실기 확인은 ADR-006 5장 "검증하지 못한 것"과 6장(실사용 PC 확정 후) 조건으로 남음 |
+| G2 PANIC 대기 연결이 연결 자리를 채움 | 7단계 조건으로 기록 | ADR-006 6장 표 "기다리는 PANIC의 시간 상한" |
+| G3 문구 불일치 | (a) 반영, (b) 부분 반영 | (a) ADR-006 2.3 UNKNOWN 정의 갱신. (b) real.js:57·66 제목 문구는 바뀌었지만 67행 "PANIC SELL과 내리기는 보낼 수 있지만"은 그대로라, 소켓이 없어진 경우에는 여전히 명령이 엔진에 닿지 않는다. 참고 등급이라 승인 조건으로 삼지 않는다. 7단계 소켓 재생성으로 해소 |
+| G4 빌드 첫 실행 실패 | 해당 없음 | 이번 정상 실행에서 재현 없음(위 참고의 실패는 검토자 실행 오류) |
+
+## 점검표 밖 발견
+- **H1 (중요, 수정 필요) `run` 폴더(또는 `engine.lock`)를 지우면 같은 설정 폴더로 엔진이 둘 뜬다. 1차 M6이 막으려던 경우 그대로다.**
+  - 근거: 위 "직접 실행한 것"의 실제 프로세스 점검. ControlServer.java:87은 `run/engine.lock`을 `CREATE`로 열고 `tryLock`한다. 리눅스(POSIX)에서는 잠금이 걸린 파일도 지울 수 있고, 엔진 1은 지워진 inode의 잠금을 계속 쥐고 있으므로 엔진 2가 같은 경로에 새 파일을 만들어 잠금을 얻는다. 1차 M6의 시나리오가 "사용자가 폴더를 정리하는 등"이었고, 잠금 파일은 소켓과 같은 `run` 폴더에 있어 폴더 정리 한 번으로 둘 다 사라진다
+  - 영향: (1) 같은 실전 계좌의 Guard가 두 벌 생긴다(7단계에서는 같은 계좌 주문 세션 두 개, 계좌별 단일 직렬 큐 붕괴). (2) 실험실은 엔진 2(모두 OFF, `UP`)와만 대화하므로, 엔진 1에서 계좌가 열려 있어도 화면은 "모두 OFF"로 보이고 내리기·PANIC은 엔진 2로 간다(UI-05 착각 방지와 D-023 원칙 2 위반). (3) 엔진 2를 띄우지 않더라도, 실행 중에 `run` 폴더만 지워지면 c4e1a18의 새 규칙에 따라 잠금 파일 없음 → `NOT_RUNNING` → 화면 "가상"이 된다(G1에서 고친 경로의 남은 틈). (4) 한 엔진이 종료하며 `Files.deleteIfExists(socket)`(ControlServer.java:295·345)로 같은 경로의 다른 엔진 소켓을 지울 수 있다
+  - 지금은 증권사 연동 전이라 열 수 있는 계좌가 없어 현재 계좌 피해는 없다. 하지만 ADR-006 2.2의 "엔진은 설정 폴더당 하나"가 사실과 다르고, M6을 "반영"으로 판정한 재검토 1의 근거(소켓만 지운 시험)가 이 경우를 다루지 않았다
+  - 수정 제안(택1 이상): (a) 엔진이 주기적으로(예: 2초) 잠금 파일 경로의 `fileKey`(inode)와 소켓 파일이 자기 것인지 확인하고, 바뀌었거나 없으면 ERROR 로그와 함께 다시 만들거나(잠금 재획득 실패 시 다른 엔진이 있다는 뜻이므로 모든 계좌를 내리기 방향으로 전이) 알린다. 7단계 조건 "엔진이 지워진 소켓을 스스로 다시 만들기"에 잠금 파일을 합친다. (b) 잠금 파일을 지우기 어려운 위치·이름으로 분리(예: 설정 폴더 바로 아래 `engine.lock`, `run`과 분리)해 폴더 정리 한 번에 사라지지 않게 한다(완전한 해결은 아님). (c) 엔진 기동 시 기존 소켓 경로에 연결을 시도하는 것 외에, 같은 설정 폴더를 쓰는 다른 엔진 프로세스를 PID 목록으로 확인한다(보조 수단). 테스트: 잠금 파일(또는 `run` 폴더)을 지운 뒤 두 번째 엔진이 거부되거나, 첫 엔진이 이를 감지해 ERROR와 함께 복구하는지
+  - 코드로 고치지 않을 경우 최소 조건: ADR-006 2.2 "엔진은 설정 폴더당 하나" 문구를 "`run/engine.lock`이 지워지지 않는 한"으로 정정하고, 4장 위험 표와 6장 7단계 완료 조건(실전 활성화 전)에 "잠금 파일 삭제 시 단일 인스턴스 보장 상실, 감지·복구"를 넣으며, 장애 테스트 목록에 이 시나리오를 추가한다
+- **H2 (참고) ControlClient 클래스 Javadoc(ControlClient.java:26-29)의 NOT_RUNNING/UNKNOWN 정의가 c4e1a18 규칙(잠금 파일을 읽지 못하면 UNKNOWN)으로 갱신되지 않았다.** 메서드 Javadoc(84-89행)과 ADR은 맞다. 문서 정합성만의 문제다
+- **H3 (참고) 새 테스트의 Windows 이식성.** ControlChannelTest.java:309의 `ProcessHandle.current().info().command().orElseThrow()`는 일부 환경에서 비어 있을 수 있다. 안전과 무관하고 Windows에서 실행할 때 확인하면 된다
+
+## 판정
+수정 필요(H1). 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 2(A5, A13)다. 직전 지적 G1은 코드와 테스트로 반영을 확인했고(Windows 실기는 ADR 5·6장 조건), G2는 7단계 조건으로 기록됐으며, G3은 참고 수준의 문구 하나가 남았다. H1은 실제 프로세스로 재현한 단일 인스턴스 보장의 틈으로, 1차 M6과 같은 위험(같은 계좌 Guard 두 벌, 화면이 엉뚱한 엔진과 대화)이다. 현재 계좌 피해는 없으므로, 코드 수정과 테스트 1건 또는 최소한 ADR-006 2.2 문구 정정·4장 위험 표·6장 7단계 완료 조건과 장애 테스트 목록 등록을 하면 승인한다. H2·H3은 참고다. 실전 경로 PR이므로 승인 후에도 머지는 사용자가 직접 한다(지침 10장).
