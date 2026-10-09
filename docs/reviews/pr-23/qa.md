@@ -138,3 +138,32 @@
 
 - A14, 과금 8.2·8.3, R-2, R-3, R-4는 8c8afe5에서 닫혔다. 점검표 A·B1·B6·과금 검사에 실패·확인 못 함 항목은 없다.
 - 남은 것은 머지 충돌 하나다. 충돌 해결 커밋이 D-036·7.1·TST-01·TST-07 내용을 바꾸지 않고 D-038 행과 v14.3 이력을 보존하면, 그 커밋 기준으로 충돌 해결부만 확인해 판정을 다시 낸다.
+
+## 재검토 3 2026-10-09 (기준 커밋 b3429a7, 충돌 해결)
+- 대상: PR #23 / 커밋 b3429a7c130da3b7be4490b9bf4a145dd8e3a2cd(47f79e5와 main 307ca00의 병합) / main 대비 전체 diff (base 307ca00, GitHub `mergeable_state: clean`)
+- 범위: 요청은 충돌 해결 부분이지만 QA 지침 3장에 따라 main 대비 전체 diff에서 충돌 해결 밖의 새 변경이 섞였는지도 확인했다.
+- 직접 실행한 것:
+  - `git diff --stat origin/main b3429a7` → md 6개(`decisions/README.md`, `research/market-data-limits.md`, `spec/autotrade-spec.md`, `team/broker-and-fault-design.md`, `reviews/pr-23/qa.md`, `reviews/pr-23/risk-ops.md`). **코드·설정·테스트·마이그레이션 변경 없음.** 8c8afe5 대비 늘어난 Java·ADR·runbook 변경(`ReplayCheck` 등)은 모두 main #27에서 들어온 것이고 main 대비 diff에는 나타나지 않는다.
+  - PR 고유 변경 비교: `git diff 1bd0ddc 8c8afe5`(재검토 2 기준)와 `git diff 307ca00 b3429a7`(지금)의 +/- 줄을 리뷰 파일을 빼고 대조 → 다른 줄은 두 곳뿐이다. (1) Q-015 행: main #27의 "요금 확인은 끝남(무료, 사용자 2026-10-09 약관 확인)" 문구를 그대로 두고 이 PR의 "키움 토큰 재발급 무효화 실측(D-036 1-K 선행)"만 덧붙임. (2) 기획서 버전 v14.2 → **v14.4**와 그 이력 행 번호. 나머지(D-036 행, 7장 1번 행, 7.1절 전문, TST-01·TST-07 행, 조사 문서 메모)는 글자 단위로 같다.
+  - `git show b3429a7:docs/decisions/README.md` → D-035, D-036, D-037, **D-038**(`:43`) 순서로 모두 있음.
+  - `git show b3429a7:docs/spec/autotrade-spec.md` → 버전 `v14.4`(`:12`), 변경 이력 v14.4(`:20`) → **v14.3**(`:21`) → v14.1 → v14 순서. 버전이 거꾸로 가지 않음.
+  - `git grep "<<<<<<<\|>>>>>>>" b3429a7 -- docs` → 0건(충돌 표식 없음).
+  - `git diff 47f79e5 b3429a7 -- docs/reviews` → main에서 온 `docs/reviews/pr-27/architect.md`만. 이 PR의 `qa.md`·`risk-ops.md` 원문은 바뀌지 않음.
+  - `./gradlew build --no-daemon --max-workers=1` (b3429a7) → `BUILD SUCCESSFUL`. 테스트 결과 XML 집계 521건, 실패 0·오류 0·건너뜀 0.
+  - PR head(b3429a7) check run → `Gradle build`, `DB schema (PostgreSQL 16)`, `Secret scan and collector boundary` 모두 success(2026-10-09T11:20~11:23).
+
+| 지난 조건 | 상태 | 근거 |
+|---|---|---|
+| R-1 현재 main과의 충돌 해결, CI 재통과 | 해결 | `mergeable_state: clean`, base 307ca00, head CI 3종 success, 직접 빌드 성공 |
+| D-036·7.1·TST-01·TST-07 불변 | 확인 | 위 PR 고유 변경 대조. 내용 변경 없음(버전 번호만 v14.2 → v14.4) |
+| D-038 행과 v14.3 이력 보존 | 확인 | `decisions/README.md:43`, `autotrade-spec.md:21` |
+| 충돌 해결 밖 새 변경 | 없음 | main 대비 diff는 md 6개이고 PR 고유 변경은 위 두 곳(Q-015 병합, 버전 번호)뿐 |
+
+점검표 A·B1·B6·과금 검사의 각 항목 결과는 재검토 2와 같다(대상 내용이 같고, 이번 병합으로 이 PR의 diff에 코드가 들어오지 않음). Q-015의 요금 문구는 main #27의 기존 내용이며 이 PR이 쓴 것이 아니다. 실패·확인 못 함 항목 없음.
+
+재검토 2의 N-1(시험용 우회 구현은 실전 관련 PR로 QA 관문), N-2(조회 정상 주기 상한을 7단계 절차서에서 정할 것), N-3(감지·알림 합격 조건 여부), N-4(1-T는 토스 실시간 구현 전 해당 없음)는 머지 조건이 아닌 후속 과제로 남는다.
+
+### 판정
+승인
+
+- 머지는 project-instructions.md 10장에 따라 사용자가 직접 한다. 이 보고서 커밋으로 head가 바뀌므로 머지 전 CI가 이 커밋에서도 통과했는지 확인할 것.
