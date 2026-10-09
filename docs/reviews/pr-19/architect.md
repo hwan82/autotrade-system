@@ -201,3 +201,34 @@
 
 ### 판정
 승인. 점검표 B 전 항목 통과 또는 해당 없음이고 확인 못 함은 없다. 이 판정은 architect 검토에 한한다. 실전 관련 PR이므로 Claude가 머지하지 않으며, risk-ops 재검토 승인, 독립 QA, 사용자 직접 머지(D-035 출처 확인 포함)가 남아 있다.
+
+## 재검토 2026-10-09 (6)
+- 대상: PR #19 / 브랜치 HEAD 5304721 / `git diff origin/main...5304721` 전체. 지난 재검토(56203c7) 뒤 바뀐 것: risk-ops 재검토(5) 원문(98cc10a), 독립 QA 원문(aa3742c, 판정 "수정 필요(A14)", F-1), 5304721의 코드 2개(`ArchitectureTest.java`, 새 위반 픽스처 `com.autotrade.risk.archfixture.SplitPackageApproveAll`)와 문서 2개(ADR-001:81·:104, D-032 결정 6항·위험과 한계 둘째 항목). 운영 코드(`src/main`) 변경 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - 별도 git worktree(5304721, 검토 후 제거)에서 `./gradlew clean build --no-daemon`: BUILD SUCCESSFUL, EXIT=0. 테스트 XML 합계 320건, 실패·오류·건너뜀 0. ArchitectureTest 13건.
+  - GitHub REST check-runs(5304721): `Gradle build`, `DB schema (PostgreSQL 16)`, `Secret scan and collector boundary` 모두 success. `git merge-tree --write-tree origin/main 5304721` 충돌 없음.
+  - QA F-1 우회를 같은 worktree에서 다시 해 봤다(`:autotrade-architecture-test:test`, 실험 뒤 삭제하고 `git status` 깨끗함 확인).
+    - E1: `autotrade-sim/src/main/java`에 `package com.autotrade.risk; RevSplit implements RiskPolicy`(승인만) → EXIT=1, `리스크_규칙은_리스크_모듈에만_있다` 실패, 보고서에 `RevSplit` 이름이 나온다. QA가 못 잡았다고 한 E1이 이제 잡힌다.
+    - E3: `autotrade-app-lab`에 `com.autotrade.risk.x` 패키지의 익명 `RiskPolicy` → EXIT=1(1건 실패).
+  - 규칙 변이: `andShould(FROM_RISK_MODULE)` 제거 → 1건 실패(자기 검사의 `SplitPackageApproveAll` hasSize(1)), 위치 판정을 항상 참으로 → 1건 실패(같은 단언), 항상 거짓으로 → 2건 실패(운영 검사와 `RiskChain` 통과 단언). 세 변이 모두 잡혔다.
+  - 리스크 클래스의 출처: 테스트 클래스패스의 리스크 모듈은 `autotrade-risk/build/libs/autotrade-risk-0.1.0-SNAPSHOT.jar`라 URI에 `/autotrade-risk/`가 들어 있다. 운영 검사가 통과하므로 실제 구현(`RiskChain`)은 모듈 판정을 통과한다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 worktree `./gradlew clean build` EXIT=0, 320건 통과, CI 3종 success |
+| B2 | 통과 | 규칙이 강화됐고 ADR이 함께 바뀌었다. `RISK_POLICIES_LIVE_IN_RISK_MODULE`은 패키지 조건에 클래스 파일 위치 조건을 더했다(ArchitectureTest.java:158-178). ADR-001:81("`RiskPolicy` 구현 클래스는 리스크 모듈 산출물에만, 패키지와 클래스 파일 위치")과 :104, D-032 결정 6항이 같은 내용을 적는다. 새 픽스처는 테스트 소스(`autotrade-architecture-test/src/test`)에만 있고 PRODUCTION 가져오기(`DO_NOT_INCLUDE_TESTS`)에 들어가지 않는다. 모듈 의존 변경 없음 |
+| B3 | 통과 | 계약(공개 타입·생성자·설정·스키마) 변경 없음. 바뀐 것은 ArchUnit 규칙이고 ADR-001·D-032에 반영됐다 |
+| B4 | 통과 | 운영 코드 변경 없음. 지난 검토의 결정론·실험 재실행 결과 유효 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 새 동작(모듈 위치 판정)에 실패 경우 테스트가 있다: 다른 모듈의 리스크 패키지 픽스처를 정확히 1건 잡고(:290-291), 실제 `RiskChain`은 통과시킨다(:293-294). 변이 3개 모두 검출. 보호 테스트 `ArchitectureTest`는 규칙이 강해졌다. 다만 `ApproveAllRiskPolicy` 단언이 `hasSize(1)`에서 `hasViolation()`으로 바뀌었다(:288-289). 조건이 둘이 되어 위반 건수가 1→2로 늘 수 있어서이며, 규칙 자체는 더 엄격해졌으므로 약화로 보지 않는다(아래 참고 1). 테스트 삭제·`@Disabled` 없음 |
+| B7 | 통과(risk-ops 검토 필요) | 보호 테스트(`ArchitectureTest`)를 바꾼 실전 관련 PR. 5304721 기준 risk-ops 재검토, 독립 QA 재검토, 사용자 직접 머지가 필요하다 |
+| B8 | 통과 | 바뀐 줄에 비밀값 없음, CI gitleaks success |
+
+### 점검표 밖 발견
+- **참고 1 `ApproveAllRiskPolicy` 단언의 정밀도.** `hasViolation()`은 "위반 1건 이상"만 본다. 이 픽스처는 패키지와 모듈을 둘 다 어기므로 정확한 기대값은 2건이다. 규칙 하나가 다른 이유로 빠져도 남은 하나로 통과할 수 있다. 다만 모듈 조건은 `SplitPackageApproveAll` hasSize(1)이, 패키지 조건은 E3·`ApproveAllRiskPolicy`가 따로 잡으므로(변이 M1로 확인) 실제 구멍은 없다. 다음에 이 테스트를 고칠 때 `hasSize(2)`로 고정하면 좋다.
+- **참고 2 위치 판정은 경로 문자열 휴리스틱이다**(`contains("/autotrade-risk/")`, :160-163). 저장소를 `/autotrade-risk/`가 들어간 경로 아래에 받으면 모든 클래스가 모듈 조건을 통과한다. 그 경우 `SplitPackageApproveAll` hasSize(1) 단언이 실패하므로(변이 M2와 같은 효과) 조용히 약해지지 않고 빌드가 깨진다. 닫힌 쪽 실패라 막지 않는다. 모듈 이름을 바꾸면 이 문자열도 같이 바꿔야 하므로, 모듈 이름 변경 시 리뷰 항목으로 남긴다.
+- **참고 3 람다·메서드 참조(QA E2)는 여전히 못 잡는다.** D-032 위험과 한계(:39)가 "7단계 주문 파이프라인은 `RiskPolicy`를 받는 자리를 두지 않고 `RiskChain`만 받아야 한다"를 선행 조건으로 적었다. 지금 운영 코드에서 `RiskPolicy` 타입을 받는 자리는 `RiskChain.Builder.entryRule`뿐이고(진입을 더 막을 수만 있음), 실행기는 `RiskChain`만 받는다.
+
+### 판정
+승인. 점검표 B 전 항목 통과 또는 해당 없음이고 확인 못 함은 없다. QA F-1(E1)의 우회는 직접 재현해 이제 잡히는 것을 확인했다. 이 판정은 architect 검토에 한한다. 실전 관련 PR(보호 테스트 변경 포함)이므로 Claude가 머지하지 않으며, risk-ops 재검토, 독립 QA 재검토(A14), 사용자 직접 머지(D-035 출처 확인 포함)가 남아 있다.
