@@ -113,6 +113,26 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
+    void 보내던_스레드에서_바로_온_전송_실패는_잠금_밖에서_끊고_알린다() {
+        StreamingMarketDataSource s = connected();
+        boolean[] inside = {false};
+        List<Boolean> firedInside = new ArrayList<>();
+        s.addStateListener((id, st) -> firedInside.add(inside[0]));
+        transport.last().failSends = true;
+
+        inside[0] = true;
+        s.subscribe(Set.of(Symbol.krx("035720")), received::add);
+        inside[0] = false;
+        assertThat(firedInside).isEmpty();                       // subscribe 안에서 알리지 않는다
+        assertThat(s.state()).isEqualTo(ConnectionState.CONNECTED);
+
+        scheduler.runDue();
+        assertThat(firedInside).containsExactly(false);
+        assertThat(s.state()).isEqualTo(ConnectionState.DISCONNECTED);
+        assertThat(transport.last().closed).isTrue();
+    }
+
+    @Test
     void PING에_응답한다() {
         connected();
         transport.last().push("PING");

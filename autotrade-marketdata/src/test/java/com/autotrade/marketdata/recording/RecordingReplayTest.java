@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -190,23 +191,52 @@ class RecordingReplayTest {
     }
 
     @Test
-    void 녹화_큐가_넘치면_기다리지_않고_버린_뒤_누락을_표시한다() {
-        // 큐 1칸: 쓰기 스레드가 따라오기 전에 몰아서 넣으면 일부가 버려진다
-        MarketEventRecorder rec = new MarketEventRecorder(new RecordingLayout(root), Market.KRX, SEOUL, CLOCK, Map.of(), "", 1,
-                Duration.ofMillis(50));
-        int n = 2000;
+    void 녹화_큐가_넘치면_기다리지_않고_버린_뒤_누락을_표시한다() throws InterruptedException {
+        // 쓰기 스레드를 문 앞에 세워 두고 몰아서 넣는다: 큐 2칸이 차면 나머지는 버려진다(스레드 일정과 무관)
+        CountDownLatch gate = new CountDownLatch(1);
+        MarketEventRecorder rec = new MarketEventRecorder(new RecordingLayout(root), Market.KRX, SEOUL, CLOCK, Map.of(), "", 2,
+                Duration.ofMillis(50), task -> {
+                    Thread t = new Thread(() -> {
+                        try {
+                            gate.await();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        task.run();
+                    }, "recorder-test");
+                    t.setDaemon(true);
+                    return t;
+                });
+        int n = 100;
         for (int i = 0; i < n; i++) {
             Instant t = OPEN.plusMillis(i);
             rec.offer("K", new TradeTick(SAMSUNG, i + 1, t, t, BigDecimal.TEN, 1));
         }
-        long dropped = rec.droppedCount();
+        assertThat(rec.acceptedCount()).isEqualTo(2);
+        assertThat(rec.droppedCount()).isEqualTo(n - 2);
+
+        gate.countDown();
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (rec.queued() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertThat(rec.queued()).isZero();
+        // 큐가 비면 다음 이벤트 앞에 버린 구간이 누락으로 남는다
+        Instant next = OPEN.plusMillis(n);
+        rec.offer("K", new TradeTick(SAMSUNG, n + 1, next, next, BigDecimal.TEN, 1));
         rec.close();
+
         RecordedDay day = RecordedDay.open(new RecordingLayout(root).dayDir(Market.KRX, LocalDate.of(2026, 10, 8)));
-        long gaps = day.lines().stream().filter(l -> l.event() instanceof DataGap g
-                && g.reason() == DataGap.GapReason.RECORDER_OVERFLOW).count();
-        assertThat(dropped).isPositive();
-        assertThat(gaps).isPositive();
-        assertThat(day.eventCount() - gaps).isEqualTo(rec.acceptedCount());
+        List<DataGap> gaps = day.lines().stream().map(l -> l.event()).filter(DataGap.class::isInstance)
+                .map(DataGap.class::cast).toList();
+        assertThat(gaps).singleElement().satisfies(g -> {
+            assertThat(g.reason()).isEqualTo(DataGap.GapReason.RECORDER_OVERFLOW);
+            assertThat(g.gapStart()).isEqualTo(OPEN.plusMillis(2)); // 처음 버린 이벤트
+            assertThat(g.gapEnd()).isEqualTo(next);
+        });
+        assertThat(day.eventCount()).isEqualTo(3 + 1);           // 받은 3건 + 누락 표시 1건
+        assertThat(rec.acceptedCount()).isEqualTo(3);
     }
 
     @Test

@@ -122,7 +122,6 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         stateListeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
-    /** 운영 지표(누락·무시 건수). 스냅샷이다. */
     @Override
     public java.util.Optional<Instant> lastReceivedAt() {
         synchronized (lock) {
@@ -130,6 +129,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         }
     }
 
+    /** 운영 지표(누락·무시 건수). 스냅샷이다. */
     public Stats.Snapshot stats() {
         synchronized (lock) {
             return stats.snapshot();
@@ -584,12 +584,25 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
 
         @Override
         public void onClosed(int statusCode, String reason) {
-            dropConnection(gen, "서버 종료 " + statusCode);
+            drop("서버 종료 " + statusCode);
         }
 
         @Override
         public void onError(Throwable error) {
-            dropConnection(gen, "오류 " + error.getClass().getSimpleName());
+            drop("오류 " + error.getClass().getSimpleName());
+        }
+
+        /**
+         * 전송 실패는 {@code send}를 부른 스레드에서 바로 올 수 있다({@link WsHandler}). 그때는 소스 잠금 안이므로
+         * 끊기와 상태 알림을 스케줄러로 미룬다. 잠금 안에서 알리면 수신자(MarketHub)가 같은 스레드에서 다시 들어와
+         * 낡은 계획으로 덮어쓰거나 허브·소스 잠금 순서가 뒤집혀 교착할 수 있다.
+         */
+        private void drop(String why) {
+            if (Thread.holdsLock(lock)) {
+                scheduler.schedule(Duration.ZERO, () -> dropConnection(gen, why));
+            } else {
+                dropConnection(gen, why);
+            }
         }
     }
 

@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -56,6 +57,17 @@ public final class MarketEventRecorder implements AutoCloseable {
      */
     public MarketEventRecorder(RecordingLayout layout, Market market, ZoneId zone, Clock clock,
             Map<String, String> sourceScopes, String license, int queueCapacity, Duration flushInterval) {
+        this(layout, market, zone, clock, sourceScopes, license, queueCapacity, flushInterval, task -> {
+            Thread t = new Thread(task, "recorder-" + market);
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /** 쓰기 스레드 생성을 바꿀 수 있는 생성자. 테스트가 쓰기 시작 시점을 정할 때 쓴다. */
+    MarketEventRecorder(RecordingLayout layout, Market market, ZoneId zone, Clock clock,
+            Map<String, String> sourceScopes, String license, int queueCapacity, Duration flushInterval,
+            ThreadFactory threads) {
         this.layout = Objects.requireNonNull(layout, "layout");
         this.market = Objects.requireNonNull(market, "market");
         this.zone = Objects.requireNonNull(zone, "zone");
@@ -64,8 +76,7 @@ public final class MarketEventRecorder implements AutoCloseable {
         this.license = Objects.requireNonNull(license, "license");
         this.flushInterval = Objects.requireNonNull(flushInterval, "flushInterval");
         this.queue = new ArrayBlockingQueue<>(queueCapacity);
-        this.writer = new Thread(this::loop, "recorder-" + market);
-        writer.setDaemon(true);
+        this.writer = threads.newThread(this::loop);
         writer.start();
     }
 
@@ -108,6 +119,11 @@ public final class MarketEventRecorder implements AutoCloseable {
     /** 쓰기 스레드가 살아 있는지. 디스크 오류로 녹화가 멈췄으면 false(감시 지표). */
     public boolean isWriting() {
         return writer.isAlive();
+    }
+
+    /** 큐에 남은 건수(테스트·감시용). */
+    int queued() {
+        return queue.size();
     }
 
     public synchronized long acceptedCount() {

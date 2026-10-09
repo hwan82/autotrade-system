@@ -21,10 +21,6 @@ public interface LiveMarketDataSource extends MarketDataSource, AutoCloseable {
     void addStateListener(SourceStateListener listener);
 
     /**
-     * 현재(또는 마지막) 연결에서 서버 메시지를 마지막으로 받은 시각. 끊긴 소스의 종목을 옮길 때 공백 시작으로 쓴다.
-     * 접속 전이면 빈 값.
-     */
-    /**
      * 연속 인증 실패로 자격 증명이 거부된 것으로 보는지. 플러그인은 이때 DEGRADED로 알리고 게이트웨이는 배분에서 뺀다.
      * 인증이 다시 확인되면(로그인 응답 또는 시세 수신) 풀린다.
      */
@@ -32,6 +28,10 @@ public interface LiveMarketDataSource extends MarketDataSource, AutoCloseable {
         return false;
     }
 
+    /**
+     * 현재(또는 마지막) 연결에서 서버 메시지를 마지막으로 받은 시각. 끊긴 소스의 종목을 옮길 때 공백 시작으로 쓴다.
+     * 접속 전이면 빈 값.
+     */
     default java.util.Optional<java.time.Instant> lastReceivedAt() {
         return java.util.Optional.empty();
     }

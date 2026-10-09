@@ -34,6 +34,8 @@ public final class DailyBarQualityCheck {
         Objects.requireNonNull(manifest, "manifest");
         // 스냅샷 기준일은 생성 시각의 거래소 현지 날짜다(시장마다 다르다: 한국 아침은 미국 전날 저녁)
         java.time.Instant createdAt = java.time.Instant.parse(manifest.createdAt());
+        // 캘린더 읽기는 비싸다(행마다 하면 20년치 검사가 수십 분): 시장마다 한 번만 계산한다
+        Map<Market, LocalDate> snapshotDates = new java.util.EnumMap<>(Market.class);
         List<Finding> findings = new ArrayList<>();
         Map<Symbol, List<DailyBar>> bySymbol = new TreeMap<>();
         Map<Market, NavigableSet<LocalDate>> marketDates = new TreeMap<>();
@@ -56,7 +58,7 @@ public final class DailyBarQualityCheck {
                     findings.add(new Finding(Rule.DUPLICATE_BAR, sym, b.date(), "같은 날짜 행이 둘 이상"));
                     continue;
                 }
-                checkRow(b, ps, localDate(createdAt, b.symbol().market()), findings);
+                checkRow(b, ps, snapshotDates.computeIfAbsent(sym.market(), m -> localDate(createdAt, m)), findings);
                 if (prev != null && valid(prev) && valid(b)) {
                     checkJump(prev, b, findings);
                 }

@@ -34,6 +34,8 @@ final class FakeTransport implements WsTransport {
         final WsHandler handler;
         final List<String> sent = new ArrayList<>();
         boolean closed;
+        /** true면 보내기가 실패하고, JDK의 이미 실패한 전송처럼 {@code send}를 부른 스레드에서 바로 오류를 알린다. */
+        boolean failSends;
 
         Conn(WsHandler handler) {
             this.handler = handler;
@@ -41,6 +43,10 @@ final class FakeTransport implements WsTransport {
 
         @Override
         public void send(String text) {
+            if (failSends) {
+                handler.onError(new java.io.IOException("Output closed"));
+                return;
+            }
             sent.add(text);
         }
 
