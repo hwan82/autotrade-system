@@ -19,6 +19,7 @@ final class LineProtocol implements StreamProtocol {
     int opened;
     int invalidated;
     boolean failPrepare;
+    boolean loginAck = true;
     final int max;
 
     LineProtocol(int max) {
@@ -51,7 +52,7 @@ final class LineProtocol implements StreamProtocol {
 
     @Override
     public boolean requiresLoginAck() {
-        return true;
+        return loginAck;
     }
 
     @Override

@@ -61,6 +61,9 @@ public final class KiwoomPlugin implements BrokerPlugin {
 
     @Override
     public BrokerStatus status() {
+        if (configured && source.credentialsRejected()) {
+            return BrokerStatus.DEGRADED; // 연속 인증 실패(ADR-003 4장)
+        }
         return BrokerStatuses.fromConnection(configured, configured ? source.state() : ConnectionState.NEW);
     }
 

@@ -42,6 +42,11 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
 
     private static final Logger LOG = System.getLogger(StreamingMarketDataSource.class.getName());
 
+    /** 인증 실패 뒤 다음 접속(자격 증명 재발급)까지 최소 간격. 발급 API를 두드리지 않게 한다(risk-ops 검토 N1). */
+    static final Duration AUTH_RETRY_MIN = Duration.ofSeconds(60);
+    /** 이 횟수만큼 연속 인증에 실패하면 자격 증명이 거부된 것으로 보고 경보한다. */
+    static final int AUTH_FAILURE_LIMIT = 3;
+
     private final String sourceId;
     private final StreamProtocol protocol;
     private final WsTransport transport;
@@ -60,6 +65,10 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     private WsConnection connection;
     private int generation;
     private boolean awaitingLogin;
+    /** 이번 연결에서 인증이 확인됐는지(로그인 응답 또는 첫 시세). 확인 전에는 재연결 대기를 초기화하지 않는다. */
+    private boolean confirmed;
+    /** 연속 인증 실패 횟수. 확인되면 0. */
+    private int authFailures;
     private long nextSubId;
     private long sequence;
     private Instant lastMessageAt;
@@ -245,6 +254,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 return;
             }
             connection = conn;
+            confirmed = false;
             lastMessageAt = clock.instant();
             sendAll(opening);
             awaitingLogin = protocol.requiresLoginAck();
@@ -258,7 +268,10 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     /** 인증까지 끝났다: 누락 구간을 알리고 구독을 복구한다. 잠금 안에서 부른다. */
     private ConnectionState becomeReady() {
         awaitingLogin = false;
-        backoff.reset();
+        if (protocol.requiresLoginAck()) {
+            // 로그인 응답을 받았으니 인증이 확인됐다. 응답이 없는 프로토콜은 첫 시세에서 확인한다
+            confirm();
+        }
         Instant now = clock.instant();
         if (gapStart != null) {
             for (Symbol s : gapSymbols) {
@@ -274,6 +287,21 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         }
         sendAll(protocol.subscribeMessages(new TreeSet<>(registered)));
         return setState(ConnectionState.CONNECTED);
+    }
+
+    private void confirm() {
+        if (!confirmed) {
+            confirmed = true;
+            authFailures = 0;
+            backoff.reset();
+        }
+    }
+
+    @Override
+    public boolean credentialsRejected() {
+        synchronized (lock) {
+            return authFailures >= AUTH_FAILURE_LIMIT;
+        }
     }
 
     private void dropConnection(int gen, String why) {
@@ -306,7 +334,11 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         if (pendingTask != null) {
             pendingTask.cancel();
         }
-        pendingTask = scheduler.schedule(backoff.nextDelay(), () -> {
+        Duration delay = backoff.nextDelay();
+        if (authFailures > 0 && delay.compareTo(AUTH_RETRY_MIN) < 0) {
+            delay = AUTH_RETRY_MIN;
+        }
+        pendingTask = scheduler.schedule(delay, () -> {
             ConnectionState changed;
             synchronized (lock) {
                 if (state == ConnectionState.CLOSED) {
@@ -380,6 +412,12 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 }
                 case LOGIN_FAILED -> {
                     protocol.invalidateCredentials();
+                    authFailures++;
+                    stats.authFailures++;
+                    if (authFailures == AUTH_FAILURE_LIMIT) {
+                        LOG.log(Level.ERROR, "{0} 인증 {1}회 연속 실패: 자격 증명 거부로 보고 DEGRADED. 키 확인 필요",
+                                sourceId, authFailures);
+                    }
                     dropGen = gen;
                     dropWhy = "인증 실패 " + d.detail();
                 }
@@ -389,6 +427,9 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 }
                 case IGNORED -> stats.ignored++;
                 case NONE -> { }
+            }
+            if (!d.quotes().isEmpty()) {
+                confirm(); // 시세가 오면 인증이 살아 있다
             }
             for (RawQuote q : d.quotes()) {
                 if (!registered.contains(q.symbol())) {
@@ -562,10 +603,11 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         long unsubscribed;
         long overflowDropped;
         long malformed;
+        long authFailures;
 
         Snapshot snapshot() {
             return new Snapshot(connectFailures, disconnects, gaps, subscribeRejected, ignored, unsubscribed, overflowDropped,
-                    malformed);
+                    malformed, authFailures);
         }
 
         public record Snapshot(
@@ -576,6 +618,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 long ignored,
                 long unsubscribed,
                 long overflowDropped,
-                long malformed) {}
+                long malformed,
+                long authFailures) {}
     }
 }

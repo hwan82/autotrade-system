@@ -87,6 +87,32 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
+    void 로그인_응답이_없는_프로토콜에서_인증_실패가_이어져도_재발급은_1분에_한_번이고_3회면_거부로_본다() {
+        protocol.loginAck = false;
+        StreamingMarketDataSource s = source(SerialDispatcher.direct());
+        s.subscribe(Set.of(SAMSUNG), received::add);
+        s.start();
+        scheduler.runDue();
+        // 10분 동안 접속마다 인증 실패
+        for (int sec = 0; sec < 600; sec++) {
+            if (s.state() == ConnectionState.CONNECTED) {
+                transport.last().push("LOGIN FAIL");
+            }
+            scheduler.advance(Duration.ofSeconds(1));
+        }
+        assertThat(protocol.opened).isBetween(10, 11);      // 접속(=자격 증명 준비)은 60초에 한 번 꼴
+        assertThat(protocol.invalidated).isBetween(protocol.opened - 1, protocol.opened); // 마지막 접속은 아직 실패 전일 수 있다
+        assertThat(s.credentialsRejected()).isTrue();
+        assertThat(s.stats().authFailures()).isGreaterThanOrEqualTo(3);
+
+        // 시세가 다시 오면 인증이 확인돼 풀린다
+        scheduler.advance(Duration.ofSeconds(61));
+        assertThat(s.state()).isEqualTo(ConnectionState.CONNECTED);
+        transport.last().push("T 005930 71500 1 1791446400");
+        assertThat(s.credentialsRejected()).isFalse();
+    }
+
+    @Test
     void PING에_응답한다() {
         connected();
         transport.last().push("PING");
@@ -169,6 +195,8 @@ class StreamingMarketDataSourceTest {
         assertThat(protocol.invalidated).isEqualTo(1);
         assertThat(transport.connections.get(0).closed).isTrue();
         scheduler.advance(Duration.ofSeconds(1));
+        assertThat(transport.connections).hasSize(1); // 인증 실패 뒤에는 최소 60초 기다린다(발급 API 보호)
+        scheduler.advance(Duration.ofSeconds(59));
         assertThat(transport.connections).hasSize(2);
         assertThat(s.state()).isEqualTo(ConnectionState.CONNECTING);
     }

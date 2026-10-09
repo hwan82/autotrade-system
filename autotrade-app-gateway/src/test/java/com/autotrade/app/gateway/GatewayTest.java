@@ -109,6 +109,7 @@ class GatewayTest {
         gaps = gaps.stream().filter(gap -> !gap.symbol().equals(KAKAO)).toList();
         assertThat(gaps).extracting(DataGap::symbol).containsExactly(HYNIX, SAMSUNG);
         assertThat(gaps).allSatisfy(gap -> {
+            assertThat(gap.reason()).isEqualTo(DataGap.GapReason.SOURCE_SWITCH);
             assertThat(gap.gapStart()).isEqualTo(down);
             assertThat(gap.gapEnd()).isEqualTo(down);
         });
