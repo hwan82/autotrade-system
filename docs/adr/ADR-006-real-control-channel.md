@@ -1,6 +1,6 @@
 # ADR-006 실전 제어 명령 채널과 운영 화면 1차(실전 활성화 2차 확인, PANIC SELL)
 
-- 상태: 제안 (ui-dev, risk-ops·architect 1차 검토 반영). 검토 원문: [risk-ops](../reviews/claude-project-thread-r930sh/risk-ops.md), [architect](../reviews/claude-project-thread-r930sh/architect.md). 실전 경로라 **사용자가 직접 확인하고 머지**한다(지침 10장). 이 PR 머지가 아래 7장 결정의 사용자 결정이다(ADR-002 7장과 같은 방식). 결정 로그 번호는 머지 후 pm-lead가 부여한다
+- 상태: 채택 (PR #18 머지, 2026-10-09 사용자 결정. 이전 상태: 제안). 검토 원문: [risk-ops](../reviews/claude-project-thread-r930sh/risk-ops.md), [architect](../reviews/claude-project-thread-r930sh/architect.md). 실전 경로라 **사용자가 직접 확인하고 머지**한다(지침 10장). 이 PR 머지가 아래 7장 결정의 사용자 결정이다(ADR-002 7장과 같은 방식). 결정 로그 번호는 머지 후 pm-lead가 부여한다
 - 날짜: 2026-10-09
 - 단계: 로드맵 5단계(UI)의 실전 운영 화면 부분. 7단계 실전 연동의 명령 경로 바닥
 - 기획서: v13 RSK-01(2차 확인), RSK-13(PANIC SELL), UI-05(운영 화면), UI-06(읽기 전용 경로, 별도 명령 채널), CFG-02·03
@@ -141,7 +141,7 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 
 | 위험 | 영향 | 대응 |
 |---|---|---|
-| 같은 OS 사용자로 도는 악성 프로그램은 소켓에 연결할 수 있음 | 상태 조회·내리기·PANIC 1단계(보호 모드 고정)는 가능(모두 안전 방향). 올리기와 PANIC 청산은 비밀번호가 필요 | 비밀번호 + 잠금. 비밀번호를 키로거로 훔치는 수준은 범위 밖 `[가정]` |
+| 같은 OS 사용자로 도는 악성 프로그램은 소켓에 연결할 수 있음 | 상태 조회·내리기·PANIC 1단계(보호 모드 고정)는 가능(모두 안전 방향). 올리기와 PANIC 청산은 비밀번호가 필요. 다만 틀린 확인을 5번 보내 15분 잠금을 반복하면 그동안 사람의 PANIC도 보호 모드 고정까지만 된다(청산 서비스 거부) | 비밀번호 + 잠금. 비밀번호를 키로거로 훔치는 수준은 범위 밖 `[가정]`. 잠금 남용 대책은 6장 표(7단계 완료 조건) |
 | 실험실 프로세스가 장악됨(의존 라이브러리 취약점 등) | 해시 탈취 후 오프라인 대입, 화면 입력 비밀번호 가로채기, secrets.json 해시 교체 후 엔진 재기동 시 공격자 비밀번호로 실전 열기 | 15자 이상 비밀번호와 PBKDF2 600,000회로 대입 비용을 올림. **7단계 완료 조건**: secrets.json·해시 변경과 엔진 재기동을 감시 프로세스가 알림(MON), 실전 활성화마다 외부 알림(문자·메신저), 가능하면 해시를 엔진만 읽는 별도 파일로 분리 |
 | 비밀번호가 실험실 메모리와 소켓을 평문으로 지난다 | 같은 PC 메모리 덤프 위험 | 로컬 전용, 로그·응답 미기록, 엔진은 검증 후 배열을 지움. Java 문자열은 GC 전까지 남을 수 있음(한계) |
 | 엔진 재기동으로 잠금이 풀림 | 대입 시도 속도는 재기동 시간에 묶임 | 재기동 시 모든 계좌 OFF. 반복 횟수 600,000회로 시도당 약 0.5초 이상 `[추론]` |
@@ -193,10 +193,11 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 | 엔진이 지워진 소켓·잠금 파일을 스스로 확인해 다시 만들고 긴급 알림, 지울 수 없는 단일 실행 보장 | architect + risk-ops | 7단계 완료 조건 |
 | 장애 테스트 후보: "엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 기동 차단, 화면 가상 표시 없음" (broker-and-fault-design.md 7장 목록 반영은 Q-018, 사용자 결정) | risk-ops | 7단계 |
 | 하향 명령(내리기·PANIC)용 연결 자리 예약, 기다리는 PANIC의 시간 상한, 감시 프로세스(MON) 점검 항목에 명령 채널 연결 포화 추가 | risk-ops | 7단계 완료 조건 |
-| 처리기가 활성화 각 단계 직전에 요청 접수 후 경과 시간을 다시 확인해 실험실 대기 상한을 넘기면 출발 상태로 되돌리기(지금 `STALE`은 대기열 시간만 봄, ControlServer). 화면이 "응답 없음"을 보인 뒤 실전이 열리는 경로 차단 (QA [pr-18](../reviews/pr-18/qa.md) 1, architect 재검토 3 참고 1) | risk-ops + architect | 7단계 완료 조건 |
-| 비밀번호 해시 계산을 검증기 잠금(`OperatorAuthenticator` `synchronized`) 밖으로 빼서 검증 중 STATUS·잠금 조회가 막히지 않게 하기 (QA 2, architect 참고 1) | architect | 7단계 완료 조건 |
-| 같은 OS 사용자 프로그램이 틀린 확인을 반복해 잠금을 걸면 PANIC이 보호 모드 고정까지만 되는 경로의 대책 검토 (QA 3) | risk-ops | 7단계 완료 조건 |
-| `hash-password` 안내 문구를 config-keys.md와 맞추기, 잠금 파일을 `NOFOLLOW_LINKS`로 열기, PID 쓰기 실패 시 빈 잠금 파일 처리 (QA 4·5, architect 참고 2) | architect | 7단계 |
+| 늦게 끝나는 활성화 차단: 엔진이 명령마다 **절대 기한**을 갖고, ① 2차 확인(해시 검증) 뒤 `beginActivation` 직전, ② 각 활성화 단계 직전, ③ 마지막 단계 뒤 OPEN 전이(`completeStep`) 직전에 기한을 확인해 넘겼으면 `failActivation`(출발 상태로)하고 `STALE`로 답한다. 지금 `STALE`은 요청을 다 읽은 뒤 잡는 `enqueuedAt` 기준 대기열 시간만 본다(ControlServer). 기한의 기준은 7단계 설계에서 둘 중 하나로 정한다: (가) 실험실이 요청에 절대 기한을 실어 보냄(명령 형식 변경, 이 ADR 개정), (나) 엔진 고정 기한을 두고 "엔진 기한 + 요청 읽기 상한(5초) < 실험실 대기 상한"을 규칙으로 적음. 합격 테스트: 단계·해시 검증·마지막 단계를 각각 기한 너머로 늦추면 OPEN이 되지 않고 출발 상태로 돌아온다 (QA [pr-18](../reviews/pr-18/qa.md) 1, [architect 재검토 3](../reviews/claude-project-thread-r930sh/architect.md) 참고 1) | risk-ops + architect | 7단계 완료 조건 |
+| 비밀번호 해시 계산을 검증기 잠금(`OperatorAuthenticator` `synchronized`) 밖으로 빼서 검증 중 STATUS·잠금 조회가 막히지 않게 하기. 해시 반복 상한(`MAX_ITERATIONS` 10,000,000, 직접 시험 약 10.8초)을 활성화 기한 안에 들도록 낮출지 재검토 (QA [pr-18](../reviews/pr-18/qa.md) 2, [architect 재검토 3](../reviews/claude-project-thread-r930sh/architect.md) 참고 1) | architect + risk-ops | 7단계 완료 조건 |
+| 잠금 남용으로 PANIC 청산을 막는 경로 대책: (1) 확인 잠금이 걸리면 외부 알림(실전 활성화 알림과 같은 경로), (2) 잠긴 동안 PANIC 청산을 어떻게 할지 결정(예: 감시 프로세스 긴급 PANIC 경로, 잠금과 별개인 청산 확인 수단). 결정은 Q 번호로 사용자에게 묻는다. 합격 기준: 잠금 상태에서 알림이 나가고, 정해진 청산 경로가 장애 테스트로 확인됨 (QA [pr-18](../reviews/pr-18/qa.md) 3) | risk-ops | 7단계 완료 조건 |
+| `hash-password` 안내 문구를 config-keys.md와 맞추기, 잠금 파일을 `NOFOLLOW_LINKS`로 열기, PID 쓰기 실패 시 빈 잠금 파일 처리 (QA [pr-18](../reviews/pr-18/qa.md) 4·5, [architect 재검토 3](../reviews/claude-project-thread-r930sh/architect.md) 참고 2) | architect | 7단계 |
+| 기존 엔진 확인용 프로브 연결(`ControlServer.isListening`)에 연결 시간 상한 두기 (architect 재검토 2 참고) | architect | 7단계 |
 | 머지 후 기획서 RSK-13 문구 갱신(1단계는 2차 확인 전, Q-017 결과) | pm-lead(autotrade-spec-keeper) | 머지 직후 |
 
 ## 7. 사용자 결정 항목(이 PR 머지로 결정)과 질문
