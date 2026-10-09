@@ -41,3 +41,45 @@
 - 고칠 것: R-1(새 모듈이 아키텍처 테스트 클래스패스에 자동으로 들어오거나 빠지면 빌드가 실패하게 하고, 그 실패를 확인하는 검사를 둔다), 그 결과에 맞춰 D-034:32·`ModuleOwnershipTest.java:44`·ADR-002 9장 문구 정정(A14 (1)), `broker-and-fault-design.md:68` 예시 정정(R-2, A14 (2)).
 - 권고(이번 PR 필수 아님): R-3 D-033 예외 문구, R-4 2단계 테스트 요구.
 - 이 PR은 실전 관련 PR(보호 테스트 `ArchitectureTest` 계열 추가, `GuardedOrderGatewayTest`·`RealOrderGatewaysTest` 수정, 실전·가상 공용 `OrderState` 계약 변경)이므로 재검토 승인 뒤에도 사용자 확인 머지와 독립 QA 관문 대상이다(지침 10·11장).
+
+## 재검토 2026-10-09
+- 대상: PR #21 / 커밋 `7dd0d78`(브랜치 `claude/project-thread-bl5qbg`) / main(`52ad85f`, 머지 기준점과 같음) 대비 diff 전체. 앞 검토(`4224efb`) 뒤 추가 커밋 `20f514a`(이 원문), `f2ffbab`(R-2·R-3 문서), `7dd0d78`(R-1 수정). `4224efb..7dd0d78` 비교 대상(검토 원문 제외): `CLAUDE.md`, `autotrade-architecture-test/build.gradle.kts`, `ModuleOwnershipTest.java`, ADR-001, ADR-002, D-033, D-034, `broker-and-fault-design.md`. 운영 코드(`*/src/main/*`) 추가 변경 없음.
+- 점검표: A
+- 검토자: risk-ops 서브에이전트. 커밋 메시지·ADR의 "검증" 서술은 근거로 쓰지 않고 아래 실험으로 다시 확인했다.
+- 직접 실행한 것:
+  - 새 분리 작업 트리에서 `./gradlew build --no-daemon -I <저장소 밖 미러 init 스크립트>` → **BUILD SUCCESSFUL**(57초). 실패 0, 오류 0, 건너뜀 0. architecture-test 20(ArchitectureTest 12, ModuleOwnershipTest 8), risk 41, app-engine 7, config 30, domain 31, sim 75, app-lab 86, strategy 25, gateway 1, watchdog 1, broker-api 1. 보호 테스트: `RealTradingGuardTest` 31/31, `GuardedOrderGatewayTest` 8/8, `RealOrderGatewaysTest` 4/4, `EngineMainTest` 3/3, `ArchitectureTest` 12/12, `OrderStateTest` 4/4, `ConfigLoaderTest` 21/21.
+  - 변조 실험 E1(앞 검토 실험 2와 같은 조건): 새 모듈 `autotrade-rogue`를 settings에만 include하고(`autotrade-risk` 의존), `com.autotrade.risk.guard.RogueRaiser`가 `beginActivation`을 부르게 함 → `./gradlew build` **실패**. `#운영_클래스는_패키지를_소유한_모듈에만_있다`(RogueRaiser 소유 위반)와 `#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`("소유 모듈 표(OWNERS)에 없는 모듈: autotrade-rogue")가 실패. **R-1 구멍이 닫혔다.**
+  - 변조 실험 E2(손 목록 회귀): rogue를 자기 패키지 `com.autotrade.rogue`로 두고 OWNERS에 등록한 뒤, `autotrade-architecture-test/build.gradle.kts`를 `4224efb` 판(손 목록)으로 되돌림 → **실패**. 시스템 속성이 없어 `#클래스패스는_settings의_...`가 닫힌 쪽으로 실패하고, `#운영_클래스는_...`의 `seenModules` 불일치로도 실패.
+  - 변조 실험 E3: E2 상태에서 빌드 파일만 PR 판으로 복원(rogue가 자동으로 클래스패스에 들어옴) → `ArchitectureTest#Guard를_올리는_조작은_명령_채널에서만_한다` **실패**(rogue의 `beginActivation` 호출 검출). 즉 기존 보호 규칙도 이제 새 모듈에 닿는다. (E2·E3에서 `#아무도_의존하지_않는_새_모듈이_빠지면_잡아낸다`도 실패했는데, 실험에서 내가 OWNERS에 `autotrade-rogue`를 넣어 그 테스트의 가정 이름과 겹친 탓이다. 결함 아님.)
+  - 실험 파일은 모두 지우고 `git status` 깨끗함 확인. 커밋·push 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 운영 코드 변경 없음(앞 검토 이후 `*/src/main/*` 변경 0). `RealTradingGuard.java:332,337` 초기 OFF, `RealTradingGuardTest` 31/31, `EngineMainTest#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 통과. 새 모듈에서 Guard를 올리는 코드는 이제 빌드가 막는다(E1, E3) |
+| A2 | 통과 | `ArchitectureTest.java` 변경 없음, 12/12. 아키텍처 테스트 클래스패스가 settings의 모든 Java 모듈에서 자동으로 만들어짐(`autotrade-architecture-test/build.gradle.kts:24`), 범위 교차 확인 `ModuleOwnershipTest.java:137`. 앞 검토의 조건(클래스패스 밖 모듈)은 E1·E2·E3로 해소 확인. 남는 한계는 아래 R-6 |
+| A3 | 통과 | 라우팅 코드 변경 없음. `RealOrderGateways.java:31-33`, `RealOrderGatewaysTest` 4/4 |
+| A4 | 통과(이 PR 범위) | 앞 검토와 같음: `UNKNOWN`·`CANCEL_REQUESTED` 비종결(`OrderStateTest#미확정과_취소_요청_중은_종결이_아니다`), `GuardedOrderGateway.java:85` 그대로. 재발주 로직은 미구현이고 TST-07 (7)로 7단계 완료 조건에 묶여 있음 |
+| A5 | 해당 없음 | `IdempotencyKey`·발급기 변경 없음(TST-07 (7)로 추적) |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음(F-2는 TST-07 (1)로 추적) |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 코드 변경 없음 |
+| A8 | 해당 없음 | 프로세스 런타임 의존·`processIsolation` 변경 없음. 바뀐 빌드 파일은 테스트 전용 모듈의 `testImplementation`뿐이라 실행 프로세스 클래스패스에 영향 없음 |
+| A9 | 통과 | 보호 폴링 `toss-polling-scope` 기본 `HELD_ONLY` 유지(`autotrade-default.json:5`). R-3 반영: D-033에 "보유 종목 보호 폴링은 결정 1의 예외, 끄거나 막는 변경은 risk-ops 검토와 사용자 결정"(`D-033-unpriced-source-default-off.md:27`). 설계 문서 예시도 `toss-polling-scope: HELD_ONLY`와 "실시간 순위와 별개" 주석 유지(`broker-and-fault-design.md:68-71`) |
+| A10 | 통과 | 추가 diff grep 0건. 실험 픽스처 이름·별칭(`autotrade-rogue`, `com.autotrade.rogue`)만 테스트 문자열로 쓰임 |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음(`ArchitectureTest` 12, Guard 계열 수 그대로). `ModuleOwnershipTest` 5→8로 늘었고 새 테스트에 실패 경우 포함: `#아무도_의존하지_않는_새_모듈이_빠지면_잡아낸다`(클래스패스 누락, 표 누락, 손 목록 회귀, 표에만 남은 모듈, 대조군), `#클래스패스_항목에서_모듈_이름을_알아낸다`(외부 jar 불인정 포함). Gradle 밖 실행 시 속성 없음으로 실패(닫힌 쪽, E2에서 확인) |
+| A12 | 통과 | 장애 대응표·장애 테스트 8종 변경 없음. 설정 예시 정정(R-2)은 #1·#2 처리 규칙과 무관 |
+| A13 | 해당 없음 | 시장·시각·금액 계산 변경 없음 |
+| A14 | 통과 | 앞 검토 실패 사유 해소: (1) D-034:32는 "settings에 include한 모듈은 빠뜨릴 수 없다"와 남는 한계(settings 밖 폴더, Gradle 밖 jar, 런타임 클래스패스)로 고쳐졌고 E1·E2로 사실임을 확인. `ModuleOwnershipTest` 클래스 주석, ADR-002 9장 보강, ADR-001 2.2·위험표, CLAUDE.md가 같은 동작을 적음. (2) `broker-and-fault-design.md:68` 예시가 기본값 `[KIWOOM, KIS]`와 D-033·Q-020 주석으로 정정. ORD-07·RSK-01·17종·D-033·D-034 일치는 앞 검토와 같음 |
+
+## 점검표 밖 발견 (재검토)
+- R-1: 해소(E1·E2·E3).
+- R-2: 해소. 다만 `.claude/agents/risk-ops.md:18`의 "장애 대응표 14종"은 그대로다(에이전트 설정 파일, 사용자에게 알릴 사항으로 유지).
+- R-3: 반영됨(권고 사항이었음).
+- R-4: 미반영. 이번 PR 필수 아님. 2단계 시세 게이트웨이 소스 선택 PR에서 "기본 설정 시 요금 미확인 소스 연결 0건"과 "보호 폴링은 priority와 무관" 테스트를 요구한다.
+- **R-6 [낮음, 남은 한계, 조치 요구 없음]** 범위 검사는 `rootProject.subprojects` 가운데 `java` 플러그인을 쓴 모듈만 본다. `includeBuild`로 붙인 다른 빌드, 저장소 안 파일 jar 의존, `java` 플러그인 없이 직접 만든 컴파일 태스크는 대상 밖이다. 이런 구성은 `settings.gradle.kts`나 모듈 빌드 파일을 바꿔야 생기므로 리뷰에서 보인다. 실행 중인 클래스패스는 여전히 검사하지 않는다. D-034:32에 이 한계가 적혀 있다. 실전 프로세스에 외부 jar나 included build가 들어오는 PR은 risk-ops 검토 대상으로 본다.
+- 확인한 점: 모듈 판별을 Gradle 프로젝트 이름(settings 목록)과 빌드 출력 폴더 이름(클래스패스) 두 갈래로 하므로 둘이 다르게 꾸며지면 불일치로 실패한다(닫힌 쪽). 손 목록 회귀는 시스템 속성 누락이나 범위 차이로 잡힌다(E2).
+
+## 판정 (재검토)
+승인
+
+- 앞 검토의 수정 필요 항목(A14, R-1)이 해소된 것을 직접 실행한 빌드와 변조 실험 E1~E3로 확인했다. 확인 못 함 항목은 없다(A5~A8·A13은 이 PR이 건드리지 않아 해당 없음, 미구현 상태는 TST-07로 7단계 완료 조건에 묶여 있다).
+- 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest` 계열 추가·확장, `GuardedOrderGatewayTest`·`RealOrderGatewaysTest` 수정, 실전·가상 공용 `OrderState` 계약 변경, 장애 설계 문서 수정). 이 승인은 risk-ops 역할 검토 결과일 뿐이다. 머지는 독립 QA 관문을 거친 뒤 사용자가 직접 한다(지침 10·11장).
