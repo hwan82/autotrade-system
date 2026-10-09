@@ -248,16 +248,117 @@ class EngineCommandHandlerTest {
     }
 
     @Test
-    void PANIC은_2차_확인이_틀리면_아무것도_하지_않는다() {
+    void PANIC은_2차_확인이_틀려도_보호_모드_고정은_하고_청산은_하지_않는다() {
         EngineCommandHandler h = handler();
         send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
 
-        assertThat(send(h, ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", "wrong-password")).code())
-                .isEqualTo(ControlCodes.CONFIRMATION_FAILED);
-        assertThat(send(h, ControlRequest.panicAll("전체", PASSWORD)).code())
-                .isEqualTo(ControlCodes.CONFIRMATION_FAILED);
-        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OPEN);
+        ControlResponse r = send(h, ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", "wrong-password"));
+
+        assertThat(r.ok()).isFalse();
+        assertThat(r.code()).isEqualTo(ControlCodes.CONFIRMATION_FAILED);
+        assertThat(r.message()).contains("보호 모드 고정");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+        assertThat(r.steps()).extracting(PanicStepResult::step).containsExactly(
+                "PROTECTIVE_LOCK", "CANCEL_OPEN_ORDERS", "CANCEL_SERVER_STOPS", "SELL", "CONFIRM_FILLS", "GUARD_OFF");
+        assertThat(r.steps().getFirst().outcome()).isEqualTo("DONE");
+        assertThat(r.steps().subList(1, 6)).extracting(PanicStepResult::outcome).containsOnly("SKIPPED");
         assertThat(liquidated).isEmpty();
+
+        ControlResponse all = send(h, ControlRequest.panicAll("전체", PASSWORD));
+        assertThat(all.code()).isEqualTo(ControlCodes.CONFIRMATION_FAILED);
+        assertThat(liquidated).isEmpty();
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+    }
+
+    @Test
+    void 잠긴_상태에서도_PANIC은_보호_모드_고정을_한다() {
+        EngineCommandHandler h = handler();
+        send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+        for (int i = 0; i < OperatorAuthenticator.MAX_FAILURES; i++) {
+            send(h, ControlRequest.activate("KIWOOM-KR-1", "KIWOOM-KR-1", "wrong-password"));
+        }
+
+        ControlResponse r = send(h, ControlRequest.panicAll(ControlRequest.PANIC_ALL_PHRASE, PASSWORD));
+
+        assertThat(r.code()).isEqualTo(ControlCodes.LOCKED);
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+        assertThat(liquidated).isEmpty();
+    }
+
+    @Test
+    void 비밀번호가_없어도_PANIC은_열린_계좌를_보호_모드로_고정한다() {
+        EngineCommandHandler opener = handler();
+        send(opener, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+        EngineCommandHandler none = new EngineCommandHandler(guard, new OperatorAuthenticator(Optional.empty(), clock),
+                configured::contains, steps, liquidator, (c, t, code) -> commandAudit.add(code));
+
+        ControlResponse r = send(none, ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        assertThat(r.code()).isEqualTo(ControlCodes.PASSWORD_NOT_CONFIGURED);
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+        assertThat(liquidated).isEmpty();
+    }
+
+    @Test
+    void 서버_측_손절을_취소한_뒤_매도가_끝나지_않으면_긴급으로_알린다() {
+        EngineCommandHandler opener = handler();
+        send(opener, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+        liquidator = account -> List.of(
+                PanicSteps.result(account, PanicSteps.CANCEL_OPEN_ORDERS, PanicSteps.DONE, ""),
+                PanicSteps.result(account, PanicSteps.CANCEL_SERVER_STOPS, PanicSteps.DONE, ""),
+                PanicSteps.result(account, PanicSteps.SELL, PanicSteps.FAILED, "거부"));
+
+        ControlResponse r = send(handler(), ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        PanicStepResult last = r.steps().getLast();
+        assertThat(last.step()).isEqualTo("GUARD_OFF");
+        assertThat(last.urgent()).isTrue();
+        assertThat(last.note()).contains("서버 측 손절이 취소된 상태").doesNotContain("서버 측 손절 계속");
+        assertThat(r.message()).contains("긴급");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+    }
+
+    @Test
+    void 서버_측_손절을_취소하기_전에_멈추면_긴급이_아니다() {
+        EngineCommandHandler opener = handler();
+        send(opener, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+        liquidator = account -> List.of(
+                PanicSteps.result(account, PanicSteps.CANCEL_OPEN_ORDERS, PanicSteps.FAILED, "조회 실패"));
+
+        ControlResponse r = send(handler(), ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        assertThat(r.steps().getLast().urgent()).isFalse();
+        assertThat(r.steps().getLast().note()).contains("서버 측 손절 계속");
+    }
+
+    @Test
+    void 단계_수행_중_Error가_나도_ACTIVATING에_남지_않는다() {
+        steps = (account, step) -> {
+            if (step == ActivationStep.ORDER_SESSION) {
+                throw new LinkageError("test");
+            }
+            return Optional.empty();
+        };
+        EngineCommandHandler h = handler();
+
+        assertThatThrownBy(() -> send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD)))
+                .isInstanceOf(LinkageError.class);
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+    }
+
+    @Test
+    void 감사_로그가_실패해도_결과는_그대로_돌려준다() {
+        EngineCommandHandler h = new EngineCommandHandler(guard,
+                new OperatorAuthenticator(OperatorPasswordHash.parse(OperatorPasswordHashTest.HASH), clock),
+                configured::contains, steps, liquidator, (command, target, code) -> {
+                    throw new IllegalStateException("disk full");
+                });
+
+        ControlResponse r = send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        assertThat(r.ok()).isTrue();
+        assertThat(r.message()).contains("감사 로그 기록 실패");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OPEN);
     }
 
     @Test

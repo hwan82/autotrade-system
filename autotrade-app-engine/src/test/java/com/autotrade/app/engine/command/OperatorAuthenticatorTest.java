@@ -77,6 +77,31 @@ class OperatorAuthenticatorTest {
         assertThatThrownBy(() -> auth.confirmationFor(account)).isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void 검증은_그_계좌에만_쓸_수_있고_명령이_끝나면_버린다() {
+        auth.verify(pw(), "KIS-1", "KIS-1");
+        assertThatThrownBy(() -> auth.confirmationFor(new AccountId("KIS-2"))).isInstanceOf(IllegalStateException.class);
+        // 다른 계좌로 시도하면서 검증이 소모됐다
+        assertThatThrownBy(() -> auth.confirmationFor(new AccountId("KIS-1"))).isInstanceOf(IllegalStateException.class);
+
+        auth.verify(pw(), "KIS-1", "KIS-1");
+        auth.discardVerification();
+        assertThatThrownBy(() -> auth.confirmationFor(new AccountId("KIS-1"))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void PANIC_문구로_통과한_검증으로는_계좌_2차_확인을_만들_수_없다() {
+        auth.verify(pw(), "전체 청산", "전체 청산");
+        assertThatThrownBy(() -> auth.confirmationFor(new AccountId("KIS-1"))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 확인_문구는_NFC로_정규화해_비교한다() {
+        String nfd = java.text.Normalizer.normalize("전체 청산", java.text.Normalizer.Form.NFD);
+        assertThat(nfd).isNotEqualTo("전체 청산");
+        assertThat(auth.verify(pw(), nfd, "전체 청산")).isEqualTo(OperatorAuthenticator.Result.OK);
+    }
+
     static char[] pw() {
         return OperatorPasswordHashTest.PASSWORD.toCharArray();
     }

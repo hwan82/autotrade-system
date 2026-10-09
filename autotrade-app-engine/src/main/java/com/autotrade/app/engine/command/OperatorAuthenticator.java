@@ -5,6 +5,7 @@ import com.autotrade.risk.guard.SecondConfirmation;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.text.Normalizer;
 import java.util.Arrays;
 import java.util.Optional;
 
@@ -15,7 +16,10 @@ import java.util.Optional;
  * 모두 맞아야 통과하며, 어느 쪽이 틀렸는지는 알려 주지 않는다. {@link #MAX_FAILURES}번 연속 실패하면 {@link #LOCKOUT} 동안
  * 모든 2차 확인을 거절한다. 잠금은 메모리에만 있어 엔진을 다시 띄우면 풀린다(재기동 시 모든 계좌 OFF이므로 위험이 늘지 않음).
  *
- * <p>명령 채널은 한 번에 명령 하나만 처리하므로 이 클래스는 스레드 안전하지 않아도 된다(ControlServer 단일 스레드).
+ * <p>검증 통과는 그 확인 문구(계좌 별칭)에 묶이고 {@link #confirmationFor}가 한 번 쓰면 사라진다. 다른 계좌의 2차 확인으로
+ * 쓸 수 없다. 확인 문구는 NFC로 정규화해 비교한다(macOS 입력기 등이 한글을 NFD로 보낼 수 있음).
+ *
+ * <p>상태 조회는 명령 대기열을 거치지 않고 다른 스레드에서 들어오므로 모든 공개 메서드를 동기화한다.
  */
 public final class OperatorAuthenticator {
 
@@ -28,8 +32,8 @@ public final class OperatorAuthenticator {
     private final Clock clock;
     private int failures;
     private Instant lockedUntil;
-    /** 방금 통과한 검증. {@link #confirmationFor}가 한 번 쓰고 지운다. */
-    private boolean verified;
+    /** 방금 통과한 검증의 확인 문구. {@link #confirmationFor}가 한 번 쓰고 지운다. */
+    private String verifiedPhrase;
 
     public OperatorAuthenticator(Optional<OperatorPasswordHash> hash, Clock clock) {
         this.hash = hash;
@@ -41,7 +45,7 @@ public final class OperatorAuthenticator {
     }
 
     /** 잠겨 있으면 풀리는 시각. */
-    public Optional<Instant> lockedUntil() {
+    public synchronized Optional<Instant> lockedUntil() {
         Instant now = clock.instant();
         return lockedUntil != null && now.isBefore(lockedUntil) ? Optional.of(lockedUntil) : Optional.empty();
     }
@@ -53,8 +57,8 @@ public final class OperatorAuthenticator {
      * @param typed 사람이 입력한 확인 문구
      * @param expected 맞아야 하는 문구(계좌 별칭 또는 전체 PANIC 문구)
      */
-    public Result verify(char[] password, String typed, String expected) {
-        verified = false;
+    public synchronized Result verify(char[] password, String typed, String expected) {
+        verifiedPhrase = null;
         try {
             if (hash.isEmpty()) {
                 return Result.NOT_CONFIGURED;
@@ -62,12 +66,13 @@ public final class OperatorAuthenticator {
             if (lockedUntil().isPresent()) {
                 return Result.LOCKED;
             }
-            boolean phraseOk = typed != null && typed.strip().equals(expected);
+            String want = normalize(expected);
+            boolean phraseOk = typed != null && want != null && normalize(typed).equals(want);
             boolean passwordOk = hash.get().matches(password);
             if (phraseOk && passwordOk) {
                 failures = 0;
                 lockedUntil = null;
-                verified = true;
+                verifiedPhrase = want;
                 return Result.OK;
             }
             failures++;
@@ -87,14 +92,24 @@ public final class OperatorAuthenticator {
     /**
      * 검증을 통과한 직후 그 계좌의 2차 확인을 한 번 만든다. 유효 시간은 Guard가 본다(60초).
      *
-     * @throws IllegalStateException 직전 {@link #verify}가 통과하지 않았거나 이미 확인을 만들었을 때
+     * @throws IllegalStateException 직전 {@link #verify}가 이 계좌 별칭으로 통과하지 않았거나 이미 확인을 만들었을 때
      */
-    SecondConfirmation confirmationFor(AccountId account) {
-        if (!verified) {
-            throw new IllegalStateException("2차 확인 검증을 통과하지 않았습니다");
+    synchronized SecondConfirmation confirmationFor(AccountId account) {
+        String phrase = verifiedPhrase;
+        verifiedPhrase = null;
+        if (phrase == null || !phrase.equals(normalize(account.value()))) {
+            throw new IllegalStateException("이 계좌로 2차 확인 검증을 통과하지 않았습니다");
         }
-        verified = false;
         return new SecondConfirmation(account, OPERATOR, clock.instant());
+    }
+
+    /** 명령 하나가 끝날 때 쓰지 않은 검증을 버린다. 다음 명령이 앞 명령의 검증을 이어 쓰지 못하게 한다. */
+    synchronized void discardVerification() {
+        verifiedPhrase = null;
+    }
+
+    private static String normalize(String text) {
+        return text == null ? null : Normalizer.normalize(text.strip(), Normalizer.Form.NFC);
     }
 
     public enum Result { OK, FAILED, LOCKED, NOT_CONFIGURED }

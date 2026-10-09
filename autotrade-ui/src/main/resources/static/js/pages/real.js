@@ -19,6 +19,8 @@ const STEP = {
 };
 const OUTCOME = { DONE: '완료', SKIPPED: '건너뜀', NOT_AVAILABLE: '수행 불가', FAILED: '실패' };
 const PANIC_ALL_PHRASE = '전체 청산';
+// 엔진이 답하지 않을 때 보여 줄 마지막 확인 상태
+let lastUp = null;
 
 export async function realPage() {
   const host = h('div', {});
@@ -40,30 +42,44 @@ export async function realPage() {
 }
 
 function body(view, refresh, result) {
-  if (!view.engineReachable) {
+  const engine = view.engineState || (view.engineReachable ? 'UP' : 'UNKNOWN');
+  if (engine === 'UP') lastUp = view;
+  if (engine === 'NOT_RUNNING') {
+    lastUp = null;
     return h('div', { class: 'empty' },
-      h('h2', {}, '실전 엔진에 연결되지 않았습니다'),
+      h('h2', {}, '실전 엔진이 실행 중이 아닙니다'),
       h('p', {}, view.message),
-      h('p', { class: 'muted small' }, '실전 엔진(autotrade-engine)을 같은 설정 폴더로 실행하면 여기서 상태를 볼 수 있습니다. 실험실이 꺼져 있거나 이 화면이 닫혀도 실전 엔진은 영향받지 않습니다.'));
+      h('p', { class: 'muted small' }, '실전 엔진(autotrade-engine)을 같은 설정 폴더로 실행하면 여기서 상태를 볼 수 있습니다. 엔진을 다시 시작하면 모든 실전 계좌는 꺼진 상태로 시작합니다. 실험실이 꺼져 있거나 이 화면이 닫혀도 실전 엔진은 영향받지 않습니다.'));
   }
-  const st = view.status;
-  const ready = st.passwordConfigured && !st.lockedUntil;
+  const unknown = engine === 'UNKNOWN';
+  if (unknown && !lastUp) {
+    return h('div', { class: 'notice warn' },
+      h('h2', {}, '실전 엔진이 응답하지 않습니다'),
+      h('p', {}, `${view.message}. 엔진은 살아 있을 수 있고 실전 계좌가 열려 있을 수 있습니다. 실전 엔진 터미널을 확인하세요.`));
+  }
+  const st = unknown ? lastUp.status : view.status;
+  const ready = !unknown && st.passwordConfigured && !st.lockedUntil;
   const open = st.accounts.filter(a => a.state !== 'OFF').length;
+  const lockOnly = !(st.passwordConfigured && !st.lockedUntil);
   return h('div', {},
+    unknown ? h('div', { class: 'notice warn' },
+      h('p', {}, `실전 엔진이 응답하지 않습니다(${view.message}). 아래는 ${new Date(lastUp.asOf).toLocaleTimeString('en-GB')}에 마지막으로 확인한 상태입니다.`),
+      h('p', { class: 'small' }, '지금 상태와 다를 수 있습니다. 활성화는 막아 두었고, PANIC SELL과 내리기는 보낼 수 있지만 반영 여부는 엔진이 다시 응답해야 알 수 있습니다.')) : null,
     !st.passwordConfigured ? h('div', { class: 'notice warn' },
       h('p', {}, '운영자 비밀번호가 설정되지 않아 실전 활성화와 PANIC SELL을 받을 수 없습니다.'),
       h('p', { class: 'small' }, '터미널에서 실전 엔진을 hash-password 인자로 실행해 해시를 만들고, secrets.json의 real-trading.operator-password-hash에 넣은 뒤 엔진을 다시 시작하세요. 비밀번호 자체는 어디에도 저장되지 않습니다.')) : null,
     st.lockedUntil ? h('div', { class: 'notice warn' },
-      h('p', {}, `2차 확인을 여러 번 틀려 ${new Date(st.lockedUntil).toLocaleTimeString('ko-KR')}까지 잠겼습니다. 내리기는 그대로 할 수 있습니다.`)) : null,
+      h('p', {}, `2차 확인을 여러 번 틀려 ${new Date(st.lockedUntil).toLocaleTimeString('ko-KR')}까지 잠겼습니다. 내리기는 그대로 할 수 있고, PANIC SELL은 보호 모드 고정(신규 주문 차단)까지만 됩니다.`)) : null,
     st.accounts.length === 0
       ? h('div', { class: 'empty' }, h('p', {}, '실전 계좌가 설정되지 않았습니다(runtime-config.json의 real-trading.accounts).'))
       : h('div', {},
         h('div', { class: 'panic-all' },
           h('p', {}, `열린 실전 계좌 ${open}개 / 전체 ${st.accounts.length}개`),
           h('button', {
-            class: 'btn danger', type: 'button', disabled: !ready,
-            onclick: () => panicDialog(null, refresh, result),
-          }, '전체 PANIC SELL')),
+            class: 'btn danger', type: 'button',
+            onclick: () => panicDialog(null, refresh, result, lockOnly),
+          }, '전체 PANIC SELL'),
+          lockOnly ? h('p', { class: 'small warn-text' }, '비밀번호가 없거나 잠겨 있어 보호 모드 고정만 됩니다') : null),
         table([
           { label: '계좌', render: a => h('strong', {}, a.id) },
           { label: '증권사·시장', render: a => `${BROKER[a.broker] || a.broker} · ${MARKET[a.market] || a.market}` },
@@ -81,8 +97,8 @@ function body(view, refresh, result) {
               onclick: () => deactivateDialog(a, refresh, result),
             }, '내리기'),
             h('button', {
-              class: 'btn danger', type: 'button', disabled: !ready,
-              onclick: () => panicDialog(a, refresh, result),
+              class: 'btn danger', type: 'button',
+              onclick: () => panicDialog(a, refresh, result, lockOnly),
             }, 'PANIC SELL')) },
         ], st.accounts, { rowClass: a => `state-${a.state.toLowerCase()}` })),
     h('h2', {}, '상태 설명'),
@@ -112,12 +128,14 @@ function dialog(title, tone, content, actions) {
  * 2차 확인 폼. 확인 문구를 정확히 입력하고 비밀번호를 넣어야 버튼이 켜진다.
  * 보낸 뒤에는 결과와 상관없이 비밀번호 입력란을 비운다.
  */
-function secondConfirmation({ title, tone, intro, phrase, submitLabel, send, refresh, result }) {
+function secondConfirmation({ title, tone, intro, phrase, submitLabel, send, refresh, result, passwordOptional = false }) {
   const typed = h('input', { id: 'dlg-typed', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off' });
   const password = h('input', { id: 'dlg-password', type: 'password', autocomplete: 'off' });
   const submit = h('button', { class: `btn ${tone === 'danger' ? 'danger' : ''}`, type: 'button', disabled: true }, submitLabel);
   const cancel = h('button', { class: 'btn secondary', type: 'button' }, '취소');
-  const update = () => { submit.disabled = !(typed.value === phrase && password.value.length > 0); };
+  const update = () => {
+    submit.disabled = !(typed.value.trim().normalize('NFC') === phrase && (passwordOptional || password.value.length > 0));
+  };
   typed.addEventListener('input', update);
   password.addEventListener('input', update);
   const dlg = dialog(title, tone, h('div', {},
@@ -126,7 +144,9 @@ function secondConfirmation({ title, tone, intro, phrase, submitLabel, send, ref
       h('label', { for: 'dlg-typed' }, '확인 문구'),
       h('div', {}, typed, h('p', { class: 'hint' }, '아래 문구를 그대로 입력하세요: ', h('strong', { class: 'phrase' }, phrase))),
       h('label', { for: 'dlg-password' }, '운영자 비밀번호'),
-      h('div', {}, password, h('p', { class: 'hint' }, '실전 엔진이 검증합니다. 5번 연속 틀리면 15분 동안 잠깁니다.')))),
+      h('div', {}, password, h('p', { class: 'hint' }, passwordOptional
+        ? '지금은 비밀번호 검증을 할 수 없어 보호 모드 고정까지만 됩니다. 비밀번호를 넣어도 청산은 하지 않습니다.'
+        : '실전 엔진이 검증합니다. 5번 연속 틀리면 15분 동안 잠깁니다.')))),
   [cancel, submit]);
   cancel.addEventListener('click', () => dlg.close());
   submit.addEventListener('click', async () => {
@@ -139,7 +159,7 @@ function secondConfirmation({ title, tone, intro, phrase, submitLabel, send, ref
       showResult(result, r);
     } catch (e) {
       toast(e.message, true);
-      if (e.code === 'ENGINE_UNREACHABLE' || e.code === 'LOCKED') dlg.close();
+      if (e.code === 'ENGINE_UNREACHABLE' || e.code === 'LOCKED' || e.code === 'BUSY' || e.code === 'STALE') dlg.close();
     } finally {
       refresh().catch(() => {});
     }
@@ -161,15 +181,17 @@ function activateDialog(a, refresh, result) {
   });
 }
 
-function panicDialog(a, refresh, result) {
+function panicDialog(a, refresh, result, lockOnly) {
   const all = a === null;
   secondConfirmation({
     title: all ? '전체 PANIC SELL' : `${a.id} PANIC SELL`, tone: 'danger',
-    phrase: all ? PANIC_ALL_PHRASE : a.id, submitLabel: 'PANIC SELL 실행',
+    phrase: all ? PANIC_ALL_PHRASE : a.id, submitLabel: lockOnly ? '보호 모드 고정' : 'PANIC SELL 실행',
+    passwordOptional: lockOnly,
     intro: h('div', {},
+      lockOnly ? h('p', { class: 'notice warn' }, '운영자 비밀번호가 없거나 잠겨 있어 1단계(보호 모드 고정)까지만 합니다. 신규 주문은 바로 막히고, 손절·익절과 서버 측 손절은 계속됩니다.') : null,
       h('p', {}, all ? '모든 실전 계좌의 자동 매매 포지션을 정리합니다.' : `${a.id} 계좌의 자동 매매 포지션을 정리합니다.`),
       h('ol', { class: 'small' },
-        h('li', {}, '보호 모드로 고정해 신규 주문을 바로 막습니다.'),
+        h('li', {}, '보호 모드로 고정해 신규 주문을 바로 막습니다. 이 단계는 비밀번호 확인 전에 하므로 확인이 실패해도 일어납니다.'),
         h('li', {}, '미체결 주문과 서버 측 손절 주문을 모두 취소하고 확인합니다.'),
         h('li', {}, '매도합니다. 국내는 시장가, 미국은 지정가에 여유폭을 둡니다. 장 외 시간에는 매도하지 않습니다.'),
         h('li', {}, '체결을 확인한 뒤에만 Guard를 끕니다. 확인되지 않으면 보호 모드에 남아 손절이 계속됩니다.')),
@@ -209,13 +231,14 @@ function deactivateDialog(a, refresh, result) {
 }
 
 function showResult(host, r) {
-  host.replaceChildren(h('section', { class: 'result' },
+  if (r.ok === false) toast(r.message, true);
+  host.replaceChildren(h('section', { class: `result${r.ok === false ? ' rejected' : ''}` },
     h('h2', {}, '마지막 명령 결과'),
     h('p', {}, r.message),
     r.steps && r.steps.length ? table([
       { label: '계좌', render: s => s.account },
       { label: '단계', render: s => STEP[s.step] || s.step },
       { label: '결과', render: s => h('span', { class: `outcome-${s.outcome.toLowerCase()}` }, OUTCOME[s.outcome] || s.outcome) },
-      { label: '설명', render: s => s.note },
-    ], r.steps) : null));
+      { label: '설명', render: s => s.urgent ? h('strong', {}, `긴급: ${s.note}`) : s.note },
+    ], r.steps, { rowClass: s => s.urgent ? 'urgent' : '' }) : null));
 }

@@ -24,7 +24,13 @@ public final class OperatorPasswordHash {
     public static final int ITERATIONS = 600_000;
     /** 너무 약한 해시를 손으로 넣는 것을 막는 하한. */
     public static final int MIN_ITERATIONS = 100_000;
-    public static final int MIN_PASSWORD_LENGTH = 8;
+    /** 손으로 넣은 값이 엔진 기동·검증을 수십 초씩 멈추게 하는 것을 막는 상한. */
+    public static final int MAX_ITERATIONS = 10_000_000;
+    /**
+     * 이 비밀번호 하나로 실전 계좌를 연다(단일 인증 요소). NIST SP 800-63B-4(2025)는 단일 요소로 쓰는 비밀번호에 최소 15자를
+     * 요구한다. [가정] 원문 대신 2차 자료로 확인했다(ADR-006 2.4).
+     */
+    public static final int MIN_PASSWORD_LENGTH = 15;
 
     private static final int SALT_BYTES = 16;
     private static final int HASH_BYTES = 32;
@@ -52,7 +58,7 @@ public final class OperatorPasswordHash {
             int iterations = Integer.parseInt(parts[1]);
             byte[] salt = Base64.getDecoder().decode(parts[2]);
             byte[] hash = Base64.getDecoder().decode(parts[3]);
-            if (iterations < MIN_ITERATIONS || salt.length < SALT_BYTES || hash.length != HASH_BYTES) {
+            if (iterations < MIN_ITERATIONS || iterations > MAX_ITERATIONS || salt.length < SALT_BYTES || hash.length != HASH_BYTES) {
                 return Optional.empty();
             }
             return Optional.of(new OperatorPasswordHash(iterations, salt, hash));
@@ -69,8 +75,8 @@ public final class OperatorPasswordHash {
     /** 반복 횟수를 정해 만든다. 테스트가 하한값으로 빨리 돌리려고 쓴다. */
     static String create(char[] password, SecureRandom random, int iterations) {
         Objects.requireNonNull(password, "password");
-        if (iterations < MIN_ITERATIONS) {
-            throw new IllegalArgumentException("반복 횟수가 너무 적습니다");
+        if (iterations < MIN_ITERATIONS || iterations > MAX_ITERATIONS) {
+            throw new IllegalArgumentException("반복 횟수가 범위를 벗어났습니다");
         }
         if (password.length < MIN_PASSWORD_LENGTH) {
             throw new IllegalArgumentException("비밀번호는 " + MIN_PASSWORD_LENGTH + "자 이상이어야 합니다");

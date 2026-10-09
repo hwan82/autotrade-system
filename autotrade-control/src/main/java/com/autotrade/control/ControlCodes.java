@@ -15,6 +15,10 @@ public final class ControlCodes {
     public static final String LOCKED = "LOCKED";
     /** 지금 상태에서 할 수 없는 전이(예: 이미 OPEN인 계좌 활성화, 계좌번호 없는 계좌). */
     public static final String INVALID_STATE = "INVALID_STATE";
+    /** 명령 대기열이 차서 받지 않음. 반영되지 않았으니 상태를 보고 다시 보낸다. */
+    public static final String BUSY = "BUSY";
+    /** 올리는 명령(ACTIVATE)이 대기열에서 너무 오래 기다려 버림. 실험실은 이미 응답 없음으로 처리했을 수 있다. */
+    public static final String STALE = "STALE";
     /** 엔진에 연결할 수 없음(실험실 쪽에서만 만든다). */
     public static final String ENGINE_UNREACHABLE = "ENGINE_UNREACHABLE";
     /** 엔진 내부 오류. */

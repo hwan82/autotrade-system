@@ -6,7 +6,7 @@ import java.util.Objects;
  * 실험실(UI)이 실전 엔진에 보내는 명령 하나(ADR-006 2.3). 연결 하나에 요청 하나, JSON 한 줄.
  *
  * <p>{@code password}는 운영자 비밀번호 평문이다. 엔진이 해시와 비교한 뒤 버리고, 어디에도 저장·기록하지 않는다.
- * {@link #toString()}은 비밀번호를 가린다.
+ * {@link #toString()}은 비밀번호와 계좌 칸을 가린다.
  *
  * @param command 명령 종류
  * @param account 대상 실전 계좌 별칭. PANIC_ALL과 STATUS는 비운다
@@ -46,7 +46,8 @@ public record ControlRequest(
 
     @Override
     public String toString() {
-        return "ControlRequest[command=" + command + ", account=" + account
+        // 계좌 칸에 잘못 붙여 넣은 비밀값이 로그로 새지 않게 계좌도 가린다
+        return "ControlRequest[command=" + command + ", account=" + (account == null ? "" : "****")
                 + ", password=" + (password == null || password.isEmpty() ? "" : "****") + "]";
     }
 }

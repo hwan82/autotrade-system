@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.config.ConfigLoader;
 import com.autotrade.config.ConfigPaths;
+import com.autotrade.app.engine.command.OperatorPasswordHash;
 import com.autotrade.config.LoadedConfig;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlRequest;
@@ -21,6 +22,7 @@ import com.autotrade.risk.guard.RealTradingGuard;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -102,6 +104,50 @@ class EngineMainTest {
             assertThat(engine.guard().state(new AccountId("KIS-US-1"))).isEqualTo(GuardState.OFF);
         }
         assertThat(socket).doesNotExist();
+    }
+
+    @Test
+    void 소켓_파일을_지워도_두_번째_엔진은_잠금_때문에_뜨지_않는다() throws Exception {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        Path socket = ControlSocket.path(paths);
+
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED)) {
+            Files.delete(socket);
+
+            assertThat(EngineMain.run(paths, FIXED)).isEqualTo(1);
+            assertThat(socket).doesNotExist();
+            assertThat(engine.server().socket()).isEqualTo(socket);
+        }
+        // 첫 엔진이 끝나면 잠금이 풀려 다시 뜬다
+        assertThat(EngineMain.run(paths, FIXED)).isZero();
+    }
+
+    @Test
+    void 실제_배선으로_활성화하면_증권사_연동_전이라_첫_단계에서_OFF로_돌아간다() throws Exception {
+        String password = "PLACEHOLDER-OPERATOR-PW";
+        String hash = OperatorPasswordHash.create(password.toCharArray(), new SecureRandom());
+        ConfigPaths paths = ConfigPaths.in(dir);
+        Files.writeString(paths.runtimeFile(), """
+                { "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] } }
+                """);
+        Files.writeString(paths.secretsFile(), """
+                { "real-trading": { "account-numbers": { "KIS-US-1": "<ACCOUNT_NUMBER>" },
+                                    "operator-password-hash": "%s" } }
+                """.formatted(hash));
+
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED);
+                ControlClient client = new ControlClient(ControlSocket.path(paths), Duration.ofSeconds(10))) {
+            ControlResponse r = client.send(ControlRequest.activate("KIS-US-1", "KIS-US-1", password));
+
+            assertThat(r.ok()).isTrue();
+            assertThat(r.message()).contains("AUTHENTICATED").contains("OFF");
+            assertThat(r.status().passwordConfigured()).isTrue();
+            assertThat(r.status().accounts()).singleElement().satisfies(a -> {
+                assertThat(a.state()).isEqualTo("OFF");
+                assertThat(a.accountNumberConfigured()).isTrue();
+            });
+            assertThat(engine.guard().state(new AccountId("KIS-US-1"))).isEqualTo(GuardState.OFF);
+        }
     }
 
     @Test

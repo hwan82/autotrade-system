@@ -51,25 +51,51 @@ function header(session) {
 
 // 모드 띠: 실전 계좌가 하나라도 꺼짐이 아니면 실전 표시로 바꾼다(UI-05: 실전·모의 상태를 착각할 수 없게).
 // 실전 엔진 스냅샷만 읽는다(UI-06). 5초마다 다시 읽고, 운영 화면이 새로 읽으면 바로 반영한다.
+// 엔진이 답하지 않으면(UNKNOWN) 실전 계좌가 열려 있을 수 있으므로 "가상"으로 바꾸지 않고 마지막 확인 상태를 경고와 함께 둔다.
+let lastUp = null;
+
+function liveAccounts(view) {
+  return view && view.status ? view.status.accounts.filter(a => a.state !== 'OFF') : [];
+}
+
+function describe(live) {
+  return live.map(a => `${a.id} ${a.state === 'OPEN' ? '실전 매매 중' : a.state === 'PROTECTIVE' ? '보호 모드' : '여는 중'}`).join(', ');
+}
+
 function modeBand(view) {
   const band = document.getElementById('mode-band');
   const title = document.getElementById('mode-title');
   const detail = document.getElementById('mode-detail');
-  const live = view && view.engineReachable ? view.status.accounts.filter(a => a.state !== 'OFF') : [];
+  const state = view ? (view.engineState || (view.engineReachable ? 'UP' : 'UNKNOWN')) : 'UNKNOWN';
+  if (state === 'UP') lastUp = view;
+  if (state === 'UNKNOWN') {
+    const live = liveAccounts(lastUp);
+    const at = lastUp && lastUp.asOf ? new Date(lastUp.asOf).toLocaleTimeString('en-GB') : '없음';
+    band.classList.toggle('real', live.length > 0);
+    band.classList.add('unknown');
+    title.textContent = `실전 상태 확인 불가 · 마지막 확인 ${at}`;
+    detail.textContent = live.length > 0
+      ? `마지막 확인 때 실전 계좌 ${live.length}개가 열려 있었습니다(${describe(live)}). 실전 엔진은 계속 돌고 있을 수 있습니다.`
+      : '실전 엔진이 응답하지 않습니다. 실전 계좌가 열려 있을 수 있으니 실전 엔진 터미널을 확인하세요.';
+    return;
+  }
+  band.classList.remove('unknown');
+  const live = state === 'UP' ? liveAccounts(view) : [];
   band.classList.toggle('real', live.length > 0);
   if (live.length > 0) {
     title.textContent = `실전 가동 중 · 실전 계좌 ${live.length}개`;
-    detail.textContent = live.map(a => `${a.id} ${a.state === 'OPEN' ? '실전 매매 중' : a.state === 'PROTECTIVE' ? '보호 모드' : '여는 중'}`).join(', ');
+    detail.textContent = describe(live);
   } else {
     title.textContent = '실험실 · 가상 계좌만';
-    detail.textContent = view && !view.engineReachable
+    detail.textContent = state === 'NOT_RUNNING'
       ? '실전 엔진이 꺼져 있습니다. 이 화면에서는 실전 주문이 나가지 않습니다.'
       : '실전 계좌는 모두 꺼져 있습니다. 이 화면에서는 실전 주문이 나가지 않습니다.';
   }
 }
 
 async function pollRealState() {
-  try { modeBand(await get('/api/real/status')); } catch { /* 실험실 서버 오류는 다른 화면이 알린다 */ }
+  // 실험실 서버가 답하지 않아도 엔진 상태는 모른다. 가상으로 바꾸지 않는다
+  try { modeBand(await get('/api/real/status')); } catch { modeBand(null); }
 }
 document.addEventListener('real-status', e => modeBand(e.detail));
 setInterval(pollRealState, 5000);

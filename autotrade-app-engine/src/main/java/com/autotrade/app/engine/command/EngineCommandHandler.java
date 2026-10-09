@@ -20,15 +20,17 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * 실전 제어 명령 처리(ADR-006 2.3). 명령 채널이 받은 요청을 Guard 전이로 바꾼다. 명령은 한 번에 하나씩만 들어온다.
+ * 실전 제어 명령 처리(ADR-006 2.3). 명령 채널이 받은 요청을 Guard 전이로 바꾼다. ACTIVATE와 PANIC은 한 번에 하나씩
+ * 들어오지만 STATUS와 DEACTIVATE는 다른 스레드에서 동시에 들어올 수 있다(ControlServer). Guard와 검증기는 스레드 안전하다.
  *
  * <ul>
  *   <li>STATUS: 계좌별 Guard 스냅샷. 확인 없음.</li>
  *   <li>ACTIVATE: 2차 확인(비밀번호 + 계좌 별칭 입력) 후 활성화 단계를 순서대로 수행. 한 단계라도 실패하면 출발 상태로
  *       돌아간다(RSK-01). 계좌번호가 없는 계좌, 이미 ACTIVATING·OPEN인 계좌는 거절.</li>
  *   <li>DEACTIVATE: 내려가는 전이라 확인 없이 즉시(OPEN → PROTECTIVE, ACTIVATING → 출발 상태, D-023 공통 원칙 2).</li>
- *   <li>PANIC_ACCOUNT·PANIC_ALL: 2차 확인 후 RSK-13 순서. 보호 모드 고정 → 증권사 단계({@link PanicLiquidator}) →
- *       증권사 단계가 모두 끝났을 때만 Guard OFF. 끝나지 않으면 보호 모드에 남겨 손절이 계속되게 한다.</li>
+ *   <li>PANIC_ACCOUNT·PANIC_ALL: RSK-13 순서. 보호 모드 고정(2차 확인 전에, 확인이 실패·잠김이어도 한다) → 2차 확인 →
+ *       증권사 단계({@link PanicLiquidator}) → 증권사 단계가 모두 끝났을 때만 Guard OFF. 끝나지 않으면 보호 모드에 남겨
+ *       손절이 계속되게 한다.</li>
  * </ul>
  * 응답과 감사 로그에는 비밀번호·확인 문구를 넣지 않는다.
  */
@@ -57,14 +59,25 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
         if (request.command() == ControlCommand.STATUS) {
             return ControlResponse.accepted("", status(), List.of());
         }
-        ControlResponse response = switch (request.command()) {
-            case ACTIVATE -> activate(request);
-            case DEACTIVATE -> deactivate(request);
-            case PANIC_ACCOUNT -> panicAccount(request);
-            case PANIC_ALL -> panicAll(request);
-            case STATUS -> throw new IllegalStateException();
-        };
-        audit.record(request.command(), auditTarget(request), response.code());
+        ControlResponse response;
+        try {
+            response = switch (request.command()) {
+                case ACTIVATE -> activate(request);
+                case DEACTIVATE -> deactivate(request);
+                case PANIC_ACCOUNT -> panicAccount(request);
+                case PANIC_ALL -> panicAll(request);
+                case STATUS -> throw new IllegalStateException();
+            };
+        } finally {
+            authenticator.discardVerification();
+        }
+        try {
+            audit.record(request.command(), auditTarget(request), response.code());
+        } catch (RuntimeException e) {
+            // 감사 로그 실패가 이미 일어난 전이의 결과를 가리면 안 된다. Guard 감사 로그는 전이마다 따로 남는다
+            response = new ControlResponse(response.ok(), response.code(),
+                    response.message() + " (명령 감사 로그 기록 실패)", response.status(), response.steps());
+        }
         return response;
     }
 
@@ -101,9 +114,20 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
         }
         try {
             guard.beginActivation(authenticator.confirmationFor(account.id()));
-        } catch (GuardClosedException | IllegalArgumentException e) {
+        } catch (GuardClosedException | IllegalArgumentException | IllegalStateException e) {
             return reject(ControlCodes.INVALID_STATE, "활성화를 시작하지 못했습니다: " + e.getMessage());
         }
+        try {
+            return runActivationSteps(account);
+        } finally {
+            // 어떤 예외·오류로 빠져나가도 ACTIVATING에 남기지 않는다(RSK-01: 실패하면 출발 상태로)
+            if (guard.state(account.id()) == GuardState.ACTIVATING) {
+                guard.failActivation(account.id(), "활성화 처리 중 예기치 않은 중단");
+            }
+        }
+    }
+
+    private ControlResponse runActivationSteps(AccountRef account) {
         for (ActivationStep step : ActivationStep.values()) {
             Optional<String> failure;
             try {
@@ -149,23 +173,30 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
             return reject(ControlCodes.UNKNOWN_ACCOUNT, "설정에 없는 실전 계좌입니다");
         }
         AccountRef account = found.get();
+        // 1단계(보호 모드 고정)는 내려가는 전이라 2차 확인 전에 한다. 잠금·비밀번호 미설정·확인 실패여도 신규 주문은 막힌다
+        List<PanicStepResult> results = new ArrayList<>();
+        results.add(lock(account));
         Optional<ControlResponse> denied = confirm(request, account.id().value());
         if (denied.isPresent()) {
-            return denied.get();
+            results.addAll(brokerStepsSkipped(account));
+            return lockOnly(denied.get(), results);
         }
-        List<PanicStepResult> results = panic(account);
+        results.addAll(afterLock(account));
         return ControlResponse.accepted(summary(results), status(), results);
     }
 
     private ControlResponse panicAll(ControlRequest request) {
-        Optional<ControlResponse> denied = confirm(request, ControlRequest.PANIC_ALL_PHRASE);
-        if (denied.isPresent()) {
-            return denied.get();
-        }
-        // 1단계(보호 모드 고정)를 모든 계좌에 먼저 해서 신규 주문을 한꺼번에 막은 뒤 계좌별 증권사 단계를 한다
+        // 1단계(보호 모드 고정)를 모든 계좌에 먼저 해서 신규 주문을 한꺼번에 막은 뒤 2차 확인과 계좌별 증권사 단계를 한다
         List<PanicStepResult> results = new ArrayList<>();
         for (AccountRef account : guard.accounts()) {
             results.add(lock(account));
+        }
+        Optional<ControlResponse> denied = confirm(request, ControlRequest.PANIC_ALL_PHRASE);
+        if (denied.isPresent()) {
+            for (AccountRef account : guard.accounts()) {
+                results.addAll(brokerStepsSkipped(account));
+            }
+            return lockOnly(denied.get(), results);
         }
         for (AccountRef account : guard.accounts()) {
             results.addAll(afterLock(account));
@@ -173,14 +204,25 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
         return ControlResponse.accepted(summary(results), status(), results);
     }
 
-    // ---- PANIC 단계 ----
+    /** 2차 확인을 통과하지 못한 PANIC. 거절 코드는 그대로 두고 보호 모드 고정 결과를 함께 돌려준다. */
+    private ControlResponse lockOnly(ControlResponse denied, List<PanicStepResult> results) {
+        return new ControlResponse(false, denied.code(),
+                denied.message() + ". 보호 모드 고정(신규 주문 차단)만 했고 청산은 하지 않았습니다", status(), results);
+    }
 
-    private List<PanicStepResult> panic(AccountRef account) {
+    private List<PanicStepResult> brokerStepsSkipped(AccountRef account) {
         List<PanicStepResult> results = new ArrayList<>();
-        results.add(lock(account));
-        results.addAll(afterLock(account));
+        for (String step : PanicSteps.BROKER_STEPS) {
+            results.add(PanicSteps.result(account, step, PanicSteps.SKIPPED, "2차 확인을 통과하지 않아 하지 않았습니다"));
+        }
+        results.add(PanicSteps.result(account, PanicSteps.GUARD_OFF, PanicSteps.SKIPPED,
+                guard.state(account.id()) == GuardState.OFF
+                        ? "이미 OFF입니다"
+                        : "보호 모드를 유지합니다(손절·익절과 서버 측 손절 계속)"));
         return results;
     }
+
+    // ---- PANIC 단계 ----
 
     /** 1단계: 보호 모드 고정(신규 주문 즉시 차단). 내려가는 전이만 쓴다. */
     private PanicStepResult lock(AccountRef account) {
@@ -220,10 +262,25 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
             guard.shutdown(account.id(), OperatorAuthenticator.OPERATOR, "PANIC SELL 완료");
             results.add(PanicSteps.result(account, PanicSteps.GUARD_OFF, PanicSteps.DONE, "PROTECTIVE → OFF"));
         } else {
-            results.add(PanicSteps.result(account, PanicSteps.GUARD_OFF, PanicSteps.SKIPPED,
-                    "매도가 확인되지 않아 보호 모드를 유지합니다(손절·익절과 서버 측 손절 계속)"));
+            results.add(keepProtective(account, broker));
         }
         return results;
+    }
+
+    /**
+     * 청산이 끝나지 않은 계좌의 6단계 결과. 무엇이 남아 보호하는지는 실제 단계 결과로 쓴다: 서버 측 손절을 이미 취소했다면
+     * 엔진 손절 감시만 남은 것이라 긴급으로 표시한다(ADR-006 2.5).
+     */
+    private static PanicStepResult keepProtective(AccountRef account, List<PanicStepResult> broker) {
+        boolean stopsCancelled = broker.stream().anyMatch(r -> PanicSteps.CANCEL_SERVER_STOPS.equals(r.step())
+                && PanicSteps.DONE.equals(r.outcome()));
+        if (stopsCancelled) {
+            return new PanicStepResult(account.id().value(), PanicSteps.GUARD_OFF, PanicSteps.SKIPPED,
+                    "매도가 확인되지 않아 보호 모드를 유지합니다. 서버 측 손절이 취소된 상태라 엔진 손절 감시만 동작합니다."
+                            + " 증권사 화면에서 보유와 손절 주문을 바로 확인하세요", true);
+        }
+        return PanicSteps.result(account, PanicSteps.GUARD_OFF, PanicSteps.SKIPPED,
+                "매도가 확인되지 않아 보호 모드를 유지합니다(손절·익절과 서버 측 손절 계속)");
     }
 
     private static boolean allBrokerStepsDone(List<PanicStepResult> broker) {
@@ -235,7 +292,9 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
     private static String summary(List<PanicStepResult> results) {
         long off = results.stream().filter(r -> PanicSteps.GUARD_OFF.equals(r.step())
                 && PanicSteps.DONE.equals(r.outcome())).count();
-        return "PANIC SELL 처리: 신규 주문 차단 완료, 청산 완료 계좌 " + off + "개";
+        long urgent = results.stream().filter(PanicStepResult::urgent).count();
+        return "PANIC SELL 처리: 신규 주문 차단 완료, 청산 완료 계좌 " + off + "개"
+                + (urgent > 0 ? ". 긴급: 서버 측 손절 없이 남은 계좌 " + urgent + "개" : "");
     }
 
     // ---- 공통 ----

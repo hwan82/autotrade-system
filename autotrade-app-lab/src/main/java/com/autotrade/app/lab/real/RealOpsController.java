@@ -7,6 +7,8 @@ import com.autotrade.control.ControlRequest;
 import com.autotrade.control.ControlResponse;
 import com.autotrade.control.EngineStatus;
 import com.autotrade.control.PanicStepResult;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -24,6 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 넘기고, 2차 확인(비밀번호·확인 문구) 검증과 Guard 전이는 엔진이 한다. 여기서는 형식만 보고 값을 저장·기록하지 않는다.
  *
  * <p>엔진이 응답하지 않으면 명령이 반영됐는지 알 수 없으므로 다시 보내지 않고 상태를 다시 읽으라고 알린다.
+ * 상태 조회는 엔진 상태를 셋으로 나눈다: {@code UP}, {@code NOT_RUNNING}(엔진 프로세스 없음, 실전 계좌가 열려 있을 수 없음),
+ * {@code UNKNOWN}(엔진이 살아 있을 수 있으나 답이 없음). UNKNOWN을 "가상"으로 보여 주면 안 된다(ADR-006 3장).
  * 상태를 바꾸는 요청은 {@code LocalOnlyRequestFilter}의 Origin·CSRF 검사를 거친다.
  */
 @RestController
@@ -33,20 +37,26 @@ public class RealOpsController {
     private static final Logger log = LoggerFactory.getLogger(RealOpsController.class);
     private static final Pattern ACCOUNT_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");
     private static final int MAX_INPUT = 1024;
+    /** 상태 조회는 대기열을 거치지 않으므로 짧게 기다린다. 화면은 5초마다 다시 읽는다. */
+    static final Duration STATUS_TIMEOUT = Duration.ofSeconds(2);
 
     private final ControlClient client;
+    private final Clock clock;
 
-    public RealOpsController(ControlClient client) {
+    public RealOpsController(ControlClient client, Clock clock) {
         this.client = client;
+        this.clock = clock;
     }
 
     @GetMapping("/status")
     public StatusView status() {
+        String asOf = clock.instant().toString();
         try {
-            ControlResponse r = client.send(ControlRequest.status());
-            return new StatusView(true, "", r.status());
+            ControlResponse r = client.send(ControlRequest.status(), STATUS_TIMEOUT);
+            return new StatusView(EngineState.UP, true, "", r.status(), asOf);
         } catch (ControlClient.EngineUnreachableException e) {
-            return new StatusView(false, e.getMessage(), null);
+            EngineState state = e.reach() == ControlClient.Reach.NOT_RUNNING ? EngineState.NOT_RUNNING : EngineState.UNKNOWN;
+            return new StatusView(state, false, e.getMessage(), null, asOf);
         }
     }
 
@@ -80,10 +90,16 @@ public class RealOpsController {
                     e.getMessage() + ". 명령이 반영됐는지 알 수 없으니 다시 보내지 말고 상태를 새로 읽어 확인하세요");
         }
         log.info("실전 제어 명령 {} 결과 {}", request.command(), r.code());
-        if (!r.ok()) {
-            throw new ApiException(statusOf(r.code()), r.code(), r.message());
+        if (!r.ok() && r.steps().isEmpty()) {
+            throw new ApiException(statusOf(r.code()), apiCode(r.code()), r.message());
         }
-        return new CommandView(r.message(), r.status(), r.steps());
+        // 2차 확인이 실패한 PANIC도 보호 모드 고정은 일어났으므로 단계 결과와 함께 200으로 돌려준다(ok=false)
+        return new CommandView(r.ok(), r.ok() ? ControlCodes.OK : apiCode(r.code()), r.message(), r.status(), r.steps());
+    }
+
+    /** 엔진 코드를 REST 오류 코드로. 형식 오류는 다른 화면과 같은 INVALID로 쓴다(ADR-005 오류 목록). */
+    private static String apiCode(String code) {
+        return ControlCodes.BAD_REQUEST.equals(code) ? "INVALID" : code;
     }
 
     private static HttpStatus statusOf(String code) {
@@ -92,7 +108,8 @@ public class RealOpsController {
             case ControlCodes.BAD_REQUEST -> HttpStatus.BAD_REQUEST;
             case ControlCodes.CONFIRMATION_FAILED -> HttpStatus.FORBIDDEN;
             case ControlCodes.LOCKED -> HttpStatus.LOCKED;
-            case ControlCodes.PASSWORD_NOT_CONFIGURED, ControlCodes.INVALID_STATE -> HttpStatus.CONFLICT;
+            case ControlCodes.PASSWORD_NOT_CONFIGURED, ControlCodes.INVALID_STATE, ControlCodes.STALE -> HttpStatus.CONFLICT;
+            case ControlCodes.BUSY -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> HttpStatus.BAD_GATEWAY;
         };
     }
@@ -115,11 +132,21 @@ public class RealOpsController {
         return value;
     }
 
-    /** @param engineReachable 실전 엔진 명령 채널에 닿았는지. false면 status는 null */
-    public record StatusView(boolean engineReachable, String message, EngineStatus status) {
+    /** 실전 엔진 상태. */
+    public enum EngineState { UP, NOT_RUNNING, UNKNOWN }
+
+    /**
+     * @param engineState 엔진 상태. UNKNOWN이면 화면은 마지막으로 확인한 상태를 경고와 함께 유지한다
+     * @param engineReachable engineState가 UP인지(이전 화면 호환)
+     * @param status UP일 때만 값이 있다
+     * @param asOf 이 조회를 한 시각(UTC ISO-8601)
+     */
+    public record StatusView(EngineState engineState, boolean engineReachable, String message, EngineStatus status,
+            String asOf) {
     }
 
-    public record CommandView(String message, EngineStatus status, List<PanicStepResult> steps) {
+    /** @param ok false면 거절이지만 단계 결과가 있다(2차 확인 실패한 PANIC의 보호 모드 고정) */
+    public record CommandView(boolean ok, String code, String message, EngineStatus status, List<PanicStepResult> steps) {
     }
 
     /** 2차 확인 입력. 문자열로 바뀌어도 비밀번호는 보이지 않는다. */

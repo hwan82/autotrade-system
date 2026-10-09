@@ -48,6 +48,8 @@ class OperatorPasswordHashTest {
         assertThat(OperatorPasswordHash.parse(HASH.replace("$100000$", "$abc$"))).isEmpty();
         assertThat(OperatorPasswordHash.parse(HASH + "$extra")).isEmpty();
         assertThat(OperatorPasswordHash.parse("pbkdf2-sha256$100000$!!!$???")).isEmpty();
+        // 엔진 기동과 검증을 오래 멈추게 하는 과도한 반복 횟수
+        assertThat(OperatorPasswordHash.parse(HASH.replace("$100000$", "$2000000000$"))).isEmpty();
     }
 
     @Test
@@ -55,5 +57,9 @@ class OperatorPasswordHashTest {
         assertThatThrownBy(() -> OperatorPasswordHash.create("short".toCharArray(), new SecureRandom()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageNotContaining("short");
+        // 단일 인증 요소라 15자 미만은 받지 않는다
+        assertThatThrownBy(() -> OperatorPasswordHash.create("fourteen-chars".toCharArray(), new SecureRandom(),
+                OperatorPasswordHash.MIN_ITERATIONS)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(OperatorPasswordHash.MIN_PASSWORD_LENGTH).isEqualTo(15);
     }
 }

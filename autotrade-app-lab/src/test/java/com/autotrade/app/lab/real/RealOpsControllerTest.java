@@ -100,7 +100,9 @@ class RealOpsControllerTest {
     void 엔진이_꺼져_있으면_상태는_연결_안_됨으로_보이고_명령은_503이다() throws Exception {
         mvc.perform(get("/api/real/status"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.engineState").value("NOT_RUNNING"))
                 .andExpect(jsonPath("$.engineReachable").value(false))
+                .andExpect(jsonPath("$.asOf").isNotEmpty())
                 .andExpect(jsonPath("$.status").doesNotExist());
         postJson("/api/real/accounts/KIS-KR-1/deactivate", "{}")
                 .andExpect(status().isServiceUnavailable())
@@ -114,9 +116,47 @@ class RealOpsControllerTest {
 
         mvc.perform(get("/api/real/status"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.engineState").value("UP"))
                 .andExpect(jsonPath("$.engineReachable").value(true))
                 .andExpect(jsonPath("$.status.accounts[0].id").value("KIS-KR-1"))
                 .andExpect(jsonPath("$.status.accounts[0].state").value("OPEN"));
+    }
+
+    @Test
+    void 엔진이_답하지_않으면_상태를_알_수_없음으로_보여_준다() throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        startEngine(r -> {
+            try {
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return ControlResponse.accepted("", snapshot("OPEN"), List.of());
+        });
+        try {
+            mvc.perform(get("/api/real/status"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.engineState").value("UNKNOWN"))
+                    .andExpect(jsonPath("$.engineReachable").value(false))
+                    .andExpect(jsonPath("$.status").doesNotExist());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void 확인에_실패한_PANIC도_보호_모드_고정_결과를_돌려준다() throws Exception {
+        startEngine(r -> new ControlResponse(false, ControlCodes.LOCKED, "잠겼습니다. 보호 모드 고정만 했습니다",
+                snapshot("PROTECTIVE"), List.of(
+                        new PanicStepResult("KIS-KR-1", "PROTECTIVE_LOCK", "DONE", "OPEN → PROTECTIVE"),
+                        new PanicStepResult("KIS-KR-1", "SELL", "SKIPPED", "2차 확인을 통과하지 않아 하지 않았습니다"))));
+
+        postJson("/api/real/accounts/KIS-KR-1/panic", "{\"typedConfirmation\":\"KIS-KR-1\",\"password\":\"x\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.code").value(ControlCodes.LOCKED))
+                .andExpect(jsonPath("$.status.accounts[0].state").value("PROTECTIVE"))
+                .andExpect(jsonPath("$.steps[0].outcome").value("DONE"));
     }
 
     @Test
@@ -156,6 +196,13 @@ class RealOpsControllerTest {
         postJson("/api/real/accounts/NOPE/activate", confirm).andExpect(status().isNotFound());
         code[0] = ControlCodes.INTERNAL;
         postJson("/api/real/accounts/KIS-KR-1/deactivate", "{}").andExpect(status().isBadGateway());
+        code[0] = ControlCodes.BUSY;
+        postJson("/api/real/accounts/KIS-KR-1/activate", confirm).andExpect(status().isServiceUnavailable());
+        code[0] = ControlCodes.STALE;
+        postJson("/api/real/accounts/KIS-KR-1/activate", confirm).andExpect(status().isConflict());
+        code[0] = ControlCodes.BAD_REQUEST;
+        postJson("/api/real/accounts/KIS-KR-1/activate", confirm).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID"));
     }
 
     @Test
@@ -166,6 +213,7 @@ class RealOpsControllerTest {
 
         postJson("/api/real/panic", "{\"typedConfirmation\":\"전체 청산\",\"password\":\"" + PASSWORD + "\"}")
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true))
                 .andExpect(jsonPath("$.steps[0].step").value("PROTECTIVE_LOCK"))
                 .andExpect(jsonPath("$.steps[1].outcome").value("NOT_AVAILABLE"));
         assertThat(received).singleElement().satisfies(r -> {
