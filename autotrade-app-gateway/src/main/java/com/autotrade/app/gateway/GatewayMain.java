@@ -30,7 +30,7 @@ import java.util.concurrent.CountDownLatch;
 
 /**
  * 시세 게이트웨이(D-013 ②). 키움·한국투자 실시간 시세를 받아 녹화한다(ADR-003). 주문 API는 호출하지 않는다(MD-01).
- * 토스 실시간(D-024 2순위)은 아직 연결하지 않는다: 요금 미확인 소스는 기본 꺼짐(D-033)이라 이전 설정 처리와 함께 후속 PR로 넣는다(D-028).
+ * 토스 실시간(D-024 2순위, 기본 목록에 있음 D-039)은 아직 연결하지 않아 건너뛴다. 호출 한도를 지키는 클라이언트와 함께 후속 PR로 넣는다(D-028).
  *
  * <p>시스템 시계를 만드는 곳은 이 진입점뿐이다. 나머지 코드는 주입받은 {@link Clock}만 쓴다(ArchitectureTest).
  */
@@ -114,7 +114,7 @@ public final class GatewayMain {
         return out;
     }
 
-    private static Optional<BrokerPlugin> plugin(BrokerId id, RuntimeConfig.BrokerKeys keys, LiveRuntime runtime) {
+    static Optional<BrokerPlugin> plugin(BrokerId id, RuntimeConfig.BrokerKeys keys, LiveRuntime runtime) {
         if (!keys.isConfigured()) {
             return Optional.empty();
         }

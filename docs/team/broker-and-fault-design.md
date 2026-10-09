@@ -65,8 +65,7 @@ autotrade:
     kiwoom:  { enabled-if-configured: true, app-key: "", secret-key: "", accounts: [] }
     toss:    { enabled-if-configured: true, api-key: "", secret: "", accounts: [] }
   market-data:
-    priority: [KIWOOM, KIS]           # 기본값. 위에서부터 ACTIVE인 것만 사용. 토스는 요금 확인(Q-020) 전 기본 꺼짐(D-033),
-                                      # 쓰려면 D-024 순서대로 [KIWOOM, TOSS, KIS]로 직접 넣는다
+    priority: [KIWOOM, TOSS, KIS]    # 기본값(D-024, D-039). 위에서부터 ACTIVE인 것만 사용. 시세 조회는 무료지만 증권사별 호출 한도는 지킨다
     mode: FAILOVER                    # FAILOVER 또는 SHARDED(구독 한도 합산)
     toss-polling-scope: HELD_ONLY     # 토스 REST 폴링은 보유 종목 보호용으로만 (실시간 순위와 별개로 유지)
   real-trading:
