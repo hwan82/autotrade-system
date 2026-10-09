@@ -86,3 +86,38 @@
 
 ### 재검토 판정
 수정 필요(A14: Q-018 번호가 열린 브랜치 r930sh의 다른 실전 결정 Q-018과 겹침). 번호만 바꾸면 되고 코드 변경은 필요 없다. 앞 검토의 실질 지적(블랙리스트와 손절이 부딪치는 문제를 사용자 결정으로 올리기)은 해결됐다.
+
+## 재검토 2026-10-09 (2)
+- 대상: PR #19 / 커밋 0df5136(앞 재검토 4e3a38f 이후 3e79f4f architect 재검토 원문, 0df5136 검토 반영) / `git diff origin/main...0df5136` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - 별도 worktree(0df5136, detached)에서 `./gradlew --no-daemon build` → BUILD SUCCESSFUL, 86 tasks 모두 실행(캐시 재사용 없음). JUnit XML: risk 55, architecture-test 13, app-engine 7, sim 75, 모두 실패·오류·건너뜀 0. worktree는 검토 뒤 지움
+  - `git diff 4e3a38f 0df5136`: 문서만 바뀜(ADR-001 1줄, D-032, 결정 로그 README, architect 원문). `*.java`·`*.kts`·`*.sql`·`*.json`·`*.yml` 변경 0
+  - `git grep "Q-018" 0df5136 -- . ':!docs/reviews'` → 결과 없음(검토 원문 밖에 남은 Q-018 참조 없음)
+  - 모든 원격 브랜치와 origin/main에서 `git grep -l "Q-019"` → 이 브랜치 말고는 결과 없음(번호 충돌 없음)
+  - `docs/reviews/pr-19/risk-ops.md`는 4e3a38f 뒤로 바뀌지 않음(`git diff --quiet` 확인)
+  - CI(0df5136): DB schema success, Secret scan and collector boundary success, Gradle build 이 시점 in_progress(로컬 전체 빌드로 대신 확인)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 0df5136은 문서만 바꿈. Guard 코드·테스트 변경 없음. ArchitectureTest 13건 통과 |
+| A2 | 통과 | ArchUnit 규칙 변경 없음. 운영 코드 `submit` 호출 위치는 그대로 두 곳(`GuardedOrderGateway.java:68`, `SimulationExperimentRunner.java:249`) |
+| A3 | 해당 없음 | 증권사·주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·조회 로직 변경 없음 |
+| A5 | 통과 | 멱등 키 발급 경로 변경 없음 |
+| A6 | 통과 | `RiskChain.java:53–57` 그대로. `RiskChainTest` 9건과 `SimulationExperimentRunnerTest` 블랙리스트 단언 통과. 보유분의 청산·손절 차단은 D-032 상태 줄, 결정 1.1, README D-032 행 세 곳에 "Q-019 결정 전까지 잠정"으로 표시됨 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | app-engine 변경 없음, 테스트 7건 통과 |
+| A9 | 통과 | 보호 경로 변경 없음. 진입 규칙이 보호 주문을 건너뛰는 구조 그대로 |
+| A10 | 통과 | diff에 비밀값 없음. CI 비밀값 스캔 success |
+| A11 | 통과 | 보호 테스트 변경 없음 |
+| A12 | 통과 | 장애 대응 경로 변경 없음. 계좌 불일치 시 손절 거절과 규칙 오류 누적을 7단계에서 알림에 묶는 후속 과제가 D-032 변경 제안 표에 기록됨 |
+| A13 | 통과 | 시장·시간·금액 계산 변경 없음 |
+| A14 | 통과 | 앞 재검토의 Q 번호 충돌이 해소됨. Q-018이 Q-019로 바뀌었고(README 미확정, D-032 세 곳, ADR-001 `RiskChain` 행), 검토 원문 밖에 Q-018 참조가 남지 않았으며, 다른 원격 브랜치와 main에 Q-019가 없다. 첫 검토 권고 2~5가 D-032 "다른 역할에 넘기는 변경 제안" 표 4행으로 옮겨짐. 결정 로그, ADR-001·004, 코드 동작이 서로 맞다 |
+
+### 재검토 (2) 점검표 밖 발견
+- 없음. Q-019의 사용자 결정은 7단계 실전 주문 파이프라인 전에 받아야 한다(D-032 위험과 한계에 기록됨). 이 PR 머지를 막는 조건은 아니다.
+- 참고: Q 번호는 열린 브랜치끼리 따로 매기고 있어 같은 충돌이 또 생길 수 있다. 머지 직전에 main과 열린 브랜치의 Q·D 번호를 대조하기를 권한다(판정에는 반영하지 않음).
+
+### 재검토 (2) 판정
+승인. 실전 관련 PR(블랙리스트·리스크 검증)이므로 지침 10·11장에 따라 독립 QA 뒤 사용자가 직접 머지한다.
