@@ -12,7 +12,7 @@
 
 | 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
 |---|---|---|---|---|---|---|
-| `market-data.priority` | 증권사 배열 | `["KIWOOM","KIS","TOSS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 실시간 소스는 이 순서에서 REALTIME_QUOTE 능력이 있는 곳만 고르므로 토스는 폴링에만 쓰인다 | 재기동 | 시세 게이트웨이 | D-008(잠정, Q-001 후 확정) |
+| `market-data.priority` | 증권사 배열 | `["KIWOOM","KIS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 게이트웨이는 이 순서대로 시세 소스를 고르고, 목록에 없는 증권사는 시세 소스로 쓰지 않는다. **토스는 기본 목록에 없다**: 토스 미국 실시간 시세 요금이 공식 확인되지 않아(`docs/research/market-data-limits.md` 5장, `[추론]` 무료) 요금 미확인 소스를 기본으로 켜지 않는다. 사용자가 `runtime-config.json`에 넣으면 적은 순서대로 쓰며, D-024 순서를 쓰려면 `["KIWOOM","TOSS","KIS"]`로 둔다. 토스 보유 종목 보호 폴링은 이 키가 아니라 `market-data.toss-polling-scope`가 정한다 | 재기동 | 시세 게이트웨이 | D-024, D-033(요금 미확인 소스 기본 꺼짐, [QA 보고서](../reviews/gates/main-realpath-2026-10-09.md) P3) |
 | `market-data.mode` | enum | `AUTO` | AUTO·FAILOVER·SHARDED. AUTO는 실시간 소스 두 곳이 설정되어 있으면 SHARDED, 아니면 FAILOVER(D-009). 운용 중 한쪽이 DEGRADED가 되면 남은 쪽으로 넘기는 동작은 2단계 ADR에서 정한다 | 재기동 | 시세 게이트웨이 | D-009 |
 | `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF. ⚠️ OFF는 전 시세 끊김 시 보유 종목 폴링 손절 감시(장애표 2번)를 끈다. 실전 보유 종목이 있을 때의 검증은 risk-ops 검토 후 추가 | 재기동 | 실전 엔진(보호 폴링) | D-008 |
 | `lab.max-parallel-runs` | int | `4` | 1~64 | 즉시(새 Run부터) | 실험실 | ADR-001 3장 예산 `[가정]` |

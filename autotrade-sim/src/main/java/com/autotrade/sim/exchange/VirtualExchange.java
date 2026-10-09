@@ -55,7 +55,7 @@ import java.util.Set;
  *       지정가로 체결(앞선 잔량을 모르므로 보수적으로).</li>
  *   <li><b>거래 상태</b>: 종목 상태가 TRADING이 아니면(VI, LULD, 정지) 체결하지 않는다(OVS-06). 주문은 유지한다.</li>
  *   <li><b>현금</b>: 매수 체결 직전 (현금 − 다른 주문의 예약 현금)으로 살 수 있는 수량까지만 체결하고, 모자란 잔량은 취소한다.</li>
- *   <li><b>당일 유효</b>: {@link #endOfDay}에서 남은 주문을 취소한다.</li>
+ *   <li><b>당일 유효</b>: {@link #endOfDay}에서 남은 주문을 만료시킨다({@code EXPIRED}, ORD-07).</li>
  *   <li>우리 주문이 시장에 준 영향(소진한 잔량)은 다음 스냅샷에 이어지지 않는다 `[가정]`: 실제 스냅샷이 시장 상태다.
  *       주문 규모가 호가 잔량보다 충분히 작다는 전제이며, 큰 주문의 성과는 과대평가될 수 있다.</li>
  * </ul>
@@ -169,6 +169,10 @@ public final class VirtualExchange implements OrderGateway {
                 key, o.state, o.request.quantity(), o.filled, o.averagePrice()));
     }
 
+    /**
+     * 가상 거래소는 취소를 그 자리에서 확정하므로 {@code CANCEL_REQUESTED}를 거치지 않고 바로 {@code CANCELED}다.
+     * 이미 종결된 주문은 그 상태를 그대로 돌려준다.
+     */
     @Override
     public OrderAck cancel(IdempotencyKey key) {
         VirtualOrder o = orders.get(Objects.requireNonNull(key, "key"));
@@ -176,15 +180,15 @@ public final class VirtualExchange implements OrderGateway {
             return new OrderAck(key, OrderState.REJECTED, false, null, "주문 없음");
         }
         if (!o.state.isTerminal()) {
-            close(o, OrderState.CANCELLED, null);
+            close(o, OrderState.CANCELED, null);
         }
         return new OrderAck(key, o.state, false, o.orderId, "");
     }
 
-    /** 거래일 종료: 남은 주문을 모두 취소한다(당일 유효). */
+    /** 거래일 종료: 남은 주문을 모두 만료시킨다(당일 유효, 상태 EXPIRED, 사유 DAY_END). */
     public void endOfDay() {
         for (VirtualOrder o : List.copyOf(open.values())) {
-            close(o, OrderState.CANCELLED, OrderRejectedReason.DAY_END);
+            close(o, OrderState.EXPIRED, OrderRejectedReason.DAY_END);
         }
     }
 
@@ -435,7 +439,7 @@ public final class VirtualExchange implements OrderGateway {
                     record(o, e, price, qty, slippageAmount.multiply(BigDecimal.valueOf(qty))
                             .divide(BigDecimal.valueOf(wanted), 10, RoundingMode.HALF_EVEN), date);
                 }
-                close(o, OrderState.CANCELLED, OrderRejectedReason.CASH_SHORT_AT_FILL);
+                close(o, OrderState.CANCELED, OrderRejectedReason.CASH_SHORT_AT_FILL);
                 return qty;
             }
         }
@@ -481,7 +485,8 @@ public final class VirtualExchange implements OrderGateway {
         private final long signalSeq;
         private final Instant signalTime;
         private final Instant activeFrom;
-        private OrderState state = OrderState.SUBMITTED;
+        /** 거래소에 도착해 접수 검증 전(submit 안에서 바로 ACCEPTED·REJECTED로 바뀐다). */
+        private OrderState state = OrderState.SUBMITTING;
         private OrderRejectedReason reason;
         private long filled;
         private BigDecimal filledNotional = BigDecimal.ZERO;

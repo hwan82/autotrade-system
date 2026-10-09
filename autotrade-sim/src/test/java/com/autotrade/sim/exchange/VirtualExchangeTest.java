@@ -237,7 +237,9 @@ class VirtualExchangeTest {
         event(book(1000, asks("70100x60"), bids("70000x400")));
         IdempotencyKey k = submit(Side.BUY, OrderType.LIMIT, "69000", 10);
         ex.endOfDay();
-        assertThat(state(k)).isEqualTo(OrderState.CANCELLED);
+        // 당일 유효 주문의 장 마감 소멸은 취소 요청이 없었으므로 EXPIRED(ORD-07)다
+        assertThat(state(k)).isEqualTo(OrderState.EXPIRED);
+        assertThat(state(k).isTerminal()).isTrue();
         assertThat(ex.reasonOf(k)).isEqualTo(OrderRejectedReason.DAY_END);
         assertThat(ex.hasOpenOrder(S)).isFalse();
         assertThat(ex.query(nextKey(S, Side.SELL))).isEqualTo(OrderQueryResult.NotFound.INSTANCE);
@@ -251,7 +253,7 @@ class VirtualExchangeTest {
         // 체결 시 매도 호가가 급등: 11,000원 × 100 = 110만 원 → 90주(990,000 + 수수료 148)만
         List<AppliedFill> f = event(book(2000, asks("11000x100"), bids("10990x100")));
         assertThat(f).singleElement().satisfies(a -> assertThat(a.fill().quantity()).isEqualTo(90));
-        assertThat(state(k)).isEqualTo(OrderState.CANCELLED);
+        assertThat(state(k)).isEqualTo(OrderState.CANCELED);
         assertThat(ex.reasonOf(k)).isEqualTo(OrderRejectedReason.CASH_SHORT_AT_FILL);
         assertThat(account.cash()).isEqualTo(Money.of(1_000_000 - 990_000 - 148, Money.KRW));
     }

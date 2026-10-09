@@ -90,7 +90,7 @@
 - `verifyProcessIsolation`: app-engine에 sim을 넣으면 빌드 실패(수동 확인 후 원복).
 - 수집기 검사: `import websocket`과 `APP_KEY = ...`가 든 픽스처 파일에서 실패(수동 확인).
 
-ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래스패스에 있는 모듈만 검사해서 새 모듈이 규칙 밖에 놓일 수 있었다. 테스트 전용 모듈이 모든 모듈에 의존하게 하고, 새 모듈을 `settings.gradle.kts`와 이 모듈에 함께 추가하는 것을 리뷰 체크 항목으로 둔다.
+ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래스패스에 있는 모듈만 검사해서 새 모듈이 규칙 밖에 놓일 수 있었다. 테스트 전용 모듈이 모든 모듈에 의존하게 한다. 이 의존은 `settings.gradle.kts`의 모든 Java 모듈에서 자동으로 만들고, 빠지면 `ModuleOwnershipTest`가 실패한다(처음에는 손 목록 + 리뷰 체크 항목이었으나 구멍이 실측돼 바꿨다. ADR-002 9장 보강).
 
 ### 2.3 핵심 계약 요약
 
@@ -221,7 +221,7 @@ DB 엔진 대안(Q-009): (A) PostgreSQL 16 **채택**(무료, role-guides.md 3�
 
 | 위험 | 영향 | 대응 |
 |---|---|---|
-| 새 모듈을 architecture-test 의존에 넣지 않으면 ArchUnit 규칙 밖 | 경계 위반이 늦게 발견 | 리뷰 체크 항목. Gradle 의존·`verifyPureDependencies`·`verifyProcessIsolation`은 모듈 단위로 항상 적용 |
+| 새 모듈을 architecture-test 의존에 넣지 않으면 ArchUnit 규칙 밖 | 경계 위반이 늦게 발견 | 해소: 의존을 settings의 모든 Java 모듈에서 자동으로 만들고, 빠지면 `ModuleOwnershipTest`가 실패한다(ADR-002 9장 보강). Gradle 의존·`verifyPureDependencies`·`verifyProcessIsolation`은 모듈 단위로 항상 적용 |
 | `System.nanoTime()`은 허용 | 지연 측정용으로 필요. 비즈니스 판단에 쓰면 비결정론 | 리뷰에서 확인. 쓰임이 늘면 규칙 추가 |
 | Windows에서는 설정 폴더·파일 권한을 POSIX로 제한하지 못함 | 같은 PC의 다른 사용자 계정이 secrets.json을 읽을 수 있음 | 기본 위치가 사용자 홈 아래라 Windows 기본 ACL로 보호된다고 `[추론]`. 7단계 전 risk-ops가 OS 자격 증명 저장소를 검토(2.6절 대안 D) |
 | gitleaks 기본 규칙은 국내 증권사 키 형식을 모름 | 형식이 특이한 키는 놓칠 수 있음 | 실제 키는 secrets.json에만 있고 저장소 밖. 2단계 플러그인 작업에서 증권사별 규칙을 `.gitleaks.toml`에 추가(data-engineer 제안) |
