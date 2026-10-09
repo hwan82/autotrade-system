@@ -109,6 +109,9 @@ class KisStreamProtocolTest {
                 + "\"body\":{\"rt_cd\":\"1\",\"msg_cd\":\"OPSP0008\",\"msg1\":\"MAX SUBSCRIBE OVER\"}}", RX);
         assertThat(reject.control()).isEqualTo(Decoded.Control.SUBSCRIBE_REJECTED);
         assertThat(reject.detail()).contains("MAX SUBSCRIBE OVER");
+        Decoded badKey = protocol.decode("{\"header\":{\"tr_id\":\"H0STCNT0\",\"tr_key\":\"005930\",\"encrypt\":\"N\"},"
+                + "\"body\":{\"rt_cd\":\"9\",\"msg_cd\":\"OPSP0011\",\"msg1\":\"invalid approval : NOT FOUND\"}}", RX);
+        assertThat(badKey.control()).isEqualTo(Decoded.Control.LOGIN_FAILED);
         Decoded ok = protocol.decode("{\"header\":{\"tr_id\":\"H0STCNT0\",\"tr_key\":\"005930\",\"encrypt\":\"N\"},"
                 + "\"body\":{\"rt_cd\":\"0\",\"msg_cd\":\"OPSP0000\",\"msg1\":\"SUBSCRIBE SUCCESS\"}}", RX);
         assertThat(ok.control()).isEqualTo(Decoded.Control.IGNORED);

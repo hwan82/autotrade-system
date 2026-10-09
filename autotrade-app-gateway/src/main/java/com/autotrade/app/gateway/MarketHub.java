@@ -56,6 +56,7 @@ final class MarketHub implements AutoCloseable {
     private final Map<BrokerId, Subscription> subscriptions = new EnumMap<>(BrokerId.class);
     private final Map<Symbol, BrokerId> owner = new TreeMap<>();
     private final Map<BrokerId, Instant> downSince = new EnumMap<>(BrokerId.class);
+    private final Map<Symbol, Lost> lost = new TreeMap<>();
     private SourcePlan current;
     private boolean closed;
 
@@ -92,7 +93,7 @@ final class MarketHub implements AutoCloseable {
         if (closed) {
             return;
         }
-        BrokerPlugin p = byPriority.stream().filter(x -> x.brokerId() == broker).findFirst().orElseThrow();
+        BrokerPlugin p = plugin(broker);
         ConnectionState state = live(p).map(LiveMarketDataSource::state).orElse(ConnectionState.CLOSED);
         if (state == ConnectionState.DISCONNECTED || state == ConnectionState.CLOSED) {
             downSince.putIfAbsent(broker, clock.instant());
@@ -101,6 +102,8 @@ final class MarketHub implements AutoCloseable {
         }
         replan();
     }
+
+    private record Lost(Instant since, DataGap.GapReason reason) {}
 
     /** 현재 상태로 다시 배분하고, 바뀐 종목만 옮긴다. */
     synchronized SourcePlan replan() {
@@ -166,17 +169,45 @@ final class MarketHub implements AutoCloseable {
                 old.close();
             }
         }
-        // 3) 소스가 바뀐 종목에 전환 표시. 종목 순서로 녹화해 결과가 결정적이다
+        // 3) 공백 표시. 종목 순서로 녹화해 결과가 결정적이다
+        //    - 다른 소스로 옮긴 종목: 옛 소스에서 마지막으로 받은 시각부터 지금까지 SOURCE_SWITCH
+        //    - 받을 소스를 잃은 종목(전 소스 장애, 한도 밖): 잃은 시각을 기억했다가 다시 배정될 때(또는 종료 때) 남긴다.
+        //      구독을 닫은 뒤라 소스가 재연결 때 내는 DISCONNECTED 공백은 받을 곳이 없기 때문이다
+        for (Map.Entry<Symbol, BrokerId> e : owner.entrySet()) {
+            if (!next.containsKey(e.getKey())) {
+                lost.putIfAbsent(e.getKey(), new Lost(gapStart(e.getValue(), now), downSince.containsKey(e.getValue())
+                        ? DataGap.GapReason.DISCONNECTED : DataGap.GapReason.SOURCE_SWITCH));
+            }
+        }
         for (Map.Entry<Symbol, BrokerId> e : next.entrySet()) {
             BrokerId prev = owner.get(e.getKey());
-            if (prev != null && prev != e.getValue()) {
-                Instant start = downSince.getOrDefault(prev, now);
-                recorder.offer(SOURCE_ID, new DataGap(e.getKey(), 0, now, now, start.isAfter(now) ? now : start, now,
-                        DataGap.GapReason.SOURCE_SWITCH));
+            Lost l = lost.remove(e.getKey());
+            if (l != null) {
+                recordGap(e.getKey(), l.since(), now, l.reason());
+            } else if (prev != null && prev != e.getValue()) {
+                recordGap(e.getKey(), gapStart(prev, now), now, DataGap.GapReason.SOURCE_SWITCH);
             }
         }
         owner.clear();
         owner.putAll(next);
+    }
+
+    /** 옛 소스가 끊겨서 옮기는 것이면 그 소스에서 마지막으로 받은 시각, 아니면 지금. */
+    private Instant gapStart(BrokerId prev, Instant now) {
+        if (!downSince.containsKey(prev)) {
+            return now;
+        }
+        BrokerPlugin p = plugin(prev);
+        Instant start = live(p).flatMap(LiveMarketDataSource::lastReceivedAt).orElse(downSince.get(prev));
+        return start.isAfter(now) ? now : start;
+    }
+
+    private void recordGap(Symbol s, Instant start, Instant end, DataGap.GapReason reason) {
+        recorder.offer(SOURCE_ID, new DataGap(s, 0, end, end, start, end, reason));
+    }
+
+    private BrokerPlugin plugin(BrokerId id) {
+        return byPriority.stream().filter(x -> x.brokerId() == id).findFirst().orElseThrow();
     }
 
     private Subscription subscribe(BrokerPlugin p, SortedSet<Symbol> symbols) {
@@ -201,6 +232,10 @@ final class MarketHub implements AutoCloseable {
             return;
         }
         closed = true;
+        // 받을 소스 없이 끝난 종목의 공백을 종료 시각까지 남긴다(녹화기는 허브 다음에 닫힌다)
+        Instant now = clock.instant();
+        lost.forEach((s, l) -> recordGap(s, l.since(), now, l.reason()));
+        lost.clear();
         subscriptions.values().forEach(Subscription::close);
         subscriptions.clear();
         for (BrokerPlugin p : byPriority) {

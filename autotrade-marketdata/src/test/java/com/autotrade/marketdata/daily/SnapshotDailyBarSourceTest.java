@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -141,5 +142,18 @@ class SnapshotDailyBarSourceTest {
         assertThat(r.findings()).filteredOn(f -> f.rule() == Rule.MISSING_BAR)
                 .extracting(f -> f.symbol().code() + "@" + f.date())
                 .containsExactly("005930@2026-10-06", "005930@2026-10-09");
+    }
+
+    @Test
+    void 스냅샷_기준일은_생성_시각의_거래소_현지_날짜다() {
+        // 2026-10-07T16:00Z = 한국 10-08 01:00. 한국 10-08 일봉은 시점 위반이 아니고 10-09는 위반이다
+        SnapshotManifest m = new SnapshotManifest("krx-daily-tz-1", 1, "2026-10-07T16:00:00Z", "0.1.0", List.of(), List.of());
+        Symbol s = new Symbol(Market.KRX, "005930");
+        java.util.function.Function<String, DailyBar> bar = d -> new DailyBar(s, java.time.LocalDate.parse(d),
+                new java.math.BigDecimal("100"), new java.math.BigDecimal("100"), new java.math.BigDecimal("100"),
+                new java.math.BigDecimal("100"), 1, java.math.BigDecimal.ONE);
+        QualityReport r = DailyBarQualityCheck.check(m, List.of(bar.apply("2026-10-08"), bar.apply("2026-10-09")), List.of());
+        assertThat(r.findings()).filteredOn(f -> f.rule() == Rule.AFTER_SNAPSHOT)
+                .extracting(f -> f.date().toString()).containsExactly("2026-10-09");
     }
 }

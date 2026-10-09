@@ -32,7 +32,8 @@ public final class DailyBarQualityCheck {
 
     public static QualityReport check(SnapshotManifest manifest, List<DailyBar> bars, List<InstrumentPeriod> history) {
         Objects.requireNonNull(manifest, "manifest");
-        LocalDate snapshotDate = LocalDate.parse(manifest.createdAt().substring(0, 10));
+        // 스냅샷 기준일은 생성 시각의 거래소 현지 날짜다(시장마다 다르다: 한국 아침은 미국 전날 저녁)
+        java.time.Instant createdAt = java.time.Instant.parse(manifest.createdAt());
         List<Finding> findings = new ArrayList<>();
         Map<Symbol, List<DailyBar>> bySymbol = new TreeMap<>();
         Map<Market, NavigableSet<LocalDate>> marketDates = new TreeMap<>();
@@ -55,7 +56,7 @@ public final class DailyBarQualityCheck {
                     findings.add(new Finding(Rule.DUPLICATE_BAR, sym, b.date(), "같은 날짜 행이 둘 이상"));
                     continue;
                 }
-                checkRow(b, ps, snapshotDate, findings);
+                checkRow(b, ps, localDate(createdAt, b.symbol().market()), findings);
                 if (prev != null && valid(prev) && valid(b)) {
                     checkJump(prev, b, findings);
                 }
@@ -66,6 +67,10 @@ public final class DailyBarQualityCheck {
         findings.sort(Comparator.comparing((Finding f) -> f.symbol()).thenComparing(Finding::date)
                 .thenComparing(f -> f.rule().ordinal()));
         return new QualityReport(manifest, bars.size(), findings);
+    }
+
+    private static LocalDate localDate(java.time.Instant t, Market market) {
+        return t.atZone(com.autotrade.marketdata.calendar.ExchangeCalendar.bundled(market).zone()).toLocalDate();
     }
 
     private static void checkRow(DailyBar b, List<InstrumentPeriod> ps, LocalDate snapshotDate, List<Finding> out) {

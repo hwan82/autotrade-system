@@ -8,7 +8,7 @@ import java.util.Objects;
  * 받지 못한 이벤트가 있을 수 있다"는 품질 메타데이터만 전한다(ADR-003 2.2).
  *
  * <p>구간이 끝난 뒤(재연결, 큐 회복)에 한 번 나온다. {@code exchangeTime}과 {@code receivedAt}은 이 표시를 만든 시각이며
- * {@code gapEnd}와 같다. 시뮬레이션은 이 구간에 걸친 체결·신호를 결과에 표시한다.
+ * {@code gapEnd}와 같다. 이 구간에 걸친 체결·신호를 실험 결과에 표시하는 것은 시뮬레이션 쪽 후속 작업이다(ADR-003 5장).
  *
  * @param gapStart 마지막으로 정상 수신을 확인한 시각
  * @param gapEnd 정상 수신을 다시 확인한 시각

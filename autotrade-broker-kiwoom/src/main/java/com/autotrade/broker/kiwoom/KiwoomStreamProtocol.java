@@ -168,8 +168,8 @@ final class KiwoomStreamProtocol implements StreamProtocol {
                     case "0D" -> book(symbol, v, today).ifPresent(out::add);
                     default -> { }
                 }
-            } catch (IllegalArgumentException | DateTimeParseException e) {
-                // 한 항목 형식 오류는 그 항목만 버린다(다른 종목 시세는 살린다)
+            } catch (IllegalArgumentException | DateTimeParseException | ArithmeticException e) {
+                // 한 항목 형식 오류(수량 소수·범위 초과 포함)는 그 항목만 버린다(다른 종목 시세는 살린다)
             }
         }
         return out;

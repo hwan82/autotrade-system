@@ -73,6 +73,7 @@ final class FakePlugin implements BrokerPlugin {
         private final List<SourceStateListener> listeners = new CopyOnWriteArrayList<>();
         private final List<Sub> subs = new CopyOnWriteArrayList<>();
         volatile ConnectionState state = ConnectionState.NEW;
+        volatile java.time.Instant lastReceived;
         boolean started;
         boolean closed;
         int maxUnion;
@@ -132,6 +133,11 @@ final class FakePlugin implements BrokerPlugin {
         @Override
         public void start() {
             started = true;
+        }
+
+        @Override
+        public Optional<java.time.Instant> lastReceivedAt() {
+            return Optional.ofNullable(lastReceived);
         }
 
         @Override

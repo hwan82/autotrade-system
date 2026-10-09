@@ -14,6 +14,8 @@ import com.autotrade.app.engine.order.RealOrderGateways;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.broker.fixturea.PluginA;
+import com.autotrade.broker.fixtureb.PluginB;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -125,7 +127,8 @@ class ArchitectureTest {
     /**
      * 실전 주문 출구는 RealTradingGuard 허가를 받는 한 곳에서만 연다(RSK-01, ADR-002, 안전 불변식 2).
      * BrokerPlugin을 구현·상속한 어떤 타입의 {@code orderGateway}든, 호출이든 메서드 참조든 막는다.
-     * 플러그인이 출구 구현을 직접 생성하는 우회는 플러그인 모듈이 생기는 2단계에서 규칙을 더한다(ADR-002 6장).
+     * 플러그인이 출구 구현을 직접 생성하는 우회 규칙은 플러그인에 주문 코드를 넣는 첫 PR보다 먼저 더한다(ADR-002 6장,
+     * ADR-003 6장). 2단계 플러그인에는 주문 코드가 없다.
      */
     static final ArchRule ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY = noClasses()
             .that().doNotHaveFullyQualifiedName(RealOrderGateways.class.getName())
@@ -259,5 +262,13 @@ class ArchitectureTest {
         // 2차 확인 생성·beginActivation 호출 2건, 메서드·생성자 참조 4건
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
+
+        // 플러그인 A가 플러그인 B의 메서드를 부르는 1건. broker-api(BrokerCredentials) 참조는 위반이 아니다
+        JavaClasses pluginFixture = new ClassFileImporter().importClasses(PluginA.class, PluginB.class);
+        EvaluationResult plugins = PLUGINS_ARE_INDEPENDENT.evaluate(pluginFixture);
+        assertThat(plugins.hasViolation()).isTrue();
+        assertThat(String.join("\n", plugins.getFailureReport().getDetails()))
+                .contains("fixturea.PluginA", "fixtureb.PluginB")
+                .doesNotContain("BrokerCredentials");
     }
 }

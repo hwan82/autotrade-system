@@ -43,6 +43,7 @@ import java.util.SortedSet;
  */
 final class KisStreamProtocol implements StreamProtocol {
 
+    static final java.util.Set<String> AUTH_FAILURE_CODES = java.util.Set.of("OPSP0011");
     static final URI ENDPOINT = URI.create("ws://ops.koreainvestment.com:21000/tryitout");
     static final int MAX_ENTRIES = 41;
     static final int MAX_SYMBOLS = MAX_ENTRIES / 2;
@@ -155,10 +156,23 @@ final class KisStreamProtocol implements StreamProtocol {
         JsonNode body = n.path("body");
         String rt = body.path("rt_cd").asText("0");
         if (!rt.equals("0")) {
+            String msgCd = body.path("msg_cd").asText("");
+            if (isAuthFailure(msgCd, body.path("msg1").asText(""))) {
+                // 접속키가 무효면 구독 거절이 아니라 인증 실패다: 접속키를 버리고 다시 받아 재접속한다
+                return Decoded.control(Decoded.Control.LOGIN_FAILED, msgCd);
+            }
             return Decoded.control(Decoded.Control.SUBSCRIBE_REJECTED,
                     trId + " " + body.path("msg_cd").asText("") + " " + body.path("msg1").asText(""));
         }
         return Decoded.ignored(trId + " " + body.path("msg1").asText(""));
+    }
+
+    /**
+     * 접속키 오류 응답. [가정] 공식 샘플·커뮤니티 사례의 {@code OPSP0011 "invalid approval : NOT FOUND"} 기준이며
+     * 실제 코드 목록은 Q-015에서 확인한다. 코드가 바뀌어도 문구로 한 번 더 잡는다.
+     */
+    static boolean isAuthFailure(String msgCd, String msg1) {
+        return AUTH_FAILURE_CODES.contains(msgCd) || msg1.toLowerCase(java.util.Locale.ROOT).contains("invalid approval");
     }
 
     private Decoded frame(String text, Instant receivedAt) {

@@ -22,8 +22,10 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 
 /**
@@ -81,14 +83,35 @@ public final class GatewayMain {
         RuntimeConfig config = loaded.config();
         Path dir = paths.runtimeFile().toAbsolutePath().getParent();
         WatchList watch = WatchList.load(dir.resolve(WatchList.FILE_NAME));
+        Set<BrokerId> reserved = reservedForRealTrading(config.realTrading());
         List<BrokerPlugin> plugins = new ArrayList<>();
         for (BrokerId id : config.marketData().priority()) {
+            if (reserved.contains(id)) {
+                LOG.log(Level.WARNING, "{0}: 실전 계좌가 설정된 증권사라 게이트웨이 실시간을 띄우지 않습니다"
+                        + "(키·토큰은 실전 엔진 전용, D-024, ADR-003 4장)", id);
+                continue;
+            }
             plugin(id, config.brokers().of(id), runtime).ifPresent(plugins::add);
         }
         if (plugins.isEmpty()) {
             LOG.log(Level.WARNING, "실시간 시세용 증권사 키가 설정되지 않았습니다. 수신 없이 대기합니다");
         }
         return Gateway.start(config.marketData().mode(), plugins, watch, dir.resolve(RECORDINGS_DIR), runtime.clock());
+    }
+
+    /**
+     * 계좌번호까지 설정된 실전 계좌가 있는 증권사. 그 증권사 키로 게이트웨이가 토큰을 받으면 실전 엔진의 토큰·세션을
+     * 밀어낼 수 있으므로(키움 토큰당 세션 1개, 토스 토큰 1개만 유효) 게이트웨이는 쓰지 않는다. 같은 키로 따로 토큰을 받아도
+     * 서로 무효화하지 않는다는 실측(Q-015) 전까지의 보수적 규칙이다(D-024).
+     */
+    static Set<BrokerId> reservedForRealTrading(RuntimeConfig.RealTrading realTrading) {
+        Set<BrokerId> out = EnumSet.noneOf(BrokerId.class);
+        for (RuntimeConfig.RealAccount a : realTrading.accounts()) {
+            if (realTrading.isConfigured(a.id())) {
+                out.add(a.broker());
+            }
+        }
+        return out;
     }
 
     private static Optional<BrokerPlugin> plugin(BrokerId id, RuntimeConfig.BrokerKeys keys, LiveRuntime runtime) {

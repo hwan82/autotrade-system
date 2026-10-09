@@ -20,6 +20,14 @@ public interface LiveMarketDataSource extends MarketDataSource, AutoCloseable {
 
     void addStateListener(SourceStateListener listener);
 
+    /**
+     * 현재(또는 마지막) 연결에서 서버 메시지를 마지막으로 받은 시각. 끊긴 소스의 종목을 옮길 때 공백 시작으로 쓴다.
+     * 접속 전이면 빈 값.
+     */
+    default java.util.Optional<java.time.Instant> lastReceivedAt() {
+        return java.util.Optional.empty();
+    }
+
     @Override
     void close();
 }

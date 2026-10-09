@@ -28,20 +28,29 @@ public final class JdkWsTransport implements WsTransport {
         return client.newWebSocketBuilder()
                 .connectTimeout(connectTimeout)
                 .buildAsync(endpoint, new Listener(handler))
-                .thenApply(Connection::new);
+                .thenApply(ws -> new Connection(ws, handler));
     }
 
     private static final class Connection implements WsConnection {
         private final WebSocket socket;
+        private final WsHandler handler;
         private CompletableFuture<?> chain = CompletableFuture.completedFuture(null);
 
-        Connection(WebSocket socket) {
+        Connection(WebSocket socket, WsHandler handler) {
             this.socket = socket;
+            this.handler = handler;
         }
 
         @Override
         public synchronized void send(String text) {
-            chain = chain.handle((ok, err) -> null).thenCompose(ignored -> socket.sendText(text, true));
+            // 전송 실패(구독 메시지 유실 등)를 삼키지 않는다: 연결 오류로 알려 소스가 끊고 다시 붙게 한다
+            chain = chain.handle((ok, err) -> null)
+                    .thenCompose(ignored -> socket.sendText(text, true))
+                    .whenComplete((ok, err) -> {
+                        if (err != null) {
+                            handler.onError(err);
+                        }
+                    });
         }
 
         @Override

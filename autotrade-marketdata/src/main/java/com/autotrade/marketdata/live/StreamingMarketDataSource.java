@@ -114,6 +114,13 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     }
 
     /** 운영 지표(누락·무시 건수). 스냅샷이다. */
+    @Override
+    public java.util.Optional<Instant> lastReceivedAt() {
+        synchronized (lock) {
+            return java.util.Optional.ofNullable(lastMessageAt);
+        }
+    }
+
     public Stats.Snapshot stats() {
         synchronized (lock) {
             return stats.snapshot();

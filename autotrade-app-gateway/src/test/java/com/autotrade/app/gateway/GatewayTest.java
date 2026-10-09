@@ -101,9 +101,14 @@ class GatewayTest {
         RecordedDay day = RecordedDay.open(new RecordingLayout(dir).dayDir(Market.KRX, LocalDate.of(2026, 10, 8)));
         List<DataGap> gaps = day.lines().stream().map(RecordingCodec.Line::event)
                 .filter(DataGap.class::isInstance).map(DataGap.class::cast).toList();
+        // 한도 밖으로 밀린 카카오는 받을 소스가 없어 밀린 시각부터 종료 시각까지 공백으로 남는다
+        assertThat(gaps).filteredOn(gap -> gap.symbol().equals(KAKAO)).singleElement().satisfies(gap -> {
+            assertThat(gap.gapStart()).isEqualTo(down);
+            assertThat(gap.gapEnd()).isEqualTo(T0.plusSeconds(8));
+        });
+        gaps = gaps.stream().filter(gap -> !gap.symbol().equals(KAKAO)).toList();
         assertThat(gaps).extracting(DataGap::symbol).containsExactly(HYNIX, SAMSUNG);
         assertThat(gaps).allSatisfy(gap -> {
-            assertThat(gap.reason()).isEqualTo(DataGap.GapReason.SOURCE_SWITCH);
             assertThat(gap.gapStart()).isEqualTo(down);
             assertThat(gap.gapEnd()).isEqualTo(down);
         });
@@ -151,6 +156,68 @@ class GatewayTest {
             assertThat(g.hubs().get(Market.KRX).currentPlan().mode()).isEqualTo(MarketDataMode.FAILOVER);
             assertThat(kiwoom.source.registered()).isEmpty();
         }
+    }
+
+    List<DataGap> gaps() {
+        RecordedDay day = RecordedDay.open(new RecordingLayout(dir).dayDir(Market.KRX, LocalDate.of(2026, 10, 8)));
+        return day.lines().stream().map(RecordingCodec.Line::event)
+                .filter(DataGap.class::isInstance).map(DataGap.class::cast).toList();
+    }
+
+    @Test
+    void 옮길_때_공백은_옛_소스에서_마지막으로_받은_시각부터다() {
+        Gateway g = start(new WatchList(List.of(SAMSUNG), List.of()));
+        kiwoom.source.lastReceived = T0.plusSeconds(3);
+        clock.now = T0.plusSeconds(60); // 무응답으로 늦게 알아챔
+        kiwoom.source.set(ConnectionState.DISCONNECTED);
+        g.close();
+
+        assertThat(gaps()).singleElement().satisfies(gap -> {
+            assertThat(gap.reason()).isEqualTo(DataGap.GapReason.SOURCE_SWITCH);
+            assertThat(gap.gapStart()).isEqualTo(T0.plusSeconds(3));
+            assertThat(gap.gapEnd()).isEqualTo(T0.plusSeconds(60));
+        });
+    }
+
+    @Test
+    void 모든_소스가_끊겼다가_돌아오면_받지_못한_구간을_남긴다() {
+        Gateway g = start(new WatchList(List.of(SAMSUNG), List.of(KAKAO)));
+        kiwoom.source.lastReceived = T0.plusSeconds(5);
+        kis.source.lastReceived = T0.plusSeconds(7);
+        clock.now = T0.plusSeconds(10);
+        kiwoom.source.set(ConnectionState.DISCONNECTED); // 삼성·카카오가 한투로
+        clock.now = T0.plusSeconds(20);
+        kis.source.set(ConnectionState.DISCONNECTED);    // 받을 곳 없음
+        assertThat(g.hubs().get(Market.KRX).currentPlan().unservedHeld()).containsExactly(SAMSUNG);
+        clock.now = T0.plusSeconds(40);
+        kiwoom.source.set(ConnectionState.CONNECTED);    // 다시 배정
+        clock.now = T0.plusSeconds(50);
+        g.close();
+
+        List<DataGap> gaps = gaps();
+        assertThat(gaps).filteredOn(gap -> gap.reason() == DataGap.GapReason.DISCONNECTED)
+                .extracting(DataGap::symbol, DataGap::gapStart, DataGap::gapEnd)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(SAMSUNG, T0.plusSeconds(7), T0.plusSeconds(40)),
+                        org.assertj.core.groups.Tuple.tuple(KAKAO, T0.plusSeconds(7), T0.plusSeconds(40)));
+    }
+
+    @Test
+    void 받을_소스_없이_끝나면_종료_시각까지_공백을_남긴다() {
+        Gateway g = start(new WatchList(List.of(SAMSUNG), List.of()));
+        kiwoom.source.lastReceived = T0.plusSeconds(2);
+        kis.source.lastReceived = T0.plusSeconds(4);
+        clock.now = T0.plusSeconds(10);
+        kiwoom.source.set(ConnectionState.DISCONNECTED);
+        kis.source.set(ConnectionState.DISCONNECTED);
+        clock.now = T0.plusSeconds(30);
+        g.close();
+
+        assertThat(gaps()).filteredOn(gap -> gap.reason() == DataGap.GapReason.DISCONNECTED)
+                .singleElement().satisfies(gap -> {
+                    assertThat(gap.gapStart()).isEqualTo(T0.plusSeconds(4));
+                    assertThat(gap.gapEnd()).isEqualTo(T0.plusSeconds(30));
+                });
     }
 
     @Test
