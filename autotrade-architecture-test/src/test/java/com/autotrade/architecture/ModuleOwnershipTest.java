@@ -7,6 +7,9 @@ import com.autotrade.app.engine.command.SplitPackageCommand;
 import com.autotrade.app.engine.order.RealOrderGateways;
 import com.autotrade.app.engine.order.SplitPackageGatewayOpener;
 import com.autotrade.architecture.OurModules.Entry;
+import com.autotrade.architecture.OurModules.Kind;
+import com.autotrade.architecture.OurModules.Layout;
+import com.autotrade.architecture.OurModules.Output;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SplitPackageGuardRaiser;
 import com.autotrade.unowned.UnownedPackage;
@@ -16,8 +19,10 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.core.importer.Location;
 import com.tngtech.archunit.core.importer.Locations;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -29,8 +34,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import qa.probe.OutsideOpener;
 import qa.probe.OutsideRaiser;
 
@@ -55,8 +63,12 @@ import qa.probe.OutsideRaiser;
  * </ol>
  * 항목마다 따로 가져오므로 같은 FQN 클래스가 두 모듈에 있어도 둘 다 검사된다(한 번에 가져오면 하나만 남는다).
  *
- * <p>모듈 식별(독립 QA PR #21 Q-2): 위치 → 프로젝트는 폴더 이름이 아니라 Gradle이 넘긴 프로젝트 경로 → 폴더 표로
- * 정한다({@link OurModules}). {@link #OWNERS}의 모듈은 최상위 프로젝트({@code :<이름>})만 뜻하므로
+ * <p>모듈 식별(독립 QA PR #21 Q-2, risk-ops 재검토 2 R-7): 클래스패스 항목 → 프로젝트는 폴더 이름이나 폴더 접두어가
+ * 아니라 Gradle이 넘긴 배치표의 <b>선언된 운영 출력</b>(main 클래스 폴더, main 자원 폴더, jar)과 정확히 일치로 정하고,
+ * 운영·테스트 구분도 경로 모양이 아니라 선언 종류로 한다({@link OurModules}). 그리고 다음은 실패다: 우리 프로젝트 폴더 안인데
+ * 어느 선언 출력과도 맞지 않는 항목, 자기 프로젝트 폴더 밖(또는 더 안쪽 다른 프로젝트 폴더 안)에 있는 선언 출력이나
+ * 컴파일·자원·묶음 태스크 출력, 같은 출력을 두 프로젝트가 선언, 클래스가 없다고 선언한 모듈({@link #MODULES_WITHOUT_PACKAGES},
+ * {@link #NO_CLASSES_YET}) 출력의 {@code .class}. {@link #OWNERS}의 모듈은 최상위 프로젝트({@code :<이름>})만 뜻하므로
  * {@code :tools:autotrade-risk} 같은 같은 이름 중첩 프로젝트는 소유 모듈로 인정되지 않고, settings에 같은 이름 프로젝트가
  * 둘 이상이어도 실패한다.
  *
@@ -112,31 +124,41 @@ class ModuleOwnershipTest {
 
     /**
      * 설계상 Java 클래스를 만들지 않는 Java 플러그인 모듈(정적 자원만 담는다). 패키지를 소유하지 않으므로 {@link #OWNERS}에 없다.
-     * 이 모듈에 {@code com.autotrade} 클래스가 생기면 소유 패키지가 없어 위 검사에서 위반이 된다.
+     * 이 선언은 소유 검사의 예외라 믿지 않는다: 이 모듈의 운영 출력에 {@code .class}가 하나라도 있으면 실패한다
+     * ({@link #declaredEmptyButHasClasses}). 이 집합과 {@link #NO_CLASSES_YET}을 바꾸는 변경은 risk-ops 검토 대상이며,
+     * {@link #클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다}가 지금 목록을 고정해 바꾸면 테스트도 같이 고쳐야 한다.
      */
     static final Set<String> MODULES_WITHOUT_PACKAGES = Set.of("autotrade-ui");
 
     @Test
     void 운영_클래스는_패키지를_소유한_모듈에만_있다() {
-        Map<String, String> dirs = OurModules.projectDirs();
+        Layout layout = OurModules.layout();
         Set<String> violations = new TreeSet<>();
         Set<String> seenProjects = new TreeSet<>();
-        // 1. 모듈 → 클래스: 우리 프로젝트 운영 항목 전체(패키지 필터 없음)
-        for (Entry entry : OurModules.productionEntries(dirs)) {
-            JavaClasses classes = OurModules.importEntry(entry.path(), PRODUCTION_ONLY);
+        // 1. 모듈 → 클래스: 우리 프로젝트의 선언된 운영 출력 전체(패키지 필터 없음, 경로 모양으로 테스트를 거르지 않음)
+        for (Entry entry : OurModules.productionEntries(layout)) {
+            JavaClasses classes = OurModules.importEntry(entry.path());
             if (!classes.isEmpty()) {
                 seenProjects.add(entry.project());
             }
             violations.addAll(violations(entry.project(), classes));
         }
         // 2. 패키지 → 위치: com.autotrade 위치는 모두 우리 프로젝트여야 한다(외부 jar의 같은 패키지 이름 차단)
-        for (Location location : comAutotradeLocations()) {
-            Optional<String> project = OurModules.projectOf(OurModules.fileOf(location.asURI()), dirs);
-            if (project.isEmpty()) {
+        //    우리 폴더 안 위치는 선언 출력으로 프로젝트를 정한다(이 모듈 테스트 출력만 뺀다). 폴더 밖은 예전처럼 경로
+        //    패턴으로 테스트 출력을 거른다
+        for (Location location : Locations.ofPackage("com.autotrade")) {
+            String file = OurModules.fileOf(location.asURI());
+            Optional<Output> output = OurModules.containingOutput(file, layout);
+            if (output.isPresent()) {
+                if (output.get().kind() == Kind.MAIN) {
+                    violations.addAll(violations(output.get().project(),
+                            new ClassFileImporter().importLocations(Set.of(location))));
+                }
+            } else if (OurModules.projectOf(file, layout.dirs()).isPresent()) {
+                violations.add("선언 출력이 아닌 우리 폴더 위치에 com.autotrade 클래스: " + location.asURI());
+            } else if (EXTERNAL_PRODUCTION_ONLY.includes(location)) {
                 violations.add("우리 프로젝트가 아닌 위치에 com.autotrade 클래스: " + location.asURI());
-                continue;
             }
-            violations.addAll(violations(project.get(), new ClassFileImporter().importLocations(Set.of(location))));
         }
         assertThat(violations).as("패키지 소유 모듈 위반(이름 위장, com.autotrade 밖 패키지, 표 미갱신)").isEmpty();
         // 검사가 빈 손으로 통과하지 않았고, 표가 실제 모듈 구성과 같다(클래스가 아직 없는 자리 모듈은 따로 적는다)
@@ -151,24 +173,34 @@ class ModuleOwnershipTest {
 
     @Test
     void 클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다() {
-        Map<String, String> dirs = OurModules.projectDirs();
+        Layout layout = OurModules.layout();
+        Map<String, String> dirs = layout.dirs();
         // 빈 손 통과 방지: 실전 경로 모듈은 반드시 표에 있다
         assertThat(dirs).containsKeys(":autotrade-risk", ":autotrade-app-engine", ":autotrade-app-lab", OurModules.SELF);
-        Set<String> onClasspath = OurModules.classpathEntries(dirs).stream()
+        List<Entry> entries = OurModules.classpathEntries(layout);
+        Set<String> onClasspath = entries.stream()
+                .filter(e -> e.kind().equals(Optional.of(Kind.MAIN)))
                 .map(Entry::project)
                 .collect(Collectors.toCollection(TreeSet::new));
 
         assertThat(coverageGaps(dirs, onClasspath, OWNERS, MODULES_WITHOUT_PACKAGES))
                 .as("settings 프로젝트가 아키텍처 테스트 클래스패스나 소유 모듈 표에서 빠졌다")
                 .isEmpty();
+        // risk-ops 재검토 2 R-7: 출력은 자기 폴더 안, 클래스패스 항목은 선언 출력과 정확히 일치,
+        // 클래스가 없다고 선언한 모듈에는 실제로 클래스가 없다
+        assertThat(OurModules.layoutProblems(layout)).as("선언 출력 배치 위반").isEmpty();
+        assertThat(OurModules.undeclaredEntries(entries)).as("선언되지 않은 클래스패스 항목").isEmpty();
+        assertThat(layout.root()).as("빈 손 방지: 저장소 루트").isPresent();
+        assertThat(OurModules.unexpectedClasspathEntries(layout)).as("선언 출력도 외부 허용 위치도 아닌 클래스패스 항목").isEmpty();
+        assertThat(declaredEmptyButHasClasses(layout, classlessModules())).as("클래스가 없다고 선언한 모듈의 클래스").isEmpty();
     }
 
     @Test
     void ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다() {
         Set<String> scope = names(ArchitectureTest.PRODUCTION);
         Set<String> ours = new TreeSet<>();
-        for (Entry entry : OurModules.productionEntries(OurModules.projectDirs())) {
-            ours.addAll(names(OurModules.importEntry(entry.path(), PRODUCTION_ONLY)));
+        for (Entry entry : OurModules.productionEntries(OurModules.layout())) {
+            ours.addAll(names(OurModules.importEntry(entry.path())));
         }
         assertThat(ours).as("빈 손 방지").contains(RealTradingGuard.class.getName(), RealOrderGateways.class.getName());
         assertThat(scope).containsAll(ours);
@@ -245,6 +277,133 @@ class ModuleOwnershipTest {
         assertThat(ArchitectureTest.ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(outside).hasViolation()).isTrue();
         assertThat(ArchitectureTest.ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(outside).hasViolation())
                 .isTrue();
+    }
+
+    @Test
+    void 출력을_다른_프로젝트_폴더로_돌리면_잡아낸다() {
+        // risk-ops 재검토 2 M7 재현(가짜 표): 자원 전용으로 등록한 :autotrade-zz가 컴파일 출력을 :autotrade-risk 폴더 안으로 돌림
+        Layout m7 = OurModules.parseLayout(String.join("|",
+                "DIR\t:autotrade-risk\t/r/autotrade-risk",
+                "MAIN\t:autotrade-risk\t/r/autotrade-risk/build/classes/java/main",
+                "MAIN\t:autotrade-risk\t/r/autotrade-risk/build/libs/autotrade-risk.jar",
+                "DIR\t:autotrade-zz\t/r/autotrade-zz",
+                "MAIN\t:autotrade-zz\t/r/autotrade-risk/build/classes/java/zz",
+                "MAIN\t:autotrade-zz\t/r/autotrade-zz/build/libs/autotrade-zz.jar"));
+        assertThat(OurModules.layoutProblems(m7)).singleElement().asString()
+                .contains("자기 프로젝트 폴더 밖").contains(":autotrade-zz").contains("담은 프로젝트: :autotrade-risk");
+        // 그 폴더가 클래스패스에 오면 폴더 접두어로는 :autotrade-risk지만, 선언 출력과 정확히 맞춰 :autotrade-zz로 매핑된다
+        assertThat(OurModules.outputOf("/r/autotrade-risk/build/classes/java/zz", m7))
+                .map(Output::project).contains(":autotrade-zz");
+        assertThat(OurModules.containingOutput("/r/autotrade-risk/build/classes/java/zz/com/autotrade/risk/guard/X.class",
+                m7)).map(Output::project).contains(":autotrade-zz");
+
+        // 같은 출력을 두 프로젝트가 선언
+        Layout shared = OurModules.parseLayout(String.join("|",
+                "DIR\t:a\t/r/a", "MAIN\t:a\t/r/a/build/x", "DIR\t:b\t/r/b", "MAIN\t:b\t/r/a/build/x"));
+        assertThat(OurModules.layoutProblems(shared)).anySatisfy(v -> assertThat(v).contains("같은 출력을 두 프로젝트가 선언"));
+
+        // 중첩 프로젝트 폴더 안으로 돌린 출력: 자기 폴더 안이어도 더 안쪽 프로젝트 것이면 위반
+        Layout nested = OurModules.parseLayout(String.join("|",
+                "DIR\t:tools\t/r/tools", "MAIN\t:tools\t/r/tools/autotrade-risk/build/classes/java/main",
+                "DIR\t:tools:autotrade-risk\t/r/tools/autotrade-risk"));
+        assertThat(OurModules.layoutProblems(nested)).singleElement().asString().contains("담은 프로젝트: :tools:autotrade-risk");
+
+        // 소스 세트 선언은 그대로 두고 컴파일 태스크 출력만 다른 프로젝트 폴더로 돌린 경우(BUILT)
+        Layout taskOnly = OurModules.parseLayout(String.join("|",
+                "DIR\t:autotrade-risk\t/r/autotrade-risk",
+                "DIR\t:autotrade-zz\t/r/autotrade-zz",
+                "MAIN\t:autotrade-zz\t/r/autotrade-zz/build/classes/java/main",
+                "BUILT\t:autotrade-zz\t/r/autotrade-risk/build/classes/java/zz"));
+        assertThat(OurModules.layoutProblems(taskOnly)).singleElement().asString().contains("BUILT");
+        // BUILT는 클래스패스 매핑에는 쓰지 않는다
+        assertThat(OurModules.outputOf("/r/autotrade-risk/build/classes/java/zz", taskOnly)).isEmpty();
+
+        // 대조군: 출력이 모두 자기 폴더 안
+        Layout ok = OurModules.parseLayout(String.join("|",
+                "DIR\t:autotrade-risk\t/r/autotrade-risk",
+                "MAIN\t:autotrade-risk\t/r/autotrade-risk/build/libs/autotrade-risk.jar",
+                "DIR\t:autotrade-zz\t/r/autotrade-zz",
+                "MAIN\t:autotrade-zz\t/r/autotrade-zz/build/classes/java/main"));
+        assertThat(OurModules.layoutProblems(ok)).isEmpty();
+    }
+
+    @Test
+    void 선언되지_않은_클래스패스_항목과_테스트처럼_보이는_운영_출력을_잡아낸다(@TempDir Path root) throws IOException {
+        Path risk = Files.createDirectories(root.resolve("autotrade-risk"));
+        Path declaredJar = Files.createDirectories(risk.resolve("build/libs")).resolve("autotrade-risk.jar");
+        writeEmptyJar(declaredJar);
+        Path sneaky = Files.createDirectories(risk.resolve("build/classes/java/zz"));
+        // 운영 출력을 테스트 경로 모양(build/classes/java/test)으로 돌린 프로젝트
+        Path zz = Files.createDirectories(root.resolve("autotrade-zz"));
+        Path testLooking = Files.createDirectories(zz.resolve("build/classes/java/test"));
+        Layout layout = OurModules.parseLayout(String.join("|",
+                "DIR\t:autotrade-risk\t" + risk, "MAIN\t:autotrade-risk\t" + declaredJar,
+                "DIR\t:autotrade-zz\t" + zz, "MAIN\t:autotrade-zz\t" + testLooking));
+
+        List<Entry> entries = OurModules.classpathEntries(layout,
+                declaredJar.toString(), sneaky.toString(), testLooking.toString(), "/no/such/external.jar");
+        // 우리 폴더 안인데 선언 출력이 아닌 항목은 실패
+        assertThat(OurModules.undeclaredEntries(entries)).singleElement().asString().contains(sneaky.toString());
+        // 경로 모양이 테스트여도 선언이 MAIN이면 운영 출력이다(경로 패턴은 이 프로젝트 항목을 운영 밖으로 봤을 것이다)
+        assertThat(entries).anySatisfy(e -> {
+            assertThat(e.path()).isEqualTo(testLooking);
+            assertThat(e.kind()).contains(Kind.MAIN);
+            assertThat(e.project()).isEqualTo(":autotrade-zz");
+        });
+        assertThat(new ImportOption.DoNotIncludeTests().includes(Location.of(testLooking))).isFalse();
+
+        // 저장소 안 파일 jar 의존(어느 프로젝트 폴더도 아님)과 허용 위치 밖 jar. 저장소 루트는 root/repo로 둔다
+        Path repo = Files.createDirectories(root.resolve("repo"));
+        Path repoJar = Files.createDirectories(repo.resolve("libs")).resolve("evil.jar");
+        writeEmptyJar(repoJar);
+        Path gradleHome = Files.createDirectories(root.resolve("gradle-home/caches"));
+        Path cachedLib = gradleHome.resolve("lib.jar");
+        writeEmptyJar(cachedLib);
+        Path elsewhere = root.resolve("elsewhere.jar");
+        writeEmptyJar(elsewhere);
+        Layout withRoots = OurModules.parseLayout(String.join("|",
+                "ROOT\t-\t" + repo, "EXTERNAL\t-\t" + gradleHome.getParent(),
+                "DIR\t:autotrade-risk\t" + risk, "MAIN\t:autotrade-risk\t" + declaredJar));
+        assertThat(OurModules.unexpectedClasspathEntries(withRoots,
+                declaredJar.toString(), cachedLib.toString(), repoJar.toString(), elsewhere.toString(), sneaky.toString()))
+                .containsExactlyInAnyOrder(
+                        "저장소 안인데 선언 출력이 아닌 클래스패스 항목: " + repoJar,
+                        "저장소 안인데 선언 출력이 아닌 클래스패스 항목: " + sneaky,
+                        "허용 위치(Gradle 의존성 캐시·배포판) 밖 클래스패스 항목: " + elsewhere);
+    }
+
+    @Test
+    void 클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다(@TempDir Path root) throws IOException {
+        Path ui = Files.createDirectories(root.resolve("autotrade-ui"));
+        Path classes = Files.createDirectories(ui.resolve("build/classes/java/main/com/autotrade/risk/guard"));
+        Path jar = Files.createDirectories(ui.resolve("build/libs")).resolve("autotrade-ui.jar");
+        writeEmptyJar(jar);
+        Layout layout = OurModules.parseLayout(String.join("|",
+                "DIR\t:autotrade-ui\t" + ui,
+                "MAIN\t:autotrade-ui\t" + ui.resolve("build/classes/java/main"),
+                "MAIN\t:autotrade-ui\t" + jar));
+        assertThat(declaredEmptyButHasClasses(layout, Set.of("autotrade-ui"))).isEmpty();
+
+        Files.write(classes.resolve("X.class"), new byte[] {(byte) 0xCA, (byte) 0xFE});
+        assertThat(declaredEmptyButHasClasses(layout, Set.of("autotrade-ui"))).singleElement().asString()
+                .contains(":autotrade-ui").contains(".class 1개");
+        // jar 안의 클래스도 센다
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
+            out.putNextEntry(new JarEntry("com/autotrade/risk/guard/Y.class"));
+            out.write(new byte[] {(byte) 0xCA, (byte) 0xFE});
+            out.closeEntry();
+        }
+        assertThat(OurModules.classFileCount(jar)).isEqualTo(1);
+        // 지금 실제 표의 선언도 사실이다(자원 전용·자리 모듈)
+        assertThat(classlessModules()).containsExactlyInAnyOrder(
+                "autotrade-ui", "autotrade-notification-jar", "autotrade-monitor-agent-jar");
+    }
+
+    private static void writeEmptyJar(Path jar) throws IOException {
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
+            out.putNextEntry(new JarEntry("META-INF/MANIFEST.MF"));
+            out.closeEntry();
+        }
     }
 
     @Test
@@ -325,14 +484,32 @@ class ModuleOwnershipTest {
                 new ClassFileImporter().importClasses(RealTradingGuard.class, SplitPackageGuardRaiser.class))).isEmpty();
     }
 
-    private static final ImportOption PRODUCTION_ONLY = new ImportOption.DoNotIncludeTests();
+    private static final ImportOption EXTERNAL_PRODUCTION_ONLY = new ImportOption.DoNotIncludeTests();
 
-    /** 클래스패스의 {@code com.autotrade} 운영 위치(테스트 출력 제외), 출처 순. */
-    private static List<Location> comAutotradeLocations() {
-        return Locations.ofPackage("com.autotrade").stream()
-                .filter(PRODUCTION_ONLY::includes)
-                .sorted(Comparator.comparing(l -> l.asURI().toString()))
-                .collect(Collectors.toList());
+    /** 클래스가 없다고 선언한 모듈: 자원 전용 모듈과 아직 클래스가 없는 자리 모듈. */
+    static Set<String> classlessModules() {
+        Set<String> out = new TreeSet<>(MODULES_WITHOUT_PACKAGES);
+        out.addAll(NO_CLASSES_YET);
+        return out;
+    }
+
+    /**
+     * 클래스가 없다고 선언한 모듈({@code classless}, 최상위 프로젝트 이름)의 운영 출력에 {@code .class}가 있으면 위반이다.
+     * 이 선언은 소유 검사의 예외이므로, 선언만 믿지 않고 실제 출력을 확인한다(R-7 M7은 이 선언과 출력 경로 변경을 겹쳤다).
+     */
+    static List<String> declaredEmptyButHasClasses(Layout layout, Set<String> classless) {
+        List<String> out = new ArrayList<>();
+        for (Output o : layout.outputs()) {
+            if (o.kind() == Kind.MAIN && classless.contains(OurModules.nameOf(o.project()))
+                    && o.project().equals(":" + OurModules.nameOf(o.project()))) {
+                long count = OurModules.classFileCount(Paths.get(o.file()));
+                if (count > 0) {
+                    out.add(o.project() + "은 클래스가 없다고 선언했지만 " + o.file() + "에 .class " + count + "개");
+                }
+            }
+        }
+        out.sort(null);
+        return out;
     }
 
     private static Set<String> names(JavaClasses classes) {
