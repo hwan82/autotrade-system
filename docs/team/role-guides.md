@@ -102,7 +102,7 @@
 - 결과 비교와 과최적화 검사(워크포워드, ±20% 민감도, 최소 거래 수, 특정 기간 쏠림).
 - 승격 제안: 선발 기준 통과 프로필을 PM에게 결정 후보로 제출.
 
-**산출물**: `strategies/<프로필ID>.yaml`, `experiments/<실험ID>/report.md`, 승격 제안서
+**산출물**: `strategies/<프로필ID>/v<버전>.yaml`, `experiments/<실험ID>/report.md`, 승격 제안서
 **스킬**: autotrade-strategy-lab, data-inference-ideation
 **완료 기준**
 - 모든 리포트에 기간, 시드, 비용 모델, 데이터 버전, 비교 대상이 명시되어 있다.

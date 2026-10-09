@@ -1,0 +1,157 @@
+/* 자동매매 실험실 대시보드. 외부 글꼴·스크립트를 쓰지 않는다(CSP 'self', 오프라인 동작). */
+:root {
+  --paper: #f5f7f3;
+  --sheet: #ffffff;
+  --ink: #1c2828;
+  --ink-soft: #55625f;
+  --rule: #d6ddd6;
+  --grid: #e6ebe5;
+  --lab: #2f4ba0;
+  --lab-soft: #e7ecf8;
+  --up: #c8372d;      /* 국내 관례: 상승·이익 빨강 */
+  --down: #2563b5;    /* 하락·손실 파랑 */
+  --warn: #9a5b00;
+  --warn-soft: #fbf1df;
+  --danger: #a3262b;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --font: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 var(--font);
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--lab); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, main:focus-visible {
+  outline: 2px solid var(--lab);
+  outline-offset: 2px;
+}
+h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .35rem; font-weight: 700; letter-spacing: -.01em; }
+h2 { font-size: 1.15rem; margin: 2rem 0 .6rem; font-weight: 650; }
+h3 { font-size: 1rem; margin: 1.2rem 0 .4rem; font-weight: 650; }
+p { max-width: 72ch; }
+.muted { color: var(--ink-soft); }
+.small { font-size: .85rem; }
+
+/* 모드 띠: 실험실(가상)임을 어느 화면에서도 착각하지 않게 한다(UI-05). 사선 해칭은 "가상"의 표시 */
+.mode-band {
+  display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: center;
+  padding: .45rem 1.25rem;
+  color: #fff;
+  background-color: var(--lab);
+  background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.09) 0 8px, transparent 8px 16px);
+  font-size: .9rem;
+}
+.mode-band .brokers { margin-left: auto; display: flex; gap: .4rem; flex-wrap: wrap; }
+.chip {
+  display: inline-block; padding: .05rem .5rem; border-radius: 999px; font-size: .8rem;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.mode-band .chip { background: rgba(255,255,255,.12); }
+.mode-band .chip.off { opacity: .7; }
+
+.shell { display: grid; grid-template-columns: 13rem 1fr; min-height: calc(100vh - 2.2rem); }
+.side {
+  border-right: 1px solid var(--rule); padding: 1.25rem 1rem; display: flex; flex-direction: column; gap: .15rem;
+}
+.side a { text-decoration: none; color: var(--ink); padding: .4rem .6rem; border-radius: var(--radius-s); }
+.side a:hover { background: var(--grid); }
+.side a[aria-current="page"] { background: var(--lab-soft); color: var(--lab); font-weight: 650; }
+.side .brand { font-weight: 750; margin-bottom: .8rem; padding-left: .6rem; }
+.side-note { margin-top: auto; font-size: .8rem; color: var(--ink-soft); padding: 0 .6rem; }
+
+main { padding: 1.6rem 2rem 4rem; min-width: 0; }
+.page-head { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between; margin-bottom: 1.2rem; }
+.crumb { font-size: .85rem; margin-bottom: .3rem; }
+
+/* 사실 표(실험 조건): 정의 목록 */
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .1rem 1.5rem; margin: .5rem 0 0; }
+.facts div { padding: .4rem 0; border-bottom: 1px solid var(--rule); }
+.facts dt { font-size: .8rem; color: var(--ink-soft); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+table { border-collapse: collapse; width: 100%; background: var(--sheet); font-size: .9rem; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius-m); }
+th, td { padding: .5rem .7rem; border-bottom: 1px solid var(--grid); text-align: left; white-space: nowrap; }
+th { font-weight: 600; color: var(--ink-soft); font-size: .8rem; background: #fafbf9; position: sticky; top: 0; }
+th button { all: unset; cursor: pointer; }
+th button:focus-visible { outline: 2px solid var(--lab); }
+td.num, th.num { text-align: right; }
+tbody tr:hover { background: #f8faf7; }
+tr.failed td { color: var(--danger); }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.hash { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .8rem; color: var(--ink-soft); }
+.swatch { display: inline-block; width: .8rem; height: .8rem; border-radius: 2px; vertical-align: -1px; margin-right: .4rem; }
+
+/* 자산 곡선: 모눈 위에 계좌별 선을 겹친다 */
+.chart { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-m); padding: .8rem; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart .gridline { stroke: var(--grid); stroke-width: 1; }
+.chart .baseline { stroke: var(--ink-soft); stroke-dasharray: 4 4; stroke-width: 1; }
+.chart .axis { fill: var(--ink-soft); font-size: 11px; }
+.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.chart .series.dim { opacity: .15; }
+.legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-top: .6rem; font-size: .85rem; }
+.legend button { all: unset; cursor: pointer; }
+.legend button[aria-pressed="false"] { opacity: .4; }
+.legend button:focus-visible { outline: 2px solid var(--lab); }
+
+.notice { background: var(--lab-soft); border-left: 3px solid var(--lab); padding: .6rem .9rem; border-radius: var(--radius-s); max-width: 80ch; }
+.notice.warn { background: var(--warn-soft); border-left-color: var(--warn); }
+.empty { border: 1px dashed var(--rule); border-radius: var(--radius-m); padding: 2rem; background: var(--sheet); }
+.empty p { margin: .3rem 0; }
+
+.pager { display: flex; gap: .5rem; align-items: center; margin-top: .6rem; font-size: .85rem; }
+.bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: .3rem .8rem; align-items: center; max-width: 40rem; font-size: .88rem; }
+.bars .bar { height: .6rem; background: var(--lab); border-radius: 2px; min-width: 2px; }
+.bars button { all: unset; cursor: pointer; color: var(--lab); }
+.bars button:focus-visible { outline: 2px solid var(--lab); }
+
+button.btn, a.btn {
+  font: inherit; font-size: .9rem; padding: .45rem .9rem; border-radius: var(--radius-s);
+  border: 1px solid var(--lab); background: var(--lab); color: #fff; cursor: pointer; text-decoration: none; display: inline-block;
+}
+button.btn.secondary, a.btn.secondary { background: var(--sheet); color: var(--lab); }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+button.link { all: unset; color: var(--lab); cursor: pointer; text-decoration: underline; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+
+/* 폼 */
+.form-grid { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: .6rem 1rem; align-items: start; max-width: 60rem; }
+label { font-weight: 550; font-size: .9rem; padding-top: .45rem; }
+input, select, textarea {
+  font: inherit; font-size: .92rem; padding: .4rem .55rem; border: 1px solid #b9c3bb; border-radius: var(--radius-s);
+  background: var(--sheet); color: var(--ink); width: 100%; max-width: 32rem;
+}
+input[readonly] { background: var(--grid); }
+.hint { font-size: .8rem; color: var(--ink-soft); margin: .2rem 0 0; }
+.param-table td { padding: .3rem .5rem; }
+.param-table input { max-width: none; }
+.param-table tr.changed td { background: var(--warn-soft); }
+
+.setting { display: grid; grid-template-columns: minmax(14rem, 22rem) minmax(12rem, 1fr) minmax(8rem, 12rem); gap: .3rem 1rem;
+  padding: .7rem 0; border-bottom: 1px solid var(--rule); align-items: start; max-width: 70rem; }
+.setting .key { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .82rem; overflow-wrap: anywhere; }
+.setting .meta { font-size: .8rem; color: var(--ink-soft); }
+.setting .changed-from-default { color: var(--warn); }
+.secret-state { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+
+.toast { position: fixed; right: 1.25rem; bottom: 1.25rem; background: var(--ink); color: #fff; padding: .7rem 1rem;
+  border-radius: var(--radius-m); max-width: 28rem; }
+.toast.error { background: var(--danger); }
+
+@media (max-width: 760px) {
+  .shell { grid-template-columns: 1fr; }
+  .side { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--rule); padding: .6rem 1rem; }
+  .side .brand { width: 100%; margin-bottom: .2rem; }
+  .side-note { width: 100%; margin-top: .4rem; }
+  main { padding: 1rem 1rem 3rem; }
+  .form-grid, .setting { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

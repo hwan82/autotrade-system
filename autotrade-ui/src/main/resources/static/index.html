@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>자동매매 실험실</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <div class="mode-band" id="mode-band" role="status">
+    <strong>실험실 · 가상 계좌만</strong>
+    <span>이 화면에서는 실전 주문이 나가지 않습니다.</span>
+    <span class="brokers" id="brokers"></span>
+  </div>
+  <div class="shell">
+    <nav class="side" aria-label="주 메뉴">
+      <a class="brand" href="#/experiments">자동매매 실험실</a>
+      <a href="#/experiments" data-nav="experiments">실험</a>
+      <a href="#/profiles" data-nav="profiles">전략 프로필</a>
+      <a href="#/settings" data-nav="settings">설정</a>
+      <p class="side-note" id="real-accounts"></p>
+    </nav>
+    <main id="view" tabindex="-1">
+      <p class="muted">불러오는 중…</p>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="alert" hidden></div>
+</body>
+</html>
