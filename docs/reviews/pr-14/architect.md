@@ -32,3 +32,20 @@
 
 ## 판정
 수정 필요(B6: ScreeningCriteria C1~C10 판정에 손 계산 기대값 단위 테스트 추가, M1: 실험 결과의 코드 커밋을 main에서 찾을 수 있게 갱신). PR은 이미 머지됐으므로 두 항목은 후속 PR로 고치고, 그 PR에서 이 파일 아래에 재검토를 덧붙인다. L1은 녹화 데이터 실험 시작 전까지 risk-ops 후속 과제로 등록해야 하고, L2~L7은 권고다. 모듈 경계·결정론·금액 표현·비밀값·실전 경로 무접촉은 확인했다.
+
+## 재검토 2026-10-09
+- 대상: 후속 PR #17 / 브랜치 `claude/project-thread-z19xbf` HEAD d018b4c / `git diff origin/main...HEAD` 전체. PR #17 자체의 점검표 B 결과는 docs/reviews/pr-17/architect.md에 있다.
+- 직접 실행한 것: `./gradlew build --no-daemon` BUILD SUCCESSFUL(EXIT=0), `./gradlew :autotrade-sim:test --rerun` 75건 통과, `ScreeningCriteria.java` 변이 12개 검사(11개 잡힘, 1개는 동치 변이), `./gradlew :autotrade-sim:runStrategyStudy` 재실행(결정론 같음, results.md 코드 줄 한 줄만 다름, 되돌림), `git merge-base --is-ancestor 0ea575d origin/main`(조상임).
+
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| B6 선발 기준 C1~C10 손 계산 테스트 | 해소 | `autotrade-sim/src/test/java/com/autotrade/sim/study/ScreeningCriteriaTest.java` 16건. 내가 요구한 경계가 모두 있다: PF 정확히 1.3(:54-60), PF null(:63-71), MDD 정확히 20%(:76-82), C6 예열 빼기와 학습 손실 FAIL(:119-141), C7 NOT_AVAILABLE(:161-169), C8 월요일 시작 주 묶음(:174-193), C9(:198-208), C10 엄격한 초과(:213-228). 손 계산을 다시 해 맞았고, 경계 연산자와 묶음 기준을 바꾼 변이 11개를 모두 잡았다. B6 통과로 바꾼다 |
+| M1 실험 결과 코드 커밋 추적성 | 해소 | results.md:17과 report.md:22의 코드 줄이 main 커밋 0ea575d로 바뀌었고, 0ea575d는 origin/main의 조상이다. 0ea575d와 HEAD의 main 코드는 같다(`git diff --name-only 0ea575d HEAD`가 테스트·문서뿐). HEAD에서 다시 돌린 결과가 코드 줄 말고 바이트 일치. 재발 방지 절차가 experiments/README.md:19에 들어갔다. 권고했던 `autotrade-sim/build.gradle.kts:17-19` 주석과 strategy-lab 스킬 반영은 아직 없다(PR #17 검토 N2, 막지 않음) |
+| L1 approve-all RiskPolicy | 등록됨(미구현, 정상) | D-027-strategy-lab-protocol.md:49에 risk-ops·sim-engine 후속 과제로 등록. 지금은 StudyMain.java:77이 합성 시세만 만들어 녹화 데이터로 돌 경로가 없다. 녹화 데이터 입력을 더하는 PR에서 risk-ops 검토로 확인한다 |
+| L2 미체결 매수 중 손절 지연 | 미반영(권고) | D-027 위험 목록에 이 경우가 아직 없다 |
+| L3 `study.warmup-days` 검증 | 미반영(권고) | ScreeningCriteria.java:86-89 그대로. 새 테스트(:129-130)는 예열이 검증 일수 이상이면 C6이 판단 불가가 되는 현재 동작만 고정한다 |
+| L4 숫자 아닌 key-param | 미반영(권고) | StrategyStudy.java 변경 없음 |
+| L5·L6·L7 | 미반영(권고·후속 과제) | 코드 변경 없음. L6은 D-027:50에 이미 있음 |
+
+## 재검토 판정
+승인. 수정 필요 항목 B6·M1이 해소됐다. L1은 등록 요건을 채웠고, L2~L7과 N2는 막지 않는 권고로 남긴다.
