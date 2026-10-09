@@ -16,7 +16,9 @@ import com.autotrade.archfixture.ApproveAllRiskPolicy;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskPolicy;
+import com.autotrade.risk.archfixture.SplitPackageApproveAll;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -24,6 +26,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.EvaluationResult;
 import java.math.BigDecimal;
@@ -151,14 +154,27 @@ class ArchitectureTest {
                     .and(target(name("<init>"))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
 
+    /** 리스크 모듈(autotrade-risk) 산출물에서 읽은 클래스인지. 클래스 파일 위치로 판단해 다른 모듈의 같은 패키지 이름을 거른다. */
+    static final DescribedPredicate<JavaClass> FROM_RISK_MODULE = new DescribedPredicate<>("come from module autotrade-risk") {
+        @Override
+        public boolean test(JavaClass c) {
+            return c.getSource()
+                    .map(src -> src.getUri().toString().replace('\\', '/').contains("/autotrade-risk/"))
+                    .orElse(false);
+        }
+    };
+
     /**
      * 리스크 규칙은 리스크 모듈에만 있다(SIM-12, 안전 불변식 7). 가상·실전이 같은 규칙을 쓰려면 규칙이 한곳에 있어야 하고,
-     * 다른 모듈이 승인만 하는 정책을 만들어 쓰는 길을 막는다. 실험 실행기는 {@code RiskChain}만 받으므로
-     * 바깥 람다로는 블랙리스트를 건너뛸 수 없고 진입 제한만 더할 수 있다.
+     * 다른 모듈이 승인만 하는 정책을 만들어 쓰는 길을 막는다. 패키지 이름만이 아니라 클래스 파일이 나온 모듈을 본다
+     * (다른 모듈에 {@code com.autotrade.risk} 패키지를 만들어 우회하는 길, QA 검토 F-1).
+     * 람다·메서드 참조는 클래스가 아니라 잡지 못한다. 실험 실행기는 {@code RiskChain}만 받으므로 바깥 람다로는
+     * 블랙리스트를 건너뛸 수 없고 진입 제한만 더할 수 있다(D-032 위험과 한계).
      */
     static final ArchRule RISK_POLICIES_LIVE_IN_RISK_MODULE = classes()
             .that().implement(RiskPolicy.class)
             .should().resideInAPackage("com.autotrade.risk..")
+            .andShould(ArchCondition.from(FROM_RISK_MODULE))
             .because("가상과 실전은 같은 리스크 검증 코드를 공유한다(SIM-12)");
 
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
@@ -268,8 +284,13 @@ class ArchitectureTest {
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
 
-        // 리스크 모듈 밖의 승인만 하는 정책 1건
+        // 리스크 모듈 밖의 승인만 하는 정책: 다른 패키지 1건(패키지·모듈 둘 다 위반), 리스크 패키지를 빌린 다른 모듈 1건
         assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
-                ApproveAllRiskPolicy.class)).getFailureReport().getDetails()).hasSize(1);
+                ApproveAllRiskPolicy.class)).hasViolation()).isTrue();
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                SplitPackageApproveAll.class)).getFailureReport().getDetails()).hasSize(1);
+        // 리스크 모듈의 실제 구현은 통과한다(위치 판정이 모든 클래스를 거절하는 오류 방지)
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                RiskChain.class)).hasViolation()).isFalse();
     }
 }
