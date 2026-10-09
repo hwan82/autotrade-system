@@ -187,3 +187,58 @@
 
 ### 판정
 승인. 점검표 A에 실패와 확인 못 함이 없다. 직전 승인 뒤 변경(c9cffb0)은 실전 안전을 약화하지 않고, 새 동작에는 회귀를 잡는 테스트가 있다. Q1·Q2는 권장이고 7단계 전 목록으로 넘긴다. 이 PR은 증권사 플러그인, 장애 전환, 보호 시세 경로를 건드리는 실전 관련 PR이다. 지침 10·11장과 D-031에 따라 Claude가 머지하지 않는다. 사용자가 직접 확인하고 독립 QA 검토를 거쳐 머지한다.
+
+## 재검토 2026-10-09 (4차)
+- 대상: PR #10 / 커밋 67e9ebf (현재 head, `git diff origin/main...67e9ebf` 전체, 107개 파일 +8339 −18). 직전 risk-ops 승인(e58009c) 뒤 변경은 다음과 같다.
+  - CI 수정 2건: 962b0b8, b7e7e73(`.github/workflows/ci.yml`)
+  - architect 검토 원문 2건: fdf93ab, 8a0e027
+  - main 병합 67e9ebf: #16~#20(실전 운영 화면·명령 채널 ADR-006, RiskChain D-032·D-035, QA 관문 보고서)과의 충돌 해소. 이 병합으로 분기점이 9eab2e6(= 현재 origin/main)이 됐다
+- 점검표: A
+- 직접 실행한 것:
+  - 67e9ebf를 별도 작업 트리(detached)로 꺼내 `./gradlew build --rerun-tasks --no-daemon` 실행 → BUILD SUCCESSFUL, 109개 작업 전부 실행.
+    - 모듈별 테스트는 실패·오류·건너뜀 0이다: risk 55, architecture-test 15, app-engine 48, app-gateway 19, marketdata 64, broker-kis 7, broker-kiwoom 13, broker-toss 7, broker-api 1, config 29, control 20, domain 27, sim 75, strategy 25, app-lab 97, app-watchdog 1
+    - risk·engine·architecture 건수가 늘어난 것은 main에서 들어온 테스트(명령 채널, 보호 모드, RiskChain) 때문이다. 이 PR이 더한 건수는 그대로다
+  - 병합 해소 검증
+    - 양쪽이 함께 고친 파일은 8개다: ci.yml, app-gateway·architecture-test build.gradle.kts, ArchitectureTest.java, adr·decisions README, config-keys.md, settings.gradle.kts.
+    - 각 파일을 origin/main과 대조했다. main 쪽에서 지워진 줄은 ArchitectureTest의 예고 주석 1줄과 ci.yml의 `for p in gateway watchdog` 1줄뿐이다(아래 표).
+    - main의 새 규칙 `ONLY_COMMAND_CHANNEL_RAISES_GUARD`(ArchitectureTest.java:158)와 명령 채널 규칙, 그 위반 픽스처 단언은 그대로 남았다.
+    - 병합 때 고친 코드는 `GatewayMainTest` 하나다. main이 `RuntimeConfig.RealTrading`에 세 번째 인자 `operatorPasswordHash`를 더해서, 생성자 호출에 `Secret.empty()`를 넣었다. 단언은 바뀌지 않았다.
+  - CI 게이트웨이 점검을 로컬에서 재현했다: `installDist` 후 빈 설정 폴더에서 ci.yml과 같은 순서로 실행했다. "ProcessStartup start" 확인 → 2초 뒤 생존 확인 → SIGTERM → 1초 안에 종료(종료 코드 143)
+  - GitHub check-run(67e9ebf): Gradle build, DB schema, Secret scan and collector boundary 모두 success(`gh api .../check-runs`)
+  - main 대비 삭제 파일 0, 테스트 파일에서 지운 줄은 ArchitectureTest 주석 1줄뿐, Java·Gradle 파일에 `@Disabled`·`assume*` 추가 0. `autotrade-risk`·`autotrade-config`·`autotrade-control`·`autotrade-app-engine` 아래 이 PR의 변경 0
+
+### 직전 승인 뒤 변경 검토
+| 변경 | 실전 영향 판단 | 근거 |
+|---|---|---|
+| CI: 게이트웨이를 백그라운드로 띄우고 SIGTERM 뒤 40초 안 종료 확인(962b0b8, b7e7e73) | 실전 경로 아님. 오히려 종료 훅(녹화기 닫기)이 실제로 끝나는지를 CI가 실패로 잡게 됐다. `if kill -0 …; then …; exit 1` 형식이라 errexit에 의존하지 않는다. 병합 후 `trap`에 `GW_PID`가 들어가 어느 단계에서 실패해도 게이트웨이를 남기지 않는다 | ci.yml:39-65, 로컬 재현 결과 |
+| ci.yml의 일회 실행 루프에서 `gateway` 제외 | 약화 아님. 같은 바이너리를 위 단계가 기동·생존·종료까지 더 엄격히 확인한다 | ci.yml:35-37 |
+| ArchitectureTest 병합 | main 규칙 손실 없음. 이 PR의 `PLUGINS_ARE_INDEPENDENT`(:218), 테스트 `증권사_플러그인끼리_참조하지_않는다`, 위반 픽스처 단언(PluginA→PluginB)만 더해졌다. 지운 줄은 ONLY_GUARD_FACTORY 규칙의 예고 주석 1줄이고, 규칙 본문은 같다 | `git diff origin/main HEAD -- autotrade-architecture-test` |
+| main의 `RealTrading` 3인자화와 `reservedForRealTrading` | 동작 같음. 판정은 여전히 `isConfigured(accountId)`(계좌번호 존재, RuntimeConfig.java:179-181)이다. `GatewayMainTest#계좌번호까지_설정된_실전_계좌의_증권사는_게이트웨이가_쓰지_않는다` 통과 | GatewayMain.java:107-115 |
+| main의 실전 엔진 명령 채널·보호 모드와 이 PR의 접점 | 접점 없음. 엔진은 증권사 플러그인 모듈에 의존하지 않고, 플러그인 인스턴스를 만들지도 않는다(`BrokerPlugin` 참조는 RealOrderGateways.java뿐). 엔진의 금지 의존에 `:autotrade-app-gateway` 유지 | autotrade-app-engine/build.gradle.kts:13-24 |
+
+### 점검표 A (67e9ebf 기준)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 이 PR의 `autotrade-risk`·`autotrade-config`·`autotrade-control` 변경 0. 병합 후 재실행 통과: `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`, `#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `#자동으로_올라가는_경로는_없다`, `#상태를_받아_열린_채로_만드는_생성_경로가_없다`, `GuardedOrderGatewayTest#OFF_계좌로는_출구를_만들_수_없다`, `ArchitectureTest#Guard를_올리는_조작은_명령_채널에서만_한다` |
+| A2 | 통과 | `GATEWAY_HAS_NO_ORDER_PORT`(ArchitectureTest.java:135)·`ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`(:145) 본문 변경 없음. 새 플러그인 3개는 architecture-test 클래스패스에 있음(build.gradle.kts:11). `실전_주문_출구는_Guard_팩토리만_연다`, `시세_게이트웨이는_주문_포트를_모른다`, `규칙은_위반을_실제로_잡아낸다` 통과. 플러그인 `orderGateway`는 전부 `Optional.empty()` |
+| A3 | 통과 | 주문 전환 경로 없음. 시세 재배분은 구독만 옮긴다. 병합으로 들어온 엔진 코드도 플러그인을 고르지 않는다 |
+| A4 | 해당 없음 | 이 PR은 주문 타임아웃·조회 로직을 바꾸지 않는다 |
+| A5 | 해당 없음 | 이 PR은 멱등 키 코드를 바꾸지 않는다 |
+| A6 | 해당 없음 | 이 PR은 주문·청산·복구 경로를 바꾸지 않는다. RiskChain(main)과 접점 없음 |
+| A7 | 해당 없음 | 이 PR은 주문 큐·토큰 버킷·킬스위치를 바꾸지 않는다 |
+| A8 | 통과 | 엔진 금지 의존에 게이트웨이 유지, 엔진은 플러그인 모듈 비의존, `프로세스_진입점끼리_참조하지_않는다` 통과. 실전 계좌 키는 게이트웨이가 쓰지 않는다(GatewayMain.java:86-92). CI가 게이트웨이의 SIGTERM 종료를 확인한다 |
+| A9 | 통과 | 보호 수단 약화 없음. `SourcePlannerTest#모든_소스가_장애면_보유_종목_전체가_경보_대상이다`, `GatewayTest#키움이_끊기면_보유_종목을_한투로_옮기고_전환_공백을_녹화한다`, `#모든_소스가_끊겼다가_돌아오면_받지_못한_구간을_남긴다` 통과 |
+| A10 | 통과 | 새 코드 없음(CI·병합). 병합 테스트 픽스처는 `<ACCOUNT_NUMBER>`, `Secret.empty()` 자리표시자. CI gitleaks success |
+| A11 | 통과 | 보호 테스트 삭제·비활성화·약화 없음. main의 보호 테스트(명령 채널, 보호 모드, Guard)는 병합 후 전부 남아 통과한다. 병합으로 고친 테스트는 생성자 인자 하나만 바뀌었고 단언은 같다 |
+| A12 | 통과 | 장애표·장애 테스트 전제를 바꾸지 않는다. CI 종료 점검은 정상 종료(녹화 마감)를 확인하는 쪽이다 |
+| A13 | 통과 | 시장 차이 처리 변경 없음. `ExchangeCalendarTest`, `MarketRulesImplTest`, `금액에_실수형을_쓰지_않는다` 통과 |
+| A14 | 통과 | 병합된 결정 로그에 D-028·Q-015가 main 항목과 번호 충돌 없이 들어갔다(중복 번호 0). ADR 목록에 ADR-003이 추가됐다. CI 변경은 결정이 필요 없는 점검 방식 변경이다 |
+
+### 점검표 밖 발견 (4차, 모두 권장, 막지 않음)
+- S1. main에 실전 활성화 2차 확인과 PANIC SELL(ADR-006)이 들어왔다. 그래서 N3(게이트웨이의 키 공유 검사가 게이트웨이 기동 때만 돈다)가 7단계에서 실제로 문제가 될 시점이 가까워졌다. 엔진을 증권사에 붙이는 PR에 다음 둘 중 하나를 선행 조건으로 둔다.
+  - 엔진 기동 때 감시 프로세스가 게이트웨이의 증권사별 연결을 대조한다
+  - 실전 계좌 키가 설정되면 게이트웨이를 재기동하도록 강제한다
+- 이전 권장 R4~R8, N3·N4, P1·P2, Q1·Q2는 여전히 7단계 전 필수 목록이다.
+
+### 판정
+승인. 점검표 A에 실패와 확인 못 함이 없다. 직전 승인 뒤 변경(CI 2건, main 병합)은 실전 안전을 약화하지 않는다. 병합에서 main의 보호 규칙·테스트가 빠지지 않았음을 원본 대조와 전체 빌드로 확인했다. 이 PR은 증권사 플러그인, 장애 전환, 보호 시세 경로를 건드리는 실전 관련 PR이다. 지침 10·11장과 D-031에 따라 Claude가 머지하지 않는다. 사용자가 직접 확인하고 독립 QA 검토를 거쳐 머지한다.
