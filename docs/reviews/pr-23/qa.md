@@ -56,3 +56,25 @@
 - 이 PR은 기준을 약화하지 않고 강화하는 방향이며, RealTradingGuard·주문 경로·보호 시세 경로 코드는 건드리지 않는다.
 - 다만 합격 기준 문구가 결정 로그와 다르고, 요금 미확인 토스 시세를 실전 활성화 필수 조건으로 만들며, 실제로 시험하지 않고도 통과될 수 있고, 시험 시행이 실전 계좌 보호를 깎을 수 있다. 장애 테스트는 실전 활성화의 유일한 차단 조건(TST-06 "차단 조건은 TST-01만")이므로 이 문구가 그대로 기준이 된다.
 - 수정 후 재검토는 이 파일 아래 `## 재검토 <날짜>`로 덧붙인다.
+
+## 재검토 2026-10-09
+- 대상: PR #23 / 커밋 38325b4f71b0664b0de20fd128eb05627c2a78f2 / main 대비 diff (검토 시점 origin/main 3ffa851, merge-base 여전히 42acc86)
+- 직접 실행한 것:
+  - `git log a3784c4..origin/claude/project-thread-89zdzi` → 새 커밋은 이 QA 보고서 커밋(38325b4) 하나뿐. **지난 검토 뒤 개발 쪽 수정 커밋 없음.** PR의 `head.sha`도 38325b4.
+  - `git diff a3784c4 38325b4 --stat` → `docs/reviews/pr-23/qa.md`만 추가. 장애 설계·결정 로그·조사 문서는 지난 검토와 같은 내용.
+  - `git merge-tree --write-tree origin/main origin/claude/project-thread-89zdzi` → 여전히 `CONFLICT (content): Merge conflict in docs/decisions/README.md`. GitHub `mergeable_state: dirty`.
+  - main은 그사이 #22·#10이 머지되어 3ffa851로 나아감. main의 결정 로그 최대 번호는 D-035로, D-036 번호 충돌은 아직 없음.
+  - `./gradlew build --no-daemon --max-workers=1` (38325b4) → `BUILD SUCCESSFUL`. 코드는 a3784c4와 같음.
+
+| 지난 지적 | 상태 | 근거 |
+|---|---|---|
+| R-1 머지 충돌·CI 미실행 | 미해결 | 위 merge-tree 결과. 충돌이 남아 있어 이 PR의 GitHub CI는 여전히 돌지 않음 |
+| A14 D-036("이나")과 설계 문서("과") 불일치, 기획서 변경 이력 미기록 | 미해결 | `broker-and-fault-design.md:187`, `decisions/README.md:36` 문구 그대로 |
+| 8.2·8.3 요금 미확인 토스 시세를 실전 활성화 필수 조건으로 만듦 | 미해결 | `broker-and-fault-design.md:187`에 "토스 시세를 켠 설정에서만" 조건 없음 |
+| R-2 합격 기준이 시험 없이 통과될 수 있음 | 미해결 | 전제 조건·관측 지표 문구 없음 |
+| R-3 시험이 실전 계좌 보호를 깎을 수 있음 | 미해결 | 시행 조건(보유 없는 계좌, 키움 토큰 무효화 실측 선행) 문구 없음 |
+
+점검표 A·B1·B6·과금 검사 각 항목의 결과는 위 첫 검토와 같다(대상 문서 내용이 바뀌지 않음). B1은 PR head 단독 빌드로는 통과지만 main 병합 결과로는 여전히 빌드할 수 없다.
+
+### 판정
+수정 필요(R-1, A14, 8.2·8.3, R-2, R-3 모두 미해결). 지난 검토 뒤 수정 커밋이 없다.
