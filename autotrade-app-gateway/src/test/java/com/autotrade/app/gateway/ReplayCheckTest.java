@@ -24,6 +24,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +51,11 @@ class ReplayCheckTest {
         rec.offer("KIWOOM-WS", new TradeTick(SAMSUNG, 6, OPEN.plusSeconds(10), OPEN.plusSeconds(10), new BigDecimal("70900"), 6));
         rec.offer("KIWOOM-WS", new TradeTick(SAMSUNG, 7, OPEN.plusSeconds(6 * 3600 + 1800), OPEN.plusSeconds(6 * 3600 + 1800),
                 new BigDecimal("71200"), 2));
+        // 정규장 밖: 장전 시간외(08:30)와 장후 시간외(15:45)
+        rec.offer("KIWOOM-WS", new TradeTick(SAMSUNG, 8, OPEN.minusSeconds(1800), OPEN.plusSeconds(6 * 3600 + 1801),
+                new BigDecimal("70000"), 100));
+        rec.offer("KIWOOM-WS", new TradeTick(SAMSUNG, 9, OPEN.plusSeconds(6 * 3600 + 2700), OPEN.plusSeconds(6 * 3600 + 2700),
+                new BigDecimal("71200"), 50));
         rec.close();
         return new RecordingLayout(root).dayDir(Market.KRX, LocalDate.of(2026, 10, 8));
     }
@@ -58,15 +64,19 @@ class ReplayCheckTest {
     void 같은_녹화일을_두_번_읽어_리플레이하면_해시가_같고_종목별_체결_요약을_현지_시각으로_낸다() {
         ReplayCheck.Report r = ReplayCheck.check(recordDay());
 
-        assertThat(r.identical()).isTrue();
+        assertThat(r.verdict()).isEqualTo(ReplayCheck.Verdict.SAME);
+        assertThat(r.hashVerified()).isTrue();
         assertThat(r.firstDigest()).hasSize(64).isEqualTo(r.secondDigest());
-        assertThat(r.eventCount()).isEqualTo(7);
+        assertThat(r.eventCount()).isEqualTo(9);
         assertThat(r.gapCount()).isEqualTo(1);
         String md = r.toMarkdown();
         assertThat(md).contains("판정: **동일**")
-                .contains("| 005930 | 4 | 71000 | 71300 | 70900 | 71200 | 22 | 09:00 | 15:30 | 1 | 1 |")
-                .contains("| 000660 | 1 | 120500 | 120500 | 120500 | 120500 | 3 | 09:00:01 | 09:00:01 | 0 | 0 |")
-                .contains("정상 종료 예, 건수 7");
+                .contains("| 005930 | 4 | 71000 | 71300 | 70900 | 71200 | 22 | 09:00 | 15:30 | 2 / 150 | 1 | 1 |")
+                .contains("| 000660 | 1 | 120500 | 120500 | 120500 | 120500 | 3 | 09:00:01 | 09:00:01 | 0 / 0 | 0 | 0 |")
+                .contains("정상 종료 예, 건수 9")
+                .contains("(파일과 일치 확인됨)")
+                .contains("정규장 구간 09:00~15:30")
+                .contains("KRX 단독 정규장");
     }
 
     @Test
@@ -79,6 +89,34 @@ class ReplayCheckTest {
 
         assertThat(code).isZero();
         assertThat(Files.readString(out, StandardCharsets.UTF_8)).isEqualTo(stdout.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void 정상_종료_메타가_없으면_두_회차가_같아도_불완전으로_보고_3을_돌려준다() throws Exception {
+        Path day = recordDay();
+        Files.delete(day.resolve(RecordingLayout.META_FILE));
+        PrintStream sink = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+
+        ReplayCheck.Report r = ReplayCheck.check(day);
+        assertThat(r.firstDigest()).isEqualTo(r.secondDigest());
+        assertThat(r.hashVerified()).isFalse();
+        assertThat(r.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
+        assertThat(r.toMarkdown()).contains("파일 해시 대조 안 함").contains("**불완전**").doesNotContain("일치 확인됨");
+        assertThat(ReplayCheck.run(new String[] {day.toString()}, sink, sink)).isEqualTo(3);
+    }
+
+    @Test
+    void 잘림이나_0건이면_불완전이고_회차가_다르면_다름이다() {
+        Path dir = root.resolve("KRX/2026-10-08");
+        String h = "a".repeat(64);
+        ReplayCheck.Report truncated = new ReplayCheck.Report(dir, Optional.empty(), true, 5, 0, Optional.empty(), h, h, 5, 5, Map.of());
+        ReplayCheck.Report empty = new ReplayCheck.Report(dir, Optional.empty(), false, 0, 0, Optional.empty(), h, h, 0, 0, Map.of());
+        ReplayCheck.Report differs = new ReplayCheck.Report(dir, Optional.empty(), false, 5, 0, Optional.empty(), h, "b".repeat(64), 5, 5, Map.of());
+
+        assertThat(truncated.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
+        assertThat(empty.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
+        assertThat(differs.verdict()).isEqualTo(ReplayCheck.Verdict.DIFFERENT);
+        assertThat(ReplayCheck.Verdict.DIFFERENT.exitCode).isEqualTo(1);
     }
 
     @Test
