@@ -59,3 +59,40 @@
 - /home/claude/autotrade-system/autotrade-strategy/src/main/java/com/autotrade/strategy/Strategy.java
 - /home/claude/autotrade-system/autotrade-sim/src/main/java/com/autotrade/sim/cost/CostModel.java
 - /home/claude/autotrade-system/docs/adr/ADR-004-simulation-engine.md
+
+## 재검토 2026-10-09
+
+# architect 검토: PR #12 3단계 실험실 MVP (재검토)
+- 대상: PR #12 / squash 머지 커밋 6459d6f / `git diff ae4343d 6459d6f` 전체(59개 파일, +4025 −5). 앞선 검토 대상 7da04b2, 지적 반영 커밋 5558dcf. 작업 트리는 origin/main(0ea575d, 이후 PR #14·#8·#15 포함)이며 파일은 작업 트리 최신본을 직접 읽었다.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` → BUILD SUCCESSFUL (EXIT=0, 1m 30s)
+  - build에서 sim·strategy 테스트가 UP-TO-DATE(캐시)였으므로 `./gradlew :autotrade-sim:cleanTest :autotrade-sim:test :autotrade-strategy:cleanTest :autotrade-strategy:test`로 다시 실행 → BUILD SUCCESSFUL. 결과 XML 집계: autotrade-sim 59개(건너뜀 0, 실패 0), autotrade-strategy 25개(건너뜀 0, 실패 0). autotrade-architecture-test 12개(실패 0)는 build에서 실제 실행됨
+  - diff에 대한 grep: `now(`, `new Random`, `Math.random`, `double`/`float`, `parallelStream`, `currentTimeMillis`, `nanoTime`, `@Disabled`, 비밀값 키워드(appkey, secret, password, token, 계좌번호)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 직접 `./gradlew build` 실행, BUILD SUCCESSFUL. sim·strategy 테스트는 cleanTest 후 재실행해 59+25개 전부 통과 |
+| B2 | 통과 | autotrade-strategy/build.gradle.kts는 `api(project(":autotrade-domain"))`만. autotrade-sim/build.gradle.kts 변경은 `tasks.test`의 `golden.update` 시스템 속성 전달뿐(의존 추가 없음). diff는 autotrade-architecture-test를 건드리지 않았고 ArchUnit 12개 통과. sim 코드에 Spring·SDK·DB 의존 없음(diff grep) |
+| B3 | 통과 | 새 계약 `Strategy`, `StrategyContext`, `StrategyFactory`, `TradeSignal`, `ExperimentResult.executionModelId`, `RunResult.metrics`가 docs/adr/ADR-004-simulation-engine.md에 정의되고 docs/adr/README.md:9에 등재. 설정 키는 추가하지 않았고 docs/config/config-keys.md 32-33행에 보류 사유와 담당을 적음. 결정은 D-025(docs/decisions/README.md). DB 스키마·REST 변경 없음. 단 ADR-004 상태가 머지 뒤에도 "제안"으로 남아 있음(점검표 밖 발견 3) |
+| B4 | 통과 | diff에 `now()`·시드 없는 난수·double 계산·parallelStream 없음. 시각은 `ReplayClock`(SimulationExperimentRunner.java:198, :211), 매수 체결 비용 날짜는 `rules.tradingDate(e.exchangeTime())`(VirtualExchange.java:423). 결과 순회는 LinkedHashMap `open`(VirtualExchange.java:76), TreeMap `dailyOrders`(VirtualAccount.java:45). HashMap `takenAsk/takenBid`(VirtualExchange.java:302-303)는 순회하지 않고 조회만 함. 골든 테스트 `SimulationExperimentRunnerTest#골든_스냅샷과_정확히_일치한다()` 재실행 통과 |
+| B5 | 통과 | 금액은 `Money`(BigDecimal+통화), 가격 BigDecimal, 수량 long. 요율 문자열→BigDecimal(diff 1030행 주석, cost 패키지), 지표 로그·지수도 `DecimalMath`로 BigDecimal 계산 |
+| B6 | 통과 | 새 동작 테스트: VirtualExchangeTest, VirtualAccountTest, CostModelTest, MetricsCalculatorTest, RunSeedsTest, SimulationExperimentRunnerTest, TradeSignalTest. 앞선 차단 지적 1의 회귀 테스트 3개 존재·통과: `대기_중이던_지정가가_나중_호가와_교차하면_지정가로_체결된다()`, `대기_중인_지정가와_같은_가격의_반대편_호가는_즉시_체결이_아니다()`, `표시_범위_밖_지정가는_그_가격이_표시될_때까지_앞선_잔량을_정하지_않는다()`. diff의 삭제 줄 5개는 모두 시그니처·주석 교체이고 테스트 삭제 없음. sim·strategy에 `@Disabled`·`assumeTrue` 없음 |
+| B7 | 해당 없음 | 실전 주문 경로, RealTradingGuard, 블랙리스트 구현, 리스크 한도, 증권사 연동 파일을 바꾸지 않음. `VirtualExchange`는 domain `OrderGateway`의 가상 구현이고 플러그인을 참조하지 않음. 리스크 정책은 호출만 함(SimulationExperimentRunner.java:243, 테스트 `리스크_정책은_모든_모의_주문에_적용된다()`) |
+| B8 | 통과 | diff 전체에서 비밀값 키워드 grep 결과 없음. 테스트 픽스처(krx-golden.events)는 종목코드·가격·수량뿐. 예외 메시지에 계좌 ID 외 비밀값 없음 |
+
+### 앞선 지적의 처리 상태
+- 1 [차단] 대기 지정가의 교차 체결가: **해결**. VirtualExchange.java:321-323(대기 중 같은 가격은 교차로 보지 않음), :330(대기 주문은 지정가로 체결), :331(충격 0), :338(첫 유효 스냅샷 뒤 `resting=true`, 즉시 교차는 그 전에만). ADR-004 2.2-3에 반영. 골든 스냅샷은 바뀌지 않았고 재실행 통과(골든 데이터에 대기 후 교차 사례가 없다는 뜻이며, 회귀는 위 단위 테스트 3개가 맡음).
+- 2 [권장] 체결 모델 ID: 일부 반영. `ExperimentResult.executionModelId`로 결과에는 남지만 `ExperimentSpec`에는 아직 없음. ADR-004 4장 후속 과제 표에 담당(sim-engine, architect)과 시점(DB 저장 작업과 함께)이 기록됨.
+- 3 [권장] DataGap: 3(c)는 Strategy.java Javadoc에 반영. 3(a)(b)는 ADR-004 4장 후속 과제(PR #10 머지 후, sim-engine)로 기록.
+- 4·5 [권장] 장 마감 상태 초기화, 시간 기준 통일: 미반영. ADR-004 4장 후속 과제로 기록(`RULES_VERSION` 상향과 함께). VirtualExchange.java:149는 여전히 `clock.instant()` 기준.
+- 6·7·8·9 [참고]: 8은 주석 반영(VirtualExchange.java:402). 6·7·9는 미반영, 차단 아님.
+- 10·11 [참고]: CostModel Javadoc에 `segmentOf` 순수·스레드 안전 조건 추가(5558dcf). Q-012 해시 포함은 후속.
+
+## 점검표 밖 발견
+1. [참고] VirtualExchange.java:298-299, :338. `resting`은 거래 가능한 호가 스냅샷을 한 번 지나야 켜진다. 지정가가 유효해진 뒤 첫 스냅샷이 VI·정지 중이라 `matchBook`이 바로 return하거나, 체결 틱만 먼저 지나간 경우에는 이미 기다린 주문인데도 다음 스냅샷에서 반대편 호가 가격(지정가보다 유리)으로 즉시 교차 체결된다. 빈도는 낮고 영향은 앞선 차단 지적과 같은 방향(낙관)이다. 수정안: `resting`을 "유효해진 뒤 처음 본 이벤트"에서 켜거나, 상태 비거래로 건너뛴 스냅샷에서도 켠다. 4·5번 후속(`RULES_VERSION` 상향)과 함께 처리하길 권한다. 차단 아님.
+2. [참고] 위 4·5번이 실제 녹화 데이터 첫 실험 전에 처리되지 않으면 VI 상태가 다음 거래일까지 이어질 수 있다. ADR-004 4장에 시점이 "RULES_VERSION 상향과 함께"로만 되어 있어, 4단계 비교 실험 결과를 해석할 때 이 한계를 명시해야 한다.
+3. [참고] docs/adr/README.md:9와 ADR-004 머리말 상태가 머지 뒤에도 "제안"이다. 채택으로 바꾸거나 남은 후속 과제 때문에 제안으로 두는 이유를 적는다.
+
+## 판정
+승인
