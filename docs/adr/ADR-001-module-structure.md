@@ -44,7 +44,7 @@
 | autotrade-domain | Money, Market·Symbol·MarketEvent, MarketRules, AccountRef·AccountSnapshot, OrderRequest·OrderIntent·OrderGateway·OrderQueryResult·IdempotencyKey·OrderState, ReplayClock | O | 없음 |
 | autotrade-marketdata | MarketDataSource, MarketEventListener, Subscription | O | domain |
 | autotrade-strategy | StrategyProfile(내용 해시), TradingStyle | O | domain |
-| autotrade-risk | RiskPolicy, RiskDecision | O | domain |
+| autotrade-risk | RiskPolicy, RiskDecision, RiskChain(가상·실전 공통 검증 체인), BlacklistSnapshot·BlacklistEntry·BlacklistType, RealTradingGuard 골격(`guard`, ADR-002) | O | domain |
 | autotrade-sim | ExperimentRunner, ExperimentSpec, ClockMode, ExperimentResult, RunResult | O | domain, strategy, marketdata, risk |
 | autotrade-broker-api | BrokerPlugin, BrokerCapability, BrokerStatus | O | domain, marketdata |
 | autotrade-config | RuntimeConfig, ConfigLoader, ConfigPaths, SecretPaths, RuntimeConfigStore, RuntimeConfigHolder, Secret, ProcessStartup | O (Jackson만) | domain |
@@ -80,7 +80,7 @@
 | Gradle 모듈 의존 | 허용되지 않은 모듈 참조(컴파일 오류) | 각 `build.gradle.kts` |
 | `verifyPureDependencies` | 순수 모듈 런타임 클래스패스의 Spring·JDBC 드라이버·HikariCP·Flyway·Hibernate·JPA·H2 | `build-logic/.../autotrade.pure-java-conventions.gradle.kts`, `check`에 연결 |
 | `verifyProcessIsolation` | 프로세스 런타임 클래스패스의 금지 모듈과 Spring (2.1절 표) | `build-logic/.../autotrade.process-conventions.gradle.kts`, `check`에 연결 |
-| ArchUnit (`ArchitectureTest`의 규칙 전체) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 실전 주문 출구·Guard 올림·2차 확인 생성·명령 채널 서버/클라이언트 위치(ADR-002·006), 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
+| ArchUnit (`ArchitectureTest`의 규칙 전체) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 실전 주문 출구·Guard 올림·2차 확인 생성·명령 채널 서버/클라이언트 위치(ADR-002·006), `RiskPolicy` 구현 클래스는 리스크 모듈 산출물에만(패키지와 클래스 파일 위치, D-032), 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
 | `-Xlint:all -Werror` | 경고 방치 | `autotrade.java-conventions` |
 | CI `guards` 잡 | 저장소 전 이력의 비밀값(gitleaks), Python 수집기의 실시간·SDK·주문·키 코드 | `.github/workflows/ci.yml`, `scripts/ci/check-python-collectors.sh` |
 
@@ -90,7 +90,7 @@
 - `verifyProcessIsolation`: app-engine에 sim을 넣으면 빌드 실패(수동 확인 후 원복).
 - 수집기 검사: `import websocket`과 `APP_KEY = ...`가 든 픽스처 파일에서 실패(수동 확인).
 
-ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래스패스에 있는 모듈만 검사해서 새 모듈이 규칙 밖에 놓일 수 있었다. 테스트 전용 모듈이 모든 모듈에 의존하게 하고, 새 모듈을 `settings.gradle.kts`와 이 모듈에 함께 추가하는 것을 리뷰 체크 항목으로 둔다.
+ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래스패스에 있는 모듈만 검사해서 새 모듈이 규칙 밖에 놓일 수 있었다. 테스트 전용 모듈이 모든 모듈에 의존하게 한다. 이 의존은 `settings.gradle.kts`의 모든 Java 모듈에서 자동으로 만들고, 빠지면 `ModuleOwnershipTest`가 실패한다(처음에는 손 목록 + 리뷰 체크 항목이었으나 구멍이 실측돼 바꿨다. ADR-002 9장 보강).
 
 ### 2.3 핵심 계약 요약
 
@@ -103,7 +103,8 @@ ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래�
 | `OrderRequest` | 매도는 EXIT·STOP_LOSS, 매수는 ENTRY만. `OrderIntent.isProtective()`로 손절 우선 처리 | 조합 위반 `IllegalArgumentException` | 불변 |
 | `BrokerPlugin` | ACTIVE이고 능력이 선언된 기능만 사용, `orderGateway(AccountRef)`는 다른 증권사 계좌면 빈 값 | 없음(빈 Optional) | 상태 조회는 비블로킹 |
 | `StrategyProfile` | 불변, `profileHash()`는 길이 접두 직렬화 SHA-256, 파라미터 순서 무관(골든 값 테스트) | 형식 위반 `IllegalArgumentException` | 불변 |
-| `RiskPolicy` | 순수 함수, I/O·현재 시각·난수 금지, 블랙리스트 규칙이 묶음의 첫 번째 | 거절은 값(`RiskDecision.Rejected`) | 필수 |
+| `RiskPolicy` | 순수 함수, I/O·현재 시각·난수 금지. 운영 구현 클래스는 리스크 모듈(autotrade-risk)의 `com.autotrade.risk..`에만(ArchUnit, 람다 제외) | 거절은 값(`RiskDecision.Rejected`) | 필수 |
+| `RiskChain` | 가상·실전 공통 체인(D-032). `builder(BlacklistSnapshot)`만 있어 블랙리스트 없는 체인은 없음. 순서 고정: 블랙리스트·수동 보유(모든 의도, 거절 ID `BLACKLIST`·`MANUAL_HOLDING`, 청산·손절도 차단, D-035) → 청산·손절 승인 → 진입 규칙(첫 거절에서 멈춤). 진입 규칙 예외·null, 주문·스냅샷 계좌 불일치는 `RISK_RULE_ERROR` 거절 | 없음(거절은 값) | 불변, 필수 |
 | `ExperimentRunner` | 결정론(스레드 수와 무관), 미래 정보 금지, Run 간 상태 공유 금지, Run 시드는 실험 시드와 프로필 해시로 파생, 실전과 같은 리스크·상태머신·블랙리스트 코드 | 한 Run 실패는 그 Run만 FAILED(사유 기록) | 동기 실행 |
 | `MarketRules` | 불변, 시간은 거래소 현지 시간대, 통화는 시장 통화, 호가 단위 반올림 방향을 호출자가 지정, 수치는 공식 출처 주석 | 0 이하 가격 거부 | 필수 |
 | `Clock` | 비즈니스 로직은 주입된 `java.time.Clock`만 사용. 리플레이는 `ReplayClock`(앞으로만 이동, `advanceToAtLeast`) | 과거로 이동 시 예외 | 필수 |
@@ -220,7 +221,7 @@ DB 엔진 대안(Q-009): (A) PostgreSQL 16 **채택**(무료, role-guides.md 3�
 
 | 위험 | 영향 | 대응 |
 |---|---|---|
-| 새 모듈을 architecture-test 의존에 넣지 않으면 ArchUnit 규칙 밖 | 경계 위반이 늦게 발견 | 리뷰 체크 항목. Gradle 의존·`verifyPureDependencies`·`verifyProcessIsolation`은 모듈 단위로 항상 적용 |
+| 새 모듈을 architecture-test 의존에 넣지 않으면 ArchUnit 규칙 밖 | 경계 위반이 늦게 발견 | 해소: 의존을 settings의 모든 Java 모듈에서 자동으로 만들고, 빠지면 `ModuleOwnershipTest`가 실패한다(ADR-002 9장 보강). Gradle 의존·`verifyPureDependencies`·`verifyProcessIsolation`은 모듈 단위로 항상 적용 |
 | `System.nanoTime()`은 허용 | 지연 측정용으로 필요. 비즈니스 판단에 쓰면 비결정론 | 리뷰에서 확인. 쓰임이 늘면 규칙 추가 |
 | Windows에서는 설정 폴더·파일 권한을 POSIX로 제한하지 못함 | 같은 PC의 다른 사용자 계정이 secrets.json을 읽을 수 있음 | 기본 위치가 사용자 홈 아래라 Windows 기본 ACL로 보호된다고 `[추론]`. 7단계 전 risk-ops가 OS 자격 증명 저장소를 검토(2.6절 대안 D) |
 | gitleaks 기본 규칙은 국내 증권사 키 형식을 모름 | 형식이 특이한 키는 놓칠 수 있음 | 실제 키는 secrets.json에만 있고 저장소 밖. 2단계 플러그인 작업에서 증권사별 규칙을 `.gitleaks.toml`에 추가(data-engineer 제안) |

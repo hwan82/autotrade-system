@@ -22,7 +22,7 @@ pm-lead, architect, data-engineer, sim-engine, strategy-researcher, risk-ops, ui
 - 전체 빌드(컴파일, 테스트, 순수 모듈 금지 의존 검사, ArchUnit): `./gradlew build`
 - 테스트만: `./gradlew test`, 모듈 하나: `./gradlew :autotrade-domain:test`
 - 프로세스 4개(D-013): 실험실 `./gradlew :autotrade-app-lab:bootRun`, 실전 엔진·시세 게이트웨이·감시는 `./gradlew :autotrade-app-{engine,gateway,watchdog}:run`
-- ArchUnit 규칙: `autotrade-architecture-test` (새 모듈은 이 모듈 의존에도 추가)
+- ArchUnit 규칙: `autotrade-architecture-test` (settings에 include한 Java 모듈은 자동으로 이 모듈의 테스트 클래스패스에 들어온다. 새 모듈은 패키지 소유 모듈 표 `ModuleOwnershipTest.OWNERS`를 갱신해야 빌드가 통과한다. 운영 클래스는 그 모듈이 소유한 `com.autotrade` 패키지 안에만 두고, 같은 이름의 프로젝트를 두 개 두지 않는다. ADR-002 9장)
 - 설정 폴더: `AUTOTRADE_CONFIG_DIR`(기본 `~/.autotrade/`), 일반 키는 `runtime-config.json`, 비밀값은 `secrets.json`
 - DB 스키마: `autotrade-app-lab/src/main/resources/db/migration/V*.sql` (CI가 PostgreSQL 16에 적용하고 `scripts/ci/schema-smoke.sql` 실행)
 - CI 경계 검사: gitleaks 비밀값 스캔, `scripts/ci/check-python-collectors.sh`

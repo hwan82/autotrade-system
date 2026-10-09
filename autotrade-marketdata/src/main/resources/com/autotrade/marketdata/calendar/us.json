@@ -1,0 +1,50 @@
+{
+  "market": "US",
+  "zone": "America/New_York",
+  "coverageFrom": "2026-01-01",
+  "coverageTo": "2028-12-31",
+  "regularOpen": "09:30",
+  "regularClose": "16:00",
+  "checkedOn": "2026-10-08",
+  "sources": {
+    "NYSE": "NYSE Holidays & Trading Hours: https://www.nyse.com/markets/hours-calendars (조기 폐장 13:00 ET)"
+  },
+  "holidays": [
+    { "date": "2026-01-01", "name": "New Year's Day", "source": "NYSE", "verified": true },
+    { "date": "2026-01-19", "name": "Martin Luther King, Jr. Day", "source": "NYSE", "verified": true },
+    { "date": "2026-02-16", "name": "Washington's Birthday", "source": "NYSE", "verified": true },
+    { "date": "2026-04-03", "name": "Good Friday", "source": "NYSE", "verified": true },
+    { "date": "2026-05-25", "name": "Memorial Day", "source": "NYSE", "verified": true },
+    { "date": "2026-06-19", "name": "Juneteenth", "source": "NYSE", "verified": true },
+    { "date": "2026-07-03", "name": "Independence Day (observed)", "source": "NYSE", "verified": true },
+    { "date": "2026-09-07", "name": "Labor Day", "source": "NYSE", "verified": true },
+    { "date": "2026-11-26", "name": "Thanksgiving Day", "source": "NYSE", "verified": true },
+    { "date": "2026-12-25", "name": "Christmas Day", "source": "NYSE", "verified": true },
+    { "date": "2027-01-01", "name": "New Year's Day", "source": "NYSE", "verified": true },
+    { "date": "2027-01-18", "name": "Martin Luther King, Jr. Day", "source": "NYSE", "verified": true },
+    { "date": "2027-02-15", "name": "Washington's Birthday", "source": "NYSE", "verified": true },
+    { "date": "2027-03-26", "name": "Good Friday", "source": "NYSE", "verified": true },
+    { "date": "2027-05-31", "name": "Memorial Day", "source": "NYSE", "verified": true },
+    { "date": "2027-06-18", "name": "Juneteenth (observed)", "source": "NYSE", "verified": true },
+    { "date": "2027-07-05", "name": "Independence Day (observed)", "source": "NYSE", "verified": true },
+    { "date": "2027-09-06", "name": "Labor Day", "source": "NYSE", "verified": true },
+    { "date": "2027-11-25", "name": "Thanksgiving Day", "source": "NYSE", "verified": true },
+    { "date": "2027-12-24", "name": "Christmas Day (observed)", "source": "NYSE", "verified": true },
+    { "date": "2028-01-17", "name": "Martin Luther King, Jr. Day", "source": "NYSE", "verified": true },
+    { "date": "2028-02-21", "name": "Washington's Birthday", "source": "NYSE", "verified": true },
+    { "date": "2028-04-14", "name": "Good Friday", "source": "NYSE", "verified": true },
+    { "date": "2028-05-29", "name": "Memorial Day", "source": "NYSE", "verified": true },
+    { "date": "2028-06-19", "name": "Juneteenth", "source": "NYSE", "verified": true },
+    { "date": "2028-07-04", "name": "Independence Day", "source": "NYSE", "verified": true },
+    { "date": "2028-09-04", "name": "Labor Day", "source": "NYSE", "verified": true },
+    { "date": "2028-11-23", "name": "Thanksgiving Day", "source": "NYSE", "verified": true },
+    { "date": "2028-12-25", "name": "Christmas Day", "source": "NYSE", "verified": true }
+  ],
+  "specialSessions": [
+    { "date": "2026-11-27", "open": "09:30", "close": "13:00", "name": "Day after Thanksgiving (early close)", "source": "NYSE", "verified": true },
+    { "date": "2026-12-24", "open": "09:30", "close": "13:00", "name": "Christmas Eve (early close)", "source": "NYSE", "verified": true },
+    { "date": "2027-11-26", "open": "09:30", "close": "13:00", "name": "Day after Thanksgiving (early close)", "source": "NYSE", "verified": true },
+    { "date": "2028-07-03", "open": "09:30", "close": "13:00", "name": "Independence Day eve (early close)", "source": "NYSE", "verified": true },
+    { "date": "2028-11-24", "open": "09:30", "close": "13:00", "name": "Day after Thanksgiving (early close)", "source": "NYSE", "verified": true }
+  ]
+}

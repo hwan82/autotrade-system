@@ -32,13 +32,37 @@ jobs:
         run: |
           ./gradlew --no-daemon :autotrade-app-engine:installDist :autotrade-app-gateway:installDist \
             :autotrade-app-watchdog:installDist :autotrade-app-lab:bootJar
-          for p in gateway watchdog; do
+          for p in watchdog; do
             "autotrade-app-$p/build/install/autotrade-$p/bin/autotrade-$p"
           done
           # 실전 엔진은 명령 채널(로컬 소켓)을 열고 계속 돈다(ADR-006). 소켓이 생기는지 확인하고, 실험실이 붙은 뒤에 끈다
-          ENGINE_PID=""; LAB_PID=""
+          ENGINE_PID=""; LAB_PID=""; GW_PID=""
           # 어느 단계에서 실패해도 띄운 프로세스를 남기지 않는다
-          trap 'kill $LAB_PID $ENGINE_PID 2>/dev/null || true' EXIT
+          trap 'kill $LAB_PID $ENGINE_PID $GW_PID 2>/dev/null || true' EXIT
+          # 시세 게이트웨이는 수신·녹화를 위해 계속 돈다(ADR-003). 기동 로그를 확인하고, 살아 있는지 본 뒤
+          # SIGTERM으로 40초 안에 종료(종료 훅이 녹화기를 닫음)되는지 확인한다
+          autotrade-app-gateway/build/install/autotrade-gateway/bin/autotrade-gateway > gateway.log 2>&1 &
+          GW_PID=$!
+          for i in $(seq 1 30); do
+            if grep -q "ProcessStartup start" gateway.log; then break; fi
+            if ! kill -0 "$GW_PID" 2>/dev/null; then cat gateway.log; exit 1; fi
+            sleep 1
+          done
+          grep -q "ProcessStartup start" gateway.log || { cat gateway.log; exit 1; }
+          sleep 2
+          kill -0 "$GW_PID" || { cat gateway.log; exit 1; }
+          kill "$GW_PID"
+          for i in $(seq 1 40); do
+            if ! kill -0 "$GW_PID" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat gateway.log
+          if kill -0 "$GW_PID" 2>/dev/null; then
+            echo "게이트웨이가 SIGTERM 뒤 40초 안에 끝나지 않았습니다"
+            kill -9 "$GW_PID"
+            exit 1
+          fi
+          GW_PID=""
           autotrade-app-engine/build/install/autotrade-engine/bin/autotrade-engine > engine.log 2>&1 &
           ENGINE_PID=$!
           for i in $(seq 1 30); do

@@ -5,6 +5,7 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
@@ -13,12 +14,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.autotrade.app.engine.command.ForgedConfirmation;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
+import com.autotrade.archfixture.ApproveAllRiskPolicy;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.archfixture.MisplacedControlChannel;
 import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.broker.fixturea.PluginA;
+import com.autotrade.broker.fixtureb.PluginB;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlServer;
+import com.autotrade.risk.RiskChain;
+import com.autotrade.risk.RiskPolicy;
+import com.autotrade.risk.archfixture.SplitPackageApproveAll;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -26,6 +33,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.EvaluationResult;
 import java.math.BigDecimal;
@@ -62,9 +70,13 @@ class ArchitectureTest {
         "com.autotrade.app.engine..", "com.autotrade.app.gateway..", "com.autotrade.app.watchdog..",
     };
 
-    private static final JavaClasses PRODUCTION = new ClassFileImporter()
-            .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-            .importPackages("com.autotrade");
+    // 검사 범위: 우리 프로젝트(settings의 모든 Java 모듈)의 운영 클래스 전체(패키지 필터 없음) + 클래스패스의 com.autotrade
+    // 위치 전체. com.autotrade 밖 패키지에 둔 우리 클래스도 실전 경로 규칙이 본다(독립 QA PR #21 Q-1). 예전 범위
+    // (importPackages("com.autotrade"))를 포함하는지는 ModuleOwnershipTest#ArchitectureTest_범위는_... 가 확인한다.
+    // 운영·테스트 구분은 우리 프로젝트면 선언 출력 종류로, 외부 jar면 예전 경로 패턴으로 한다(risk-ops 재검토 2 R-7).
+    static final JavaClasses PRODUCTION = new ClassFileImporter()
+            .withImportOption(OurModules.architectureImportOption())
+            .importLocations(OurModules.architectureScope());
 
     /** 순수 모듈은 Spring·JDBC·JPA를 모른다. */
     static final ArchRule PURE_MODULES_HAVE_NO_FRAMEWORK = noClasses()
@@ -131,7 +143,8 @@ class ArchitectureTest {
     /**
      * 실전 주문 출구는 RealTradingGuard 허가를 받는 한 곳에서만 연다(RSK-01, ADR-002, 안전 불변식 2).
      * BrokerPlugin을 구현·상속한 어떤 타입의 {@code orderGateway}든, 호출이든 메서드 참조든 막는다.
-     * 플러그인이 출구 구현을 직접 생성하는 우회는 플러그인 모듈이 생기는 2단계에서 규칙을 더한다(ADR-002 6장).
+     * 플러그인이 출구 구현을 직접 생성하는 우회 규칙은 플러그인에 주문 코드를 넣는 첫 PR보다 먼저 더한다(ADR-002 6장,
+     * ADR-003 6장). 2단계 플러그인에는 주문 코드가 없다.
      */
     static final ArchRule ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY = noClasses()
             .that().doNotHaveFullyQualifiedName(RealOrderGateways.class.getName())
@@ -153,6 +166,29 @@ class ArchitectureTest {
             .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
                     .and(target(name("<init>"))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
+
+    /** 리스크 모듈(autotrade-risk) 산출물에서 읽은 클래스인지. 클래스 파일 위치로 판단해 다른 모듈의 같은 패키지 이름을 거른다. */
+    static final DescribedPredicate<JavaClass> FROM_RISK_MODULE = new DescribedPredicate<>("come from module autotrade-risk") {
+        @Override
+        public boolean test(JavaClass c) {
+            return c.getSource()
+                    .map(src -> src.getUri().toString().replace('\\', '/').contains("/autotrade-risk/"))
+                    .orElse(false);
+        }
+    };
+
+    /**
+     * 리스크 규칙은 리스크 모듈에만 있다(SIM-12, 안전 불변식 7). 가상·실전이 같은 규칙을 쓰려면 규칙이 한곳에 있어야 하고,
+     * 다른 모듈이 승인만 하는 정책을 만들어 쓰는 길을 막는다. 패키지 이름만이 아니라 클래스 파일이 나온 모듈을 본다
+     * (다른 모듈에 {@code com.autotrade.risk} 패키지를 만들어 우회하는 길, QA 검토 F-1).
+     * 람다·메서드 참조는 클래스가 아니라 잡지 못한다. 실험 실행기는 {@code RiskChain}만 받으므로 바깥 람다로는
+     * 블랙리스트를 건너뛸 수 없고 진입 제한만 더할 수 있다(D-032 위험과 한계).
+     */
+    static final ArchRule RISK_POLICIES_LIVE_IN_RISK_MODULE = classes()
+            .that().implement(RiskPolicy.class)
+            .should().resideInAPackage("com.autotrade.risk..")
+            .andShould(ArchCondition.from(FROM_RISK_MODULE))
+            .because("가상과 실전은 같은 리스크 검증 코드를 공유한다(SIM-12)");
 
     /**
      * 명령 채널 안에서도 2차 확인({@link SecondConfirmation})은 비밀번호 검증기만 만든다(ADR-002 3장 되돌릴 조건, ADR-006 2.4).
@@ -180,6 +216,11 @@ class ArchitectureTest {
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
+            .should().notDependOnEachOther();
+
+    /** 증권사 플러그인끼리 참조하지 않는다(ADR-001, ADR-003 2.1). 공통 계약은 broker-api 패키지에만 둔다. */
+    static final ArchRule PLUGINS_ARE_INDEPENDENT = slices()
+            .matching("com.autotrade.broker.(*)..")
             .should().notDependOnEachOther();
 
     /** double 금액 금지(ARC-08): 도메인·리스크·증권사 계약에는 실수형 필드와 double 기반 BigDecimal 생성이 없다. */
@@ -252,8 +293,18 @@ class ArchitectureTest {
     }
 
     @Test
+    void 리스크_규칙은_리스크_모듈에만_있다() {
+        RISK_POLICIES_LIVE_IN_RISK_MODULE.check(PRODUCTION);
+    }
+
+    @Test
     void 프로세스_진입점끼리_참조하지_않는다() {
         PROCESSES_ARE_INDEPENDENT.check(PRODUCTION);
+    }
+
+    @Test
+    void 증권사_플러그인끼리_참조하지_않는다() {
+        PLUGINS_ARE_INDEPENDENT.check(PRODUCTION);
     }
 
     @Test
@@ -285,6 +336,22 @@ class ArchitectureTest {
         // 2차 확인 생성·beginActivation 호출 2건, 메서드·생성자 참조 4건
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
+
+        // 플러그인 A가 플러그인 B의 메서드를 부르는 1건. broker-api(BrokerCredentials) 참조는 위반이 아니다
+        JavaClasses pluginFixture = new ClassFileImporter().importClasses(PluginA.class, PluginB.class);
+        EvaluationResult plugins = PLUGINS_ARE_INDEPENDENT.evaluate(pluginFixture);
+        assertThat(plugins.hasViolation()).isTrue();
+        assertThat(String.join("\n", plugins.getFailureReport().getDetails()))
+                .contains("fixturea.PluginA", "fixtureb.PluginB")
+                .doesNotContain("BrokerCredentials");
+        // 리스크 모듈 밖의 승인만 하는 정책: 다른 패키지 클래스 1개는 패키지·모듈 2건 위반, 리스크 패키지를 빌린 다른 모듈 클래스는 모듈 1건 위반
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                ApproveAllRiskPolicy.class)).getFailureReport().getDetails()).hasSize(2);
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                SplitPackageApproveAll.class)).getFailureReport().getDetails()).hasSize(1);
+        // 리스크 모듈의 실제 구현은 통과한다(위치 판정이 모든 클래스를 거절하는 오류 방지)
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                RiskChain.class)).hasViolation()).isFalse();
         // 명령 채널 패키지 안이라도 검증기가 아니면 2차 확인을 만들 수 없다: 생성 1건, 생성자 참조 1건
         JavaClasses insideChannel = new ClassFileImporter().importClasses(ForgedConfirmation.class, OperatorAuthenticator.class);
         assertThat(ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.evaluate(insideChannel)

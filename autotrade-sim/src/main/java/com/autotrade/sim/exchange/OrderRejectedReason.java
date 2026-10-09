@@ -16,6 +16,6 @@ public enum OrderRejectedReason {
     NO_REFERENCE_PRICE,
     /** 체결 시점 현금이 모자라 잔량을 취소함. */
     CASH_SHORT_AT_FILL,
-    /** 장 마감(거래일 종료)으로 남은 잔량을 취소함. 국내·미국 정규장 주문은 당일 유효. */
+    /** 장 마감(거래일 종료)으로 남은 잔량이 만료됨(주문 상태 EXPIRED). 국내·미국 정규장 주문은 당일 유효. */
     DAY_END
 }
