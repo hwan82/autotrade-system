@@ -204,3 +204,34 @@ G. **[수정 필요] main과의 충돌을 해소한다.** 해소할 때 확인�
 
 ### 판정
 수정 필요(B1·B2 → 발견 G: main과 충돌, 머지 결과 미검증, 보호 테스트 충돌). b7e7e73 자체(발견 E 수정)는 맞다. 충돌을 해소한 뒤 같은 검토자(architect)와 risk-ops에게 재검토를 맡긴다. 해소 결과의 CI Gradle build 성공도 확인한다. 이 PR은 실전 관련 PR이므로 승인 뒤에도 사용자 직접 머지와 독립 QA를 거친다.
+
+## 재검토 2026-10-09 (5차)
+- 대상: PR #10 / 병합 커밋 67e9ebf(현재 head, 부모 8a0e027·main 9eab2e6) / `git diff origin/main...67e9ebf` 전체(107파일, +8339 −18). 직전 재검토(b7e7e73) 이후 바뀐 것은 main 병합과 충돌 해소뿐이다
+- 점검표: B
+- 직접 실행한 것(공유 체크아웃과 분리된 작업 트리에서):
+  - `git merge-base --is-ancestor origin/main HEAD`: 참. main(9eab2e6)이 모두 들어왔다
+  - 충돌 해소 대조: `git diff 9eab2e6 67e9ebf`로 충돌 4개 파일을 main 기준으로 봤다. `autotrade-architecture-test`에서 지운 줄은 2줄이다. 하나는 이 PR이 처음부터 바꾼 ArchitectureTest 주석 줄이고, 하나는 `build.gradle.kts`의 모듈 목록 줄이다. 모듈 목록 줄은 두 줄로 나눠 다시 썼고 main의 `:autotrade-control`이 남아 있다. main의 규칙·픽스처는 줄 하나도 빠지지 않았다. 나머지는 모두 이 PR 쪽 추가다
+  - `./gradlew clean build` (67e9ebf): 종료 코드 0. 테스트 503건(main 쪽 테스트 포함), 건너뜀 0, 실패 0, 오류 0. `ArchitectureTest` 전 항목 통과
+  - CI의 "Start each process once" 단계 스크립트를 워크플로에서 그대로 뽑아 `bash --noprofile --norc -eo pipefail`로 돌렸다. 종료 코드 0이었다. 게이트웨이 기동·SIGTERM 종료 확인, 실전 엔진 소켓·권한·이중 기동 차단, 실험실 응답·Host 거부·`/api/real/status` 확인을 모두 통과했다
+    - 첫 시도는 설정 폴더 경로가 Unix 소켓 길이 한도를 넘어 엔진 단계에서 실패했다. 이 환경의 경로 길이 문제라, 짧은 임시 경로로 다시 돌려 통과했다. 그 경로는 바로 지웠다
+  - GitHub(67e9ebf): PR `mergeable: true`, `mergeable_state: clean`. CI는 Gradle build, DB schema, Secret scan 모두 success다. 이 PR에서 처음으로 CI Gradle build 성공 기록이 생겼다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 67e9ebf에서 `./gradlew clean build`를 직접 돌려 종료 코드 0(503건)을 받았다. CI Gradle build도 67e9ebf에서 success다. 프로세스 기동 단계도 로컬에서 통과했다 |
+| B2 | 통과 | `ArchitectureTest.java`는 main 규칙(명령 채널, RiskChain, `RISK_POLICIES_LIVE_IN_RISK_MODULE` 등)과 픽스처를 그대로 두고 이 PR의 `PLUGINS_ARE_INDEPENDENT`, `증권사_플러그인끼리_참조하지_않는다`, 플러그인 위반 픽스처 단언만 더했다. `autotrade-architecture-test/build.gradle.kts`는 main의 `:autotrade-control`과 이 PR의 `:autotrade-broker-{kiwoom,kis,toss}`를 모두 담는다. 병합 결과에서 `시세_게이트웨이는_주문_포트를_모른다`, `실전_주문_출구는_Guard_팩토리만_연다`, `프로세스_진입점끼리_참조하지_않는다`와 main의 새 규칙 모두 통과. 게이트웨이·플러그인이 명령 채널·RiskChain을 참조하지 않는다 |
+| B3 | 통과 | 병합으로 이 PR의 계약이 바뀌지 않았다. `docs/decisions/README.md`는 D-028을 D-027과 D-030 사이에, Q-015를 Q-013과 Q-016 사이에 넣었다. 번호가 겹치지 않는다. main 쪽 `MarketEvent` 사용처(#18·#19)도 `DataGap` 추가와 함께 컴파일·테스트를 통과했다 |
+| B4 | 통과 | 시계·난수 규칙 통과. sim 골든 테스트, 리플레이 결정론 테스트 통과 |
+| B5 | 통과 | `금액에_실수형을_쓰지_않는다` 통과 |
+| B6 | 통과 | 테스트 삭제·비활성화 없음. 병합 해소가 main 쪽 테스트를 지우지 않았다(위 대조). CI 스크립트는 게이트웨이를 포그라운드 루프에서 빼고(`for p in watchdog`) 백그라운드 점검으로 바꿨다. `trap`에 `$GW_PID`를 넣었고 종료 확인 뒤 `GW_PID=""`로 비운다. 4차 발견 G의 CI 항목이 해결됐다 |
+| B7 | 통과 | risk-ops 원문 3차 판정은 승인이다(e58009c 기준). 병합 해소는 보호 테스트 `ArchitectureTest` 파일을 고친 것이다. 내용은 risk-ops가 이미 본 이 PR의 추가분과 main의 규칙을 그대로 합친 것이고, 지운 규칙은 없다. 다만 지침 11장 "보호 테스트" 조항에 따라 병합 커밋 67e9ebf도 risk-ops 재검토를 받는다(아래 판정) |
+| B8 | 통과 | 병합으로 새 비밀값·로그가 생기지 않았다. CI gitleaks success |
+
+### 점검표 밖 발견 (5차)
+- 막는 것은 없다.
+- 4차 발견 G는 해결됐다.
+- 참고: 검토 중 이 작업 트리와 무관한 게이트웨이 프로세스 2개(PID 580, 629)를 봤다. 공유 체크아웃의 install 경로에서 약 17분 전에 뜬 것이다. 내가 띄운 것이 아니라 건드리지 않았다. 다른 작업이 남긴 것이면 정리가 필요하다.
+- 이전 권장(risk-ops P1·P2, Q1, 공용 스케줄러 블로킹 토큰 발급)은 7단계 전 목록 그대로다.
+
+### 판정
+승인. 점검표 B에 실패와 확인 못 함이 없다. 병합 커밋은 보호 테스트 파일을 건드리므로 risk-ops 재검토가 필요하다. 이 원문을 쓰는 사이 risk-ops 재검토 원문(4차, 67e9ebf, 승인)이 push됐다(dfb4b4b). 내용 대조는 risk-ops 원문을 따른다. 이 PR은 실전 관련 PR이다. Claude가 머지하지 않고 사용자가 직접 확인하며, 독립 QA(D-031)를 거쳐 머지한다.
