@@ -8,6 +8,7 @@
 # 빌드 산출물
 build/
 .gradle/
+.kotlin/
 out/
 *.class
 
