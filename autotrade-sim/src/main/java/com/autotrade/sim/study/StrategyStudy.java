@@ -3,7 +3,7 @@ package com.autotrade.sim.study;
 import com.autotrade.domain.MarketRules;
 import com.autotrade.domain.order.OrderIntent;
 import com.autotrade.domain.order.Side;
-import com.autotrade.risk.RiskPolicy;
+import com.autotrade.risk.RiskChain;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
@@ -50,18 +50,18 @@ public final class StrategyStudy {
     private final MarketRules rules;
     private final CostModel cost;
     private final StrategyFactory strategies;
-    private final RiskPolicy risk;
+    private final RiskChain risk;
     private final CodeVersion code;
     private final Consumer<String> progress;
 
     /**
      * @param tradingDays 데이터의 거래일(오름차순). 학습·검증 구간을 나눌 때 쓴다
-     * @param risk 모의 주문 검증 체인. 실전과 같은 구현(블랙리스트 → 리스크 → 멱등 키 → 상태머신)은 risk-ops 작업이다
+     * @param risk 모의 주문 검증 체인. 실전과 같은 {@link RiskChain}만 받는다(SIM-12)
      * @param progress 진행 표시(로그용, 결과에 영향 없음)
      */
     public StrategyStudy(
             MarketDataSet data, List<LocalDate> tradingDays, MarketRules rules, CostModel cost,
-            StrategyFactory strategies, RiskPolicy risk, CodeVersion code, Consumer<String> progress) {
+            StrategyFactory strategies, RiskChain risk, CodeVersion code, Consumer<String> progress) {
         this.data = Objects.requireNonNull(data, "data");
         this.tradingDays = List.copyOf(tradingDays);
         this.rules = Objects.requireNonNull(rules, "rules");
