@@ -87,8 +87,9 @@ parameters:
 | `GET /api/experiments` | 실험 목록(실험 ID 문자열 내림차순. `EXP-YYYYMMDD-NN` 형식이면 최근 실험이 위): 시장·통화·기간·시드·시드머니·비용 모델·비용 표 해시·체결 모델·데이터 버전·실행 방식·코드·계좌 수 |
 | `GET /api/experiments/{id}` | 요약 + 계좌별 행(프로필 ID·버전·해시, 상태, 실패 사유, 최종 평가금액, 지표 14개, 거절 건수) |
 | `GET /api/experiments/{id}/equity` | 계좌별 일별 평가금액(비용 차감 후)과 시드머니 |
-| `GET /api/experiments/{id}/runs/{runId}/fills` | 체결 내역(멱등 키, 체결 순번, 신호·체결 이벤트 순번과 시각, 비용 항목, 실현 손익) |
-| `GET /api/experiments/{id}/runs/{runId}/round-trips` | 왕복 거래 |
+| `GET /api/experiments/{id}/runs/{runId}/summary` | 계좌 상세 머리 요약: 계좌·프로필·상태·실패 사유, 실험 기간·거래일 수·시드머니·통화, 마지막 평가금액·현금(자산 곡선 마지막 점)·총수익률, 누적 실현손익(매도 체결 `realizedPnl` 합, 비용 차감 후), 비용(수수료·세금·합계·슬리피지), 기간 끝(실패면 직전) 보유 종목(종목코드·종목명·수량·평균 단가·보유 원가), `symbolNameCount`. 실패한 Run은 곡선이 없으면 평가금액·수익률이 없다 |
+| `GET /api/experiments/{id}/runs/{runId}/fills` | 체결 내역(종목명, 멱등 키, 체결 순번, 신호·체결 이벤트 순번과 시각, 비용 항목, 실현 손익) |
+| `GET /api/experiments/{id}/runs/{runId}/round-trips` | 왕복 거래(종목명 포함) |
 | `GET /api/experiments/{id}/runs/{runId}/rejections?stage=&code=` | 거절 사유 로그 + 거르기 전 사유별 건수(`counts`) |
 | `GET /api/profiles` | 프로필 목록(ID 이름순, 최신 버전·해시, 버전 목록) |
 | `GET /api/profiles/{id}` · `/versions/{v}` | 버전 이력 · 한 버전 |
@@ -98,6 +99,8 @@ parameters:
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
 
 같은 실험의 계좌만 한 화면에서 비교한다(같은 기간·시드·비용 모델·체결 모델, 지침 5장). 실험 사이 비교 화면은 만들지 않았다.
+
+체결·왕복·거절 행과 보유 종목 행의 `symbolName`은 설정 폴더 `symbols/<MARKET>.csv`(표시용 이름표, 없으면 필드 생략)에서 붙인다. 이름은 계산·식별에 쓰지 않는다. 요약을 기존 상세 응답에 넣지 않고 별도 경로로 둔 이유: 상세는 실험 안 모든 계좌를 한 번에 주는데 보유 종목 계산은 계좌마다 체결 원장을 다시 반영해야 하므로, 계좌 화면이 열릴 때 그 계좌 것만 계산한다(기존 응답 필드는 바뀌지 않음). 보유 종목은 `VirtualAccount`에 원장을 같은 순서로 다시 반영해 얻는다(평균 원가 규칙을 따로 구현하지 않음).
 
 ### 실험 결과 출처
 `ExperimentCatalog` 인터페이스로 읽는다. 메서드는 화면 질의 단위(목록 한 쪽, 상세, 자산 곡선, 체결·왕복·거절 한 쪽)라서 DB 구현은 메서드마다 질의 하나로 옮기면 되고 실험 전체를 메모리로 되살릴 필요가 없다(architect 검토 3). 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. DB 구현으로 바꿔도 REST 응답은 바뀌지 않는다.

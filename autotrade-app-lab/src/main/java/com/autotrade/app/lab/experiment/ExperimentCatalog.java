@@ -38,4 +38,7 @@ public interface ExperimentCatalog {
      */
     Optional<ExperimentViews.RejectionPage> rejections(
             ExperimentId id, String runId, String stage, String code, int page, int size);
+
+    /** 계좌 상세 머리의 요약(기간, 시드, 마지막 평가금액·현금, 총수익률, 누적 실현손익, 비용, 기간 끝 보유 종목). */
+    Optional<ExperimentViews.RunSummary> runSummary(ExperimentId id, String runId);
 }

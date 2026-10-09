@@ -8,13 +8,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** RFC 4180 CSV 최소 구현(큰따옴표 인용, 인용 안 쉼표·큰따옴표 두 개). 줄바꿈이 든 필드는 지원하지 않는다. */
-final class Csv {
+/**
+ * RFC 4180 CSV 최소 구현(큰따옴표 인용, 인용 안 쉼표·큰따옴표 두 개). 줄바꿈이 든 필드는 지원하지 않는다.
+ * 일봉 스냅샷과 종목명 표({@code com.autotrade.marketdata.symbols})가 같은 규칙을 쓰도록 공개했다.
+ */
+public final class Csv {
 
     private Csv() {}
 
     /** 첫 줄은 헤더. 헤더가 {@code expected}와 다르면 예외. */
-    static List<List<String>> read(Path file, List<String> expected) throws IOException {
+    public static List<List<String>> read(Path file, List<String> expected) throws IOException {
         List<List<String>> rows = new ArrayList<>();
         try (BufferedReader r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             String header = r.readLine();
@@ -44,7 +47,7 @@ final class Csv {
         return rows;
     }
 
-    static List<String> split(String line) {
+    public static List<String> split(String line) {
         List<String> out = new ArrayList<>();
         StringBuilder cur = new StringBuilder();
         boolean quoted = false;
@@ -75,5 +78,25 @@ final class Csv {
         }
         out.add(cur.toString());
         return out;
+    }
+
+    /** 필드를 쉼표로 이어 한 줄로 만든다. 쉼표·큰따옴표가 든 필드만 인용한다. 줄바꿈이 든 필드는 예외. */
+    public static String join(List<String> fields) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < fields.size(); i++) {
+            String f = fields.get(i);
+            if (f.indexOf('\n') >= 0 || f.indexOf('\r') >= 0) {
+                throw new IllegalArgumentException("줄바꿈이 든 필드는 쓸 수 없습니다");
+            }
+            if (i > 0) {
+                b.append(',');
+            }
+            if (f.indexOf(',') >= 0 || f.indexOf('"') >= 0) {
+                b.append('"').append(f.replace("\"", "\"\"")).append('"');
+            } else {
+                b.append(f);
+            }
+        }
+        return b.toString();
     }
 }

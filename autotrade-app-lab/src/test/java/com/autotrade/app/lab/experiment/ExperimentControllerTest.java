@@ -127,6 +127,76 @@ class ExperimentControllerTest {
                 .andExpect(jsonPath("$.message").value("요청 형식이 올바르지 않습니다"));
     }
 
+    /**
+     * 손 계산(SampleReports.krx 20거래일). A01: 하루 +25,000이 14일, −12,500이 6일(i%3==2) → 10,000,000 + 350,000 − 75,000
+     * = 10,275,000, 현금은 그 절반 5,137,500, 수익률 275,000 / 10,000,000 = 0.0275. 체결 12건(매수 6, 매도 6):
+     * 수수료 12 × 106.8 = 1,281.6, 세금 6 × 1,424 = 8,544, 합 9,825.6, 슬리피지 12 × 1,068 = 12,816, 실현손익 6 × 2,500
+     * = 15,000, 마지막에 매도로 끝나 보유 없음.
+     */
+    @Test
+    void 계좌_요약은_손_계산과_같다() throws Exception {
+        mvc.perform(get("/api/experiments/EXP-20261008-01/runs/EXP-20261008-01-A01/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountId").value("EXP-20261008-01-A01"))
+                .andExpect(jsonPath("$.profileId").value("breakout"))
+                .andExpect(jsonPath("$.profileVersion").value(2))
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.market").value("KRX"))
+                .andExpect(jsonPath("$.currency").value("KRW"))
+                .andExpect(jsonPath("$.from").value("2026-09-01"))
+                .andExpect(jsonPath("$.to").value("2026-09-28"))
+                .andExpect(jsonPath("$.tradingDays").value(20))
+                .andExpect(jsonPath("$.seedCapital").value("10000000"))
+                .andExpect(jsonPath("$.lastEquityDate").value("2026-09-28"))
+                .andExpect(jsonPath("$.lastEquity").value("10275000"))
+                .andExpect(jsonPath("$.lastCash").value("5137500"))
+                .andExpect(jsonPath("$.totalReturn").value("0.027500"))
+                .andExpect(jsonPath("$.realizedPnl").value("15000"))
+                .andExpect(jsonPath("$.fillCount").value(12))
+                .andExpect(jsonPath("$.roundTripCount").value(6))
+                .andExpect(jsonPath("$.costs.commission").value("1281.6"))
+                .andExpect(jsonPath("$.costs.tax").value("8544"))
+                .andExpect(jsonPath("$.costs.feesTotal").value("9825.6"))
+                .andExpect(jsonPath("$.costs.slippage").value("12816"))
+                .andExpect(jsonPath("$.holdings", hasSize(0)))
+                .andExpect(jsonPath("$.symbolNameCount").value(0));
+    }
+
+    /**
+     * A02(손실): 하루 −18,000이 14일, +9,000이 6일 → 10,000,000 − 252,000 + 54,000 = 9,802,000, 현금 4,901,000, 수익률 −0.0198.
+     * 체결 3건(매수, 매도, 매수): 마지막 매수 10주가 남는다. 보유 원가 = 10 × 71,200 + 수수료 106.8 = 712,106.8,
+     * 평균 단가 = 71,210.68(매수 비용 포함 원가 기준). 실현손익은 매도 1건 −1,800.
+     */
+    @Test
+    void 손실_계좌_요약과_기간_끝_보유_종목() throws Exception {
+        mvc.perform(get("/api/experiments/EXP-20261008-01/runs/EXP-20261008-01-A02/summary"))
+                .andExpect(jsonPath("$.lastEquity").value("9802000"))
+                .andExpect(jsonPath("$.lastCash").value("4901000"))
+                .andExpect(jsonPath("$.totalReturn").value("-0.019800"))
+                .andExpect(jsonPath("$.realizedPnl").value("-1800"))
+                .andExpect(jsonPath("$.costs.feesTotal").value("1744.4"))
+                .andExpect(jsonPath("$.holdings", hasSize(1)))
+                .andExpect(jsonPath("$.holdings[0].symbol").value("005930"))
+                .andExpect(jsonPath("$.holdings[0].symbolName").doesNotExist())
+                .andExpect(jsonPath("$.holdings[0].quantity").value(10))
+                .andExpect(jsonPath("$.holdings[0].costBasis").value("712106.8"))
+                .andExpect(jsonPath("$.holdings[0].averagePrice").value("71210.68"));
+    }
+
+    @Test
+    void 실패한_계좌_요약은_실패_표시와_빈_값을_준다() throws Exception {
+        mvc.perform(get("/api/experiments/EXP-20261008-01/runs/EXP-20261008-01-A03/summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureReason").value("모르는 프로필: broken"))
+                .andExpect(jsonPath("$.tradingDays").value(0))
+                .andExpect(jsonPath("$.lastEquity").doesNotExist())
+                .andExpect(jsonPath("$.totalReturn").doesNotExist())
+                .andExpect(jsonPath("$.realizedPnl").value("0"))
+                .andExpect(jsonPath("$.seedCapital").value("10000000"));
+        mvc.perform(get("/api/experiments/EXP-20261008-01/runs/OTHER/summary")).andExpect(status().isNotFound());
+    }
+
     @Test
     void 왕복_거래를_준다() throws Exception {
         mvc.perform(get("/api/experiments/EXP-20261008-01/runs/EXP-20261008-01-A01/round-trips"))

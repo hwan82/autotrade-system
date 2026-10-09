@@ -44,6 +44,7 @@
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
 - 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
+- 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.
 - 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
 
 ## 예시 (자리표시자)

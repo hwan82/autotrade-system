@@ -37,6 +37,12 @@ public class ExperimentController {
         return found(catalog.equity(id(id)), "실험이 없습니다");
     }
 
+    /** 계좌 상세 머리 요약(기간, 시드, 평가금액, 수익률, 누적 실현손익, 비용, 기간 끝 보유 종목). */
+    @GetMapping("/{id}/runs/{runId}/summary")
+    public ExperimentViews.RunSummary runSummary(@PathVariable String id, @PathVariable String runId) {
+        return found(catalog.runSummary(id(id), runId), "실험이나 계좌가 없습니다");
+    }
+
     @GetMapping("/{id}/runs/{runId}/fills")
     public Page<ExperimentViews.FillRow> fills(
             @PathVariable String id, @PathVariable String runId,

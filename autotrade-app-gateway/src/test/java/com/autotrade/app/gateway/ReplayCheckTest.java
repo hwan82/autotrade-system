@@ -10,6 +10,8 @@ import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.recording.MarketEventRecorder;
 import com.autotrade.marketdata.recording.RecordingLayout;
+import com.autotrade.marketdata.symbols.SymbolNameFiles;
+import com.autotrade.marketdata.symbols.SymbolNames;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.math.BigDecimal;
@@ -71,12 +73,34 @@ class ReplayCheckTest {
         assertThat(r.gapCount()).isEqualTo(1);
         String md = r.toMarkdown();
         assertThat(md).contains("판정: **동일**")
-                .contains("| 005930 | 4 | 71000 | 71300 | 70900 | 71200 | 22 | 09:00 | 15:30 | 2 / 150 | 1 | 1 |")
-                .contains("| 000660 | 1 | 120500 | 120500 | 120500 | 120500 | 3 | 09:00:01 | 09:00:01 | 0 / 0 | 0 | 0 |")
+                .contains("| 005930 | – | 4 | 71000 | 71300 | 70900 | 71200 | 22 | 09:00 | 15:30 | 2 / 150 | 1 | 1 |")
+                .contains("| 000660 | – | 1 | 120500 | 120500 | 120500 | 120500 | 3 | 09:00:01 | 09:00:01 | 0 / 0 | 0 | 0 |")
                 .contains("정상 종료 예, 건수 9")
                 .contains("(파일과 일치 확인됨)")
                 .contains("정규장 구간 09:00~15:30")
                 .contains("KRX 단독 정규장");
+    }
+
+    @Test
+    void 이름표가_있으면_종목명_열에_이름을_넣고_없는_종목은_대시로_두며_판정과_해시는_그대로다() throws Exception {
+        Path day = recordDay();
+        Path config = root.resolve("cfg");
+        SymbolNameFiles.write(config, Market.KRX, List.of(new SymbolNameFiles.Entry("005930", "삼성전자", "KOSPI")));
+
+        ReplayCheck.Report named = ReplayCheck.check(day, SymbolNameFiles.load(config).names());
+        ReplayCheck.Report unnamed = ReplayCheck.check(day);
+
+        assertThat(named.toMarkdown())
+                .contains("| 종목 | 종목명 | 체결 수 |")
+                .contains("| 005930 | 삼성전자 | 4 | 71000 | 71300 | 70900 | 71200 | 22 |")
+                .contains("| 000660 | – | 1 | 120500 |");
+        assertThat(named.verdict()).isEqualTo(unnamed.verdict());
+        assertThat(named.firstDigest()).isEqualTo(unnamed.firstDigest());
+        PrintStream sink = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        assertThat(ReplayCheck.run(new String[] {day.toString()}, SymbolNameFiles.load(config).names(),
+                new PrintStream(stdout, true, StandardCharsets.UTF_8), sink)).isZero();
+        assertThat(stdout.toString(StandardCharsets.UTF_8)).contains("| 005930 | 삼성전자 |");
     }
 
     @Test
@@ -109,9 +133,9 @@ class ReplayCheckTest {
     void 잘림이나_0건이면_불완전이고_회차가_다르면_다름이다() {
         Path dir = root.resolve("KRX/2026-10-08");
         String h = "a".repeat(64);
-        ReplayCheck.Report truncated = new ReplayCheck.Report(dir, Optional.empty(), true, 5, 0, Optional.empty(), h, h, 5, 5, Map.of());
-        ReplayCheck.Report empty = new ReplayCheck.Report(dir, Optional.empty(), false, 0, 0, Optional.empty(), h, h, 0, 0, Map.of());
-        ReplayCheck.Report differs = new ReplayCheck.Report(dir, Optional.empty(), false, 5, 0, Optional.empty(), h, "b".repeat(64), 5, 5, Map.of());
+        ReplayCheck.Report truncated = new ReplayCheck.Report(dir, Optional.empty(), true, 5, 0, Optional.empty(), h, h, 5, 5, Map.of(), SymbolNames.empty());
+        ReplayCheck.Report empty = new ReplayCheck.Report(dir, Optional.empty(), false, 0, 0, Optional.empty(), h, h, 0, 0, Map.of(), SymbolNames.empty());
+        ReplayCheck.Report differs = new ReplayCheck.Report(dir, Optional.empty(), false, 5, 0, Optional.empty(), h, "b".repeat(64), 5, 5, Map.of(), SymbolNames.empty());
 
         assertThat(truncated.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
         assertThat(empty.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);

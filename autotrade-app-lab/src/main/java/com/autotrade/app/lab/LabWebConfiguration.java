@@ -6,6 +6,7 @@ import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
+import com.autotrade.marketdata.symbols.SymbolNameFiles;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Clock;
@@ -21,9 +22,14 @@ public class LabWebConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(LabWebConfiguration.class);
 
+    /** 종목명 표는 설정 폴더의 {@code symbols/<MARKET>.csv}에서 읽는다. 없거나 깨져도 이름만 비고 기동에는 영향 없다. */
     @Bean
-    ExperimentCatalog experimentCatalog() {
-        return new InMemoryExperimentCatalog();
+    ExperimentCatalog experimentCatalog(RuntimeConfigStore store) {
+        Path configDir = store.paths().runtimeFile().getParent();
+        SymbolNameFiles.Loaded loaded = SymbolNameFiles.load(configDir);
+        loaded.warnings().forEach(w -> log.warn("종목명 표: {}", w));
+        log.info("종목명 표: {}건 ({})", loaded.names().size(), configDir.resolve(SymbolNameFiles.DIR));
+        return new InMemoryExperimentCatalog(loaded.names());
     }
 
     /**

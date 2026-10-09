@@ -2,12 +2,15 @@ package com.autotrade.app.lab.experiment;
 
 import com.autotrade.app.lab.web.Page;
 import com.autotrade.domain.Money;
+import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.symbols.SymbolNames;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.account.RoundTrip;
+import com.autotrade.sim.account.VirtualAccount;
 import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.RunMetrics;
@@ -15,6 +18,9 @@ import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationReport;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.Currency;
 import java.util.List;
 
 /**
@@ -105,13 +111,14 @@ public final class ExperimentViews {
 
     /** 체결 1건(virtual_trade_log 한 행). */
     public record FillRow(
-            String key, int fillSeq, String symbol, String side, String intent, long quantity, String price,
+            String key, int fillSeq, String symbol, String symbolName, String side, String intent, long quantity, String price,
             String commission, String tax, String slippage, String currency, String lotId, String realizedPnl,
             long signalEventSeq, long fillEventSeq, String signalTime, String fillTime, String exchangeDate) {
 
-        static FillRow of(AppliedFill a) {
+        static FillRow of(AppliedFill a, SymbolNames names) {
             Fill f = a.fill();
-            return new FillRow(f.key().toString(), f.fillSeq(), f.symbol().code(), f.side().name(), f.intent().name(),
+            return new FillRow(f.key().toString(), f.fillSeq(), f.symbol().code(), name(names, f.symbol()),
+                    f.side().name(), f.intent().name(),
                     f.quantity(), f.price().toPlainString(), plain(f.fees().commission()), plain(f.fees().tax()),
                     plain(f.slippage()), f.fees().commission().currency().getCurrencyCode(), a.lotId(),
                     a.realizedPnl() == null ? null : plain(a.realizedPnl()), f.signalEventSeq(), f.fillEventSeq(),
@@ -119,18 +126,20 @@ public final class ExperimentViews {
         }
     }
 
-    public record RoundTripRow(String lotId, String symbol, String entryDate, String exitDate, String pnl) {
-        static RoundTripRow of(RoundTrip t) {
-            return new RoundTripRow(t.lotId(), t.symbol().code(), t.entryDate().toString(), t.exitDate().toString(),
-                    plain(t.pnl()));
+    public record RoundTripRow(
+            String lotId, String symbol, String symbolName, String entryDate, String exitDate, String pnl) {
+        static RoundTripRow of(RoundTrip t, SymbolNames names) {
+            return new RoundTripRow(t.lotId(), t.symbol().code(), name(names, t.symbol()), t.entryDate().toString(),
+                    t.exitDate().toString(), plain(t.pnl()));
         }
     }
 
     /** 체결되지 못한 신호·주문 1건(리스크 검증 거절, 블랙리스트 포함, 또는 거래소 거절·잔량 취소). */
-    public record RejectionRow(long eventSeq, String key, String symbol, String stage, String code, String detail) {
-        static RejectionRow of(OrderRejection j) {
-            return new RejectionRow(j.eventSeq(), j.key().toString(), j.symbol().code(), j.stage(), j.code(),
-                    j.detail());
+    public record RejectionRow(
+            long eventSeq, String key, String symbol, String symbolName, String stage, String code, String detail) {
+        static RejectionRow of(OrderRejection j, SymbolNames names) {
+            return new RejectionRow(j.eventSeq(), j.key().toString(), j.symbol().code(), name(names, j.symbol()),
+                    j.stage(), j.code(), j.detail());
         }
     }
 
@@ -140,6 +149,93 @@ public final class ExperimentViews {
 
     /** 거절 사유 분포 한 줄({@code stage:code}별 건수). */
     public record RejectionCount(String stage, String code, long count) {
+    }
+
+    /**
+     * 계좌(Run) 상세 머리의 요약(ADR-005 5장 {@code .../runs/{runId}/summary}). 모든 값은 이 Run의 결과 기록에서 계산하며
+     * 비용 차감 기준이다. 금액은 {@code currency} 한 통화다.
+     *
+     * <p>정의(코드 기준): 평가금액·현금은 자산 곡선 마지막 점, 총수익률은 {@code 평가금액 / 시드머니 − 1}(소수 6자리 HALF_EVEN,
+     * {@link RunMetrics}와 같은 규칙), 누적 실현손익은 매도 체결의 {@code realizedPnl} 합(수수료·세금 차감 후,
+     * {@link VirtualAccount#apply}의 정의), 비용은 체결의 수수료·세금·슬리피지 각각의 합이다.
+     * 슬리피지는 체결가에 이미 반영된 기록용 금액이라 {@code feesTotal}(수수료+세금, {@code RunMetrics.totalCosts}와 같은
+     * 정의)에 넣지 않고 따로 보여 준다.
+     *
+     * @param lastEquity 마지막 평가금액. 자산 곡선이 비어 있으면(첫 거래일 전에 실패) null
+     * @param lastEquityDate 그 평가금액의 거래일. 곡선이 비어 있으면 null
+     * @param totalReturn 평가금액 기준 총수익률(소수). 곡선이 비어 있으면 null
+     * @param tradingDays 자산 곡선 점 수(거래일 수)
+     * @param holdings 기간 끝(실패한 Run은 실패 직전) 보유 종목. 원장을 다시 계산하지 못하면 null
+     * @param symbolNameCount 종목명 표에 든 종목 수. 0이면 이름표가 없는 것이다
+     */
+    public record RunSummary(
+            String experimentId, String runId, String accountId, String profileId, int profileVersion,
+            String profileHash, String status, String failureReason, String market, String currency, String from,
+            String to, int tradingDays, String seedCapital, String lastEquityDate, String lastEquity, String lastCash,
+            String totalReturn, String realizedPnl, int fillCount, int roundTripCount, Costs costs,
+            List<HoldingRow> holdings, int symbolNameCount) {
+
+        static RunSummary of(ExperimentSpec spec, RunReport run, SymbolNames names) {
+            RunResult s = run.summary();
+            Currency currency = spec.seedCapital().currency();
+            Money zero = Money.zero(currency);
+            Money realized = zero;
+            Money commission = zero;
+            Money tax = zero;
+            Money slippage = zero;
+            for (AppliedFill a : run.fills()) {
+                Fill f = a.fill();
+                commission = commission.plus(f.fees().commission());
+                tax = tax.plus(f.fees().tax());
+                slippage = slippage.plus(f.slippage());
+                if (a.realizedPnl() != null) {
+                    realized = realized.plus(a.realizedPnl());
+                }
+            }
+            EquityPoint last = run.equityCurve().isEmpty() ? null : run.equityCurve().get(run.equityCurve().size() - 1);
+            String totalReturn = last == null ? null : last.equity().amount()
+                    .divide(spec.seedCapital().amount(), 6 + 2, RoundingMode.HALF_EVEN)
+                    .subtract(BigDecimal.ONE).setScale(6, RoundingMode.HALF_EVEN).toPlainString();
+            return new RunSummary(spec.id().value(), s.runId(), s.accountId().value(), run.profile().id(),
+                    run.profile().version(), s.profileHash(), s.status().name(), s.failureReason(),
+                    spec.profiles().get(0).market().name(), currency.getCurrencyCode(), spec.from().toString(),
+                    spec.to().toString(), run.equityCurve().size(), plain(spec.seedCapital()),
+                    last == null ? null : last.date().toString(), last == null ? null : plain(last.equity()),
+                    last == null ? null : plain(last.cash()), totalReturn, plain(realized), run.fills().size(),
+                    run.roundTrips().size(),
+                    new Costs(plain(commission), plain(tax), plain(commission.plus(tax)), plain(slippage)),
+                    holdings(spec, run, names), names.size());
+        }
+
+        /**
+         * 체결 원장을 {@link VirtualAccount}에 같은 순서로 다시 반영해 기간 끝 보유를 얻는다(계좌가 쓰는 평균 원가 규칙을
+         * 그대로 쓰므로 따로 구현한 계산과 어긋나지 않는다). 평균 단가는 매수 비용을 포함한 원가 기준이다.
+         */
+        private static List<HoldingRow> holdings(ExperimentSpec spec, RunReport run, SymbolNames names) {
+            try {
+                VirtualAccount account = new VirtualAccount(run.summary().accountId(), spec.seedCapital());
+                run.fills().forEach(a -> account.apply(a.fill()));
+                return account.snapshot(run.equityCurve().isEmpty() ? Instant.EPOCH : run.equityCurve()
+                                .get(run.equityCurve().size() - 1).ts()).positions().values().stream()
+                        .map(p -> new HoldingRow(p.symbol().code(), name(names, p.symbol()), p.quantity(),
+                                plain(p.averagePrice()), plain(account.costBasisOf(p.symbol()))))
+                        .toList();
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+    }
+
+    /** 비용 합계. {@code feesTotal = commission + tax}. 슬리피지는 체결가에 이미 들어 있어 합계에 더하지 않는다. */
+    public record Costs(String commission, String tax, String feesTotal, String slippage) {
+    }
+
+    /** 기간 끝 보유 종목 한 줄. 평균 단가·보유 원가는 매수 비용 포함. */
+    public record HoldingRow(String symbol, String symbolName, long quantity, String averagePrice, String costBasis) {
+    }
+
+    private static String name(SymbolNames names, Symbol symbol) {
+        return names.name(symbol).orElse(null);
     }
 
     static String plain(Money money) {

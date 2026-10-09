@@ -129,10 +129,12 @@ export async function runPage(id, runId) {
   if (!run) throw new Error('이 실험에 없는 계좌입니다');
   const e = detail.summary;
   const base = `/api/experiments/${enc(id)}/runs/${enc(runId)}`;
+  const summary = await get(`${base}/summary`);
 
   const fills = pagedSection(`${base}/fills`, [
     { label: '체결 시각', render: f => time(f.fillTime, e.market) },
-    { label: '종목', render: f => f.symbol },
+    { label: '종목코드', render: f => f.symbol },
+    { label: '종목명', render: f => nameCell(f.symbolName) },
     { label: '구분', render: f => `${SIDE[f.side] || f.side}·${INTENT[f.intent] || f.intent}` },
     { label: '수량', num: true, render: f => number(f.quantity) },
     { label: '체결가', num: true, render: f => money(f.price, f.currency) },
@@ -146,7 +148,8 @@ export async function runPage(id, runId) {
 
   const trips = pagedSection(`${base}/round-trips`, [
     { label: '로트', render: t => h('span', { class: 'hash' }, t.lotId) },
-    { label: '종목', render: t => t.symbol },
+    { label: '종목코드', render: t => t.symbol },
+    { label: '종목명', render: t => nameCell(t.symbolName) },
     { label: '진입일', render: t => t.entryDate },
     { label: '청산일', render: t => t.exitDate },
     { label: '손익(비용 차감)', num: true, render: t => h('span', { class: signClass(t.pnl) }, money(t.pnl, e.currency)) },
@@ -155,13 +158,67 @@ export async function runPage(id, runId) {
   return h('div', {},
     h('p', { class: 'crumb' }, h('a', { href: '#/experiments' }, '실험'), ' / ', h('a', { href: `#/experiments/${enc(id)}` }, id), ' / ', runId),
     h('h1', {}, runId),
-    h('p', { class: 'muted' }, `프로필 `, h('a', { href: `#/profiles/${enc(run.profileId)}/v${run.profileVersion}` }, `${run.profileId} v${run.profileVersion}`),
-      `, 해시 `, h('span', { class: 'hash', title: run.profileHash }, shortHash(run.profileHash)), `, 상태 ${STATUS[run.status]}.`,
-      e.market === 'US' ? ' 시각은 미국 동부(ET)와 한국(KST)을 함께 적습니다.' : ''),
-    run.failureReason ? h('p', { class: 'notice warn' }, `실패 사유: ${run.failureReason}`) : null,
+    summaryCard(summary, run),
+    e.market === 'US' ? h('p', { class: 'muted small' }, '시각은 미국 동부(ET)와 한국(KST)을 함께 적습니다.') : null,
     h('h2', {}, '체결 내역'), fills,
     h('h2', {}, '왕복 거래'), trips,
     h('h2', {}, '거절 사유'), rejectionSection(base));
+}
+
+function nameCell(name) {
+  return name === null || name === undefined ? '–' : name;
+}
+
+/** 계좌 상세 머리: 계좌·기간·시드, 마지막 평가금액·수익률·누적 실현손익·비용, 기간 끝 보유 종목. 값은 서버가 계산해 준다. */
+function summaryCard(s, run) {
+  const cur = s.currency;
+  const failed = s.status === 'FAILED';
+  const tile = (label, value, sub, cls) => h('div', { class: 'tile' },
+    h('div', { class: 'tile-label' }, label),
+    h('div', { class: `tile-value ${cls || ''}`.trim() }, value),
+    sub ? h('div', { class: 'tile-sub' }, sub) : null);
+  const tiles = h('div', { class: 'tiles' },
+    tile('마지막 평가금액', money(s.lastEquity, cur),
+      s.lastEquityDate ? `${s.lastEquityDate} 마감 · 현금 ${money(s.lastCash, cur)}` : '자산 곡선 기록 없음'),
+    tile('총수익률 (평가금액 기준)', s.totalReturn === null || s.totalReturn === undefined ? '–' : pct(s.totalReturn),
+      `시드머니 ${money(s.seedCapital, cur)} 대비`, signClass(s.totalReturn)),
+    tile('누적 실현손익', money(s.realizedPnl, cur),
+      `매도 체결의 손익 합(비용 차감 후) · 왕복 ${number(s.roundTripCount)}건`, signClass(s.realizedPnl)),
+    tile('비용 합계 (수수료+세금)', money(s.costs.feesTotal, cur),
+      `수수료 ${money(s.costs.commission, cur)} · 세금 ${money(s.costs.tax, cur)} · 슬리피지 ${money(s.costs.slippage, cur)}(체결가에 반영, 합계 제외)`));
+  const facts = h('dl', { class: 'facts' }, [
+    ['계좌 ID', s.accountId],
+    ['프로필', h('span', {}, h('a', { href: `#/profiles/${enc(s.profileId)}/v${s.profileVersion}` }, `${s.profileId} v${s.profileVersion}`),
+      ' ', h('span', { class: 'hash', title: s.profileHash }, shortHash(s.profileHash)))],
+    ['상태', failed ? '실패' : (STATUS[s.status] || s.status)],
+    ['실험 기간', `${s.from} ~ ${s.to} (거래일 ${number(s.tradingDays)}일 기록)`],
+    ['시장·통화', `${MARKET[s.market] || s.market}, ${cur}`],
+    ['시드머니', money(s.seedCapital, cur)],
+    ['체결', `${number(s.fillCount)}건`],
+  ].map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v))));
+
+  let holdings;
+  if (s.holdings === null || s.holdings === undefined) {
+    holdings = h('p', { class: 'muted' }, '체결 원장에서 보유 종목을 계산하지 못했습니다.');
+  } else if (s.holdings.length === 0) {
+    holdings = h('p', { class: 'muted' }, failed ? '실패 직전까지 보유한 종목이 없습니다.' : '기간 끝에 보유한 종목이 없습니다.');
+  } else {
+    holdings = table([
+      { label: '종목코드', render: x => x.symbol },
+      { label: '종목명', render: x => nameCell(x.symbolName) },
+      { label: '수량', num: true, render: x => number(x.quantity) },
+      { label: '평균 단가', num: true, render: x => money(x.averagePrice, cur) },
+      { label: '보유 원가', num: true, render: x => money(x.costBasis, cur) },
+    ], s.holdings);
+  }
+  return h('section', { class: 'summary-card', 'aria-label': '계좌 요약' },
+    failed ? h('p', { class: 'notice warn' }, `실패한 계좌입니다. 아래 값은 실패 직전까지의 기록입니다.${s.failureReason ? ` 사유: ${s.failureReason}` : ''}`) : null,
+    tiles, facts,
+    h('h2', {}, failed ? '실패 직전 보유 종목' : '기간 끝 보유 종목'),
+    holdings,
+    h('p', { class: 'muted small' }, '평균 단가와 보유 원가는 매수 수수료를 포함한 원가 기준입니다. 평가손익은 종가 기록이 없어 표시하지 않습니다.'),
+    s.symbolNameCount === 0 ? h('p', { class: 'muted small' },
+      '종목명은 설정 폴더 symbols/KRX.csv가 있어야 보입니다. gradlew :autotrade-app-gateway:symbolMaster로 만듭니다.') : null);
 }
 
 export function pagedSection(url, columns, emptyText, size = 50, extra = () => '') {
@@ -211,7 +268,8 @@ function rejectionSection(base) {
       filter ? h('p', { class: 'small' }, `${filter.stage}:${filter.code}만 보는 중 `, h('button', { class: 'link', type: 'button', onclick: () => { filter = null; draw(0); } }, '전체 보기')) : null,
       table([
         { label: '이벤트 순번', num: true, render: j => j.eventSeq },
-        { label: '종목', render: j => j.symbol },
+        { label: '종목코드', render: j => j.symbol },
+        { label: '종목명', render: j => nameCell(j.symbolName) },
         { label: '단계', render: j => j.stage },
         { label: '사유', render: j => j.code },
         { label: '상세', render: j => j.detail || '–' },
