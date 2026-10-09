@@ -79,10 +79,13 @@ class RealOpsControllerTest {
     }
 
     @AfterEach
-    void stopEngine() {
+    void stopEngine() throws IOException {
         if (engine != null) {
             engine.close();
+            engine = null;
         }
+        // 가짜 엔진은 이 테스트 JVM의 PID를 잠금 파일에 적는다. 남겨 두면 다음 테스트가 "엔진 살아 있음"으로 본다
+        Files.deleteIfExists(dir.resolve("c").resolve("run").resolve("engine.lock"));
         received.clear();
     }
 

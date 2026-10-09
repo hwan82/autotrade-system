@@ -66,7 +66,7 @@ function body(view, refresh, result) {
       h('p', {}, `실전 엔진이 응답하지 않습니다(${view.message}). 아래는 ${new Date(lastUp.asOf).toLocaleTimeString('en-GB')}에 마지막으로 확인한 상태입니다.`),
       h('p', { class: 'small' }, '지금 상태와 다를 수 있습니다. 활성화는 막아 두었고, PANIC SELL과 내리기는 보낼 수 있지만 반영 여부는 엔진이 다시 응답해야 알 수 있습니다.')) : null,
     !st.passwordConfigured ? h('div', { class: 'notice warn' },
-      h('p', {}, '운영자 비밀번호가 설정되지 않아 실전 활성화와 PANIC SELL을 받을 수 없습니다.'),
+      h('p', {}, '운영자 비밀번호가 설정되지 않아 실전 활성화를 할 수 없고, PANIC SELL은 보호 모드 고정(신규 주문 차단)까지만 됩니다.'),
       h('p', { class: 'small' }, '터미널에서 실전 엔진을 hash-password 인자로 실행해 해시를 만들고, secrets.json의 real-trading.operator-password-hash에 넣은 뒤 엔진을 다시 시작하세요. 비밀번호 자체는 어디에도 저장되지 않습니다.')) : null,
     st.lockedUntil ? h('div', { class: 'notice warn' },
       h('p', {}, `2차 확인을 여러 번 틀려 ${new Date(st.lockedUntil).toLocaleTimeString('ko-KR')}까지 잠겼습니다. 내리기는 그대로 할 수 있고, PANIC SELL은 보호 모드 고정(신규 주문 차단)까지만 됩니다.`)) : null,

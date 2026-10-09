@@ -219,27 +219,38 @@ class ControlChannelTest {
     }
 
     @Test
-    void 대기열이_차면_BUSY로_거절한다() throws Exception {
+    void 대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다() throws Exception {
         CountDownLatch release = new CountDownLatch(1);
         try (ControlServer server = ControlServer.start(socket(), r -> {
-                    await(release);
+                    if (r.command() == ControlCommand.ACTIVATE) {
+                        await(release);
+                    }
                     return echo(r);
                 });
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
             List<Thread> waiting = new ArrayList<>();
             for (int i = 0; i < ControlServer.MAX_QUEUED; i++) {
-                waiting.add(Thread.ofVirtual().start(() -> sendQuietly(client, ControlRequest.panicAll("x", "y"))));
+                waiting.add(Thread.ofVirtual().start(() ->
+                        sendQuietly(client, ControlRequest.activate("KIS-1", "KIS-1", "y"))));
             }
             Thread.sleep(300);
 
-            ControlResponse r = client.send(ControlRequest.activate("KIS-1", "KIS-1", "y"));
-
-            assertThat(r.code()).isEqualTo(ControlCodes.BUSY);
+            ControlResponse busy = client.send(ControlRequest.activate("KIS-1", "KIS-1", "y"));
+            List<ControlResponse> panic = new CopyOnWriteArrayList<>();
+            Thread panicThread = Thread.ofVirtual().start(() ->
+                    panic.add(sendQuietly(client, ControlRequest.panicAll("x", "y"))));
+            Thread.sleep(300);
             release.countDown();
+            panicThread.join(10_000);
             for (Thread t : waiting) {
                 t.join(10_000);
             }
-            assertThat(received).extracting(ControlRequest::command).doesNotContain(ControlCommand.ACTIVATE);
+
+            assertThat(busy.code()).isEqualTo(ControlCodes.BUSY);
+            assertThat(panic).singleElement().satisfies(r -> assertThat(r.ok()).isTrue());
+            assertThat(received).extracting(ControlRequest::command)
+                    .containsOnlyOnce(ControlCommand.PANIC_ALL)
+                    .filteredOn(c -> c == ControlCommand.ACTIVATE).hasSize(ControlServer.MAX_QUEUED);
         }
     }
 
@@ -293,12 +304,29 @@ class ControlChannelTest {
                     .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
                             e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.NOT_RUNNING));
         }
-        // 비정상 종료로 소켓 파일만 남은 경우도 실행 중이 아니다
+        // 비정상 종료로 소켓 파일과 잠금 파일만 남은 경우도 실행 중이 아니다(잠금 파일의 PID가 죽음)
         deadSocket();
+        Process finished = new ProcessBuilder("true").start();
+        finished.waitFor();
+        Files.writeString(socket().getParent().resolve(ControlServer.LOCK_FILE), Long.toString(finished.pid()));
         try (ControlClient client = new ControlClient(socket(), Duration.ofSeconds(1))) {
             assertThatThrownBy(() -> client.send(ControlRequest.status()))
                     .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
                             e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.NOT_RUNNING));
+        }
+    }
+
+    @Test
+    void 엔진이_살아_있는데_소켓만_없어지면_실행_중이_아님이_아니라_알_수_없음이다() throws Exception {
+        try (ControlServer server = ControlServer.start(socket(), this::echo);
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(1))) {
+            assertThat(Files.readString(socket().getParent().resolve(ControlServer.LOCK_FILE)))
+                    .isEqualTo(Long.toString(ProcessHandle.current().pid()));
+            Files.delete(socket());
+
+            assertThatThrownBy(() -> client.send(ControlRequest.status()))
+                    .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
+                            e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.UNKNOWN));
         }
     }
 

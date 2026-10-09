@@ -5,12 +5,14 @@ import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -34,8 +36,9 @@ import java.util.function.Function;
  * 실전 엔진 쪽 명령 채널 서버(ADR-006 2.2). Unix 도메인 소켓 하나를 열고 요청마다 처리기를 부른다.
  *
  * <ul>
- *   <li>올리는 명령과 PANIC(ACTIVATE, PANIC_ACCOUNT, PANIC_ALL)은 한 번에 하나씩 처리한다(단일 스레드). 대기열에는
- *       {@link #MAX_QUEUED}개까지만 받고 넘치면 {@link ControlCodes#BUSY}로 거절한다.</li>
+ *   <li>올리는 명령과 PANIC(ACTIVATE, PANIC_ACCOUNT, PANIC_ALL)은 한 번에 하나씩 처리한다(단일 스레드). ACTIVATE는
+ *       대기열(실행 중 포함)에 {@link #MAX_QUEUED}개까지만 받고 넘치면 {@link ControlCodes#BUSY}로 거절한다. PANIC은
+ *       거절하지 않고 기다렸다가 실행한다.</li>
  *   <li>STATUS와 DEACTIVATE는 대기열을 거치지 않고 연결 스레드에서 바로 처리한다. 활성화가 오래 걸려도 상태를 볼 수 있고
  *       즉시 내릴 수 있어야 하기 때문이다(내리는 전이는 언제나 허용, D-023 공통 원칙 2). 그래서 처리기는 이 두 명령에 대해
  *       스레드 안전해야 한다.</li>
@@ -64,6 +67,7 @@ public final class ControlServer implements AutoCloseable {
     private final Function<ControlRequest, ControlResponse> handler;
     private final long staleAfterNanos;
     private final FileChannel lockChannel;
+    // 잠금 파일에는 엔진 PID를 적는다. 소켓 파일이 사라져도 실험실이 엔진 생존을 판단할 수 있게 한다(ControlClient)
     private final FileLock lock;
     private final ServerSocketChannel server;
     private final ExecutorService commands = Executors.newSingleThreadExecutor(daemon("control-command"));
@@ -96,6 +100,15 @@ public final class ControlServer implements AutoCloseable {
             throw new IOException("다른 실전 엔진이 이미 실행 중입니다(" + LOCK_FILE + " 잠금)");
         }
         this.lock = acquired;
+        try {
+            lockChannel.truncate(0);
+            lockChannel.write(ByteBuffer.wrap(
+                    Long.toString(ProcessHandle.current().pid()).getBytes(StandardCharsets.US_ASCII)), 0);
+            lockChannel.force(false);
+        } catch (IOException e) {
+            releaseLock();
+            throw e;
+        }
         ServerSocketChannel opened = null;
         try {
             removeStaleSocket(socket);
@@ -211,6 +224,11 @@ public final class ControlServer implements AutoCloseable {
     private ControlResponse dispatch(ControlRequest request) throws Exception {
         if (DIRECT.contains(request.command())) {
             return handle(request);
+        }
+        boolean panic = request.command() == ControlCommand.PANIC_ACCOUNT || request.command() == ControlCommand.PANIC_ALL;
+        // PANIC은 대기열 상한과 상관없이 받는다(내리는 방향은 거절하지 않음, D-023 원칙 2). 연결 상한이 전체 수를 묶는다
+        if (panic) {
+            return commands.submit(() -> handle(request)).get();
         }
         if (!queued.tryAcquire()) {
             return ControlResponse.rejected(ControlCodes.BUSY,

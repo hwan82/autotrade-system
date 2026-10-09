@@ -80,7 +80,7 @@
 | Gradle 모듈 의존 | 허용되지 않은 모듈 참조(컴파일 오류) | 각 `build.gradle.kts` |
 | `verifyPureDependencies` | 순수 모듈 런타임 클래스패스의 Spring·JDBC 드라이버·HikariCP·Flyway·Hibernate·JPA·H2 | `build-logic/.../autotrade.pure-java-conventions.gradle.kts`, `check`에 연결 |
 | `verifyProcessIsolation` | 프로세스 런타임 클래스패스의 금지 모듈과 Spring (2.1절 표) | `build-logic/.../autotrade.process-conventions.gradle.kts`, `check`에 연결 |
-| ArchUnit (10개 규칙) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
+| ArchUnit (`ArchitectureTest`의 규칙 전체) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 실전 주문 출구·Guard 올림·2차 확인 생성·명령 채널 서버/클라이언트 위치(ADR-002·006), 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
 | `-Xlint:all -Werror` | 경고 방치 | `autotrade.java-conventions` |
 | CI `guards` 잡 | 저장소 전 이력의 비밀값(gitleaks), Python 수집기의 실시간·SDK·주문·키 코드 | `.github/workflows/ci.yml`, `scripts/ci/check-python-collectors.sh` |
 

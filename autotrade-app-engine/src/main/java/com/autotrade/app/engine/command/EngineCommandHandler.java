@@ -69,7 +69,11 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
                 case STATUS -> throw new IllegalStateException();
             };
         } finally {
-            authenticator.discardVerification();
+            // 검증을 쓰는 명령(ACTIVATE·PANIC)만 버린다. 대기열을 거치지 않는 DEACTIVATE가 동시에 진행 중인
+            // ACTIVATE의 검증을 지우지 않게 한다
+            if (request.command() != ControlCommand.DEACTIVATE) {
+                authenticator.discardVerification();
+            }
         }
         try {
             audit.record(request.command(), auditTarget(request), response.code());

@@ -347,6 +347,18 @@ class EngineCommandHandlerTest {
     }
 
     @Test
+    void 활성화_검증_직후_들어온_내리기는_그_검증을_지우지_않는다() {
+        OperatorAuthenticator auth = new OperatorAuthenticator(OperatorPasswordHash.parse(OperatorPasswordHashTest.HASH), clock);
+        EngineCommandHandler h = new EngineCommandHandler(guard, auth, configured::contains, steps, liquidator,
+                (c, t, code) -> commandAudit.add(code));
+        // 검증과 2차 확인 생성 사이에 다른 스레드의 DEACTIVATE가 끝나는 상황(DEACTIVATE는 대기열을 거치지 않음)
+        auth.verify(PASSWORD.toCharArray(), "KIS-US-1", "KIS-US-1");
+        h.apply(ControlRequest.deactivate("KIWOOM-KR-1", null));
+
+        assertThat(auth.confirmationFor(KIS.id()).account()).isEqualTo(KIS.id());
+    }
+
+    @Test
     void 감사_로그가_실패해도_결과는_그대로_돌려준다() {
         EngineCommandHandler h = new EngineCommandHandler(guard,
                 new OperatorAuthenticator(OperatorPasswordHash.parse(OperatorPasswordHashTest.HASH), clock),

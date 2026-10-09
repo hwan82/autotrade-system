@@ -5,6 +5,7 @@ import java.net.ConnectException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -22,7 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * 실험실 쪽 명령 채널 클라이언트. 연결 하나에 요청 하나를 보내고 응답을 기다린다.
  * 엔진에 닿지 못하면 {@link EngineUnreachableException}. 이유는 둘로 나눈다(ADR-006 2.6).
  * <ul>
- *   <li>{@link Reach#NOT_RUNNING}: 소켓이 없거나 연결이 거절됨. 엔진 프로세스가 없다고 본다(재기동하면 모든 계좌 OFF).</li>
+ *   <li>{@link Reach#NOT_RUNNING}: 소켓이 없거나 연결이 거절됐고, 잠금 파일의 PID로 본 엔진 프로세스도 없음
+ *       (재기동하면 모든 계좌 OFF).</li>
  *   <li>{@link Reach#UNKNOWN}: 연결은 됐지만 제때 답이 없거나 도중에 끊김. 엔진은 살아 있을 수 있고 실전 계좌가 열려 있을 수
  *       있다. 화면은 "가상"으로 바꾸지 않고 마지막으로 확인한 상태를 경고와 함께 보여 줘야 한다.</li>
  * </ul>
@@ -48,7 +50,7 @@ public final class ControlClient implements AutoCloseable {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(limit, "limit");
         if (!Files.exists(socket)) {
-            throw new EngineUnreachableException(Reach.NOT_RUNNING, "실전 엔진이 실행 중이 아닙니다");
+            throw notRunningOrUnknown();
         }
         AtomicReference<SocketChannel> holder = new AtomicReference<>();
         Future<ControlResponse> call = io.submit(() -> {
@@ -68,14 +70,34 @@ public final class ControlClient implements AutoCloseable {
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof ConnectException || cause instanceof NoSuchFileException) {
-                // 소켓 파일은 있지만 듣는 엔진이 없다(비정상 종료로 남은 소켓)
-                throw new EngineUnreachableException(Reach.NOT_RUNNING, "실전 엔진이 실행 중이 아닙니다");
+                // 소켓 파일은 있지만 듣는 쪽이 없다(비정상 종료로 남은 소켓, 또는 엔진은 살아 있는데 소켓이 바뀜)
+                throw notRunningOrUnknown();
             }
             throw new EngineUnreachableException(Reach.UNKNOWN, "실전 엔진과 통신하지 못했습니다");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new EngineUnreachableException(Reach.UNKNOWN, "요청이 중단됐습니다");
         }
+    }
+
+    /**
+     * 소켓에 닿지 못했을 때 엔진 프로세스가 정말 없는지 본다. 잠금 파일({@code engine.lock})에 적힌 PID의 프로세스가
+     * 살아 있으면 엔진이 살아 있는데 소켓만 없어진 것일 수 있으므로 UNKNOWN으로 본다(가상으로 보이면 안 됨).
+     * PID를 읽지 못하면 NOT_RUNNING. 다른 프로세스가 같은 PID를 다시 쓰면 UNKNOWN이 되는데, 이는 안전한 쪽이다.
+     */
+    private EngineUnreachableException notRunningOrUnknown() {
+        Path lockFile = socket.toAbsolutePath().getParent().resolve(ControlServer.LOCK_FILE);
+        try {
+            String text = Files.readString(lockFile, StandardCharsets.US_ASCII).strip();
+            long pid = Long.parseLong(text);
+            if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                return new EngineUnreachableException(Reach.UNKNOWN,
+                        "실전 엔진 프로세스는 살아 있지만 명령 채널에 닿지 못했습니다");
+            }
+        } catch (IOException | NumberFormatException e) {
+            // 잠금 파일이 없거나 비었다: 엔진이 한 번도 뜨지 않았거나 PID를 적기 전
+        }
+        return new EngineUnreachableException(Reach.NOT_RUNNING, "실전 엔진이 실행 중이 아닙니다");
     }
 
     private static void closeQuietly(SocketChannel channel) {
