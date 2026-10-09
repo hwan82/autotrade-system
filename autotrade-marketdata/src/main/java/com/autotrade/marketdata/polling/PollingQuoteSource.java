@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.SortedSet;
 
 /**
- * 폴링 현재가 소스(능력 POLLING_QUOTE, D-008). 실시간 소스가 모두 끊겨도 보유 종목 손절 감시를 이어 가는 보호 경로다
+ * 폴링 현재가 소스(능력 POLLING_QUOTE, D-024). 실시간 소스가 모두 끊겨도 보유 종목 손절 감시를 이어 가는 보호 경로다
  * (broker-and-fault-design.md 장애표 2번). 부르는 쪽(실전 엔진 보호 감시)이 주기를 정하고, 레이트리밋은 구현이 지킨다.
  * 주문 API를 호출하지 않는다.
  */

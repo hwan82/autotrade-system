@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 폴링으로 받은 현재가(체결 이벤트가 아니다: 수량이 없고 그 사이 체결을 모른다). 보유 종목 보호 감시용(D-008).
+ * 폴링으로 받은 현재가(체결 이벤트가 아니다: 수량이 없고 그 사이 체결을 모른다). 보유 종목 보호 감시용(D-024).
  *
  * @param priceTime 증권사가 준 가격 시각
  * @param receivedAt 이 시스템이 받은 시각

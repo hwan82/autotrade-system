@@ -37,7 +37,7 @@ public interface BrokerPlugin {
 
     Optional<MarketDataSource> marketData(Market market);
 
-    /** 폴링 현재가(능력 POLLING_QUOTE, D-008 보유 종목 보호용). 없으면 빈 값(ADR-003 2.1). */
+    /** 폴링 현재가(능력 POLLING_QUOTE, D-024 보유 종목 보호용). 없으면 빈 값(ADR-003 2.1). */
     default Optional<PollingQuoteSource> pollingQuotes() {
         return Optional.empty();
     }
