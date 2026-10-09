@@ -130,3 +130,45 @@
 - 고칠 것: R-7. 클래스패스 항목을 프로젝트의 선언된 출력과 정확히 맞춰 매핑하고, 자원 전용·자리 모듈에 클래스가 생기면 실패하게 하며, 그 실패를 재현하는 테스트를 둔다. 그 결과에 맞춰 ADR-002 9.3·D-034 "F-1 보장 범위"를 고친다. 코드로 막지 않겠다면 위 최소 대안처럼 예외를 보장 문장에 정확히 적는다. 그 경우에도 이 검토자에게 다시 판정을 받는다.
 - 확인된 개선: QA Q-1·Q-2와 앞 검토 R-1은 직접 재현으로 닫힌 것을 확인했다. 보호 테스트 `ArchitectureTest` 변경은 범위 확대(강화)뿐이다.
 - 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest` 범위 변경 포함). risk-ops가 승인해도 독립 QA 관문을 거친 뒤 사용자가 직접 머지한다(지침 10·11장).
+
+## 재검토 3 2026-10-09
+- 대상: PR #21 / 커밋 `f03b6bf`(브랜치 `claude/project-thread-bl5qbg`) / main(`52ad85f`, 머지 기준점과 같음) 대비 diff 전체. 재검토 2(`74a0f41`) 뒤 커밋: `88c9d7e`(architect 재검토 2 원문), `846054c`(이 원문 재검토 2), `f03b6bf`(R-7 수정). `74a0f41..f03b6bf`에서 바뀐 코드: `autotrade-architecture-test/build.gradle.kts`, **`ArchitectureTest.java`(보호 테스트, 가져오기 판정 1줄)**, `ModuleOwnershipTest.java`, `OurModules.java`. 문서: ADR-002 9장(9.3 보강 3, 9.4 보장 범위와 한계), D-034. 운영 코드(`*/src/main/*`) 변경 0.
+- 점검표: A
+- 검토자: risk-ops 서브에이전트. 커밋 메시지와 ADR 9.4의 "검증" 서술은 근거로 쓰지 않았고, 아래 실험으로 다시 확인했다.
+- 직접 실행한 것:
+  - 새 분리 작업 트리에서 `./gradlew build --no-daemon -I <저장소 밖 미러 init 스크립트>` → **BUILD SUCCESSFUL**(1분 34초). 실패 0, 오류 0, 건너뜀 0. architecture-test 25(ArchitectureTest 12, ModuleOwnershipTest 13), risk 41, app-engine 7, config 30, domain 31, sim 75, app-lab 86, strategy 25, gateway 1, watchdog 1, broker-api 1. 보호 테스트 `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `RealOrderGatewaysTest` 4, `EngineMainTest` 3, `ArchitectureTest` 12 모두 통과(수 그대로).
+  - 변조 실험(모두 커밋하지 않았다. 실험 뒤 원복해 `git status` 깨끗함과 Gradle 홈에 둔 실험 jar 삭제를 확인했다):
+    - M7 재현(재검토 2와 같은 조건: 자원 전용 등록 + `compileJava` 태스크 출력을 `autotrade-risk/build/classes/java/zz`로, `com.autotrade.risk.guard.X`가 `beginActivation` 호출) → **실패**. `#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다` "선언 출력이 자기 프로젝트 폴더 밖: :autotrade-zz BUILT …/autotrade-risk/build/classes/java/zz". 표 고정 테스트 `#클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다`도 예외 목록 변경으로 실패했다. **R-7이 닫혔다.**
+    - M8(자기 폴더 안의 테스트 모양 경로): (a) `compileJava` 태스크 출력만 `build/classes/test`로 돌림 → 실패는 예외 목록 고정 테스트 1건뿐이었다. 다만 이 경우 클래스가 선언 출력·jar에 들어가지 않아(`unzip -l` 결과 `.class` 0개) 어떤 클래스패스에도 오지 않으므로 우회가 아니다. (b) `sourceSets.main.java.destinationDirectory`를 `build/classes/test`로 돌림(jar에 `X.class` 포함) → **실패**. `#운영_클래스는_패키지를_소유한_모듈에만_있다`(소유 위반 `X (:autotrade-zz)`)와 `#클래스패스는_...`("클래스가 없다고 선언했지만 … .class 1개", 폴더·jar 2건)가 잡았다.
+    - M9(저장소 안 파일 jar): `autotrade-app-engine`에 `implementation(files("libs/evil.jar"))`를 두고, jar에 `org.evil.E`(`beginActivation` 호출)를 넣음 → **실패**("선언 출력과 맞지 않는 클래스패스 항목: …/autotrade-app-engine/libs/evil.jar").
+    - M10(허용 위치 밖 jar): 같은 jar를 저장소 밖 임의 경로에서 의존 → **실패**("허용 위치(Gradle 의존성 캐시·배포판) 밖 클래스패스 항목").
+    - M11(문서화된 한계 확인): 같은 jar를 Gradle 사용자 홈(`~/.gradle/`) 아래에 두고 실전 엔진이 `files(...)`로 의존 → **BUILD SUCCESSFUL**. `com.autotrade` 밖 패키지의 외부 jar 코드가 Guard를 올려도 두 테스트는 보지 않는다. 이것은 ADR-002 9.4 "남은 한계" 둘째 항목과 D-034 "F-1 남은 한계 (나)"에 적힌 그대로다. 빌드 파일 의존성 변경이 있어야 생긴다.
+  - 비밀값: 추가 diff grep 0건.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 운영 코드 변경 없음(`*/src/main/*` 변경 0). `RealTradingGuard.java:332,337` 초기 OFF, `RealTradingGuardTest` 31/31, `EngineMainTest#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 통과. 위장 코드로 Guard를 올리는 경로를 빌드가 막는 범위가 R-7 형태까지 넓어졌다(M7, M8b) |
+| A2 | 통과(문서화된 한계 있음) | `ArchitectureTest.PRODUCTION`의 가져오기 판정이 경로 패턴에서 선언 출력 종류로 바뀌었다(`ArchitectureTest.java:64`, `OurModules.architectureImportOption()`). 우리 폴더 안에서 빠지는 것은 이 모듈 테스트 출력뿐이다. 선언되지 않은 항목도 넣고, 외부 jar는 예전 패턴을 그대로 쓴다. 그래서 예전 범위보다 좁아지지 않는다. 이는 `#ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다`가 단언한다. R-7(M7)·테스트 경로 변형(M8b)·저장소 안 파일 jar(M9)·임의 경로 jar(M10)는 모두 빌드 실패. 남은 우회는 ADR-002 9.4와 D-034에 적힌 한계와 일치한다. 한계는 (가) 다른 프로젝트 선언 출력 안으로 쓰는 사용자 정의 태스크·`jar from(...)`(실측 안 함), (나) Gradle 홈·Maven 의존성의 `com.autotrade` 밖 외부 코드(M11로 실측, 문서와 일치)다. 둘 다 빌드 스크립트나 의존성 변경이 있어야 생긴다 |
+| A3 | 통과 | 라우팅 코드 변경 없음. `RealOrderGateways.java:31-33`, `RealOrderGatewaysTest` 4/4 |
+| A4 | 통과(이 PR 범위) | 앞 검토와 같다. `UNKNOWN`·`CANCEL_REQUESTED`는 비종결(`OrderStateTest`)이고 `GuardedOrderGateway.java:85`도 그대로다. 재발주 로직은 미구현이며 TST-07 (7)에서 추적한다 |
+| A5 | 해당 없음 | `IdempotencyKey`·발급기 변경 없음(TST-07 (7)로 추적) |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음(F-2는 TST-07 (1)로 추적) |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 코드 변경 없음 |
+| A8 | 해당 없음 | 프로세스 런타임 의존·`processIsolation` 변경 없음. 바뀐 빌드 파일은 테스트 전용 모듈뿐이다 |
+| A9 | 통과 | 앞 재검토와 같다. `toss-polling-scope` 기본값 `HELD_ONLY`, D-033 예외 문구 유지 |
+| A10 | 통과 | 추가 diff grep 0건. 실험 jar는 저장소 밖에서 만들었고 삭제했다 |
+| A11 | 통과 | `ArchitectureTest`는 가져오기 판정 1줄만 바뀌었고 규칙·픽스처·단언은 그대로 12/12다. 범위 포함은 별도 테스트가 단언한다. 테스트 삭제·비활성화는 0건이다. `ModuleOwnershipTest` 10→13: `#출력을_다른_프로젝트_폴더로_돌리면_잡아낸다`(M7 가짜 표, 태스크 출력만 돌림, 같은 출력 공유, 중첩 폴더, 대조군), `#선언되지_않은_클래스패스_항목과_테스트처럼_보이는_운영_출력을_잡아낸다`, `#클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다`(예외 목록 고정 포함). 모두 실패 경우를 담고 있다 |
+| A12 | 통과 | 장애 대응표·장애 테스트 8종 변경 없음 |
+| A13 | 해당 없음 | 시장·시각·금액 계산 변경 없음 |
+| A14 | 통과 | ADR-002 9.4 "보장"이 실제 동작과 맞다. 보장 범위를 "자기 프로젝트 폴더 안의 선언 출력으로 만든 운영 클래스" + "선언 출력도 외부 허용 위치도 아닌 클래스패스 항목이면 실패"로 좁혀 적었고, M7·M8b·M9·M10으로 확인했다. 남은 한계 (가)~(라)가 D-034 "F-1 남은 한계"와 같은 내용이다. (나)는 M11로 실측해 문서와 일치함을 확인했다. 재검토 2의 A14 실패 사유(무조건 보장 문장)는 해소됐다 |
+
+## 점검표 밖 발견 (재검토 3)
+- R-7: 해소(M7, M8b). 앞 검토의 R-1, QA Q-1·Q-2는 이번 변경으로 매핑 방식이 바뀌었다. 재검토 2의 M1~M5를 이번 커밋에서 다시 돌리지는 않았다. 단 바뀐 판정(선언 출력 정확 일치)은 M1~M4가 기대던 폴더 매핑을 넓히는 방향이 아니다. `#com_autotrade_밖_패키지의_운영_클래스도_잡아낸다`, `#같은_이름의_중첩_프로젝트는_소유_모듈로_인정하지_않는다`, `#아무도_의존하지_않는_새_모듈이_빠지면_잡아낸다`가 그대로 통과한다. 그래서 회귀로 보지 않는다 `[추론]`.
+- R-8 [낮음, 문서화됨, 조치 요구 없음]: M11처럼 Gradle 사용자 홈 아래 jar나 Maven 의존성으로 들어온 외부 코드는 `com.autotrade` 밖 패키지면 두 테스트가 보지 않는다. 문서가 이 한계와 대응("실전 엔진에 새 외부 의존성이 들어오는 PR은 risk-ops 검토")을 적었다. risk-ops는 앞으로 `autotrade-app-engine`, `autotrade-risk`, `autotrade-broker-*`의 `dependencies` 블록 변경을 실전 관련 PR 신호로 보고 검토한다. 7단계 전에 실전 엔진 런타임 클래스패스의 외부 jar 목록을 고정하는 검사(허용 목록)를 두는 것을 TST-07 후보로 권한다.
+- 관찰: 예외 목록(`MODULES_WITHOUT_PACKAGES`·`NO_CLASSES_YET`)은 지금 값이 테스트로 고정됐다. 이 목록을 바꾸는 PR은 보호 테스트 변경이므로 실전 관련 PR로 다룬다(지침 11장 보호 테스트).
+
+## 판정 (재검토 3)
+승인
+
+- 재검토 2의 수정 필요 항목(A2, A14, R-7)이 해소된 것을 직접 실행한 빌드와 변조 실험(M7, M8b, M9, M10)으로 확인했다. 남은 우회(M11)는 ADR-002 9.4와 D-034에 적힌 한계와 일치한다. 확인 못 함 항목은 없다(A5~A8·A13은 이 PR이 건드리지 않아 해당 없음이고, 미구현 상태는 TST-07로 7단계 완료 조건에 묶여 있다).
+- 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest` 범위·판정 변경 포함). 이 승인은 risk-ops 역할 검토 결과일 뿐이다. 머지는 독립 QA 관문을 거친 뒤 사용자가 직접 한다(지침 10·11장).
