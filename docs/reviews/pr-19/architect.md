@@ -34,3 +34,37 @@
 - B2·B3: ADR-004 2.4(입력, 처리 순서)와 4장 후속표, ADR-001 모듈표·계약표·ArchUnit 규칙 목록을 `RiskChain`·`BlacklistSnapshot`·거절 규칙 ID·`RISK_POLICIES_LIVE_IN_RISK_MODULE` 기준으로 갱신하고 D-032를 링크한다(문서 수정만).
 - N1: D-023 공통 원칙 1과의 충돌을 D-032에 명시하고 사용자 결정 Q 항목으로 올린다(이 항목 잠정 표시).
 - 실전 관련 PR이므로 수정 후 risk-ops 재검토, 독립 QA, 사용자 머지가 필요하다. N2~N6은 막지 않는다.
+
+## 재검토 2026-10-09
+- 대상: PR #19 / 브랜치 HEAD 4975a9e / `git diff origin/main...4975a9e` 전체(커밋 4개, 20개 파일, +692 −45). 지난 검토(8e48a0b) 뒤 바뀐 것: BlacklistSnapshot.java Javadoc 2줄, SimulationExperimentRunnerTest 테스트 이름 1줄, ADR-001, ADR-004, D-032, 결정 로그 README.
+- 점검표: B
+- 직접 실행한 것:
+  - 별도 git worktree(4975a9e, 검토 후 제거)에서 `./gradlew clean build --no-daemon`: BUILD SUCCESSFUL, 101 actionable tasks, EXIT=0. 테스트 XML 합계 320건, 실패·오류·건너뜀 0(지난 검토와 같은 건수). 이름이 바뀐 `진입_규칙은_모든_모의_진입에_적용된다()` 실행 확인.
+  - `git diff 90b2c8d 4975a9e -- '*.java'`: 운영 코드 변경은 주석 2줄뿐이라 지난 검토의 변이 검사(8건 + ArchUnit 2건)와 실험 재실행 결과가 그대로 유효하다.
+  - GitHub REST check-runs(4975a9e): `DB schema`, `Secret scan and collector boundary` success, `Gradle build`는 검토 시점에 in_progress(로컬 빌드로 판정).
+  - 열린 PR의 결정 로그 번호 대조: `git grep "| Q-01[5-8] |"`를 열린 브랜치마다 실행(아래 R1).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 worktree `./gradlew clean build` EXIT=0, 320건 통과 |
+| B2 | 통과 | 의존 변경 없음(지난 검토와 같음). ArchUnit 규칙 목록이 ADR-001:81에 갱신됐다: "13개 테스트", Guard 규칙 2개(ADR-002)와 `RiskPolicy` 구현은 리스크 모듈에만(D-032)을 더해 실제 `ArchitectureTest`의 규칙과 맞는다(지난 N5도 해소) |
+| B3 | 통과 | ADR-004 2.4 입력(:59)과 처리 순서(:62)가 `RiskChain`으로, 4장 후속표(:108)가 "공통 체인 `RiskChain`만 받음, 멱등 키·상태머신 단계는 남음"으로 바뀌었다. ADR-001 모듈표(:47)에 `RiskChain`·`BlacklistSnapshot`·`BlacklistEntry`·`BlacklistType`(과 기존 guard 골격), 계약표(:104-105)에 `RiskPolicy` 운영 구현 위치와 `RiskChain` 계약(빌더, 고정 순서, 거절 ID `BLACKLIST`·`MANUAL_HOLDING`·`RISK_RULE_ERROR`, 불변)이 들어갔다. 코드(RiskChain.java:50-72, 99)와 대조해 일치 |
+| B4 | 통과 | 코드 변경 없음(주석·테스트 이름). 지난 검토의 결정론·실험 재실행 결과 유효 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 테스트 수 320건 유지, 삭제·`@Disabled` 없음. 테스트 이름 변경은 동작과 이름을 맞춘 것(지난 N6 해소) |
+| B7 | 통과(risk-ops 검토 필요) | 블랙리스트·리스크 검증과 보호 테스트를 건드리는 실전 관련 PR. risk-ops 재검토가 4975a9e 기준으로 따로 있어야 하고, 사용자 머지 대상이다 |
+| B8 | 통과 | 바뀐 줄에 비밀값 없음, CI gitleaks success |
+
+### 지난 지적 처리
+- B2·B3: 해소(위 표).
+- N1: D-032 결정 1.1(:15)에 "청산·손절까지 막는 부분은 Q-018 결정 전까지 잠정", 위험과 한계 첫 항목(:38)에 D-023 공통 원칙 1과의 충돌, 위험 경로, 현재 무영향, 사용자 결정 필요가 들어갔고, 결정 로그 미확정에 Q 항목(README:49)이 추천안·대안과 함께 열렸다. 내용은 해소. 다만 번호가 아래 R1처럼 겹친다.
+- N2: BlacklistSnapshot.java:21에 "같은 스냅샷인지는 지문으로만 판단, equals는 재현 확인에 쓰지 않음"이 들어갔다. 해소(권고 수준).
+- N3·N4: 7단계 과제로 남김. 막지 않음.
+- N5·N6: 해소.
+
+### 새 발견
+- **R1 (수정 필요) Q-018 번호가 열린 PR #18과 겹친다.** [사실] 열린 PR #18(브랜치 `claude/project-thread-r930sh`, 실전 운영 화면·ADR-006)의 `docs/decisions/README.md`가 이미 Q-016, Q-017, Q-018을 쓰고 있고, 그 Q-018은 "장애 테스트 목록(broker-and-fault-design.md 7장)에 실전 엔진 …" 항목이다. 열린 PR #10(`claude/project-thread-u03g6l`)은 Q-015를 쓴다. 이 PR은 다른 내용으로 Q-018을 새로 열고 D-032(:15, :38)와 ADR-001(:105)에서 그 번호를 참조한다. [추론] 둘 중 나중에 머지되는 쪽에서 README는 충돌로 드러나지만, D-032·ADR-001의 참조는 충돌 없이 남아 다른 질문을 가리킬 수 있다. 두 Q가 모두 실전 영향이라 사용자에게 같은 번호로 다른 질문을 하게 된다. 요구: 이 PR의 항목을 열린 PR들과 겹치지 않는 번호(지금 기준 Q-019)로 바꾸고 D-032·ADR-001 참조를 함께 고친다. 다른 쪽이 번호를 바꾸기로 하면 그 조정 결과를 PR 본문에 적는다.
+- **R2 (권고) 결정 로그 색인의 D-032 줄(README:36)은 "블랙리스트·수동 보유 필터(모든 의도)"만 적고 잠정·Q 항목을 언급하지 않는다.** 색인만 보는 사람이 확정으로 읽는다. 번호 정리 때 "청산·손절 차단은 Q-0xx 결정 전까지 잠정"을 덧붙인다. D-032 상태 줄(:4)의 "확정"도 같은 이유로 "확정(1.1 일부 잠정)"이 낫다.
+
+### 판정
+수정 필요(R1). 문서의 Q 번호만 바꾸면 된다. B 점검표는 전 항목 통과 또는 해당 없음이고 확인 못 함은 없다. R1을 고친 뒤 다시 확인하면 승인할 수 있다. 실전 관련 PR이므로 그 뒤에도 risk-ops 재검토, 독립 QA, 사용자 머지가 필요하다.
