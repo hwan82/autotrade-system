@@ -22,8 +22,7 @@
 
 ```
  autotrade-app-gateway ──► autotrade-broker-kiwoom ─┐
-                       └─► autotrade-broker-kis ────┤──► autotrade-broker-api ──► autotrade-marketdata ──► domain
-   autotrade-broker-toss (폴링, 게이트웨이는 안 씀) ─┘
+                       └─► autotrade-broker-kis ────┴──► autotrade-broker-api ──► autotrade-marketdata ──► domain
 ```
 
 - **공통 엔진 하나, 프로토콜만 증권사별.** `StreamingMarketDataSource`(marketdata.live)가 접속, 로그인 대기, 구독 등록, 재연결(1초부터 두 배씩 최대 30초), 무응답 감시, 끊긴 구간 표시를 맡는다. 플러그인은 `StreamProtocol`(엔드포인트, 열기 메시지, 구독·해지 메시지, 해석)만 구현한다. 토스 WebSocket을 붙이게 되면 `TossStreamProtocol` 하나와 플러그인 능력 선언만 추가하면 된다(BRK-06).
@@ -33,7 +32,7 @@
 - **수신 스레드 분리.** 소켓 콜백은 해석까지만 하고 이벤트는 소스 전용 `SerialDispatcher`(크기 제한 큐)로 넘긴다. 큐가 차면 버리고 나중에 `CONSUMER_OVERFLOW` 공백을 남긴다. 느린 수신자가 소켓을 막지 않는다(broker-and-fault-design.md 5장).
 - **토큰.** `TokenCache`가 만료 여유를 두고 재발급하고, 로그인 거절이면 버리고 재발급한다. 인증 실패 뒤 다음 접속(재발급)은 최소 60초 뒤다. 토큰·접속키 **발급 자체가 실패**해도 원인과 무관하게 다음 발급은 60초 뒤이고, 발급이 자격 증명 거절(HTTP 401·403, 키움 `return_code`≠0 `[가정]`)이면 `CredentialsRejectedException`으로 알려 접속 후 인증 실패와 같은 횟수로 센다(독립 QA PR #10 과금 8.4). 재연결 대기는 인증이 확인된 뒤(로그인 응답, 응답이 없는 한국투자는 첫 시세)에만 초기화한다. 연속 3회 인증에 실패하면 ERROR 로그를 남기고 플러그인이 DEGRADED로 알려 게이트웨이 배분에서 빠진다. 거부 판정 뒤에는 재발급 간격을 2분부터 두 배씩 늘려 30분에서 멈춘다(하루 약 50회, risk-ops 5차 T1). 인증이 다시 확인되면 풀린다. 한국투자는 배분에서 빠지면 시세가 오지 않아 스스로 풀리지 않으므로 키를 고친 뒤 게이트웨이를 재기동한다(risk-ops 검토 N1). 토큰 값은 `toString`에서 가리고 로그·예외 메시지에 넣지 않는다(안전 불변식 9).
 
-| 항목 | 키움 | 한국투자 | 토스 |
+| 항목 | 키움 | 한국투자 | 토스(참고, 이 PR에 클라이언트 없음) |
 |---|---|---|---|
 | 방식 | WebSocket `wss://api.kiwoom.com:10000/api/dostk/websocket` | WebSocket `ws://ops.koreainvestment.com:21000/tryitout` | REST 폴링 `GET /api/v1/prices` |
 | 인증 | 접근 토큰(`au10001`) → `LOGIN` 응답 대기 | 접속키(`/oauth2/Approval`, 24시간) → 구독 메시지 헤더 | 접근 토큰(client credentials) |
@@ -176,7 +175,7 @@
 - domain: `MarketEvent`에 `DataGap` 추가.
 - marketdata: `LiveMarketDataSource`, `ConnectionState`, `SourceStateListener`, 패키지 `live`·`recording`·`calendar`·`rules`·`daily`·`polling`.
 - broker-api: `BrokerCredentials`, `BrokerStatuses`, `BrokerPlugin.pollingQuotes()`(기본 빈 값, 기존 구현 영향 없음).
-- 새 모듈 `autotrade-broker-{kiwoom,kis,toss}`, ArchUnit 규칙 `증권사_플러그인끼리_참조하지_않는다`.
+- 새 모듈 `autotrade-broker-{kiwoom,kis}`(토스는 연결 PR로, 2.1), ArchUnit 규칙 `증권사_플러그인끼리_참조하지_않는다`.
 
 **설정 키 제안 (architect가 config-keys.md에 반영 여부 결정)**
 
