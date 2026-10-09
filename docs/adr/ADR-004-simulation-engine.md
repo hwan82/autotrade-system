@@ -12,7 +12,7 @@
 
 [사실] 1단계 뼈대(PR #7)는 `ExperimentRunner`·`ExperimentSpec`·`RunResult` 계약만 두고 구현을 3단계로 넘겼다(`autotrade-sim/.../ExperimentRunner.java`). `StrategyProfile`은 데이터만 있고 "실행 로직은 3·4단계에서 정의"로 남아 있었다.
 [사실] 비용은 D-021과 Q-004 조사(docs/research/q-004-trading-costs.md)가 "적용 시작일이 있는 표, 체결 건 단위 항목별 반올림"으로 정했다.
-[사실] 2단계 시세(PR #10)는 아직 열려 있다. 이 ADR의 실행기는 시세 소스 대신 불변 이벤트 목록(`MarketDataSet`)을 받고, 테스트는 손으로 만든 녹화 데이터를 쓴다. #10 머지 후 녹화 형식 어댑터를 더한다(4장).
+[사실] 이 ADR 작성 당시 2단계 시세(PR #10)는 열려 있었고, 2026-10-09 main에 머지됐다(`3ffa851`). 이 ADR의 실행기는 시세 소스 대신 불변 이벤트 목록(`MarketDataSet`)을 받고, 테스트는 손으로 만든 녹화 데이터를 쓴다. #10 머지 후 녹화 형식 어댑터를 더한다(4장).
 
 ## 2. 결정
 

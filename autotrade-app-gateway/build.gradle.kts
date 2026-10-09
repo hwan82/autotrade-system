@@ -23,3 +23,13 @@ dependencies {
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)
 }
+
+// 녹화일 두 번 리플레이 확인(2단계 완료 기준 MD-06). 녹화 파일만 읽고 네트워크·주문을 쓰지 않는다.
+// 사용: ./gradlew :autotrade-app-gateway:replayCheck --args="2026-10-12 replay-2026-10-12.md"
+tasks.register<JavaExec>("replayCheck") {
+    group = "verification"
+    description = "녹화일을 두 번 리플레이해 결과가 같은지 보고 종목별 체결 요약을 낸다"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.gateway.ReplayCheck")
+    workingDir = rootProject.projectDir // 보고서 상대 경로는 저장소 루트 기준
+}
