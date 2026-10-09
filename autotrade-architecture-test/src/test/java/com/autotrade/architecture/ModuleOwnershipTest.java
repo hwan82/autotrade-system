@@ -14,9 +14,11 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.core.importer.Location;
 import com.tngtech.archunit.core.importer.Locations;
+import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,8 +42,15 @@ import org.junit.jupiter.api.Test;
  * <p>방법: 클래스패스의 {@code com.autotrade} 위치(모듈별 클래스 폴더나 jar)를 하나씩 따로 가져와, 위치 경로에서 모듈 이름을
  * 알아내고(아래 {@link #moduleOf}), 클래스 패키지의 소유 모듈(아래 {@link #OWNERS}, 가장 긴 접두어 우선)과 비교한다.
  * 위치마다 따로 가져오므로 같은 FQN 클래스가 두 모듈에 있어도 둘 다 검사된다(한 번에 가져오면 하나만 남는다).
- * 표에 없는 패키지 루트, 모듈을 알 수 없는 위치, 표에 있는데 클래스패스에 없는 모듈도 실패다. 그래서 새 모듈을 만들면
- * 이 표를 같이 고쳐야 빌드가 통과한다(CLAUDE.md, ADR-001 4장).
+ * 표에 없는 패키지 루트, 모듈을 알 수 없는 위치, 표에 있는데 클래스패스에 없는 모듈도 실패다.
+ *
+ * <p>검사 범위(risk-ops PR #21 검토 R-1): 이 테스트는 {@code autotrade-architecture-test}의 테스트 클래스패스만 본다. 그
+ * 클래스패스는 손 목록이 아니라 {@code settings.gradle.kts}의 모든 Java 모듈(자기 자신 제외)에서 자동으로 만든다
+ * ({@code build.gradle.kts}). 또 Gradle이 settings의 Java 모듈 이름을 시스템 속성으로 따로 넘기고, 아래
+ * {@link #클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다}가 그 목록이 클래스패스·{@link #OWNERS} 표와 같지 않으면
+ * 실패한다. 그래서 settings에 include한 새 모듈은 어떤 모듈도 의존하지 않아도 이 검사와 {@link ArchitectureTest}에 들어오고,
+ * 표를 고치기 전까지 빌드가 실패한다(CLAUDE.md, ADR-002 9장). Gradle 밖(IDE 자체 실행기)에서 시스템 속성 없이 돌리면
+ * 닫힌 쪽으로 실패한다. settings에 include하지 않은 폴더는 Gradle 빌드 산출물이 아니므로 대상이 아니다.
  *
  * <p>대안 비교
  * <ul>
@@ -86,6 +95,19 @@ class ModuleOwnershipTest {
      */
     static final Set<String> NO_CLASSES_YET = Set.of("autotrade-notification-jar", "autotrade-monitor-agent-jar");
 
+    /**
+     * 설계상 Java 클래스를 만들지 않는 Java 플러그인 모듈(정적 자원만 담는다). 패키지를 소유하지 않으므로 {@link #OWNERS}에 없다.
+     * 이 모듈에 {@code com.autotrade} 클래스가 생기면 소유 패키지가 없어 위 검사에서 위반이 된다.
+     */
+    static final Set<String> MODULES_WITHOUT_PACKAGES = Set.of("autotrade-ui");
+
+    /** Gradle이 넘기는 settings의 Java 모듈 이름 목록(쉼표 구분, 이 모듈 제외). {@code build.gradle.kts}. */
+    static final String SETTINGS_MODULES_PROPERTY = "autotrade.settingsJavaModules";
+
+    /** 클래스패스 항목(폴더나 jar)의 경로에서 모듈 이름을 알아낸다. 클래스·자원 폴더, jar, IDE 출력. */
+    private static final Pattern CLASSPATH_MODULE_DIR =
+            Pattern.compile(".*/([^/]+)/(?:build/(?:classes|resources|libs)|out/production)(?:/.*)?");
+
     /** Gradle 클래스 폴더·jar({@code <모듈>/build/classes|libs/...}), IDE 출력({@code <모듈>/out/production/...}). */
     private static final Pattern MODULE_DIR = Pattern.compile(".*/([^/!]+)/(?:build/(?:classes|libs)|out/production)/.*");
 
@@ -109,6 +131,59 @@ class ModuleOwnershipTest {
         Set<String> expected = new TreeSet<>(OWNERS.values());
         expected.removeAll(NO_CLASSES_YET);
         assertThat(seenModules).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void 클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다() {
+        String property = System.getProperty(SETTINGS_MODULES_PROPERTY);
+        assertThat(property)
+                .as("시스템 속성 %s가 없다. Gradle(./gradlew :autotrade-architecture-test:test)로 실행해야 한다",
+                        SETTINGS_MODULES_PROPERTY)
+                .isNotBlank();
+        Set<String> settingsModules = new TreeSet<>(List.of(property.split(",")));
+        // 빈 손 통과 방지: 실전 경로 모듈은 반드시 목록에 있다
+        assertThat(settingsModules).contains("autotrade-risk", "autotrade-app-engine", "autotrade-app-lab");
+
+        assertThat(coverageGaps(settingsModules, classpathModules(), OWNERS, MODULES_WITHOUT_PACKAGES))
+                .as("settings 모듈이 아키텍처 테스트 클래스패스나 소유 모듈 표에서 빠졌다")
+                .isEmpty();
+    }
+
+    @Test
+    void 아무도_의존하지_않는_새_모듈이_빠지면_잡아낸다() {
+        // R-1 재현: settings에만 include한 새 모듈이 클래스패스에도 표에도 없는 경우(손 목록 시절의 구멍)
+        Set<String> settings = new TreeSet<>(OWNERS.values());
+        settings.addAll(MODULES_WITHOUT_PACKAGES);
+        Set<String> classpath = new TreeSet<>(settings);
+        settings.add("autotrade-rogue");
+        assertThat(coverageGaps(settings, classpath, OWNERS, MODULES_WITHOUT_PACKAGES)).containsExactly(
+                "아키텍처 테스트 클래스패스에 없는 모듈: autotrade-rogue",
+                "소유 모듈 표(OWNERS)에 없는 모듈: autotrade-rogue");
+
+        // 표만 고치고 클래스패스에는 없는 경우(의존 목록을 손 목록으로 되돌린 경우)
+        Map<String, String> table = new HashMap<>(OWNERS);
+        table.put("com.autotrade.rogue", "autotrade-rogue");
+        assertThat(coverageGaps(settings, classpath, table, MODULES_WITHOUT_PACKAGES))
+                .containsExactly("아키텍처 테스트 클래스패스에 없는 모듈: autotrade-rogue");
+
+        // 표에는 있는데 settings에서 사라진 모듈
+        settings.remove("autotrade-rogue");
+        assertThat(coverageGaps(settings, classpath, table, MODULES_WITHOUT_PACKAGES))
+                .containsExactly("settings에 없는 모듈이 표에 있음: autotrade-rogue");
+
+        // 대조군: 모두 맞으면 빈 결과
+        assertThat(coverageGaps(settings, classpath, OWNERS, MODULES_WITHOUT_PACKAGES)).isEmpty();
+    }
+
+    @Test
+    void 클래스패스_항목에서_모듈_이름을_알아낸다() {
+        assertThat(classpathModuleOf("/home/u/repo/autotrade-risk/build/classes/java/main")).contains("autotrade-risk");
+        assertThat(classpathModuleOf("/home/u/repo/autotrade-ui/build/resources/main")).contains("autotrade-ui");
+        assertThat(classpathModuleOf("/home/u/repo/autotrade-app-lab/build/libs/autotrade-app-lab-plain.jar"))
+                .contains("autotrade-app-lab");
+        assertThat(classpathModuleOf("C:\\work\\repo\\autotrade-sim\\out\\production\\classes"))
+                .contains("autotrade-sim");
+        assertThat(classpathModuleOf("/home/u/.gradle/caches/modules-2/files-2.1/x/archunit-1.3.0.jar")).isEmpty();
     }
 
     @Test
@@ -184,6 +259,54 @@ class ModuleOwnershipTest {
                 .filter(PRODUCTION_ONLY::includes)
                 .sorted(Comparator.comparing(l -> l.asURI().toString()))
                 .collect(Collectors.toList());
+    }
+
+    /** 테스트 JVM 클래스패스(Gradle이 넘긴 그대로)에 항목이 있는 모듈. 클래스가 없는 모듈도 자원 폴더 등으로 잡힐 수 있다. */
+    private static Set<String> classpathModules() {
+        Set<String> out = new TreeSet<>();
+        for (String entry : System.getProperty("java.class.path").split(File.pathSeparator)) {
+            classpathModuleOf(entry).ifPresent(out::add);
+        }
+        return out;
+    }
+
+    static Optional<String> classpathModuleOf(String entry) {
+        Matcher m = CLASSPATH_MODULE_DIR.matcher(entry.replace('\\', '/'));
+        return m.matches() ? Optional.of(m.group(1)) : Optional.empty();
+    }
+
+    /**
+     * settings의 Java 모듈 목록과 클래스패스·소유 모듈 표를 맞춰 본다. 빠진 것을 사람이 읽을 문장으로 돌려준다(정렬).
+     *
+     * @param settingsModules settings에 include된 Java 모듈(이 모듈 제외)
+     * @param classpathModules 이 테스트 클래스패스에 항목이 있는 모듈
+     * @param owners 패키지 루트 → 소유 모듈 표
+     * @param withoutPackages 패키지를 소유하지 않는 모듈
+     */
+    static List<String> coverageGaps(Set<String> settingsModules, Set<String> classpathModules,
+            Map<String, String> owners, Set<String> withoutPackages) {
+        List<String> missingOnClasspath = new ArrayList<>();
+        List<String> missingInTable = new ArrayList<>();
+        List<String> staleInTable = new ArrayList<>();
+        Set<String> known = new TreeSet<>(owners.values());
+        known.addAll(withoutPackages);
+        for (String m : new TreeSet<>(settingsModules)) {
+            if (!classpathModules.contains(m)) {
+                missingOnClasspath.add("아키텍처 테스트 클래스패스에 없는 모듈: " + m);
+            }
+            if (!known.contains(m)) {
+                missingInTable.add("소유 모듈 표(OWNERS)에 없는 모듈: " + m);
+            }
+        }
+        for (String m : known) {
+            if (!settingsModules.contains(m)) {
+                staleInTable.add("settings에 없는 모듈이 표에 있음: " + m);
+            }
+        }
+        List<String> out = new ArrayList<>(missingOnClasspath);
+        out.addAll(missingInTable);
+        out.addAll(staleInTable);
+        return out;
     }
 
     static List<String> violations(String module, JavaClasses classes) {
