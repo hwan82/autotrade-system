@@ -49,3 +49,47 @@
 
 ## 판정
 수정 필요(B7: risk-ops 검토 원문 없음, 발견 1: 시세 공백 유실, 발견 2: 한국투자 인증 실패 미감지와 ADR 불일치). 발견 3~5는 같은 수정 PR에서 함께 고치기를 권장한다. CI "Gradle build" 성공도 머지 전에 확인해야 한다.
+
+## 재검토 2026-10-09
+- 대상: PR #10 / 커밋 bf23fc3(현재 head) / `git diff origin/main...bf23fc3` 전체(106파일, +8021 −15). 직전 검토(4160936) 이후 코드 변경은 1ea693e, eecb2d2, ae90625(`.gitignore` 한 줄). 나머지는 검토 원문 커밋
+- 점검표: B
+- 직접 실행한 것(공유 체크아웃과 분리된 작업 트리에서):
+  - `./gradlew clean build` (bf23fc3): 종료 코드 0. 테스트 398건, 건너뜀 0, 실패 0, 오류 0
+  - 1ea693e에서 `./gradlew clean build` 1회 실패: `RecordingReplayTest#녹화_큐가_넘치면_기다리지_않고_버린_뒤_누락을_표시한다`(208행 `gaps` 0). bf23fc3에서 CPU 부하(바쁜 루프 8개)를 걸고 `RecordingReplayTest`·`StreamingMarketDataSourceTest`를 `--rerun-tasks`로 반복하니 같은 테스트가 다시 실패했다(첫 12회 중 1회, 이어서 15회 중 4회). 실패는 매번 이 테스트 하나였다
+  - 임시 테스트(실행 후 삭제, 커밋 안 함) 1: 전송 계층의 `send`가 같은 스레드에서 `onError`를 부르게 하자, `DISCONNECTED` 상태 알림이 `subscribe` 호출 안에서(소스 잠금을 쥔 채) 나갔다(`FIRED_INSIDE_SUBSCRIBE=true`). 1ea693e와 bf23fc3에서 같은 결과
+  - 임시 테스트 2: `ExchangeCalendar.bundled(...)` 1회 비용을 쟀다. 예열 뒤 약 200µs/회
+  - CI check-runs(bf23fc3): Secret scan 성공, DB schema 성공, Gradle build는 검토 시점에 진행 중
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 실패 | `./gradlew clean build`는 bf23fc3에서 통과했다. 하지만 같은 코드로 빌드 결과가 갈린다. `RecordingReplayTest#녹화_큐가_넘치면_기다리지_않고_버린_뒤_누락을_표시한다`가 쓰기 스레드와의 경합에 기대기 때문이다(아래 발견 A). 1ea693e clean build 1회 실패, bf23fc3 부하 반복에서 재현됐다. CI Gradle build 결과도 아직 없다 |
+| B2 | 통과 | 규칙은 추가만 있다. `PLUGINS_ARE_INDEPENDENT`(ArchitectureTest.java:160 부근)와 위반 픽스처 `com.autotrade.broker.fixturea.PluginA`→`fixtureb.PluginB`. `규칙은_위반을_실제로_잡아낸다`에서 위반이 잡히고 broker-api 참조는 위반이 아님을 확인한다. 통과 |
+| B3 | 통과 | 새 계약 `LiveMarketDataSource.lastReceivedAt()`, `credentialsRejected()`(기본 메서드), `Stats.Snapshot.authFailures`가 ADR-003 2.1 "토큰"·2.2와 일치한다. 이전 불일치(한투 주소, MISSING_BAR 정의, 기준일=거래소 현지 날짜, DataGap 주석)는 ADR-003 38·117·119행과 `DataGap.java`에서 고쳐졌다. ADR-003 106행에는 manifest "기준일"이라는 말이 남아 있지만 117행이 생성 시각의 현지 날짜로 정의하므로 막지 않는다 |
+| B4 | 통과 | 새 코드도 주입 `Clock`만 쓴다(`MarketHub.gapStart`, 인증 실패 하한 `AUTH_RETRY_MIN`). `NO_SYSTEM_TIME`·`NO_UNSEEDED_RANDOM` 통과. 리플레이 결정론 테스트와 sim 골든 테스트 통과. `MarketHub.lost`는 `TreeMap`이라 공백 녹화 순서가 종목 순서로 정해진다 |
+| B5 | 통과 | 금액 표현 변경 없음. `금액에_실수형을_쓰지_않는다` 통과 |
+| B6 | 실패 | 새 동작에는 테스트가 있다. 전 소스 장애 공백, 마지막 수신 시각 기준 공백, 종료 시 공백(`GatewayTest` 3건), 한투 인증 실패 매핑, 인증 실패 60초 하한·3회 거부·해제(`StreamingMarketDataSourceTest`), 실전 계좌 증권사 제외(`GatewayMainTest`), 스냅샷 현지 기준일. 1ea693e에서 지웠던 `SOURCE_SWITCH` 단언은 eecb2d2에서 복구됐다. 다만 위 경합 테스트는 결과가 비결정적이라 "통과로 확인됨"으로 셀 수 없다(발견 A). 같은 PR이 만든 테스트다 |
+| B7 | 통과 | `docs/reviews/pr-10/risk-ops.md` "재검토 2026-10-09 (2차)" 판정 승인(eecb2d2 기준, 그 뒤 코드 변경은 `.gitignore`뿐). 같은 원문이 이 PR을 실전 관련 PR로 분류했다. 따라서 사용자 직접 머지와 독립 QA(D-031) 대상이다 |
+| B8 | 통과 | 새 로그 두 줄은 증권사 ID·실패 횟수만 남긴다(`GatewayMain` 예약 증권사 경고, `StreamingMarketDataSource` 인증 연속 실패 ERROR). `LOGIN_FAILED` 사유는 `msg_cd`만(`KisStreamProtocol`). 테스트 픽스처는 `<ACCOUNT_NUMBER>` 자리표시자. CI gitleaks 성공 |
+
+### 이전 수정 필요 항목 처리
+- 원래 B7(risk-ops 원문 없음): 해결. 위 B7 참고
+- 원래 발견 1(공백 유실): 해결. `MarketHub`가 배정을 잃은 종목을 `lost`에 기억했다가 다시 배정될 때나 종료 때 녹화한다. 전환 공백 시작은 `lastReceivedAt()`이다. 테스트 `GatewayTest#모든_소스가_끊겼다가_돌아오면_받지_못한_구간을_남긴다`, `#옮길_때_공백은_옛_소스에서_마지막으로_받은_시각부터다`, `#받을_소스_없이_끝나면_종료_시각까지_공백을_남긴다`로 확인했다
+- 원래 발견 2(한투 인증 실패): 해결. `OPSP0011` 또는 "invalid approval" 문구를 `LOGIN_FAILED`로 바꾼다. 코드 목록은 `[가정]`이고 Q-015에서 확인한다. 재발급 루프는 eecb2d2의 60초 하한과 인증 확인 뒤 초기화로 막혔다
+- 원래 권장 3~5: 반영됐다. ArchitectureTest 주석, 키움 `ArithmeticException` 항목 단위 처리, 전송 실패 알림, 기준일, 문서 정리. 단 전송 실패 알림이 새 결함을 만들었다(발견 B). 토스 부분 결과(R5)와 공용 스케줄러 토큰 발급은 ADR-003 5·6장 후속 목록에 있다
+
+### 점검표 밖 발견 (재검토)
+
+A. **[수정 필요] 녹화 큐 넘침 테스트가 비결정적이다.** `RecordingReplayTest.java:193-210`은 큐 1칸에 2000건을 몰아 넣고 `RECORDER_OVERFLOW` 공백이 1건 이상이길 기대한다. 공백은 "버린 뒤 다음 넣기가 성공할 때" 생긴다(`MarketEventRecorder.offer`). 쓰기 스레드가 첫 항목에서 `DayWriter`를 여는 동안(폴더 생성, 메타 쓰기) 2000건이 모두 넣어지면 이후 넣기가 전부 실패해 공백이 0건이 된다. 부하가 있는 CI 러너에서 빌드를 무작위로 깨뜨린다. 제안: 쓰기를 멈출 수 있는 시험용 생성자를 둔다(쓰기 스레드 시작을 `CountDownLatch`로 막고, 넘친 뒤 풀고, 한 건 더 넣는다). 또는 쓰기 스레드 팩토리를 주입한다. 테스트를 지우거나 끄지 않는다(지침 4장 5번).
+
+B. **[수정 필요] 전송 실패 알림이 소스 잠금 안에서 상태 알림을 내보낸다.** 1ea693e가 `JdkWsTransport.send`에 `.whenComplete(... handler.onError(err))`를 붙였다(JdkWsTransport.java:49-51). 앞선 전송이 끝나 있으면 `thenCompose`가 호출 스레드에서 `sendText`를 부른다. `sendText`가 이미 실패한 future를 돌려주면 `onError`도 호출 스레드에서 돈다. JDK는 출력이 닫힌 뒤 바로 실패한 future를 돌려준다 `[추론]`(이 환경에 JDK 소스가 없어 원문 대조는 못 했다). 같은 스레드에서 불렸을 때의 동작은 임시 테스트 1로 확인했다. `sendAll`은 소스 잠금 안에서 불린다(`StreamingMarketDataSource.java:178` `subscribe`, `:406` `onText`의 응답 전송). 그래서 `Handler.onError → dropConnection → fire`가 잠금을 쥔 채 `MarketHub.onState`까지 들어간다. 이는 "상태 알림은 잠금 밖에서 부른다"(클래스 주석)와 `WsHandler` "한 연결의 콜백은 겹치지 않는다"를 깬다. 영향:
+   1. 허브 스레드가 `replan → subscribe` 중이면 같은 스레드에서 `replan`이 다시 들어간다. 안쪽 배분이 끝난 뒤 바깥 `apply`가 낡은 계획으로 덮어써 끊긴 소스에 종목이 남는다. 다음 상태 알림(재접속 시도, 약 1초 뒤)에서 풀린다.
+   2. 수신 스레드가 `onText`에서 소스 잠금을 쥐고 PONG을 보내다 실패하면, 허브 잠금을 기다린다. 이때 다른 스레드가 허브 잠금을 쥐고 같은 소스의 `subscribe`(소스 잠금)를 기다리면 교착이 된다. 게이트웨이 시장 하나의 수신·재배분이 멈춘다.
+
+   제안(대안 2개): (a) `JdkWsTransport`에서 `whenCompleteAsync`로 다른 스레드에 넘긴다. (b) `StreamingMarketDataSource.Handler.onError`가 `dropConnection`을 스케줄러로 미룬다(`scheduler.schedule(Duration.ZERO, ...)`). 전송 계층 구현과 무관하게 막으려면 (b)를 추천한다. `WsTransport`/`WsHandler` 계약에 "콜백은 `send` 호출 스레드에서 불릴 수 있다" 또는 그 반대를 명시하고, 같은 스레드 실패 테스트를 더한다.
+
+C. **[수정 필요] 일봉 품질 검사가 행마다 캘린더 JSON을 다시 읽는다.** `DailyBarQualityCheck.localDate`가 일봉 한 행마다 `ExchangeCalendar.bundled(market)`을 부른다(DailyBarQualityCheck.java:73). 잰 비용은 1회 약 200µs다. KRX 전 종목 20년 일봉(약 1,250만 행 `[추론]`)이면 검사만 40분쯤 걸린다. 현재 테스트 크기에서는 드러나지 않는다. 제안: `check` 시작에서 시장별 기준일을 한 번 계산하거나(`EnumMap<Market, LocalDate>`), 시간대를 `MarketRules`/상수에서 받는다.
+
+D. **[권장]** `LiveMarketDataSource.java:22-25`에 `lastReceivedAt`의 Javadoc이 고아로 남았다(risk-ops P3과 같다). `StreamingMarketDataSource`도 `/** 운영 지표 */` 주석이 `lastReceivedAt()` 위로 밀려 `stats()` 설명이 사라졌다. risk-ops P1·P2(한투 거부 상태가 재기동 전까지 안 풀림, 장 마감 뒤 `authFailures` 미초기화)는 7단계 전 목록에 동의한다.
+
+### 판정
+수정 필요(B1·B6 → 발견 A: 비결정적 테스트, 발견 B: 전송 실패 알림의 잠금 안 호출, 발견 C: 행마다 캘린더 재파싱). 세 가지 모두 수정 범위가 작다. 고친 뒤 같은 검토자에게 재검토를 맡긴다. CI Gradle build 성공도 머지 전에 확인한다. 이 PR은 실전 관련 PR로 분류됐으므로(risk-ops 원문) architect 승인 뒤에도 사용자 직접 머지와 독립 QA를 거친다.
