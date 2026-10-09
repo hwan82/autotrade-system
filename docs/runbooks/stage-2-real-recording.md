@@ -1,0 +1,29 @@
+# 2단계 완료 확인: 실제 KRX 하루 녹화와 두 번 리플레이
+
+2단계 완료 기준 "하루 녹화분을 두 번 리플레이해 결과 동일"(team-design.md 6장, 기획서 MD-06)을 실제 증권사 시세로 확인하는 절차다. QA 2단계 재판정의 C1과 G-1(원본 대조)에 대응한다. 증권사 키가 필요해 사용자가 직접 한다. 요금은 무료로 확인됐다([시세 조사](../research/market-data-limits.md) 1.5절).
+
+## 준비 (장 시작 전)
+1. 키움 또는 한국투자 Open API 사용 신청을 하고 App Key·Secret을 받는다. 키움은 포털에서 접속할 PC의 IP를 등록한다.
+2. 설정 폴더(`AUTOTRADE_CONFIG_DIR`, 기본 `~/.autotrade/`)의 `secrets.json`에 키를 넣는다. 키는 저장소·채팅에 올리지 않는다.
+   ```json
+   { "brokers": { "kiwoom": { "app-key": "<KIWOOM_APP_KEY>", "app-secret": "<KIWOOM_SECRET_KEY>" } } }
+   ```
+   한국투자는 `"kis": { "app-key": "<KIS_APP_KEY>", "app-secret": "<KIS_APP_SECRET>" }`.
+3. 그 증권사로 실전 계좌(`real-trading.accounts`와 계좌번호)를 설정해 두었다면 게이트웨이가 그 키를 쓰지 않는다(D-024). 녹화할 증권사는 실전 계좌가 없는 쪽이어야 한다.
+4. 같은 폴더에 `watchlist.json`을 만든다. 대조하기 쉬운 대형주 몇 개면 충분하다.
+   ```json
+   { "held": [], "candidates": ["KRX:005930", "KRX:000660", "KRX:035420"] }
+   ```
+
+## 녹화 (08:40 전 시작, 15:40 뒤 종료)
+5. 저장소 루트에서 `./gradlew :autotrade-app-gateway:installDist`로 설치한 뒤 `autotrade-app-gateway/build/install/autotrade-gateway/bin/autotrade-gateway`로 실행한다(`gradlew run`은 Ctrl+C 때 정상 종료 처리가 돌지 않을 수 있다). 로그에 `시세 배분` 줄이 나오고 장이 열린 뒤 녹화 폴더의 `events.jsonl.gz` 크기가 늘면 정상이다. 키가 3번 거절되면 ERROR 로그가 남고 재시도 간격이 늘어나니, 키와 IP 등록을 확인한 뒤 다시 실행한다.
+6. 장 마감(15:30 종가 단일가) 뒤 15:40 이후에 Ctrl+C로 끈다. 정상 종료해야 메타(`meta.json`)에 정상 종료 표시와 `eventsSha256`이 남는다. 녹화는 `~/.autotrade/recordings/KRX/<날짜>/`에 생긴다.
+
+## 확인
+7. `./gradlew :autotrade-app-gateway:replayCheck --args="<날짜> replay-<날짜>.md"`를 실행한다(예: `2026-10-12`). 녹화를 디스크에서 두 번 따로 읽어 리플레이하고, 두 결과의 SHA-256과 메타·파일 해시를 비교한다. 보고서는 저장소 루트에 생긴다. 종료 코드 0이면 동일, 1이면 다름, 2면 녹화를 읽지 못한 것이다.
+8. 원본 대조(G-1): 보고서의 종목별 시가·고가·저가·종가·체결 수량 합을 HTS(영웅문·eFriend) 그날 일봉과 비교한다. 가격 자릿수나 시각이 다르면 수신 해석 오류다. 체결 수량 합은 끊김이 0이고 개장부터 마감까지 녹화했을 때만 일봉 거래량과 같아야 한다. 대조 결과를 보고서 끝에 한두 줄 적는다.
+9. 보고서 파일을 프로젝트 스레드에 올린다. data-engineer가 `experiments/stage-2-replay/<날짜>.md`로 커밋하고 QA에 2단계 완료 재판정을 요청한다. 녹화 파일 자체는 올리지 않는다(외부 공유 금지, ADR-003).
+
+## 실패했을 때
+- 연결은 되는데 이벤트가 0건: 구독 거절일 수 있다(ADR-003 5장). 게이트웨이 로그를 스레드에 올린다(키·토큰 값이 보이면 지운다).
+- 가격이 10배·100배 다름, 시각이 9시간 어긋남: 필드 해석 `[가정]`이 틀린 것이다(Q-015). 보고서를 올리면 수정 PR을 만든다.
