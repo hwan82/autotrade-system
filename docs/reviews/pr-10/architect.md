@@ -235,3 +235,59 @@ G. **[수정 필요] main과의 충돌을 해소한다.** 해소할 때 확인�
 
 ### 판정
 승인. 점검표 B에 실패와 확인 못 함이 없다. 병합 커밋은 보호 테스트 파일을 건드리므로 risk-ops 재검토가 필요하다. 이 원문을 쓰는 사이 risk-ops 재검토 원문(4차, 67e9ebf, 승인)이 push됐다(dfb4b4b). 내용 대조는 risk-ops 원문을 따른다. 이 PR은 실전 관련 PR이다. Claude가 머지하지 않고 사용자가 직접 확인하며, 독립 QA(D-031)를 거쳐 머지한다.
+
+## 재검토 2026-10-09 (6차)
+- 대상: PR #10 / 커밋 e35b29f(검토 시작 시 head) / `git diff origin/main...e35b29f` 전체(103파일, +8144 −17). 직전 재검토(67e9ebf, 승인) 이후 커밋은 0b306be(독립 QA 원문), fd6892c(main #21·#22 병합과 QA 수정), e35b29f(국내 시세 요금 조사)다. 이 원문을 쓰는 사이 a2e548d(risk-ops 원문 5차, 문서만)가 push됐다
+- 점검표: B. 독립 QA 원문(`docs/reviews/pr-10/qa.md`, 0e9c2ad 기준 수정 필요)의 지적이 반영됐는지도 코드로 확인했다
+- 직접 실행한 것(공유 체크아웃과 분리된 작업 트리에서):
+  - `git merge-base --is-ancestor origin/main HEAD`: 참. main(9576a19, #21·#22)이 모두 들어왔다
+  - 병합 해소 대조: main이 9eab2e6 이후 바꾼 39개 파일 중 PR head에서 main과 다른 파일은 5개다(`ArchitectureTest.java`, `ModuleOwnershipTest.java`, `config-keys.md`, `decisions/README.md`, `market-data-limits.md`). `autotrade-architecture-test`의 main 대비 차이는 추가뿐이다. `ArchitectureTest`는 `PLUGINS_ARE_INDEPENDENT`·플러그인 픽스처·주석 1건, `ModuleOwnershipTest.OWNERS`는 `com.autotrade.broker.kiwoom`·`com.autotrade.broker.kis` 두 줄이다. main의 `build.gradle.kts`(settings의 Java 모듈 자동 포함)는 그대로 쓴다
+  - `./gradlew clean build --no-daemon` (e35b29f): BUILD SUCCESSFUL, 종료 코드 0. 테스트 516건, 실패 0, 오류 0, 건너뜀 0. `ModuleOwnershipTest` 13건, `StreamingMarketDataSourceTest` 18건, `KiwoomStreamProtocolTest` 10건, `KisStreamProtocolTest` 6건 모두 통과
+  - 변이 확인(로컬 전용, 되돌림. 작업 트리 깨끗함 확인):
+    - `scheduleReconnect`의 `|| issuanceFailed`를 빼면 `인증_준비_실패도_재연결_대기로_넘기고_다음_발급은_1분_뒤다`가 실패한다
+    - 발급 거절 catch에서 `invalidateCredentials()`·`countAuthFailure()`를 빼면 `발급이_자격_증명_거절로_이어져도_발급은_1분에_한_번이고_3회면_거부로_본다`가 실패한다
+  - GitHub(e35b29f): PR `mergeable: true`. CI Gradle build, DB schema, Secret scan 모두 success
+
+독립 QA 지적 반영 확인
+- QA B1(main 병합 뒤 `ModuleOwnershipTest` 실패): 해결. OWNERS에 키움·한국투자 패키지가 들어갔고, 토스 모듈은 settings에서 빠져 표와 settings가 맞는다. 병합 결과가 위 빌드로 통과한다.
+- QA 8.4·R-1(발급 실패 경로에 인증 실패 보호 없음): 해결.
+  - `StreamingMarketDataSource.attempt` catch(StreamingMarketDataSource.java:221-233)가 발급이 실패하면 원인과 무관하게 `issuanceFailed`를 세운다. `scheduleReconnect`(362행)가 다음 시도를 60초 뒤로 미룬다.
+  - `CredentialsRejectedException`이면 자격 증명을 버리고 `countAuthFailure()`(307-314행)로 센다. 이 메서드는 접속 후 `LOGIN_FAILED`와 같다. 3회면 ERROR와 `credentialsRejected()`가 된다.
+  - 발급 클라이언트는 HTTP 401·403과 키움 `return_code`≠0을 거절로 던진다(KiwoomTokenClient.java:45-57, KisApprovalClient.java:44-46). 그 밖의 상태는 일반 `IOException`이다.
+  - 테스트: `발급이_자격_증명_거절로_이어져도_발급은_1분에_한_번이고_3회면_거부로_본다`(600초에 10~11회, 거부 판정, 고친 뒤 풀림), `접속키_발급이_401_403이면_자격_증명_거절로_알리고_그_밖의_실패는_구분한다`, `토큰_발급_실패_메시지에_비밀값이_없다`(401·500·return_code 구분).
+  - 기존 테스트 `인증_준비_실패도_재연결_대기로_넘긴다`는 1초 재시도를 고정하고 있었다. 이 테스트는 지우지 않았다. 이름을 바꾸고 60초 단언으로 강화했다.
+- QA A14·8.3·R-3(D-033 이전 처리 없는 토스 클라이언트): 해결. 이 PR에서 토스 클라이언트를 뺐다.
+  - `autotrade-broker-toss` 모듈 전체(운영 2파일, 테스트 3파일)와 settings 줄을 지웠다. 저장소 Java·Gradle 파일에 `TossPricePoller`·`TossTokenClient`·`broker-toss` 참조가 남아 있지 않다(grep).
+  - `GatewayMain.plugin`의 `TOSS -> Optional.empty()`(GatewayMain.java:125)는 그대로다. 기본 우선순위는 main의 D-033대로 `["KIWOOM","KIS"]`다.
+  - 지운 토스 테스트는 지운 운영 코드만 검사하던 것이다. 테스트를 지워서 통과시킨 경우가 아니다. 초안 코드는 0e9c2ad에 남아 있다(ADR-003 2.1).
+- QA 8.1·8.2(국내 실시간·발급 요금 근거): 점검표 B 밖이다. e35b29f가 공식 자료에서 무료·유료 문구를 찾지 못했다고 `확인 못 함`으로 적었다(market-data-limits.md 1.5절). 그리고 키를 넣어 실제 접속하는 시점을 사용자 결정 Q-015로 올렸다. 키가 없으면 소스를 만들지 않는 것은 QA 8.3에서 확인됐다. 판정은 QA 재검토와 사용자 결정에 맡긴다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 e35b29f에서 `./gradlew clean build`를 직접 돌렸다. 종료 코드 0, 516건, 실패·건너뜀 0. CI Gradle build도 e35b29f에서 success다. main(9576a19)이 들어간 병합 결과다 |
+| B2 | 통과 | 의존 방향 변화 없음. 플러그인 모듈은 broker-api·marketdata·domain만 본다. main의 새 규칙 `ModuleOwnershipTest`(패키지 소유, settings 자동 포함)를 지키도록 OWNERS에 두 줄만 더했다. 기존 표·규칙은 하나도 빼지 않았다. `ArchitectureTest` 전 항목 통과(`증권사_플러그인끼리_참조하지_않는다`, `시세_게이트웨이는_주문_포트를_모른다`, `실전_주문_출구는_Guard_팩토리만_연다` 포함). 새 규칙 변경이 없어 새 ADR은 필요 없다 |
+| B3 | 통과 | 새 공개 타입 `CredentialsRejectedException`(marketdata.live, `IOException` 하위)은 `TokenCache.Fetcher`의 `throws Exception` 계약 안의 하위 타입이다. 기존 구현은 영향받지 않는다. ADR-003 2.1에 발급 실패 60초 하한과 거절 계수, 토스 클라이언트 제외 이유가 반영됐다. D-028 요약행, Q-015도 갱신됐다. 다만 ADR-003 안에 지운 토스 모듈이 남은 곳이 있다(발견 H, 권장) |
+| B4 | 통과 | 새 코드는 주입된 `scheduler`·`clock`만 쓴다. 시계·난수 ArchUnit 규칙 통과. sim 골든 테스트와 리플레이 결정론 테스트 통과 |
+| B5 | 통과 | 금액 코드 변경 없음. `금액에_실수형을_쓰지_않는다` 통과 |
+| B6 | 통과 | 새 동작마다 테스트가 있다(위). 변이 2건이 모두 잡힌다. `@Disabled`·건너뜀 0. 지운 테스트는 함께 지운 토스 운영 코드 전용이다. 1초 재시도를 고정하던 테스트는 지우지 않고 강화했다 |
+| B7 | 통과 | 실전 경로 인접(보호 테스트 `ModuleOwnershipTest` OWNERS 수정, 장애표 7번 인증 실패 처리)이라 **risk-ops 검토 필요**. risk-ops 원문 5차(e35b29f, 승인)가 a2e548d로 따로 있다. 주문 경로·Guard·블랙리스트 코드 변경은 없다(플러그인 `orderGateway`는 여전히 빈 값) |
+| B8 | 통과 | 발급 거절 예외 메시지에는 상태 코드·`return_code`만 들어간다. 테스트가 키·시크릿이 메시지에 없음을 단언한다(위 두 테스트). 로그는 예외 클래스 이름만 남긴다(StreamingMarketDataSource.java:223). CI gitleaks success. 요금 조사 문서에는 공개 URL만 있다 |
+
+### 점검표 밖 발견 (6차)
+H. **[권장, 머지 전에 고치면 좋음] ADR-003에 지운 토스 모듈이 남아 있다.** 2.1 본문(46행)은 토스를 뺐다고 적는다. 하지만 아래 세 곳은 아직 이 PR에 토스 모듈이 있는 것처럼 읽힌다.
+   - 모듈 그림(26행 `autotrade-broker-toss (폴링, 게이트웨이는 안 씀)`)
+   - 증권사 표의 토스 열(소스 이름 `TOSS-POLL` 등)
+   - "이 PR에 포함한 계약 변경"의 `새 모듈 autotrade-broker-{kiwoom,kis,toss}`(179행)
+
+   그림과 표는 "후속 연결 PR"로 표시하고, 179행은 `{kiwoom,kis}`로 고칠 것을 권한다. 코드와 빌드에는 영향이 없어 막지 않는다. `BrokerPlugin.java:13`, `broker-api/build.gradle.kts:5`, `StreamProtocol.java:11` 주석의 "kis, kiwoom, toss"는 앞으로의 플러그인 목록이라 그대로 둬도 된다.
+
+I. **[참고] 발급 실패 60초 하한의 비용.** 일반 발급 실패(네트워크 등)도 60초를 기다린다. 발급은 캐시가 없거나 만료가 가까울 때만 일어난다. 그래서 토큰 갱신 시점의 일시 장애가 실시간 공백을 최대 60초 늘린다. 이 공백은 `DataGap`으로 남고 보유 종목은 다음 소스로 재배분된다. 키움 `return_code`≠0을 모두 거절로 세는 것은 `[가정]`이다(Q-015). 둘 다 risk-ops 5차 T2·T3과 같은 판단이고, 7단계 전 목록에 둔다.
+
+- 이전 권장(risk-ops P1·P2, Q1, 공용 스케줄러 블로킹 토큰 발급)은 7단계 전 목록 그대로다.
+
+### 판정
+승인. 점검표 B에 실패와 확인 못 함이 없다.
+- 독립 QA 원문의 B1, 8.4, A14·8.3은 코드와 테스트로 해결된 것을 직접 확인했다.
+- 과금 8.1·8.2는 B 밖이다. QA 재검토와 사용자 결정(Q-015)이 판정한다.
+- 발견 H는 문서 정정 권장이다.
+- 이 PR은 실전 관련 PR이다. Claude가 머지하지 않는다. 사용자가 직접 확인하고 독립 QA 재검토(qa.md의 수정 필요 해소)를 거쳐 머지한다.
