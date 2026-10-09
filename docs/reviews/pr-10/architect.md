@@ -129,3 +129,42 @@ D. **[권장]** `LiveMarketDataSource.java:22-25`에 `lastReceivedAt`의 Javadoc
 
 ### 판정
 승인. 점검표 B에 실패와 확인 못 함이 없다. 머지 전에 c9cffb0 이후 head의 CI "Gradle build" 성공을 확인해야 한다. risk-ops 원문에 따라 이 PR은 실전 관련 PR이다. Claude가 머지하지 않고, 사용자가 직접 확인하고 독립 QA(D-031)를 거쳐 머지한다.
+
+## 재검토 2026-10-09 (3차)
+- 대상: PR #10 / 커밋 962b0b8(현재 head) / `git diff origin/main...962b0b8` 전체(107파일, +8258 −16). 직전 승인(c9cffb0) 이후 바뀐 것은 다음 셋이다:
+  - `.github/workflows/ci.yml`(962b0b8)
+  - 검토 원문 `docs/reviews/pr-10/architect.md`(e58009c)
+  - 검토 원문 `docs/reviews/pr-10/risk-ops.md`(7c2c5a4)
+- 점검표: B
+- 직접 실행한 것(공유 체크아웃과 분리된 작업 트리에서):
+  - `./gradlew clean build` (962b0b8): 종료 코드 0. 테스트 399건, 건너뜀 0, 실패 0, 오류 0. 코드는 c9cffb0과 같다
+  - CI 단계 흉내: `:autotrade-app-gateway:installDist` 뒤 빈 설정 폴더(`AUTOTRADE_CONFIG_DIR`)로 게이트웨이를 백그라운드 기동했다.
+    - 로그에 `com.autotrade.config.ProcessStartup start`가 찍혔다. CI의 grep 패턴 "ProcessStartup start"와 맞는다
+    - 6초 뒤에도 살아 있었다
+    - SIGTERM 뒤 2초 안에 종료했다(종료 코드 143)
+  - `bash -eo pipefail -c '! true; echo ...'`: 부정(`!`)한 명령이 실패해도 스크립트가 계속 돈다(echo 출력됨). 아래 발견 E의 근거
+  - CI(Actions runs, 이 브랜치): 4160936부터 7c2c5a4까지 Gradle build는 모두 cancelled다. 962b0b8의 실행 결과는 검토 시점에 아직 조회되지 않았다. 이 PR에서 CI Gradle build 성공 기록은 아직 없다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 962b0b8에서 `./gradlew clean build`를 직접 실행했고 종료 코드 0이었다. CI 결과는 아직 없다(머지 전 확인 조건) |
+| B2 | 통과 | 962b0b8은 코드·ArchUnit·모듈 의존을 바꾸지 않는다 |
+| B3 | 통과 | 계약 변경 없음. CI 단계의 "게이트웨이는 계속 돈다" 전제는 ADR-003(수신·녹화 상주)과 일치한다 |
+| B4 | 통과 | 코드 변경 없음. 직전 재검토 근거 그대로 |
+| B5 | 통과 | 코드 변경 없음 |
+| B6 | 실패 | 테스트 코드 변경은 없다. 그러나 이번에 더한 CI 기동 점검 중 "SIGTERM 뒤 30초 안 종료" 확인이 실패를 잡지 못한다(발견 E). 검사가 하는 일과 커밋 메시지·주석이 말하는 일이 다르다 |
+| B7 | 통과 | 962b0b8은 실전 경로를 건드리지 않는다(CI 스크립트의 게이트웨이 기동 방식만). risk-ops 원문 "재검토 2026-10-09 (3차)" 판정은 승인이다(e58009c 기준). 962b0b8이 risk-ops 판정 범위에 닿는지는 risk-ops가 판단한다. 이 PR은 실전 관련 PR로 분류돼 있다 |
+| B8 | 통과 | CI 스크립트에 비밀값 없음. 빈 설정 폴더로 기동하므로 키·계좌번호를 쓰지 않는다. 게이트웨이 로그는 `cat gateway.log`로 출력되지만, 키가 없는 기동이라 비밀값이 섞일 경로가 없다 |
+
+### 점검표 밖 발견 (3차)
+E. **[수정 필요] 게이트웨이 종료 확인이 실패해도 CI가 통과한다.**
+   - `.github/workflows/ci.yml`의 `! kill -0 "$GW_PID" 2>/dev/null` 줄은 스크립트 마지막 명령이 아니고, 그 뒤에 실험실 기동이 이어진다.
+   - GitHub Actions의 기본 셸은 `bash -e`(errexit)다. bash는 `!`로 부정한 명령의 실패로는 스크립트를 멈추지 않는다(bash 매뉴얼 `set -e` 예외 조항, 위 실행으로 확인).
+   - 그래서 게이트웨이가 30초 안에 끝나지 않아도 단계는 계속 가서 성공한다. 커밋 메시지와 주석의 "30초 안에 종료되는지 확인한다"가 실제로는 검사되지 않는다. 종료 훅(녹화기 닫기, 최대 30초)이 멈추는 회귀를 놓친다.
+   - 제안: `if kill -0 "$GW_PID" 2>/dev/null; then echo "게이트웨이가 SIGTERM 뒤 30초 안에 끝나지 않음"; kill -9 "$GW_PID"; exit 1; fi`로 바꾼다.
+   - 참고: 녹화기 닫기 시한(30초)과 대기 시한(30초)이 같아 경계에서 흔들릴 수 있다. 대기를 40초쯤으로 두는 것을 권장한다.
+
+F. **[권장]** 기동 확인 패턴 "ProcessStartup start"는 JUL 기본 형식(`클래스 메서드`)에 기대고 있다. 로그 형식 설정이 바뀌면 깨진다. 지금은 동작하므로 막지 않는다. 바꿀 일이 생기면 실험실처럼 생존 신호(예: 녹화 폴더 생성, 또는 명시적인 "gateway started" INFO)로 확인한다.
+
+### 판정
+수정 필요(B6 → 발견 E: CI 게이트웨이 종료 확인이 실패를 잡지 못함). 한 줄 수정이다. 고친 뒤 같은 검토자에게 재검토를 맡긴다. 머지 전에 head의 CI "Gradle build" 성공도 확인한다. 이 PR은 실전 관련 PR이므로 architect 승인 뒤에도 사용자 직접 머지와 독립 QA를 거친다.
