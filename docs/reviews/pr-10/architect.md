@@ -168,3 +168,39 @@ F. **[권장]** 기동 확인 패턴 "ProcessStartup start"는 JUL 기본 형식
 
 ### 판정
 수정 필요(B6 → 발견 E: CI 게이트웨이 종료 확인이 실패를 잡지 못함). 한 줄 수정이다. 고친 뒤 같은 검토자에게 재검토를 맡긴다. 머지 전에 head의 CI "Gradle build" 성공도 확인한다. 이 PR은 실전 관련 PR이므로 architect 승인 뒤에도 사용자 직접 머지와 독립 QA를 거친다.
+
+## 재검토 2026-10-09 (4차)
+- 대상: PR #10 / 커밋 b7e7e73(현재 head) / `git diff origin/main...b7e7e73` 전체. 직전 재검토(962b0b8) 이후 코드·설정 변경은 b7e7e73의 `.github/workflows/ci.yml` 한 파일(+7 −3)뿐이다
+- 점검표: B
+- 직접 실행한 것(공유 체크아웃과 분리된 작업 트리에서):
+  - `./gradlew clean build` (b7e7e73): 종료 코드 0. 테스트 399건, 건너뜀 0, 실패 0, 오류 0
+  - 고친 종료 확인을 SIGTERM을 무시하는 가짜 프로세스로 `bash -eo pipefail`에서 돌렸다. "끝나지 않음"을 출력하고 단계가 종료 코드 1로 실패했다(그 뒤 명령은 실행되지 않음). 발견 E가 고쳐졌다
+  - `gh api repos/hwan82/autotrade-system/pulls/10`: `mergeable: false`, `mergeable_state: "dirty"`. b7e7e73에 대한 CI 실행은 0건이다. pull_request CI는 머지 커밋을 만들 수 없어 돌지 않는다
+  - `git merge-tree --write-tree origin/main b7e7e73`: 충돌 4건
+    - `.github/workflows/ci.yml`
+    - `autotrade-architecture-test/build.gradle.kts`
+    - `autotrade-architecture-test/src/test/java/com/autotrade/architecture/ArchitectureTest.java`
+    - `docs/decisions/README.md`
+  - main은 분기 뒤 5커밋(c50ab6f, 2dcea43, 52ad85f, 42acc86 #18 실전 운영 화면·명령 채널, 9eab2e6 #19 RiskChain) 앞서 있다. 결정 번호는 겹치지 않는다(main에 D-028·Q-015 없음)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 실패 | 검토자 빌드는 PR 브랜치에서 통과했다. 그러나 PR이 main과 충돌해(`mergeable_state: dirty`) 머지 결과를 만들 수 없다. 그래서 머지 후 코드는 빌드된 적이 없고, CI도 돌 수 없다. 충돌 해소 뒤 머지 결과로 다시 빌드해야 한다 |
+| B2 | 실패 | 브랜치 자체의 ArchUnit 규칙은 통과한다(이전 재검토 근거 그대로). 그러나 보호 테스트 `ArchitectureTest.java`와 `autotrade-architecture-test/build.gradle.kts`가 main과 충돌한다. main은 분기 뒤 이 파일에 규칙과 픽스처를 더했다(+89줄: 명령 채널, RiskChain, ForgedConfirmation 등). 해소 결과에서 양쪽 규칙(main의 새 규칙과 이 PR의 `PLUGINS_ARE_INDEPENDENT`·위반 픽스처)이 모두 남는지 확인되지 않았다 |
+| B3 | 통과 | 계약 변경 없음(b7e7e73은 CI 스크립트만). 결정 로그 충돌은 표 행 위치 충돌이다. 번호는 겹치지 않는다(이 PR의 D-028·Q-015는 main에 없다) |
+| B4 | 통과 | 코드 변경 없음. 직전 재검토 근거 그대로 |
+| B5 | 통과 | 코드 변경 없음 |
+| B6 | 통과 | 발견 E 해결. 종료 확인이 `if kill -0 …; then …; exit 1; fi`로 바뀌어 실패를 잡는다(위 실행). 대기도 40초로 늘었다. 테스트 삭제·약화 없음 |
+| B7 | 통과 | b7e7e73은 실전 경로를 건드리지 않는다. risk-ops 원문 3차 판정은 승인이다(e58009c 기준). 다만 충돌 해소는 보호 테스트(`ArchitectureTest`)를 고치는 일이다. 지침 11장 "보호 테스트" 조항에 따라 해소 커밋은 risk-ops 재검토 대상이다 |
+| B8 | 통과 | CI 스크립트에 비밀값 없음 |
+
+### 점검표 밖 발견 (4차)
+G. **[수정 필요] main과의 충돌을 해소한다.** 해소할 때 확인할 점:
+   - `ArchitectureTest.java`: main 쪽 새 규칙·픽스처와 이 PR의 `PLUGINS_ARE_INDEPENDENT`, `증권사_플러그인끼리_참조하지_않는다`, `규칙은_위반을_실제로_잡아낸다` 안의 플러그인 픽스처 단언을 모두 남긴다. 어느 규칙도 지우거나 약화하지 않는다.
+   - `autotrade-architecture-test/build.gradle.kts`: main이 더한 의존과 이 PR의 `autotrade-broker-{kiwoom,kis,toss}`를 모두 넣는다.
+   - `.github/workflows/ci.yml`: main은 실전 엔진을 백그라운드로 띄우고 `trap … EXIT`로 정리한다. 게이트웨이는 아직 `for p in gateway watchdog` 포그라운드 루프에 있다. 이 PR의 게이트웨이는 계속 돌므로 해소 결과에서 게이트웨이가 포그라운드 루프에 남으면 CI가 20분 시한까지 멈춘다(962b0b8이 고친 바로 그 문제). 게이트웨이는 루프에서 빼고 이 PR의 백그라운드 점검을 쓴다. `trap`에 `$GW_PID`도 넣는다.
+   - `docs/decisions/README.md`: 두 쪽 행을 번호 순서로 합친다.
+   - main #19(RiskChain)와 #18(명령 채널) 이후에도 게이트웨이·플러그인이 주문 포트와 명령 채널을 모르는지 해소 결과에서 `ArchitectureTest`로 확인한다.
+
+### 판정
+수정 필요(B1·B2 → 발견 G: main과 충돌, 머지 결과 미검증, 보호 테스트 충돌). b7e7e73 자체(발견 E 수정)는 맞다. 충돌을 해소한 뒤 같은 검토자(architect)와 risk-ops에게 재검토를 맡긴다. 해소 결과의 CI Gradle build 성공도 확인한다. 이 PR은 실전 관련 PR이므로 승인 뒤에도 사용자 직접 머지와 독립 QA를 거친다.
