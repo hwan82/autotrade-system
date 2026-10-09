@@ -12,7 +12,7 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 
 /**
- * 시세 소스 배분 규칙(D-008·D-009, MD-03·MD-04, ADR-002 2.2). 순수 함수: 같은 입력이면 같은 결과.
+ * 시세 소스 배분 규칙(D-008·D-009, MD-03·MD-04, ADR-003 2.2). 순수 함수: 같은 입력이면 같은 결과.
  *
  * <ul>
  *   <li>후보 소스는 {@code market-data.priority} 순서이고, 쓸 수 있는(실시간 능력이 있고 DEGRADED가 아닌) 것만 고른다.</li>

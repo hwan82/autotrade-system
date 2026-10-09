@@ -9,7 +9,7 @@ import java.util.SortedSet;
 
 /**
  * 증권사별 실시간 메시지 형식. 플러그인(kiwoom, kis, toss)이 구현하고, 연결·재연결·순번·누락 표시는
- * {@link StreamingMarketDataSource}가 공통으로 한다(ADR-002 2.1). 구현은 주문 메시지를 만들지 않는다.
+ * {@link StreamingMarketDataSource}가 공통으로 한다(ADR-003 2.1). 구현은 주문 메시지를 만들지 않는다.
  *
  * <p>구현은 연결 하나에 대해 상태를 갖지 않는 것이 좋다. 연결마다 {@link #openingMessages()}가 새로 불린다.
  */

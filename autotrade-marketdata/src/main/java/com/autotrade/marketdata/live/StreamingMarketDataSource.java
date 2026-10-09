@@ -26,7 +26,7 @@ import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 증권사 WebSocket 실시간 시세 소스의 공통 구현(ADR-002 2.1). 메시지 형식은 {@link StreamProtocol}이 맡고,
+ * 증권사 WebSocket 실시간 시세 소스의 공통 구현(ADR-003 2.1). 메시지 형식은 {@link StreamProtocol}이 맡고,
  * 이 클래스는 접속, 인증 대기, 구독 등록·복구, 무응답 감지, 재연결, 순번, 누락 구간 표시를 맡는다.
  *
  * <p>순서 보장: 메시지 해석과 순번 부여는 잠금 안에서 하고, 수신자 호출은 {@link SerialDispatcher} 하나로 넘긴다.
@@ -223,7 +223,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 return;
             }
             stats.connectFailures++;
-            // 접속 실패도 끊김으로 알린다. 기동 직후부터 못 붙는 소스를 게이트웨이가 배분에서 빼야 한다(ADR-002 2.2)
+            // 접속 실패도 끊김으로 알린다. 기동 직후부터 못 붙는 소스를 게이트웨이가 배분에서 빼야 한다(ADR-003 2.2)
             changed = setState(ConnectionState.DISCONNECTED);
             scheduleReconnect();
         }
@@ -359,7 +359,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
             try {
                 d = protocol.decode(text, now);
             } catch (RuntimeException e) {
-                // 해석 못 한 메시지 하나 때문에 연결을 잃지 않는다. 본문은 로그에 남기지 않는다(ADR-002 4장)
+                // 해석 못 한 메시지 하나 때문에 연결을 잃지 않는다. 본문은 로그에 남기지 않는다(ADR-003 4장)
                 stats.malformed++;
                 LOG.log(Level.WARNING, "{0} 해석 실패 메시지 버림({1})", sourceId, e.getClass().getSimpleName());
                 return;

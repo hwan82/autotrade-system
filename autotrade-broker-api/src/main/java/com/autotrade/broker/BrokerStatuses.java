@@ -2,7 +2,7 @@ package com.autotrade.broker;
 
 import com.autotrade.marketdata.ConnectionState;
 
-/** 시세 연결 상태에서 플러그인 상태를 정한다(broker-and-fault-design.md 3.1, ADR-002 2.1). */
+/** 시세 연결 상태에서 플러그인 상태를 정한다(broker-and-fault-design.md 3.1, ADR-003 2.1). */
 public final class BrokerStatuses {
 
     private BrokerStatuses() {}

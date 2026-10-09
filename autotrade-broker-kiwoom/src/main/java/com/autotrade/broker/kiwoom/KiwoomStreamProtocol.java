@@ -42,7 +42,7 @@ import java.util.SortedSet;
  * `[가정]` 체결·호가를 함께 등록해도 종목 단위로 200을 센다. 한 REG에 담는 종목은 100개씩 나눈다(한도 미공개).
  * 체결시간에는 날짜가 없어 수신 시각의 한국 날짜를 붙인다(정규장은 자정을 넘지 않는다).
  * 부호는 전일 대비 방향이므로 가격·수량은 절댓값을 쓴다.
- * VI 발동·해제(1h)는 VI발동구분 값의 뜻을 실측으로 확인한 뒤 붙인다(ADR-002 5장).
+ * VI 발동·해제(1h)는 VI발동구분 값의 뜻을 실측으로 확인한 뒤 붙인다(ADR-003 5장).
  */
 final class KiwoomStreamProtocol implements StreamProtocol {
 

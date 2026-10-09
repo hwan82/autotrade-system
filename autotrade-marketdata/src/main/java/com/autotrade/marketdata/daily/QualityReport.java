@@ -69,7 +69,7 @@ public record QualityReport(SnapshotManifest manifest, long barsChecked, List<Fi
         sb.append("- 스냅샷 생성: ").append(manifest.createdAt()).append(", 수집 스크립트 ").append(manifest.scriptVersion()).append('\n');
         sb.append("- 검사한 일봉: ").append(barsChecked).append("건, 오류 ").append(errorCount())
                 .append("건(사용 안 함), 경고 ").append(findings.size() - errorCount()).append("건\n");
-        sb.append("- 규칙: docs/adr/ADR-002-market-data.md 2.6절\n\n");
+        sb.append("- 규칙: docs/adr/ADR-003-market-data.md 2.6절\n\n");
         sb.append("## 출처\n\n| 이름 | 라이선스 | 수집 시각 | URL |\n|---|---|---|---|\n");
         for (SnapshotManifest.Source s : manifest.sources()) {
             sb.append("| ").append(s.name()).append(" | ").append(s.license()).append(" | ").append(s.collectedAt())

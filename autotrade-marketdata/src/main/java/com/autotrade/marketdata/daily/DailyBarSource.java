@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.SortedSet;
 
 /**
- * 일봉과 종목 이력 조회(MD-07, ADR-002 2.6). 장전 후보 풀(Stage 0)과 일봉 스윙 전략이 쓴다.
+ * 일봉과 종목 이력 조회(MD-07, ADR-003 2.6). 장전 후보 풀(Stage 0)과 일봉 스윙 전략이 쓴다.
  *
  * <p>계약
  * <ul>

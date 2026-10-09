@@ -10,10 +10,10 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 /**
- * 미국 정규장 규칙(D-015, ADR-002 2.5). 거래 시간은 NYSE 캘린더, 호가 단위는 SEC Regulation NMS Rule 612:
+ * 미국 정규장 규칙(D-015, ADR-003 2.5). 거래 시간은 NYSE 캘린더, 호가 단위는 SEC Regulation NMS Rule 612:
  * 1달러 이상 0.01달러, 1달러 미만 0.0001달러 `[사실]`(17 CFR 242.612).
  * `[가정]` 2024년 Rule 612 개정(일부 종목 0.005달러 단위)의 시행 여부·대상은 확인하지 못했다. 시행되면 종목별 단위를
- * 받아야 하므로 이 구현을 바꾼다(ADR-002 5장 확인 항목).
+ * 받아야 하므로 이 구현을 바꾼다(ADR-003 5장 확인 항목).
  */
 public final class UsMarketRules implements MarketRules {
 

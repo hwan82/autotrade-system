@@ -21,7 +21,7 @@ import java.util.Optional;
 import java.util.TreeMap;
 
 /**
- * 거래소 캘린더(MD-08, ADR-002 2.5). 휴장일·특별 운영일은 데이터 파일(리소스 {@code krx.json}, {@code us.json})에서 읽고,
+ * 거래소 캘린더(MD-08, ADR-003 2.5). 휴장일·특별 운영일은 데이터 파일(리소스 {@code krx.json}, {@code us.json})에서 읽고,
  * 코드에 날짜를 박지 않는다. 수록 범위 밖 날짜는 {@link CalendarCoverageException}으로 실패한다.
  *
  * <p>주말(토·일)은 두 시장 모두 휴장이다. 서머타임은 {@link ZoneId}(tzdb)가 처리한다. 불변, 스레드 안전.

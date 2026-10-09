@@ -14,7 +14,7 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 
 /**
- * 녹화일 리플레이(MD-06, ADR-002 2.4). 같은 녹화를 몇 번 돌려도 이벤트 순서와 값이 같다.
+ * 녹화일 리플레이(MD-06, ADR-003 2.4). 같은 녹화를 몇 번 돌려도 이벤트 순서와 값이 같다.
  *
  * <p>푸시 소스지만 스스로 스레드를 만들지 않는다. {@link #subscribe}로 수신자를 등록한 뒤 {@link #replay()}를 부르면
  * 호출한 스레드에서 녹화 순번 순서대로 전달한다. 시계({@code ReplayClock})는 수신자가 이벤트의 {@code receivedAt}으로 옮긴다.

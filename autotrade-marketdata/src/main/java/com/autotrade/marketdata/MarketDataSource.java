@@ -6,7 +6,7 @@ import java.util.Set;
 /**
  * 실시간·리플레이 시세 소스(푸시 방식). 구현: {@link LiveMarketDataSource}(실전 API 실시간, 시세 게이트웨이 프로세스,
  * {@code live.StreamingMarketDataSource}), {@code recording.RecordedReplaySource}(녹화 리플레이).
- * 일봉은 {@code daily.DailyBarSource}로 따로 읽는다. 연결 상태와 누락 구간 표시는 ADR-002.
+ * 일봉은 {@code daily.DailyBarSource}로 따로 읽는다. 연결 상태와 누락 구간 표시는 ADR-003.
  *
  * <p>계약
  * <ul>

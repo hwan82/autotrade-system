@@ -10,7 +10,7 @@ import java.util.function.UnaryOperator;
  * <p>변경({@link #update})은 검증된 새 스냅샷을 디스크에 먼저 쓰고(write-through) 성공하면 메모리를 바꾼다.
  * 디스크 저장이 실패하면 메모리도 그대로라서 재기동 후 상태가 화면과 어긋나지 않는다.
  *
- * <p>실시간 변경 불가 키(시세 소스 구성, 증권사 키)는 여기서 바꿀 수 없다. 증권사 키 변경은
+ * <p>실시간 변경 불가 키(시세 소스 구성, 증권사 키, 실전 계좌)는 여기서 바꿀 수 없다. 증권사 키 변경은
  * "미체결·보유 확인 → 세션 종료 → 재연결" 절차가 필요하므로 그 절차를 구현하는 작업(2·7단계)에서 별도 경로로 연다.
  */
 public final class RuntimeConfigHolder {
@@ -41,6 +41,9 @@ public final class RuntimeConfigHolder {
         }
         if (!after.brokers().equals(before.brokers())) {
             throw new IllegalArgumentException("brokers.*는 재연결 절차를 거쳐야 바꿀 수 있습니다");
+        }
+        if (!after.realTrading().equals(before.realTrading())) {
+            throw new IllegalArgumentException("real-trading.*은 계좌 교체 절차(CFG-05)를 거쳐야 바꿀 수 있습니다");
         }
         store.save(after);
         current.set(after);

@@ -17,5 +17,9 @@
     "kis": { "app-key": "", "app-secret": "" },
     "kiwoom": { "app-key": "", "app-secret": "" },
     "toss": { "app-key": "", "app-secret": "" }
+  },
+  "real-trading": {
+    "accounts": [],
+    "account-numbers": {}
   }
 }

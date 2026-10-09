@@ -20,7 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 녹화 한 줄(JSON Lines)의 형식(ADR-002 2.3, 형식 버전 {@value #FORMAT_VERSION}). 키 이름은 짧게 두고 바꾸지 않는다.
+ * 녹화 한 줄(JSON Lines)의 형식(ADR-003 2.3, 형식 버전 {@value #FORMAT_VERSION}). 키 이름은 짧게 두고 바꾸지 않는다.
  *
  * <pre>
  * {"seq":1,"src":"KIWOOM-WS","srcSeq":7,"t":"TRADE","sym":"KRX:005930","ex":"…Z","rx":"…Z","px":"71500","qty":10}

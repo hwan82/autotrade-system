@@ -11,7 +11,7 @@ import java.util.Objects;
 import java.util.function.Function;
 
 /**
- * 한국거래소 규칙(ADR-002 2.5). 거래 시간은 {@link ExchangeCalendar}, 호가 단위는 아래 표.
+ * 한국거래소 규칙(ADR-003 2.5). 거래 시간은 {@link ExchangeCalendar}, 호가 단위는 아래 표.
  *
  * <p>주식 호가가격단위(2023-01-25 시행, 코스피·코스닥 통일). `[사실]` 2,000원 미만 1원, 1만~2만원대 10원,
  * 10만~20만원대 100원, 20만~50만원 500원, 50만원 이상 1,000원은 보도 자료로 확인

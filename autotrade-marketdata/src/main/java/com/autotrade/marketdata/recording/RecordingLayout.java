@@ -6,7 +6,7 @@ import java.time.LocalDate;
 import java.util.Objects;
 
 /**
- * 녹화 폴더 구조(ADR-002 2.3): {@code <root>/<MARKET>/<yyyy-MM-dd>/events.jsonl.gz} + {@code meta.json}.
+ * 녹화 폴더 구조(ADR-003 2.3): {@code <root>/<MARKET>/<yyyy-MM-dd>/events.jsonl.gz} + {@code meta.json}.
  * 날짜는 거래소 현지 날짜다(미국 장은 한국 날짜로 이틀에 걸친다). 녹화 데이터는 저장소에 커밋하지 않는다.
  */
 public record RecordingLayout(Path root) {

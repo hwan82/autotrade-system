@@ -24,20 +24,33 @@
 | `notification.kakao.access-token` 🔒 | 문자열 | 빈 값 | | 즉시 | 알림 | |
 | `brokers.{kis,kiwoom,toss}.app-key` 🔒 | 문자열 | 빈 값 | 비어 있으면 그 증권사는 NOT_CONFIGURED | 재연결 절차 | 증권사 플러그인 | broker-and-fault-design.md 3장 |
 | `brokers.{kis,kiwoom,toss}.app-secret` 🔒 | 문자열 | 빈 값 | 키움은 secret-key, 토스는 secret을 여기에 넣는다 | 재연결 절차 | 증권사 플러그인 | |
+| `real-trading.accounts` | 배열 | `[]` | 항목은 `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가)·`broker`(KIS·KIWOOM·TOSS)·`market`(KRX·US)만. **활성화 키(`enabled` 등)는 없다**: 넣으면 그 파일 전체를 쓰지 않는다(CFG-02). RealTradingGuard는 기동 시 모든 계좌 OFF | 계좌 교체 절차(CFG-05, 구현 전까지 UI 변경 불가) | 실전 엔진 | [ADR-002](../adr/ADR-002-real-trading-guard.md), D-010, D-016 |
+| `real-trading.account-numbers.<id>` 🔒 | 문자열 맵 | `{}` | 키는 `accounts`의 id만 쓴다. 목록에 없는 항목은 그 항목만 무시하고 건수만 경고한다(값·별칭은 남기지 않음). 값이 없는 계좌는 활성화할 수 없다 | 계좌 교체 절차 | 실전 엔진(증권사 플러그인에 전달) | [ADR-002](../adr/ADR-002-real-trading-guard.md) 2.4 |
+
+## 실험실 프로세스 속성 (Spring, `application.yml`)
+설정 파일 계층(runtime-config.json)이 아니라 실험실 프로세스 기동 속성이다. 실행 중에 바뀌지 않는다.
+
+| 속성 | 기본값 | 설명 | 근거 |
+|---|---|---|---|
+| `server.address` | `127.0.0.1` | 대시보드 바인딩 주소. 루프백이 아니거나 비우면 기동을 거부한다 | D-020, [ADR-005](../adr/ADR-005-ui-dashboard.md) |
+| `server.port` | `8480` (환경 변수 `AUTOTRADE_UI_PORT`) | 대시보드 포트 | ADR-005 |
+| `autotrade.lab.strategies-dir` | `strategies` (실행 폴더 기준, bootRun은 저장소 루트) | 전략 프로필 YAML 폴더 | ADR-005 4장 |
 
 ## 아직 없는 키 (담당 작업에서 추가)
-- 실전 계좌(`real-trading.accounts`), RealTradingGuard, 리스크 한도, 블랙리스트: risk-ops. 설정 파일 로딩이 실전 활성화를 켤 수 없어야 한다(CFG-02). 키 구조 제안은 [ADR-001 2.6.1](../adr/ADR-001-module-structure.md)(계좌번호는 secrets.json, `enabled`는 저장하지 않음).
-- 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): D-021 기준으로 3단계 sim-engine 작업에서 추가.
+- 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
+- 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
+- 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
-- 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-002 6장](../adr/ADR-002-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
-- 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-002 2.2.
+- 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
+- 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
 
 ## 예시 (자리표시자)
 `runtime-config.json`
 ```json
 {
   "lab": { "max-parallel-runs": 2 },
-  "notification": { "slack": { "enabled": true } }
+  "notification": { "slack": { "enabled": true } },
+  "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] }
 }
 ```
 `secrets.json`
@@ -46,6 +59,7 @@
   "notification": { "slack": { "webhook-url": "<SLACK_WEBHOOK_URL>" } },
   "brokers": {
     "kiwoom": { "app-key": "<KIWOOM_APP_KEY>", "app-secret": "<KIWOOM_SECRET_KEY>" }
-  }
+  },
+  "real-trading": { "account-numbers": { "KIS-US-1": "<ACCOUNT_NUMBER>" } }
 }
 ```

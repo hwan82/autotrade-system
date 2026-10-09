@@ -21,7 +21,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 시장 하나의 시세를 날짜별로 녹화한다(MD-05, ADR-002 2.3).
+ * 시장 하나의 시세를 날짜별로 녹화한다(MD-05, ADR-003 2.3).
  *
  * <ul>
  *   <li>여러 소스의 이벤트를 받은 순서대로 하나의 녹화 순번({@code seq})으로 합친다. 리플레이는 이 순번을 따른다.</li>

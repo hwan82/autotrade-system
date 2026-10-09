@@ -1,7 +1,7 @@
 package com.autotrade.marketdata;
 
 /**
- * 증권사 실시간 시세 소스(ADR-002 2.1). {@link MarketDataSource} 계약에 연결 수명과 상태 알림을 더한다.
+ * 증권사 실시간 시세 소스(ADR-003 2.1). {@link MarketDataSource} 계약에 연결 수명과 상태 알림을 더한다.
  *
  * <p>계약
  * <ul>

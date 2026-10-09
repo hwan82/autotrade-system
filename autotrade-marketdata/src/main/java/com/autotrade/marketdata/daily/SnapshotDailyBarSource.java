@@ -28,7 +28,7 @@ import java.util.TreeSet;
 
 /**
  * 스냅샷 폴더({@code manifest.json}, {@code daily_bars.csv}, {@code instrument_history.csv})에서 읽는 일봉 소스
- * (D-019, ADR-002 2.6). 읽을 때 SHA-256·행 수를 manifest와 맞춰 보고, 품질 검사 오류 행은 뺀다.
+ * (D-019, ADR-003 2.6). 읽을 때 SHA-256·행 수를 manifest와 맞춰 보고, 품질 검사 오류 행은 뺀다.
  *
  * <pre>
  * daily_bars.csv:         market,code,date,open,high,low,close,volume,adj_factor

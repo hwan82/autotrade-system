@@ -17,17 +17,17 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 /**
- * 시세 게이트웨이 조립(ADR-002 2.2). 시장마다 녹화기 하나와 {@link MarketHub} 하나를 만든다.
+ * 시세 게이트웨이 조립(ADR-003 2.2). 시장마다 녹화기 하나와 {@link MarketHub} 하나를 만든다.
  * 감시 종목이 없는 시장이나 실시간 소스가 없는 시장은 만들지 않는다.
  *
- * <p>2단계 범위는 수신과 녹화까지다. 실전 엔진·실험실로 실시간 전달(IPC)은 후속 작업이다(ADR-002 5장).
+ * <p>2단계 범위는 수신과 녹화까지다. 실전 엔진·실험실로 실시간 전달(IPC)은 후속 작업이다(ADR-003 5장).
  */
 public final class Gateway implements AutoCloseable {
 
     /** 녹화 큐 크기. 키움 200종목 × 초당 수십 건을 몇 초 버틴다. 넘치면 버리고 공백을 남긴다. */
     static final int RECORDER_QUEUE = 100_000;
     static final Duration FLUSH_INTERVAL = Duration.ofSeconds(1);
-    static final String LICENSE = "증권사 Open API 시세. 개인 연구용 저장만, 재배포 금지(ADR-002 4장)";
+    static final String LICENSE = "증권사 Open API 시세. 개인 연구용 저장만, 재배포 금지(ADR-003 4장)";
 
     private final Map<Market, MarketHub> hubs;
     private final Map<Market, MarketEventRecorder> recorders;

@@ -3,8 +3,12 @@ package com.autotrade.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.autotrade.domain.account.BrokerId;
+import com.autotrade.domain.market.Market;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class SecretTest {
@@ -29,7 +33,10 @@ class SecretTest {
                 new RuntimeConfig.Brokers(
                         new RuntimeConfig.BrokerKeys(Secret.of(FAKE_SECRET), Secret.of(FAKE_SECRET)),
                         config.brokers().kiwoom(),
-                        config.brokers().toss()));
+                        config.brokers().toss()),
+                new RuntimeConfig.RealTrading(
+                        List.of(new RuntimeConfig.RealAccount("KIS-1", BrokerId.KIS, Market.KRX)),
+                        Map.of("KIS-1", Secret.of(FAKE_SECRET))));
         assertThat(withKey.toString()).doesNotContain(FAKE_SECRET);
     }
 

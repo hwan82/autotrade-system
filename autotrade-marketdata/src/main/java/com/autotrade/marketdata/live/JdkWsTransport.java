@@ -9,7 +9,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /**
- * JDK 내장 {@link java.net.http.WebSocket} 전송. 외부 라이브러리를 쓰지 않는다(순수 Java, ADR-002 2.1).
+ * JDK 내장 {@link java.net.http.WebSocket} 전송. 외부 라이브러리를 쓰지 않는다(순수 Java, ADR-003 2.1).
  * 보내기는 이전 전송이 끝난 뒤에 이어 붙인다(JDK WebSocket은 동시에 두 전송을 허용하지 않는다).
  */
 public final class JdkWsTransport implements WsTransport {

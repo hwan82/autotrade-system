@@ -16,7 +16,7 @@ import java.util.Objects;
 /**
  * 토스증권 Open API 토큰({@code POST /oauth2/token}, form, Client Credentials). `[사실]` client_id·client_secret,
  * 클라이언트당 유효 토큰은 하나이고 새 토큰이 이전 토큰을 무효화한다(https://openapi.tossinvest.com/openapi-docs/overview.md,
- * 2026-10-08 확인). 그래서 토스 토큰은 한 프로세스(실전 엔진 보호 감시)만 받아야 한다(ADR-002 2.1).
+ * 2026-10-08 확인). 그래서 토스 토큰은 한 프로세스(실전 엔진 보호 감시)만 받아야 한다(ADR-003 2.1).
  * `[가정]` 응답은 OAuth2 표준 access_token·expires_in(초)이다.
  */
 final class TossTokenClient implements TokenCache.Fetcher {

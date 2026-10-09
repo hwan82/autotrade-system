@@ -38,7 +38,7 @@ import java.util.SortedSet;
  *       H0STASP0 호가: 0 종목코드, 1 영업시각, 3~12 매도호가1~10, 13~22 매수호가1~10, 23~32 매도잔량, 33~42 매수잔량.</li>
  *   <li>한도: appkey당 41건, 체결과 호가를 따로 센다(docs/research/market-data-limits.md H1·H2). 그래서 20종목.</li>
  * </ul>
- * 접속 주소가 평문 ws다(공식 주소). 접속키가 평문으로 오간다는 위험은 ADR-002 4장에 적었다.
+ * 접속 주소가 평문 ws다(공식 주소). 접속키가 평문으로 오간다는 위험은 ADR-003 4장에 적었다.
  * 암호화 프레임(첫 값 1)은 체결통보용이라 시세 소스에서는 쓰지 않고 버린다.
  */
 final class KisStreamProtocol implements StreamProtocol {

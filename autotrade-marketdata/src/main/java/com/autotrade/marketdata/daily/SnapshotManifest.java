@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 오프라인 수집 스냅샷의 manifest(D-019 언어 간 계약, ADR-002 2.6, 스키마 버전 {@value #SCHEMA_VERSION}).
+ * 오프라인 수집 스냅샷의 manifest(D-019 언어 간 계약, ADR-003 2.6, 스키마 버전 {@value #SCHEMA_VERSION}).
  * Python 수집기가 쓰고 Java는 읽기만 한다.
  *
  * <pre>

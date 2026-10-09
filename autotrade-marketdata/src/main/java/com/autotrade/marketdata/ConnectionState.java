@@ -1,6 +1,6 @@
 package com.autotrade.marketdata;
 
-/** 실시간 시세 소스의 연결 상태(ADR-002 2.1). */
+/** 실시간 시세 소스의 연결 상태(ADR-003 2.1). */
 public enum ConnectionState {
     /** 만들었지만 {@code start()} 전. */
     NEW,

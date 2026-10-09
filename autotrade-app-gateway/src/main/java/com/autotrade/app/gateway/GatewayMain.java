@@ -27,7 +27,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 
 /**
- * 시세 게이트웨이(D-013 ②). 키움·한국투자 실시간 시세를 받아 녹화한다(ADR-002). 주문 API는 호출하지 않는다(MD-01).
+ * 시세 게이트웨이(D-013 ②). 키움·한국투자 실시간 시세를 받아 녹화한다(ADR-003). 주문 API는 호출하지 않는다(MD-01).
  * 토스는 폴링 전용이라 게이트웨이에서 쓰지 않는다(D-008, 보유 종목 보호는 실전 엔진 몫).
  *
  * <p>시스템 시계를 만드는 곳은 이 진입점뿐이다. 나머지 코드는 주입받은 {@link Clock}만 쓴다(ArchitectureTest).
@@ -35,7 +35,7 @@ import java.util.concurrent.CountDownLatch;
 public final class GatewayMain {
 
     static final String PROCESS = "gateway";
-    /** 녹화 폴더. 설정 키 {@code market-data.recording-dir}는 제안 상태라 2단계는 설정 폴더 아래 고정(ADR-002 6장). */
+    /** 녹화 폴더. 설정 키 {@code market-data.recording-dir}는 제안 상태라 2단계는 설정 폴더 아래 고정(ADR-003 6장). */
     static final String RECORDINGS_DIR = "recordings";
     static final int DISPATCH_QUEUE = 50_000;
 
