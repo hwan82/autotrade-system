@@ -51,7 +51,7 @@ class GuardedOrderGatewayTest {
 
         OrderAck ack = gw.submit(order(KIS_KR, OrderIntent.ENTRY));
 
-        assertThat(ack.state()).isEqualTo(OrderState.SUBMITTED);
+        assertThat(ack.state()).isEqualTo(OrderState.ACCEPTED);
         assertThat(broker.submitted).hasSize(1);
     }
 
@@ -95,7 +95,7 @@ class GuardedOrderGatewayTest {
         gw.cancel(order(KIS_KR, OrderIntent.ENTRY).key());
 
         assertThat(entry.state()).isEqualTo(OrderState.REJECTED);
-        assertThat(stop.state()).isEqualTo(OrderState.SUBMITTED);
+        assertThat(stop.state()).isEqualTo(OrderState.ACCEPTED);
         assertThat(broker.submitted).extracting(OrderRequest::intent).containsExactly(OrderIntent.STOP_LOSS);
         assertThat(broker.cancelled).hasSize(1);
     }
@@ -153,7 +153,7 @@ class GuardedOrderGatewayTest {
         public OrderAck submit(OrderRequest request) {
             calls++;
             submitted.add(request);
-            return new OrderAck(request.key(), OrderState.SUBMITTED, false, "B-1", "");
+            return new OrderAck(request.key(), OrderState.ACCEPTED, false, "B-1", "");
         }
 
         @Override
@@ -166,7 +166,7 @@ class GuardedOrderGatewayTest {
         public OrderAck cancel(IdempotencyKey key) {
             calls++;
             cancelled.add(key);
-            return new OrderAck(key, OrderState.CANCELLED, false, "B-1", "");
+            return new OrderAck(key, OrderState.CANCEL_REQUESTED, false, "B-1", "");
         }
     }
 }
