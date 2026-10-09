@@ -12,10 +12,11 @@
 - 증권사 연동과 장애 대응: docs/team/broker-and-fault-design.md
 - 해외(미국)주식: docs/team/overseas-design.md
 - 확정된 결정: docs/decisions/README.md
+- 검토 체계와 점검표: docs/qa/README.md, docs/qa/checklists.md (검토 원문은 docs/reviews/)
 
 ## 역할 에이전트 (.claude/agents)
 pm-lead, architect, data-engineer, sim-engine, strategy-researcher, risk-ops, ui-dev
-작업이 특정 역할에 해당하면 해당 에이전트에 위임한다. 실전 주문 경로, RealTradingGuard, 블랙리스트, 장애 대응을 건드리는 변경은 반드시 risk-ops 검토를 거친다.
+작업이 특정 역할에 해당하면 해당 에이전트에 위임한다. 실전 주문 경로, RealTradingGuard, 블랙리스트, 장애 대응을 건드리는 변경은 반드시 risk-ops 검토를 거친다. 검토 맡기는 방법과 원문 보존은 프로젝트 지침 11장을 따른다.
 
 ## 빌드와 테스트
 - 전체 빌드(컴파일, 테스트, 순수 모듈 금지 의존 검사, ArchUnit): `./gradlew build`
