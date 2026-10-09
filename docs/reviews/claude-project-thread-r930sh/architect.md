@@ -241,3 +241,45 @@
 
 ## 판정
 수정 필요(B7 확인 못 함: c7e158b 대상 risk-ops A 점검표 재검토 원문이 없음). architect 관점의 코드·계약 지적은 남지 않았다(점검표 B 실패 0, 중요 지적 0, 참고 4건). c7e158b 대상 risk-ops 재검토 원문이 생기면 B7만 다시 확인한다. 실전 경로 PR이므로 그 뒤에도 머지는 사용자가 직접 한다(지침 10장).
+
+## 재검토 3 2026-10-09
+
+# architect 검토: 실전 운영 화면(ADR-006) 재검토 2 이후 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, HEAD d402140, `git diff origin/main...HEAD` 전체(origin/main 2dcea43 = merge-base, 12커밋, 57개 파일). 직전 검토(c7e158b) 뒤 바뀐 것은 c4e1a18(ControlClient 판정 규칙, ControlChannelTest 1건 추가·1건 이식성 수정, real.js 문구, ADR-006), b554eba(ControlClient Javadoc, real.js 문구 1줄, ADR-006 2.2·4장·6장, config-keys.md 안내 1줄), 검토 원문 보존 커밋(51387cb, 8017d53, d402140; d402140은 ADR-006 1줄과 결정 로그 Q-018 추가 포함). diff 전체를 다시 훑고, 바뀐 실행 코드는 `ControlClient.notRunningOrUnknown`과 `ControlServer` 잠금 처리(80-135행)를 함께 읽었다
+- 점검표: B
+- 직접 실행한 것:
+  - `git archive d402140`을 이 검토 전용 새 폴더(scratchpad `arch-rv3-1791509142`)에 풀고 `./gradlew build --offline --no-daemon --rerun-tasks`: **BUILD SUCCESSFUL**(91 actionable tasks, 91 executed, EXIT=0). 테스트 XML 집계 378건, 실패 0, 오류 0, 건너뜀 0. 이 중 ArchitectureTest 13, ControlChannelTest 20, EngineCommandHandlerTest 22, OperatorAuthenticatorTest 9, EngineMainTest 8, OperatorPasswordHashTest 5, RealOpsControllerTest 11. `verifyPureDependencies`·`verifyProcessIsolation` 13회 실행
+  - gitleaks 8.21.2(`--redact`): `origin/main..HEAD`, 저장소 전 이력 모두 "no leaks found"
+  - `scripts/ci/check-python-collectors.sh`: 종료 코드 0
+  - `git diff --diff-filter=D origin/main...HEAD`: 삭제 파일 없음. 추가 줄의 `@Disabled`·`@Ignore`·`assume`은 검토 원문 인용 줄에만 있음
+  - Linux에서만 실행했다. Windows·macOS와 GitHub Actions CI 단계(엔진 기동·소켓 권한 셸 검사)는 실행하지 않았다
+- 코드는 고치지 않았다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 결과(로컬, --offline, 전용 폴더). CI 러너 결과는 보지 않았다 |
+| B2 | 통과 | c7e158b 이후 모듈 의존·ArchUnit 규칙·build.gradle.kts 변경 없음. 바뀐 `ControlClient`는 JDK(`Files`, `NoSuchFileException`, `ProcessHandle`)만 써 control 모듈 PURE 규칙(`ArchitectureTest.java:58`) 유지. ArchitectureTest 13건·verifyPureDependencies·verifyProcessIsolation 통과 |
+| B3 | 통과 | 프로세스 간 계약(실험실의 엔진 생존 판정 규칙)이 바뀌었고 ADR-006에 먼저 기록됨: 2.2(48행) "잠금 파일이 아예 없을 때만 NOT_RUNNING, 읽지 못하면 UNKNOWN", 2.3(78행) `engineState` 정의 "판단할 수 없으면 언제나 UNKNOWN". 코드(`ControlClient.java:91-107`: NoSuchFile→NOT_RUNNING 96행, 읽기 오류·비PID→UNKNOWN 99행, PID 생존→UNKNOWN 103행, PID 죽음→NOT_RUNNING)와 클래스 Javadoc(26-31행)이 일치. "엔진은 설정 폴더당 하나" 한계가 2.2(44행)·4장 위험 표에 정정됨. 5장 테스트 표 건수(ControlChannelTest 20건)가 실행 결과와 일치. REST 응답 형태·설정 키·스키마 변경 없음(config-keys.md는 운영 안내 문장만) |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음, 골든 테스트 포함 전체 통과. 새 코드에 시스템 시계·난수 없음(ArchUnit `NO_SYSTEM_TIME` 통과) |
+| B5 | 해당 없음 | 금액을 다루는 코드 변경 없음 |
+| B6 | 통과 | 바뀐 판정마다 테스트: `ControlChannelTest#잠금_파일을_읽지_못하거나_내용이_PID가_아니면_알_수_없음이다`(빈 파일, 폴더로 흉내 낸 읽기 오류 모두 UNKNOWN), `#엔진이_없으면_실행_중이_아님을_알린다`(잠금 파일 없음·죽은 PID → NOT_RUNNING, `true` 대신 현재 JVM `-version`으로 바꿔 Windows 이식성 개선, 단언은 그대로), `#엔진이_살아_있는데_소켓만_없어지면_실행_중이_아님이_아니라_알_수_없음이다` 유지. 테스트 삭제·비활성화 없음 |
+| B7 | 통과 | 실전 경로(명령 채널, 엔진 생존 판정, Guard 제어 화면)를 건드림 → **risk-ops 검토 필요**이며, 그 원문이 있다: `docs/reviews/claude-project-thread-r930sh/risk-ops.md` "재검토 4"(353행 이후)가 b554eba(마지막 실행 코드 변경 커밋) 대상 A 점검표로 실패 0·확인 못 함 0, 판정 "승인". 그 뒤 d402140은 검토 원문, ADR-006 1줄(Q-018 참조), 결정 로그 Q-018 추가뿐이라 실행 코드 변경이 없다(`git show --stat d402140`). 실전 경로 PR이므로 머지는 사용자가 직접 한다(지침 10장) |
+| B8 | 통과 | gitleaks 범위·전 이력 무결과. 새 예외 메시지(`ControlClient.java:97-101,104-105`)는 고정 문구이고 경로·PID·파일 내용을 담지 않는다. 테스트 값은 빈 문자열·실행 중 PID뿐 |
+
+### 직전 지적(재검토 2) 처리 확인
+- B7(c7e158b 대상 risk-ops 재검토 원문 없음): **해소.** 위 B7. risk-ops는 재검토 2·3에서 F1·F2·G1·G3·H1·H2를 지적했고 c4e1a18·b554eba로 고친 뒤 재검토 4에서 승인했다.
+- 참고-1(Windows에서 잠긴 engine.lock 읽기 실패 시 NOT_RUNNING으로 빠짐): **해결(안전한 쪽).** 읽기 오류는 이제 UNKNOWN(`ControlClient.java:99-101`). Windows에서는 엔진이 살아 있고 소켓만 없을 때 PID 확인 대신 읽기 실패로 UNKNOWN이 되어 결과가 같다 `[추론, Windows 미검증]`. ADR-006 5장(174행)에 미검증으로 기록.
+- 참고-2(정상 종료 뒤 PID가 남아 재사용 시 UNKNOWN): 변경 없음. ADR-006 48행이 "안전한 쪽"으로 기록. 참고 유지.
+- 참고-3(`new ProcessBuilder("true")` 이식성): **해결.** 현재 JVM 실행 파일로 바꿈.
+- 참고-4(PANIC 대기 상한): ADR-006 6장 표에 "기다리는 PANIC의 시간 상한"이 7단계 완료 조건으로 추가됨. 해결(기록).
+- 재검토 1의 참고-1(활성화 기한 전달)·참고-2(PBKDF2를 `synchronized` 안에서 계산): 여전히 코드·ADR 모두 반영 없음. 지금 영향 없음(활성화 단계가 즉시 실패, STATUS 지연만). 아래 참고-1로 다시 남긴다.
+
+## 점검표 밖 발견
+
+### 참고
+1. **재검토 1 참고-1·2를 ADR-006 6장 후속 표에 올릴 것.** 처리기에 요청 기한을 넘겨 늦게 끝나는 활성화를 버리기, `OperatorAuthenticator.verify`의 PBKDF2 계산을 모니터 밖으로 빼기. 둘 다 7단계에서 활성화 단계가 실제로 생기기 전에 할 일이다. 이번 판정 사유로 삼지 않는다.
+2. **빈 잠금 파일이 남으면 UNKNOWN이 계속된다.** `ControlServer.java:104-107`에서 `truncate(0)` 뒤 PID 쓰기·`force`가 실패하면 잠금만 풀고 빈 파일이 남는다(또는 그 사이 프로세스가 죽은 경우). 그러면 엔진이 없어도 실험실은 다음 엔진 기동 전까지 UNKNOWN을 보인다. 안전한 쪽이고 엔진을 다시 띄우면 풀리며, 창이 매우 좁다. 화면 문구("엔진 상태를 확인하지 못했습니다… 실전 엔진 터미널을 확인하세요", real.js:57-58)가 이 경우도 맞게 안내한다. 기록만 한다.
+3. **ADR-006 5장 테스트 표 문구**: "엔진 없음·죽은 소켓(잠금 파일 PID 죽음)은 NOT_RUNNING"은 맞지만, 새 규칙의 핵심인 "잠금 파일이 없을 때만"을 시험하는 경우(소켓 파일 없음 + 잠금 파일 없음)는 `#엔진이_없으면_실행_중이_아님을_알린다` 첫 단언이 맡는다. 표에 이를 명시하면 다음 검토가 쉬워진다. 선택 사항.
+
+## 판정
+판정은 **승인**. 점검표 B는 실패 0, 확인 못 함 0, 해당 없음 1(B5). 직전 판정 사유였던 B7은 risk-ops 재검토 4 승인 원문으로 해소됐고, 마지막 실행 코드 변경(c4e1a18·b554eba)은 ADR-006 계약과 일치하며 테스트로 덮였다. 전체 빌드 378건 통과, gitleaks·Python 경계 검사 통과. 참고 3건은 승인 조건이 아니다. 실전 경로(RealTradingGuard 제어, 장애 대응) PR이므로 이 승인 후에도 독립 QA와 사용자의 직접 확인·머지가 필요하다(지침 10장·11장).
