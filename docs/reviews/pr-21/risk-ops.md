@@ -172,3 +172,45 @@
 
 - 재검토 2의 수정 필요 항목(A2, A14, R-7)이 해소된 것을 직접 실행한 빌드와 변조 실험(M7, M8b, M9, M10)으로 확인했다. 남은 우회(M11)는 ADR-002 9.4와 D-034에 적힌 한계와 일치한다. 확인 못 함 항목은 없다(A5~A8·A13은 이 PR이 건드리지 않아 해당 없음이고, 미구현 상태는 TST-07로 7단계 완료 조건에 묶여 있다).
 - 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest` 범위·판정 변경 포함). 이 승인은 risk-ops 역할 검토 결과일 뿐이다. 머지는 독립 QA 관문을 거친 뒤 사용자가 직접 한다(지침 10·11장).
+
+## 재검토 4(bd04435) 2026-10-09
+- 대상: PR #21 / head `bd04435`(브랜치 `claude/project-thread-bl5qbg`) / main `42acc86`(#18 실전 운영 화면, 머지 기준점과 같음) 대비 diff 전체. 재검토 3 이후 들어온 커밋: `911b94e`·`d736306`·`9830f14`(검토 원문·QA 보고서, 문서만), `bd04435`(main 병합). `git show --cc bd04435`로 본 손 해결 지점은 두 곳이다. (1) `ModuleOwnershipTest.OWNERS`에 `com.autotrade.control → autotrade-control` 한 줄 추가(`ModuleOwnershipTest.java:112`). (2) `docs/decisions/README.md` 미확정 표에 #18의 Q-016~Q-018과 #21의 Q-020·Q-021을 모두 남김. `autotrade-architecture-test/build.gradle.kts`는 #21의 자동 의존 방식이 남았고 #18의 손 목록(`:autotrade-control` 포함)은 사라졌다. 그 외 #18 파일(실전 엔진 명령 채널, `autotrade-control`, 실험실 `RealOpsController`, CI 엔진 기동 검사)은 main 그대로 들어왔다(`git diff 42acc86 bd04435`에 없음).
+- 점검표: A
+- 검토자: risk-ops 서브에이전트. 병합 커밋 메시지("build 성공, 396건")는 근거로 쓰지 않고 직접 실행했다.
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon -I <미러 init 스크립트>`(첫 시도는 Maven Central 429로 의존성 해석 실패, 미러로 재실행) → **BUILD SUCCESSFUL**. 이어 `./gradlew test --rerun-tasks` → 실패 0, 오류 0, 건너뜀 0, 합계 396: architecture-test 26(ArchitectureTest 13, ModuleOwnershipTest 13), risk 41, app-engine 48, control 20, config 30, domain 31, sim 75, app-lab 97, strategy 25, gateway 1, watchdog 1, broker-api 1. 변조 실험 원복 뒤 `:autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test`를 다시 돌려 통과, `git status` 깨끗함을 확인했다.
+  - `ArchitectureTest` main 대비 diff: `PRODUCTION` 정의(가져오기 범위)만 다르다(`ArchitectureTest.java:69-71`). #18이 더한 규칙 `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`·`ONLY_ENGINE_OPENS_CONTROL_SERVER`·`ONLY_LAB_SENDS_CONTROL_COMMANDS`와 그 픽스처 단언은 병합 결과에 그대로 있고, 넓어진 #21 범위로 검사된다.
+  - 변조 실험(커밋하지 않음, 원복함):
+    - E1: `OWNERS`에서 `com.autotrade.control` 줄 삭제 → **실패 2건**. `#운영_클래스는_패키지를_소유한_모듈에만_있다`("com.autotrade.control.ControlClient (:autotrade-control): 소유 모듈 표에 없는 패키지 루트" 등), `#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`("소유 모듈 표(OWNERS)에 없는 프로젝트: :autotrade-control"). 병합에서 이 줄을 빠뜨렸으면 빌드가 막혔을 것이고, 새 모듈 `autotrade-control`은 손 목록 없이 자동으로 검사 범위에 들어왔다.
+    - E2: 실험실 운영 코드에 `com.autotrade.control.LabOpensServer`(`ControlServer.start` 호출)를 둠 → `ArchitectureTest#명령_채널_서버는_엔진만_열고_클라이언트는_실험실만_쓴다`는 패키지 허용(`com.autotrade.control..`) 때문에 **통과**하지만, `ModuleOwnershipTest#운영_클래스는_패키지를_소유한_모듈에만_있다`가 **실패**(`LabOpensServer (:autotrade-app-lab)` 소유 위반).
+    - E3: 실험실 운영 코드에 같은 FQN `com.autotrade.app.engine.command.OperatorAuthenticator`(검증 없이 `new SecondConfirmation`)를 둠 → `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`의 FQN 예외로 `ArchitectureTest`는 **통과**, `ModuleOwnershipTest`가 **실패**(`OperatorAuthenticator (:autotrade-app-lab)` 소유 위반).
+    - 결론: #18의 명령 채널 보호 규칙은 패키지 이름·FQN으로 허용 범위를 정하므로, #21의 소유 규칙이 있어야 그 이름을 믿을 수 있다. 병합 결과에서 두 규칙이 맞물려 동작함을 실측했다.
+  - 비밀값: `git diff origin/main...HEAD` 추가 줄 grep(앱 키·계좌번호 모양·Bearer·password 대입) 0건. `autotrade-default.json`의 `real-trading.operator-password-hash`·브로커 키는 빈 문자열이다(#18 그대로).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 이 PR의 운영 코드 변경 4파일(`autotrade-default.json`, `OrderState.java`, `OrderRejectedReason.java`, `VirtualExchange.java`)은 Guard와 무관하다. 병합된 기본 설정 `autotrade-default.json:21-25`은 `accounts: []`, 활성화 키 없음. `RealTradingGuardTest`·`EngineMainTest`(#18 테스트 포함, app-engine 48/48) 통과. 위장 코드로 2차 확인을 만들거나 명령 채널 서버를 여는 경로는 소유 규칙이 막는다(E2, E3) |
+| A2 | 통과(문서화된 한계 있음) | `ArchitectureTest`는 main 대비 `PRODUCTION` 범위만 넓어졌고 규칙 13건(#18 규칙 포함) 통과. `#ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다` 통과(`autotrade-control` 포함). 남은 한계는 재검토 3과 같다(ADR-002 9.4, D-034 "F-1 남은 한계") |
+| A3 | 통과 | 라우팅 코드 변경 없음. `RealOrderGatewaysTest` 통과(이 PR의 상태값 수정 `SUBMITTED→ACCEPTED`, `CANCELLED→CANCEL_REQUESTED`만) |
+| A4 | 통과(이 PR 범위) | 재검토 3과 같다. #18 엔진 코드(`autotrade-app-engine/src/main`, `autotrade-control/src/main`, 실험실 `real` 패키지)는 `OrderState`를 쓰지 않아(grep 0건) 이 PR의 비종결 상태 변경과 충돌하지 않는다. 재발주는 미구현, TST-07 (7) 추적 |
+| A5 | 해당 없음 | `IdempotencyKey`·발급기 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음. PANIC SELL 경로는 #18(main) 범위이며 이 PR diff에 없다 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 코드 변경 없음 |
+| A8 | 해당 없음 | 이 PR이 바꾼 빌드 파일은 테스트 전용 `autotrade-architecture-test`뿐이다. 프로세스 런타임 의존은 #18(main) 그대로이고 CI 엔진·실험실 기동 검사도 main 그대로다 |
+| A9 | 통과 | `toss-polling-scope: HELD_ONLY`(`autotrade-default.json:5`) 유지, 시세 우선순위에서 토스만 빠짐(D-033). 보유 종목 보호 경로 약화 없음 |
+| A10 | 통과 | 추가 diff grep 0건. 변조 실험 파일은 삭제했고 실험실 빌드 출력에도 남지 않았다 |
+| A11 | 통과 | 보호 테스트 삭제·비활성화 0건. `ArchitectureTest`는 범위 확대만, `ModuleOwnershipTest` 13건 그대로이고 병합으로 표에 한 줄 추가(새 모듈 등록, 정상 절차). E1로 그 줄이 필수임을 확인했다 |
+| A12 | 통과 | 장애 대응표·장애 테스트 8종 변경 없음(이 PR diff 기준) |
+| A13 | 해당 없음 | 시장·시각·금액 계산 변경 없음 |
+| A14 | 통과 | 결정 로그 병합에서 Q-016~Q-018(#18)과 Q-020·Q-021(#21)이 모두 남았다(`docs/decisions/README.md`). ADR-001 93행, ADR-002 9장 198행, CLAUDE.md 25행의 "의존은 자동, 새 모듈은 OWNERS 갱신" 서술이 병합 결과(`build.gradle.kts` 자동 의존 + OWNERS 한 줄)와 맞다 |
+
+## 점검표 밖 발견 (재검토 4)
+- 새 지적 없음. 병합 해결은 최소 변경이며, #18의 손 목록을 #21 자동 의존으로 대체한 결과 `autotrade-control`이 빠지지 않았음을 E1로 확인했다.
+- 관찰: #18 명령 채널 규칙(`ONLY_ENGINE_OPENS_CONTROL_SERVER`, `ONLY_LAB_SENDS_CONTROL_COMMANDS`, `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`)은 단독으로는 같은 이름 패키지·FQN 위장(E2·E3)을 통과시킨다. 이 PR이 머지되기 전 main은 그 상태다 `[사실, E2·E3 실측]`. 이 PR 머지가 그 구멍을 닫는다. 앞으로 명령 채널·엔진 쪽 규칙을 패키지 허용으로 추가할 때는 소유 규칙이 전제임을 ADR-006에도 한 줄 적어 두기를 권한다(조치 요구 아님, 다음 ADR-006 수정 때).
+- 재검토 3의 R-8(외부 jar 한계)은 그대로다. `autotrade-control`은 `autotrade-config`와 Jackson만 의존한다(`autotrade-control/build.gradle.kts:8-10`).
+
+## 판정 (재검토 4)
+승인
+
+- 병합 커밋 `bd04435`이 보호 테스트를 약화하지 않았고, main(#18)의 실전 명령 채널 규칙과 이 PR의 소유 규칙이 함께 동작함을 직접 빌드(396건 통과)와 변조 실험(E1~E3)으로 확인했다. 확인 못 함 항목은 없다.
+- 이 PR은 실전 관련 PR이다(보호 테스트 `ArchitectureTest`·`ModuleOwnershipTest` 변경 포함). 이 승인은 risk-ops 역할 검토 결과일 뿐이며, 독립 QA 관문을 거친 뒤 사용자가 직접 머지한다(지침 10·11장).
