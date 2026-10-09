@@ -7,6 +7,10 @@ import com.autotrade.domain.Money;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.risk.BlacklistEntry;
+import com.autotrade.risk.BlacklistSnapshot;
+import com.autotrade.risk.BlacklistType;
+import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskDecision;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentId;
@@ -19,7 +23,6 @@ import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.testing.FixtureEvents;
 import com.autotrade.sim.testing.FixtureStrategies;
-import com.autotrade.sim.testing.TestBlacklist;
 import com.autotrade.sim.testing.TestKrxRules;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.TradingStyle;
@@ -30,7 +33,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Set;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
@@ -179,7 +181,9 @@ class SimulationExperimentRunnerTest {
     @Test
     void 리스크_정책은_모든_모의_주문에_적용된다() {
         SimulationExperimentRunner denyAll = new SimulationExperimentRunner(DATA, TestKrxRules.INSTANCE, COST,
-                new FixtureStrategies(), (o, a) -> RiskDecision.reject("DENY", "테스트"), ExecutionSettings.defaults(),
+                new FixtureStrategies(),
+                RiskChain.builder(BlacklistSnapshot.EMPTY).entryRule((o, a) -> RiskDecision.reject("DENY", "테스트")).build(),
+                ExecutionSettings.defaults(),
                 new CodeVersion("test", false), 1, null);
         SimulationReport r = denyAll.runDetailed(spec(List.of(MKT_HOLD, LIMIT_MAKER)));
         for (RunReport run : r.runs()) {
@@ -193,7 +197,9 @@ class SimulationExperimentRunnerTest {
 
     private static SimulationExperimentRunner runner(int parallelism) {
         return new SimulationExperimentRunner(DATA, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
-                new TestBlacklist(Set.of(HYNIX)), ExecutionSettings.defaults(), new CodeVersion("test", false),
+                RiskChain.builder(BlacklistSnapshot.of(List.of(new BlacklistEntry(HYNIX, BlacklistType.MANUAL, "테스트"))))
+                        .build(),
+                ExecutionSettings.defaults(), new CodeVersion("test", false),
                 parallelism, SAMSUNG);
     }
 

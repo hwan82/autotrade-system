@@ -12,8 +12,8 @@ import com.autotrade.domain.order.OrderAck;
 import com.autotrade.domain.order.OrderRequest;
 import com.autotrade.domain.order.OrderState;
 import com.autotrade.domain.time.ReplayClock;
+import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskDecision;
-import com.autotrade.risk.RiskPolicy;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentRunner;
@@ -59,7 +59,7 @@ import java.util.concurrent.Future;
  *   <li>시계를 이벤트 수신 시각으로 옮김</li>
  *   <li>가상 거래소가 이 이벤트로 기존 주문을 체결(신호를 낸 이벤트로는 체결하지 않음)</li>
  *   <li>전략이 이 이벤트까지 본 상태로 신호를 냄</li>
- *   <li>신호마다 멱등 키 발급 → 리스크 검증({@link RiskPolicy}, 블랙리스트 포함) → 거래소 접수</li>
+ *   <li>신호마다 멱등 키 발급 → 리스크 검증({@link RiskChain}: 블랙리스트·수동 보유 → 진입 규칙, 실전과 같은 코드) → 거래소 접수</li>
  * </ol>
  */
 public final class SimulationExperimentRunner implements ExperimentRunner {
@@ -68,19 +68,20 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final MarketRules rules;
     private final CostModel cost;
     private final StrategyFactory strategies;
-    private final RiskPolicy risk;
+    private final RiskChain risk;
     private final ExecutionSettings execution;
     private final CodeVersion code;
     private final int parallelism;
     private final Symbol benchmark;
 
     /**
-     * @param risk 모의 주문이 통과할 검증 체인. 실전과 같은 구현을 넣는다(SIM-12). 체인 구성은 risk-ops 작업
+     * @param risk 모의 주문이 통과할 검증 체인. 실전과 같은 {@link RiskChain}만 받는다(SIM-12). 승인만 하는 정책이나
+     *     블랙리스트를 건너뛰는 정책은 넣을 수 없다. 리플레이는 실험 시작 때 찍은 블랙리스트 스냅샷 하나로 끝까지 돈다(RSK-12)
      * @param parallelism 동시에 돌릴 Run 수(lab.max-parallel-runs). 결과에는 영향 없음
      * @param benchmark 매수 후 보유 비교 종목. 없으면 null
      */
     public SimulationExperimentRunner(
-            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskPolicy risk,
+            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark) {
         this.data = Objects.requireNonNull(data, "data");
         this.rules = Objects.requireNonNull(rules, "rules");

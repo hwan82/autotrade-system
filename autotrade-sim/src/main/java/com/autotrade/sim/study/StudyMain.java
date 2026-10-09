@@ -1,8 +1,8 @@
 package com.autotrade.sim.study;
 
 import com.autotrade.domain.Money;
-import com.autotrade.risk.RiskDecision;
-import com.autotrade.risk.RiskPolicy;
+import com.autotrade.risk.BlacklistSnapshot;
+import com.autotrade.risk.RiskChain;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
@@ -78,8 +78,10 @@ public final class StudyMain {
         log("이벤트 " + synthetic.data().events().size() + "건, 스냅샷 " + synthetic.data().version());
 
         CostModel cost = CostModels.krDefault(s -> KrxBoard.KOSPI);
-        // 합성 데이터에는 제외 종목이 없다. 실전과 같은 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)은 risk-ops 작업
-        RiskPolicy risk = (order, account) -> RiskDecision.approve();
+        // 실전과 같은 검증 체인(RiskChain: 블랙리스트·수동 보유 → 진입 규칙)으로 돈다(SIM-12).
+        // 합성 종목(900xxx)은 실제 종목이 아니라 제외 종목이 있을 수 없으므로 빈 스냅샷을 쓴다.
+        // 녹화 데이터 실험은 영속 블랙리스트(RSK-12)의 실험 시작 시점 스냅샷을 넣어야 하므로 이 진입점으로 돌리지 않는다.
+        RiskChain risk = RiskChain.builder(BlacklistSnapshot.EMPTY).build();
         StudyConfig config = new StudyConfig(ID, SEED, Money.of(10_000_000, Money.KRW), profiles, "kr-bh-baseline",
                 "kr-random-control", TRAIN_DAYS, LATENCIES, Duration.ofMillis(500), NULL_SEEDS,
                 ScreeningThresholds.defaults(), 4);

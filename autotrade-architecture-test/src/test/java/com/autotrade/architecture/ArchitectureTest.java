@@ -5,15 +5,18 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.app.engine.order.RealOrderGateways;
+import com.autotrade.archfixture.ApproveAllRiskPolicy;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.risk.RiskPolicy;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -148,6 +151,16 @@ class ArchitectureTest {
                     .and(target(name("<init>"))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
 
+    /**
+     * 리스크 규칙은 리스크 모듈에만 있다(SIM-12, 안전 불변식 7). 가상·실전이 같은 규칙을 쓰려면 규칙이 한곳에 있어야 하고,
+     * 다른 모듈이 승인만 하는 정책을 만들어 쓰는 길을 막는다. 실험 실행기는 {@code RiskChain}만 받으므로
+     * 바깥 람다로는 블랙리스트를 건너뛸 수 없고 진입 제한만 더할 수 있다.
+     */
+    static final ArchRule RISK_POLICIES_LIVE_IN_RISK_MODULE = classes()
+            .that().implement(RiskPolicy.class)
+            .should().resideInAPackage("com.autotrade.risk..")
+            .because("가상과 실전은 같은 리스크 검증 코드를 공유한다(SIM-12)");
+
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
@@ -216,6 +229,11 @@ class ArchitectureTest {
     }
 
     @Test
+    void 리스크_규칙은_리스크_모듈에만_있다() {
+        RISK_POLICIES_LIVE_IN_RISK_MODULE.check(PRODUCTION);
+    }
+
+    @Test
     void 프로세스_진입점끼리_참조하지_않는다() {
         PROCESSES_ARE_INDEPENDENT.check(PRODUCTION);
     }
@@ -249,5 +267,9 @@ class ArchitectureTest {
         // 2차 확인 생성·beginActivation 호출 2건, 메서드·생성자 참조 4건
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
+
+        // 리스크 모듈 밖의 승인만 하는 정책 1건
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                ApproveAllRiskPolicy.class)).getFailureReport().getDetails()).hasSize(1);
     }
 }
