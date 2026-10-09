@@ -21,5 +21,6 @@ dependencies {
     implementation(project(":autotrade-risk"))
     implementation(project(":autotrade-broker-api"))
     implementation(project(":autotrade-config"))
+    implementation(project(":autotrade-control"))
     implementation(project(":autotrade-notification-jar"))
 }

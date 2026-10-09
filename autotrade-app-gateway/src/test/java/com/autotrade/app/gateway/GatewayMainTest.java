@@ -32,10 +32,10 @@ class GatewayMainTest {
         RuntimeConfig.RealTrading rt = new RuntimeConfig.RealTrading(
                 List.of(new RuntimeConfig.RealAccount("KIWOOM-KRX-1", BrokerId.KIWOOM, Market.KRX),
                         new RuntimeConfig.RealAccount("KIS-KRX-1", BrokerId.KIS, Market.KRX)),
-                Map.of("KIWOOM-KRX-1", Secret.of("<ACCOUNT_NUMBER>")));
+                Map.of("KIWOOM-KRX-1", Secret.of("<ACCOUNT_NUMBER>")), Secret.empty());
 
         // 한투 계좌는 계좌번호가 없어 활성화할 수 없으므로 게이트웨이가 써도 된다
         assertThat(GatewayMain.reservedForRealTrading(rt)).containsExactly(BrokerId.KIWOOM);
-        assertThat(GatewayMain.reservedForRealTrading(new RuntimeConfig.RealTrading(List.of(), Map.of()))).isEmpty();
+        assertThat(GatewayMain.reservedForRealTrading(new RuntimeConfig.RealTrading(List.of(), Map.of(), Secret.empty()))).isEmpty();
     }
 }

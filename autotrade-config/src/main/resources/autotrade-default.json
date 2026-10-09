@@ -20,6 +20,7 @@
   },
   "real-trading": {
     "accounts": [],
-    "account-numbers": {}
+    "account-numbers": {},
+    "operator-password-hash": ""
   }
 }

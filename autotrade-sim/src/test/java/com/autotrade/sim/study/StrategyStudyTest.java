@@ -4,7 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.domain.Money;
 import com.autotrade.domain.market.Market;
-import com.autotrade.risk.RiskDecision;
+import com.autotrade.risk.BlacklistSnapshot;
+import com.autotrade.risk.RiskChain;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.cost.CostModel;
@@ -96,7 +97,7 @@ class StrategyStudyTest {
                 profiles, "bh", "rnd", 3, List.of(Duration.ofMillis(500), Duration.ofSeconds(2)), Duration.ofMillis(500),
                 3, ScreeningThresholds.defaults(), 2);
         return new StrategyStudy(synth.data(), synth.tradingDays(), RULES, COST, new CatalogStrategyFactory(RULES),
-                (o, acc) -> RiskDecision.approve(), new CodeVersion("abc", false), m -> { }).run(config);
+                RiskChain.builder(BlacklistSnapshot.EMPTY).build(), new CodeVersion("abc", false), m -> { }).run(config);
     }
 
     private static StrategyProfile bh() {

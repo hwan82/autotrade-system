@@ -23,9 +23,9 @@
 | 프로세스 (D-013) | 부트 모듈 | 진입점 | 형태 | 런타임에 없어야 하는 것 (빌드 검사) |
 |---|---|---|---|---|
 | ① 실전 엔진 | autotrade-app-engine | `EngineMain` | 순수 Java, `installDist` | sim, app-lab, ui, app-gateway, Spring |
-| ② 시세 게이트웨이 | autotrade-app-gateway | `GatewayMain` | 순수 Java | sim, app-lab, ui, risk, strategy, Spring |
+| ② 시세 게이트웨이 | autotrade-app-gateway | `GatewayMain` | 순수 Java | sim, app-lab, ui, risk, strategy, control, Spring |
 | ③ 실험실 | autotrade-app-lab | `AutotradeLabApplication` | Spring Boot, `bootJar` | (Spring 허용. 다른 프로세스 모듈 참조는 ArchUnit이 막음) |
-| ④ 감시·킬스위치 | autotrade-app-watchdog | `WatchdogMain` | 순수 Java | sim, app-lab, ui, strategy, Spring |
+| ④ 감시·킬스위치 | autotrade-app-watchdog | `WatchdogMain` | 순수 Java | sim, app-lab, ui, strategy, control, Spring |
 
 ```
  app-engine   app-gateway   app-lab (Spring)   app-watchdog      ← 서로 참조 금지
@@ -44,11 +44,12 @@
 | autotrade-domain | Money, Market·Symbol·MarketEvent, MarketRules, AccountRef·AccountSnapshot, OrderRequest·OrderIntent·OrderGateway·OrderQueryResult·IdempotencyKey·OrderState, ReplayClock | O | 없음 |
 | autotrade-marketdata | MarketDataSource, MarketEventListener, Subscription | O | domain |
 | autotrade-strategy | StrategyProfile(내용 해시), TradingStyle | O | domain |
-| autotrade-risk | RiskPolicy, RiskDecision | O | domain |
+| autotrade-risk | RiskPolicy, RiskDecision, RiskChain(가상·실전 공통 검증 체인), BlacklistSnapshot·BlacklistEntry·BlacklistType, RealTradingGuard 골격(`guard`, ADR-002) | O | domain |
 | autotrade-sim | ExperimentRunner, ExperimentSpec, ClockMode, ExperimentResult, RunResult | O | domain, strategy, marketdata, risk |
 | autotrade-broker-api | BrokerPlugin, BrokerCapability, BrokerStatus | O | domain, marketdata |
 | autotrade-config | RuntimeConfig, ConfigLoader, ConfigPaths, SecretPaths, RuntimeConfigStore, RuntimeConfigHolder, Secret, ProcessStartup | O (Jackson만) | domain |
-| autotrade-app-{engine,gateway,lab,watchdog} | 프로세스 진입점 | lab만 Spring | 위 표 |
+| autotrade-control | 실전 제어 명령 채널(ADR-006): ControlRequest·ControlResponse·EngineStatus, ControlCodec, ControlServer(엔진만), ControlClient(실험실만) | O (Jackson만) | config |
+| autotrade-app-{engine,gateway,lab,watchdog} | 프로세스 진입점 | lab만 Spring | 위 표. engine과 lab은 control에도 의존 |
 | autotrade-architecture-test | 모든 모듈을 한 클래스패스에 올려 ArchUnit 규칙 검사 | 테스트 전용 | 전부 |
 | autotrade-notification-jar, autotrade-monitor-agent-jar | 자리만 | O | 없음 |
 | autotrade-ui | 자리만(D-020: 로컬 웹 대시보드) | - | - |
@@ -60,6 +61,7 @@
 - **config는 별도 순수 모듈이다.** 4개 프로세스가 모두 같은 설정 체계를 써야 하므로 Spring에 넣지 않는다.
 - **Spring은 실험실에만 쓴다.** 실전 엔진·게이트웨이·감시는 순수 Java로 시작해 기동 시간·메모리·의존 표면을 줄인다. UI 백엔드(D-020)는 5단계에서 실험실 프로세스 또는 별도 모듈로 정한다.
 - 증권사 플러그인(kis, kiwoom, toss)은 2단계(시세)·7단계(주문)에서 모듈로 추가한다.
+- **control은 엔진과 실험실이 함께 쓰는 순수 모듈이다**(ADR-006, 2026-10-09 추가). 서버는 실전 엔진만, 클라이언트는 실험실만 쓰도록 ArchUnit(`ONLY_ENGINE_OPENS_CONTROL_SERVER`, `ONLY_LAB_SENDS_CONTROL_COMMANDS`)이 막고, 게이트웨이·감시는 런타임 클래스패스에 control이 있으면 `verifyProcessIsolation`이 실패한다.
 
 대안 비교 (프로세스 분리 방식):
 
@@ -78,7 +80,7 @@
 | Gradle 모듈 의존 | 허용되지 않은 모듈 참조(컴파일 오류) | 각 `build.gradle.kts` |
 | `verifyPureDependencies` | 순수 모듈 런타임 클래스패스의 Spring·JDBC 드라이버·HikariCP·Flyway·Hibernate·JPA·H2 | `build-logic/.../autotrade.pure-java-conventions.gradle.kts`, `check`에 연결 |
 | `verifyProcessIsolation` | 프로세스 런타임 클래스패스의 금지 모듈과 Spring (2.1절 표) | `build-logic/.../autotrade.process-conventions.gradle.kts`, `check`에 연결 |
-| ArchUnit (10개 규칙) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
+| ArchUnit (`ArchitectureTest`의 규칙 전체) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 실전 주문 출구·Guard 올림·2차 확인 생성·명령 채널 서버/클라이언트 위치(ADR-002·006), `RiskPolicy` 구현 클래스는 리스크 모듈 산출물에만(패키지와 클래스 파일 위치, D-032), 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
 | `-Xlint:all -Werror` | 경고 방치 | `autotrade.java-conventions` |
 | CI `guards` 잡 | 저장소 전 이력의 비밀값(gitleaks), Python 수집기의 실시간·SDK·주문·키 코드 | `.github/workflows/ci.yml`, `scripts/ci/check-python-collectors.sh` |
 
@@ -101,7 +103,8 @@ ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래�
 | `OrderRequest` | 매도는 EXIT·STOP_LOSS, 매수는 ENTRY만. `OrderIntent.isProtective()`로 손절 우선 처리 | 조합 위반 `IllegalArgumentException` | 불변 |
 | `BrokerPlugin` | ACTIVE이고 능력이 선언된 기능만 사용, `orderGateway(AccountRef)`는 다른 증권사 계좌면 빈 값 | 없음(빈 Optional) | 상태 조회는 비블로킹 |
 | `StrategyProfile` | 불변, `profileHash()`는 길이 접두 직렬화 SHA-256, 파라미터 순서 무관(골든 값 테스트) | 형식 위반 `IllegalArgumentException` | 불변 |
-| `RiskPolicy` | 순수 함수, I/O·현재 시각·난수 금지, 블랙리스트 규칙이 묶음의 첫 번째 | 거절은 값(`RiskDecision.Rejected`) | 필수 |
+| `RiskPolicy` | 순수 함수, I/O·현재 시각·난수 금지. 운영 구현 클래스는 리스크 모듈(autotrade-risk)의 `com.autotrade.risk..`에만(ArchUnit, 람다 제외) | 거절은 값(`RiskDecision.Rejected`) | 필수 |
+| `RiskChain` | 가상·실전 공통 체인(D-032). `builder(BlacklistSnapshot)`만 있어 블랙리스트 없는 체인은 없음. 순서 고정: 블랙리스트·수동 보유(모든 의도, 거절 ID `BLACKLIST`·`MANUAL_HOLDING`, 청산·손절도 차단, D-035) → 청산·손절 승인 → 진입 규칙(첫 거절에서 멈춤). 진입 규칙 예외·null, 주문·스냅샷 계좌 불일치는 `RISK_RULE_ERROR` 거절 | 없음(거절은 값) | 불변, 필수 |
 | `ExperimentRunner` | 결정론(스레드 수와 무관), 미래 정보 금지, Run 간 상태 공유 금지, Run 시드는 실험 시드와 프로필 해시로 파생, 실전과 같은 리스크·상태머신·블랙리스트 코드 | 한 Run 실패는 그 Run만 FAILED(사유 기록) | 동기 실행 |
 | `MarketRules` | 불변, 시간은 거래소 현지 시간대, 통화는 시장 통화, 호가 단위 반올림 방향을 호출자가 지정, 수치는 공식 출처 주석 | 0 이하 가격 거부 | 필수 |
 | `Clock` | 비즈니스 로직은 주입된 `java.time.Clock`만 사용. 리플레이는 `ReplayClock`(앞으로만 이동, `advanceToAtLeast`) | 과거로 이동 시 예외 | 필수 |

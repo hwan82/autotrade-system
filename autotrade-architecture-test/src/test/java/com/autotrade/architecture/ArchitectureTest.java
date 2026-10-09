@@ -5,17 +5,27 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableTo
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.autotrade.app.engine.command.ForgedConfirmation;
+import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
+import com.autotrade.archfixture.ApproveAllRiskPolicy;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
+import com.autotrade.archfixture.MisplacedControlChannel;
 import com.autotrade.broker.BrokerPlugin;
 import com.autotrade.broker.fixturea.PluginA;
 import com.autotrade.broker.fixtureb.PluginB;
+import com.autotrade.control.ControlClient;
+import com.autotrade.control.ControlServer;
+import com.autotrade.risk.RiskChain;
+import com.autotrade.risk.RiskPolicy;
+import com.autotrade.risk.archfixture.SplitPackageApproveAll;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -23,6 +33,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.EvaluationResult;
 import java.math.BigDecimal;
@@ -52,6 +63,7 @@ class ArchitectureTest {
         "com.autotrade.sim..",
         "com.autotrade.broker..",
         "com.autotrade.config..",
+        "com.autotrade.control..",
     };
     // 실험실(Spring)을 뺀 프로세스 진입점도 Spring을 쓰지 않는다
     private static final String[] PLAIN_PROCESSES = {
@@ -136,7 +148,7 @@ class ArchitectureTest {
                     .and(target(owner(assignableTo(BrokerPlugin.class)))))
             .because("실전 주문은 RealTradingGuard를 거친 출구로만 나가야 한다(RSK-01)");
 
-    /** Guard를 올리는 조작이 허용되는 곳: 7단계 활성화 명령 채널 패키지(아직 없음). */
+    /** Guard를 올리는 조작이 허용되는 곳: 실전 제어 명령 채널 패키지(ADR-006). */
     static final String GUARD_COMMAND_CHANNEL = "com.autotrade.app.engine.command..";
 
     /**
@@ -150,6 +162,52 @@ class ArchitectureTest {
             .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
                     .and(target(name("<init>"))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
+
+    /** 리스크 모듈(autotrade-risk) 산출물에서 읽은 클래스인지. 클래스 파일 위치로 판단해 다른 모듈의 같은 패키지 이름을 거른다. */
+    static final DescribedPredicate<JavaClass> FROM_RISK_MODULE = new DescribedPredicate<>("come from module autotrade-risk") {
+        @Override
+        public boolean test(JavaClass c) {
+            return c.getSource()
+                    .map(src -> src.getUri().toString().replace('\\', '/').contains("/autotrade-risk/"))
+                    .orElse(false);
+        }
+    };
+
+    /**
+     * 리스크 규칙은 리스크 모듈에만 있다(SIM-12, 안전 불변식 7). 가상·실전이 같은 규칙을 쓰려면 규칙이 한곳에 있어야 하고,
+     * 다른 모듈이 승인만 하는 정책을 만들어 쓰는 길을 막는다. 패키지 이름만이 아니라 클래스 파일이 나온 모듈을 본다
+     * (다른 모듈에 {@code com.autotrade.risk} 패키지를 만들어 우회하는 길, QA 검토 F-1).
+     * 람다·메서드 참조는 클래스가 아니라 잡지 못한다. 실험 실행기는 {@code RiskChain}만 받으므로 바깥 람다로는
+     * 블랙리스트를 건너뛸 수 없고 진입 제한만 더할 수 있다(D-032 위험과 한계).
+     */
+    static final ArchRule RISK_POLICIES_LIVE_IN_RISK_MODULE = classes()
+            .that().implement(RiskPolicy.class)
+            .should().resideInAPackage("com.autotrade.risk..")
+            .andShould(ArchCondition.from(FROM_RISK_MODULE))
+            .because("가상과 실전은 같은 리스크 검증 코드를 공유한다(SIM-12)");
+
+    /**
+     * 명령 채널 안에서도 2차 확인({@link SecondConfirmation})은 비밀번호 검증기만 만든다(ADR-002 3장 되돌릴 조건, ADR-006 2.4).
+     * 검증을 거치지 않은 확인으로 Guard를 올리는 코드를 빌드로 막는다.
+     */
+    static final ArchRule ONLY_AUTHENTICATOR_CREATES_CONFIRMATION = noClasses()
+            .that().doNotHaveFullyQualifiedName(OperatorAuthenticator.class.getName())
+            .and().resideOutsideOfPackage("com.autotrade.risk.guard..")
+            .should().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
+                    .and(target(name("<init>"))))
+            .because("2차 확인은 운영자 비밀번호와 확인 문구 검증을 통과해야만 만들어진다(RSK-01)");
+
+    /** 명령 채널 서버(실전 제어 명령을 받는 쪽)는 실전 엔진만 연다(ADR-006 2.1). */
+    static final ArchRule ONLY_ENGINE_OPENS_CONTROL_SERVER = noClasses()
+            .that().resideOutsideOfPackages("com.autotrade.app.engine..", "com.autotrade.control..")
+            .should().dependOnClassesThat().areAssignableTo(ControlServer.class)
+            .because("실전 제어 명령은 실전 엔진만 받는다(ADR-006)");
+
+    /** 명령 채널 클라이언트(실전 엔진에 명령을 보내는 쪽)는 실험실(UI 서버)만 쓴다(ADR-006 2.1). */
+    static final ArchRule ONLY_LAB_SENDS_CONTROL_COMMANDS = noClasses()
+            .that().resideOutsideOfPackages("com.autotrade.app.lab..", "com.autotrade.control..")
+            .should().dependOnClassesThat().areAssignableTo(ControlClient.class)
+            .because("실전 제어 명령은 사람이 UI에서 2차 확인을 거쳐 보낸다. 게이트웨이·감시·엔진은 보내지 않는다(ADR-006)");
 
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
@@ -221,6 +279,18 @@ class ArchitectureTest {
     @Test
     void Guard를_올리는_조작은_명령_채널에서만_한다() {
         ONLY_COMMAND_CHANNEL_RAISES_GUARD.check(PRODUCTION);
+        ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.check(PRODUCTION);
+    }
+
+    @Test
+    void 명령_채널_서버는_엔진만_열고_클라이언트는_실험실만_쓴다() {
+        ONLY_ENGINE_OPENS_CONTROL_SERVER.check(PRODUCTION);
+        ONLY_LAB_SENDS_CONTROL_COMMANDS.check(PRODUCTION);
+    }
+
+    @Test
+    void 리스크_규칙은_리스크_모듈에만_있다() {
+        RISK_POLICIES_LIVE_IN_RISK_MODULE.check(PRODUCTION);
     }
 
     @Test
@@ -270,5 +340,21 @@ class ArchitectureTest {
         assertThat(String.join("\n", plugins.getFailureReport().getDetails()))
                 .contains("fixturea.PluginA", "fixtureb.PluginB")
                 .doesNotContain("BrokerCredentials");
+        // 리스크 모듈 밖의 승인만 하는 정책: 다른 패키지 클래스 1개는 패키지·모듈 2건 위반, 리스크 패키지를 빌린 다른 모듈 클래스는 모듈 1건 위반
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                ApproveAllRiskPolicy.class)).getFailureReport().getDetails()).hasSize(2);
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                SplitPackageApproveAll.class)).getFailureReport().getDetails()).hasSize(1);
+        // 리스크 모듈의 실제 구현은 통과한다(위치 판정이 모든 클래스를 거절하는 오류 방지)
+        assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
+                RiskChain.class)).hasViolation()).isFalse();
+        // 명령 채널 패키지 안이라도 검증기가 아니면 2차 확인을 만들 수 없다: 생성 1건, 생성자 참조 1건
+        JavaClasses insideChannel = new ClassFileImporter().importClasses(ForgedConfirmation.class, OperatorAuthenticator.class);
+        assertThat(ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.evaluate(insideChannel)
+                .getFailureReport().getDetails()).hasSize(2);
+
+        JavaClasses misplaced = new ClassFileImporter().importClasses(MisplacedControlChannel.class);
+        assertThat(ONLY_ENGINE_OPENS_CONTROL_SERVER.evaluate(misplaced).hasViolation()).isTrue();
+        assertThat(ONLY_LAB_SENDS_CONTROL_COMMANDS.evaluate(misplaced).hasViolation()).isTrue();
     }
 }

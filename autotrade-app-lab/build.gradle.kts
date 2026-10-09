@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":autotrade-risk"))
     implementation(project(":autotrade-sim"))
     implementation(project(":autotrade-config"))
+    implementation(project(":autotrade-control"))
     implementation(project(":autotrade-notification-jar"))
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")

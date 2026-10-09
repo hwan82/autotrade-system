@@ -23,6 +23,7 @@ include(
     "autotrade-broker-kis",
     "autotrade-broker-toss",
     "autotrade-config",
+    "autotrade-control",
     "autotrade-app-engine",
     "autotrade-app-gateway",
     "autotrade-app-lab",
