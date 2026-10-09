@@ -12,7 +12,7 @@
 ## 결정
 
 1. **`RiskChain`(autotrade-risk)** 이 가상·실전 공통 주문 전 검증 체인이다. 평가 순서는 고정이다.
-   1. 블랙리스트·수동 보유 필터: 진입·청산·손절 **모든 의도**에 적용(RSK-02 "어떤 경로로도", 안전 불변식 6 "청산 로직에도"). 거절 규칙 ID는 `BLACKLIST`(MANUAL), `MANUAL_HOLDING`(AUTO_ASSET). 청산·손절까지 막는 부분은 D-035으로 사용자가 확정했다(아래 위험과 한계 첫 항목).
+   1. 블랙리스트·수동 보유 필터: 진입·청산·손절 **모든 의도**에 적용(RSK-02 "어떤 경로로도", 안전 불변식 6 "청산 로직에도"). 거절 규칙 ID는 `BLACKLIST`(MANUAL), `MANUAL_HOLDING`(AUTO_ASSET). 청산·손절까지 막는 부분은 D-035로 사용자가 확정했다(아래 위험과 한계 첫 항목).
    2. 보호 주문(`OrderIntent.isProtective()`: 청산·손절) 승인. 진입 규칙은 보호 주문을 막을 수 없다(D-023 공통 원칙 1).
    3. 진입 규칙: 등록 순서대로, 첫 거절에서 멈춤. RSK-03 계좌 한도·RSK-11 세션 구간 같은 규칙이 여기 붙는다.
 2. **블랙리스트 없는 체인은 만들 수 없다.** `RiskChain.builder(BlacklistSnapshot)`만 있고 null은 거절한다. 실제 종목이 없는 합성 실험만 `BlacklistSnapshot.EMPTY`를 쓴다.
