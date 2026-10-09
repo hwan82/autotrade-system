@@ -191,7 +191,7 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 | Windows ACL로 소켓 폴더 제한, macOS 소켓 경로 길이 확인 | architect | 실사용 PC 확정 후(6단계 전) |
 | 엔진 종료 시 진행 중 명령을 마치고 닫기(지금은 즉시 중단, 재기동하면 모두 OFF) | architect | 7단계 |
 | 엔진이 지워진 소켓·잠금 파일을 스스로 확인해 다시 만들고 긴급 알림, 지울 수 없는 단일 실행 보장 | architect + risk-ops | 7단계 완료 조건 |
-| 장애 테스트 후보: "엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 기동 차단, 화면 가상 표시 없음" (broker-and-fault-design.md 7장 목록 반영은 risk-ops 제안, 사용자 결정) | risk-ops | 7단계 |
+| 장애 테스트 후보: "엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 기동 차단, 화면 가상 표시 없음" (broker-and-fault-design.md 7장 목록 반영은 Q-018, 사용자 결정) | risk-ops | 7단계 |
 | 하향 명령(내리기·PANIC)용 연결 자리 예약, 기다리는 PANIC의 시간 상한, 감시 프로세스(MON) 점검 항목에 명령 채널 연결 포화 추가 | risk-ops | 7단계 완료 조건 |
 | 머지 후 기획서 RSK-13 문구 갱신(1단계는 2차 확인 전, Q-017 결과) | pm-lead(autotrade-spec-keeper) | 머지 직후 |
 

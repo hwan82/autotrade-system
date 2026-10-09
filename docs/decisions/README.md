@@ -47,6 +47,7 @@
 | Q-013 | 승격·선발 기준 수치(스타일별 KPI, 워크포워드 구간, 장중 프로필 기준). 승격 기준 변경분은 사용자 결정. D-027 C1~C10이 1차 선별 추천안이고, 녹화 데이터 실험 후 확정 제안 | strategy-researcher |
 | Q-016 | 재기동 직후 보유가 남은 OFF 계좌에서 PANIC SELL을 누르면 보호 모드로 올려 매도할지(추천), 건너뛰고 먼저 보호 모드 진입을 요구할지. [ADR-006](../adr/ADR-006-real-control-channel.md) 7장. 실전 영향이라 **사용자 결정** | risk-ops |
 | Q-017 | 장 외 시간 PANIC SELL 때 Guard를 끌지(기획서 RSK-13 문구), 보호 모드를 유지할지(추천). [ADR-006](../adr/ADR-006-real-control-channel.md) 7장. 실전 영향이라 **사용자 결정** | risk-ops |
+| Q-018 | 장애 테스트 목록(broker-and-fault-design.md 7장)에 "실전 엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 기동 차단, 화면 가상 표시 없음"을 넣어 7단계 실전 활성화 전 합격 조건으로 둘지(risk-ops 추천: 추가). [ADR-006](../adr/ADR-006-real-control-channel.md) 4·6장. 실전 영향이라 **사용자 결정** | risk-ops |
 
 ## 닫힌 미확정
 | ID | 닫은 날짜 | 결과 |

@@ -349,3 +349,48 @@
 
 ## 판정
 수정 필요(H1). 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 2(A5, A13)다. 직전 지적 G1은 코드와 테스트로 반영을 확인했고(Windows 실기는 ADR 5·6장 조건), G2는 7단계 조건으로 기록됐으며, G3은 참고 수준의 문구 하나가 남았다. H1은 실제 프로세스로 재현한 단일 인스턴스 보장의 틈으로, 1차 M6과 같은 위험(같은 계좌 Guard 두 벌, 화면이 엉뚱한 엔진과 대화)이다. 현재 계좌 피해는 없으므로, 코드 수정과 테스트 1건 또는 최소한 ADR-006 2.2 문구 정정·4장 위험 표·6장 7단계 완료 조건과 장애 테스트 목록 등록을 하면 승인한다. H2·H3은 참고다. 실전 경로 PR이므로 승인 후에도 머지는 사용자가 직접 한다(지침 10장).
+
+## 재검토 4 2026-10-09
+
+# risk-ops 검토: 실전 운영 화면(ADR-006) 재검토 3 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, 커밋 b554eba / `git diff origin/main...HEAD`(origin/main 2dcea43 = merge-base, 11커밋, 57개 파일, +4632 −34). 직전 재검토(c4e1a18) 이후 변경은 8017d53(검토 원문 보존뿐)과 b554eba(ControlClient.java Javadoc, real.js 안내 문구 1줄, ADR-006 2.2·4장·6장, config-keys.md 안내 1줄)다. b554eba에는 실행 코드 변경이 없다(ControlClient는 클래스 Javadoc만, real.js는 문자열만). diff 전체와 영향받는 실전 경로(EngineMain, EngineCommandHandler, OperatorAuthenticator, RealTradingGuard 호출부, ControlServer/Client, RealOpsController, real.js·app.js, ArchitectureTest)를 다시 봤다
+- 점검표: A
+- 직접 실행한 것(다른 작업과 겹치지 않게 HEAD를 scratchpad의 새 폴더 `rr4-1791508918`에 clone해서 실행):
+  - `./gradlew --offline build --rerun-tasks`: BUILD SUCCESSFUL, 91개 작업 모두 실행(91 executed). 테스트 XML 집계 378건, 실패 0, 오류 0, 건너뜀 0. app-engine 48, control 20, architecture-test 13, risk 41, config 29, app-lab 97, sim 75, domain 27, strategy 25, gateway 1, watchdog 1, broker-api 1. 직전 재검토와 건수가 같다(b554eba는 테스트를 바꾸지 않음)
+  - gitleaks 8.21.2(scratchpad/gl/gitleaks): `gitleaks git --redact --log-opts=origin/main..HEAD` 9 commits no leaks found, 저장소 전 이력 60 commits no leaks found
+  - `scripts/ci/check-python-collectors.sh`: 종료 코드 0
+  - diff에 추가된 `@Disabled`·`@Ignore`·`assume*` 없음(검토 원문 인용 줄만 걸림), 삭제된 파일 없음(`git diff --diff-filter=D` 결과 없음)
+  - 실제 프로세스 점검은 이번에 다시 하지 않았다. ControlServer·EngineMain은 c4e1a18 이후 바뀌지 않았으므로(`git diff --stat 8017d53 HEAD`에 없음) 재검토 3의 H1 재현 결과가 그대로 유효하고, ADR-006에 새로 적힌 한계 서술(44·156행)이 그 재현 결과와 일치한다
+- 코드는 고치지 않았다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk` 변경 없음. EngineMain.java:85·95-98이 설정 계좌로 Guard를 만들고 모두 OFF로 시작. 설정에 올리는 키 없음(autotrade-default.json은 `operator-password-hash` 자리만). b554eba는 Guard와 무관. EngineMainTest#실전_계좌가_설정돼_있어도_기동_직후_모두_OFF다, #설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다, EngineCommandHandlerTest#기동_직후_상태는_모든_계좌_OFF이고_비밀값을_담지_않는다 통과 |
+| A2 | 통과 | ArchitectureTest.java:136 `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`, 149 `ONLY_COMMAND_CHANNEL_RAISES_GUARD`, 161 `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`, 169 `ONLY_ENGINE_OPENS_CONTROL_SERVER`, 175 `ONLY_LAB_SENDS_CONTROL_COMMANDS` 포함 13건 통과. b554eba는 ArchitectureTest를 바꾸지 않음. `RealOrderGateways.open` 운영 호출 없음. EngineMain.java:117 `BROKER_NOT_CONNECTED` 배선, EngineMainTest#실제_배선으로_활성화하면_증권사_연동_전이라_첫_단계에서_OFF로_돌아간다 통과 |
+| A3 | 통과 | 주문 전송 코드 없음. PanicLiquidator·ActivationStepRunner는 `AccountRef`만 받고 증권사 선택 인자 없음. 증권사 전환 경로 없음 |
+| A4 | 통과 | 주문 타임아웃 경로 변경 없음. 명령 채널은 재전송 없음(ControlClient.java:64-80). ACTIVATE는 오래 기다리면 STALE(ControlServer.java:233-244), PANIC은 BUSY 없이 실행(228-232). ControlChannelTest#대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다, #오래_기다린_활성화는_버리고_PANIC은_기다렸어도_실행한다 통과. real.js:67 새 문구는 "닿지 못하면 반영되지 않는다, 엔진 응답으로 확인"이라 재전송을 유도하지 않는다 |
+| A5 | 해당 없음 | 주문을 만드는 코드 없음. 멱등 키 코드(domain) 변경 없음. 7단계 PanicLiquidator 매도 구현 때 다시 본다 |
+| A6 | 통과 | 새 자동 주문 경로 없음(PANIC 증권사 단계는 `BROKER_NOT_CONNECTED` 구현으로 수행 불가). 블랙리스트·수동 보유 제외는 PanicLiquidator 계약과 ADR-006 2.5·4장에 7단계 조건으로 남음 |
+| A7 | 통과 | 계좌별 큐·토큰 버킷 코드 변경 없음. PANIC 1단계는 계좌별 Guard 전이만. 두 번째 엔진에 의한 계좌별 단일 직렬 큐 붕괴 가능성(H1)은 ADR-006 4장(156행) 위험 표와 6장(193행) 7단계 완료 조건으로 등록됨. 지금은 주문 경로가 없어 실제 영향 없음 |
+| A8 | 통과 | 실험실은 클라이언트만, 엔진은 서버만(ArchUnit 169·175), 게이트웨이·감시 런타임에 control 금지(verifyProcessIsolation, build 통과). ControlClient의 잠금 파일 읽기(ControlClient.java:90-104)는 실험실 쪽 읽기 전용. 명령 채널 장애는 Guard 판정에 영향 없음. b554eba는 실행 코드를 바꾸지 않음 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. PANIC은 증권사 단계 4개가 모두 DONE일 때만 OFF, 서버 측 손절 취소 후 매도 미확정은 긴급 표시. EngineCommandHandlerTest#서버_측_손절을_취소한_뒤_매도가_끝나지_않으면_긴급으로_알린다, #매도가_하나라도_끝나지_않으면_Guard를_끄지_않는다 통과 |
+| A10 | 통과 | gitleaks 브랜치 9커밋·전 이력 60커밋 no leaks. b554eba의 새 문구에 경로·PID·계좌·비밀값 없음. 요청 toString 마스킹(ControlChannelTest#요청_문자열에는_비밀번호와_계좌_칸이_보이지_않는다), 실험실 로그는 명령 이름과 결과 코드만(RealOpsControllerTest#활성화는_확인_문구와_비밀번호를_엔진에_넘기고_응답과_로그에는_남기지_않는다) 통과 |
+| A11 | 통과 | 삭제·비활성화된 테스트 없음. b554eba는 테스트 파일을 바꾸지 않음. 브랜치 전체에서 바뀐 기존 테스트는 재검토 1~3에서 확인한 대로 단언 유지·강화뿐. 새 동작의 실패 경우 테스트(틀린 확인, 잠금, 미설정, BUSY, STALE, 잠금 파일 읽기 실패 → UNKNOWN 등) 있음 |
+| A12 | 통과 | 대응표 #8(엔진 크래시 후 재기동), #9(실험실·UI 크래시) 전제 유지(재검토 3과 같음, 실행 코드 변경 없음). broker-and-fault-design.md는 이 브랜치에서 바뀌지 않았고, 장애 테스트 8종의 전제(주문 경로, 큐, 대사)를 깨는 변경 없음. 새로 드러난 "run 폴더 삭제 → 두 번째 엔진" 시나리오는 ADR-006 6장(194행)에 장애 테스트 후보로 올리고 broker-and-fault-design.md 7장 반영은 사용자 결정으로 남겼다. 장애 테스트 8종 구성 변경은 지침 8장 2번(실전 영향)이라 이 처리가 맞다. 해외 O1~O8 영향 없음 |
+| A13 | 해당 없음 | 시장별 분기·시간·금액 계산 없음. 대기 경과는 `System.nanoTime` 상대값으로 ArchUnit `NO_SYSTEM_TIME`(105행) 통과 |
+| A14 | 통과 | ADR-006 2.2(44행)가 "엔진은 설정 폴더당 하나(잠금 파일이 남아 있는 동안)"로 정정되고 한계를 명시, 2.2(48행)·2.3의 판정 규칙이 ControlClient.java:90-104 및 고친 클래스 Javadoc(26-31행)과 일치. 4장 위험 표(156행), 6장 7단계 완료 조건(193행)·장애 테스트 후보(194행) 추가. config-keys.md:11에 "엔진 실행 중 run 폴더를 지우지 말 것" 안내. Q-016·Q-017 결정 로그(docs/decisions/README.md:48-49)에 있음. 기획서 RSK-13 문구 갱신은 6장 표에 머지 직후 과제로 남음 |
+
+### 직전 재검토 지적 처리 확인
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| H1 run 폴더·engine.lock 삭제 시 엔진 두 개 | 최소 조건 충족(문서화), 코드 수정은 7단계 완료 조건 | 재검토 3에서 "코드로 고치지 않을 경우 최소 조건"으로 적은 4가지를 확인했다. (1) ADR-006 2.2 문구 정정(44행), (2) 4장 위험 표(156행, 영향 4가지 모두 서술), (3) 6장 7단계 완료 조건(193행, 소켓·잠금 파일 자기 확인·재생성·긴급 알림·지울 수 없는 단일 실행 보장), (4) 장애 테스트 목록: ADR-006 6장 194행에 후보로 등록, broker-and-fault-design.md 7장 반영은 사용자 결정. config-keys.md 안내 추가는 덤. 지금은 열 수 있는 계좌가 없어 현재 계좌 피해 없음 |
+| H2 ControlClient 클래스 Javadoc | 반영 | ControlClient.java:26-31이 "잠금 파일이 없거나 PID 프로세스 없음 → NOT_RUNNING, 그 밖의 모든 경우 → UNKNOWN"으로 메서드 동작(94-104행)과 일치 |
+| H3 테스트 Windows 이식성 | 변경 없음(참고) | Windows 실행 때 확인. 안전과 무관 |
+| G3(b) real.js UNKNOWN 안내 | 반영 | real.js:67 "엔진에 닿지 못하면 반영되지 않고 … 급하면 실전 엔진 터미널과 증권사 화면을 직접 확인"으로 소켓 없음 경우에 오해 소지 없음 |
+
+## 점검표 밖 발견
+- **I1 (참고) 사용자 QA 요청에 H1 관련 사용자 결정을 함께 넣을 것.** ADR-006 6장 194행은 "broker-and-fault-design.md 7장 목록 반영은 사용자 결정"이라고만 적고 결정 로그에 Q 번호가 없다. 실전 경로 PR이라 어차피 사용자에게 QA 요청이 가므로, 그 문구에 "장애 테스트 목록에 'run 폴더 삭제 → 두 번째 엔진 차단' 추가 여부(risk-ops 추천: 추가, 7단계 실전 활성화 전 합격 조건)"를 넣거나 Q 번호로 등록하면 잊히지 않는다. 승인 조건으로 삼지 않는다
+- **I2 (참고) 7단계 완료 조건이 쌓였다.** ADR-006 6장에 risk-ops 소관 7단계 완료 조건이 소켓·잠금 자기 확인, 하향 명령 연결 자리, 기다리는 PANIC 시간 상한, PANIC 매도의 블랙리스트·장 외 처리, 감시 프로세스 긴급 경로 등으로 늘었다. 7단계 착수 시 이 표를 그대로 실전 활성화 전 점검 목록(장애 테스트 8종 합격과 함께)으로 옮겨야 한다. 지금 할 일은 없다
+
+## 판정
+승인. 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 2(A5, A13)다. 직전 지적 H1은 재검토 3에서 정한 최소 조건(ADR-006 2.2 정정·4장 위험 표·6장 7단계 완료 조건·장애 테스트 후보 등록)을 모두 충족했고, H2와 G3(b)는 반영을 확인했다. b554eba에는 실행 코드 변경이 없고 전체 빌드(378건, 실패 0)·gitleaks·Python 경계 검사가 통과했다. 남은 위험(H1 코드 수정, Windows 실기 확인, PANIC 매도 구현)은 모두 ADR-006 6장에 7단계 실전 활성화 전 조건으로 묶여 있고, 지금은 증권사 주문 연동이 없어 열 수 있는 실전 계좌가 없다. 실전 경로(RealTradingGuard 제어, 장애 대응) PR이므로 이 승인 후에도 사용자가 직접 확인하고 머지한다(지침 10장·11장). I1·I2는 참고다.
