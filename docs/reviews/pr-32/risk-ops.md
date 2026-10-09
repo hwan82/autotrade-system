@@ -36,3 +36,35 @@
 
 ## 판정
 수정 필요(A9·A14: PanicLiquidator.java:11 매도 불가 예시에 VI 추가(발견 1), ADR-006:203 합격 테스트를 QA pr-26 발견 3대로 고치고 ③~④ 사이 정지 테스트 추가(발견 2))
+
+## 재검토 2026-10-09
+- 대상: PR #32 / 커밋 38ab8aa(05ece15·38ab8aa 추가) / main 대비 diff(merge-base 0a4adf4, `git diff origin/main...HEAD`: `PanicLiquidator.java` +4 −3(주석만), `ADR-006-real-control-channel.md` +3 −3, `docs/reviews/pr-32/architect.md`·`risk-ops.md` 신규)
+- 점검표: A
+- 직접 실행한 것: `./gradlew build --console=plain` → `BUILD SUCCESSFUL`. `./gradlew :autotrade-risk:test --rerun :autotrade-architecture-test:test --rerun :autotrade-app-engine:test --rerun` → 세 test 태스크 실제 실행, `BUILD SUCCESSFUL`. 테스트 결과 XML 집계 522건, 실패·오류·건너뜀 0. `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `ArchitectureTest` 15, `ModuleOwnershipTest` 13, `EngineCommandHandlerTest` 22 통과
+- 원문 보존 확인: 이 파일의 앞 내용은 22555e9 이후 다른 커밋이 고치지 않음(`git log -- docs/reviews/pr-32/risk-ops.md`가 22555e9 하나)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 실행 코드 변경 0행(주석만). `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | 주문 출구·ArchUnit 변경 없음. `ArchitectureTest` 15·`ModuleOwnershipTest` 13 통과. 주입 구현은 `BROKER_NOT_CONNECTED`(EngineMain.java:117) |
+| A3 | 통과 | 추가 문구(ADR-006:203)는 같은 계좌 내 재설정·FAILED 표시만 다룸. 증권사 전환 없음 |
+| A4 | 통과 | 재설정 주문 "타임아웃 시 재전송 없이 조회" 합격 테스트 유지(ADR-006:203) |
+| A5 | 통과 | 멱등 키 요구 변경 없음 |
+| A6 | 통과 | 블랙리스트·수동 보유 제외 문구 유지(PanicLiquidator.java:11) |
+| A7 | 통과 | 큐·토큰 버킷·계좌 격리 변경 없음 |
+| A8 | 해당 없음 | 프로세스·정지 순서 변경 없음 |
+| A9 | 통과 | 앞 검토 발견 1 해소: PanicLiquidator.java:11이 "거래정지·VI·LULD 정지 등. VI 분류는 ADR-006 6장에서 사용자 결정"으로 D-037(decisions/README.md:42)·RSK-13(autotrade-spec.md:191)·ADR-006:99와 일치. 서버 측 손절 취소 금지·상태 불명 시 매도 불가 계약 유지(PanicLiquidator.java:12,20-21) |
+| A10 | 통과 | 추가 diff 전문 확인. 비밀값 없음 |
+| A11 | 통과 | 테스트 파일 변경 없음. 보호 테스트 통과. ADR-006:203 합격 테스트에 재설정 실패 시 FAILED·긴급·Guard OFF 없음, ③ 뒤 ④ 전 정지 시 재설정 시도·실패 시 FAILED·긴급 테스트가 추가됨(7단계 전 필수) |
+| A12 | 통과 | 대응표 17종·O1~O8·장애 테스트 8종 전제 변경 없음. 서버 측 손절을 마지막 방어선으로 두는 6.1·O4·O8과 같은 방향 |
+| A13 | 통과 | 시장 분기 없음. `MarketRules` 판정 출처 유지 |
+| A14 | 통과 | 앞 검토 발견 2 해소: ADR-006:203 합격 테스트가 QA pr-26 발견 3대로 "재설정이 거절·실패해 서버 측 손절 없이 마감을 넘기면 FAILED·긴급(`urgent`) 표시와 Guard OFF 없음(DONE·SKIPPED로 숨기지 않음)"으로 바뀌고, ③~④ 사이 정지 테스트 추가. 주석·ADR·D-037·RSK-13의 매도 불가 예시 일치 |
+
+## 점검표 밖 발견 (재검토)
+1. 앞 검토 참고 3 해소: ADR-006:202가 "옛 주석(…)은 … 고쳤다", 상태 칸 "주석은 PR #32에서 고침"으로 시점이 분명해짐.
+2. 앞 검토 참고 4 해소: PanicLiquidator.java:8 "미체결 취소 확인(매도 불가면 매수만)". 이 줄은 매도 불가 시 ③을 건너뛴다는 점은 적지 않지만 바로 아래 11-12행이 적으므로 문제 아님.
+3. 남은 후속(머지를 막지 않음, ADR-006 6장에서 7단계 전 필수로 추적): `PanicLiquidator` 실패 테스트, RSK-11 일괄 취소와 서버 측 손절 관계의 기획서 반영, 새 합격 테스트의 RSK-13 인수 조건 반영(pm-lead), VI 분류 사용자 결정.
+4. 이 PR은 실전 관련 PR이므로 지침 10·11장에 따라 독립 QA 후 사용자가 직접 머지한다.
+
+## 판정 (재검토)
+승인
