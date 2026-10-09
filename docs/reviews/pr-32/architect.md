@@ -72,3 +72,33 @@
 
 ### 2차 재검토 B7 덧붙임
 위 2차 절을 푸시하기 직전 `git pull --rebase`로 risk-ops 재검토 원문 커밋 0c0d613(`docs/reviews/pr-32/risk-ops.md` "재검토 2026-10-09", 대상 38ab8aa, 판정 "승인")이 들어왔다. B7의 "risk-ops 재검토 절은 아직 없다"는 푸시 시점 기준으로 사실이 아니므로 바로잡는다: risk-ops 재검토 승인 원문이 있다. 남은 머지 조건은 독립 QA와 사용자 직접 머지다(지침 10·11장). 판정은 위 2차 판정 "승인" 그대로다.
+
+## 재검토 2026-10-09 (3차, 대상 커밋 1827f8c)
+- 대상: 브랜치 최신 abbc63b(마지막 비검토 원문 커밋 1827f8c). main 대비 diff(`git diff origin/main...HEAD`, merge-base 0a4adf4): `PanicLiquidator.java`(Javadoc만), `ADR-006-real-control-channel.md` 6장 3행, 검토 원문 3개(`architect.md`, `risk-ops.md`, `qa.md`). 2차 뒤 변경은 1827f8c(PanicLiquidator.java +3, ADR-006 :203·:205 수정). `git log origin/main..HEAD -- docs/reviews`상 검토 원문 파일을 바꾼 커밋은 각 검토자의 원문 추가·덧붙임 커밋뿐이고 1827f8c는 원문을 건드리지 않음
+- 직접 실행한 것: 새 작업 트리(/tmp/arch-pr32b, 1827f8c 시점)에서 `./gradlew build --no-daemon --console=plain` → `BUILD SUCCESSFUL in 2m 15s`(104 tasks 모두 실행). 테스트 결과 XML 집계 522건, 실패 0·오류 0·건너뜀 0. 보호 테스트 `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `ArchitectureTest` 15, `ModuleOwnershipTest` 13, `EngineCommandHandlerTest` 22 통과
+- 함께 본 것: `docs/reviews/pr-32/qa.md`(발견 1~4, 판정), `EngineCommandHandler.java:270-298`(Guard OFF 판정과 긴급 표시), `PanicStepResult.java:8`(결과 값 DONE·SKIPPED·NOT_AVAILABLE·FAILED), ADR-006 2.5(88-104행)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 실행 결과 |
+| B2 | 통과 | 의존·import·ArchUnit 규칙 변경 없음. `ArchitectureTest`·`ModuleOwnershipTest` 통과 |
+| B3 | 통과 | 시그니처·결과 값 집합 무변경. 새 계약 줄(PanicLiquidator.java:20-22 "② 직전 판정이 매도 불가면 ③~⑤ 미수행, ②·③~⑤ SKIPPED, Guard OFF 없음")은 기존 결과 값만 써서 정해졌고, ADR-006:203 (다)와 같은 내용. 현재 처리기는 증권사 단계가 모두 DONE일 때만 Guard OFF를 하므로(EngineCommandHandler.java:280) 이 규칙과 맞물려 Guard OFF가 일어나지 않는다. 기존 계약 줄 "앞 단계가 DONE이 아니면 뒤 단계를 하지 않는다"(:17), "서버 측 손절 없이 보유가 남은 상태를 SKIPPED로 숨기지 않는다"(:18-19)와도 충돌 없음(이 경우 서버 측 손절을 취소하지 않으므로) |
+| B4 | 해당 없음 | sim·strategy·시계·난수 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 실행 동작 변경 없음. 새 합격 테스트 "② 시점 매도 불가 → ③ 시점 매도 가능이어도 ③ 미수행(②·③~⑤ SKIPPED, Guard OFF 없음)"이 ADR-006:203에 7단계 전 필수로 등록됨. 테스트 삭제·비활성화 없음 |
+| B7 | 통과(risk-ops 검토 필요) | 실전 경로(PANIC SELL 증권사 단계 계약, 서버 측 손절 재설정·일괄 취소 계약)를 건드림 → **risk-ops 검토 필요**. `docs/reviews/pr-32/risk-ops.md` 2차 재검토(abbc63b로 추가, 1827f8c 대상) 판정 "승인"이 있다. 독립 QA 원문은 판정 "수정 필요(A9)"(qa.md:48)이며 1827f8c에 대한 QA 재검토는 아직 없다. 머지 전 QA 재검토 승인과 사용자 직접 머지가 필요하다(지침 10·11장) |
+| B8 | 통과 | 변경분 전문 확인. 비밀값 없음 |
+
+## QA 발견 처리 확인
+- QA 발견 1 반영: PanicLiquidator.java:20-22와 ADR-006:203 (다)에 "② 직전 매도 불가 → 그 실행에서 ③~⑤ 미수행, 재판정이 가능으로 바뀌어도 ②부터 다시 실행"과 "매도 불가 모드 ②의 결과 값 SKIPPED"가 정해졌고 합격 테스트 1건이 추가됨.
+- QA 발견 2 반영: ADR-006:205에 "종목 단위로 건너뛰면 ②의 매도 취소와 ③은 매도 가능 종목에만".
+- QA 발견 3 반영: 기획서 반영 문장을 행 끝으로 옮겨 "이 행의 합격 테스트 전부와 (나)의 일괄 취소 대상 정의"를 RSK-11·RSK-13 반영 대상으로 명시. (나)에 일괄 취소 대상에 서버 측 손절을 넣는 쪽은 사용자 결정이라고 적음.
+
+## 점검표 밖 발견
+1. [하, 참고] 매도 불가 모드의 ②는 실제로 미체결 매수를 취소하는데 결과 값은 SKIPPED다. 화면·감사 로그에서 "아무것도 하지 않음"으로 읽히지 않게, 7단계 구현은 이 SKIPPED의 설명(`detail`)에 "미체결 매수만 취소, 매도 불가로 ③~⑤ 미수행"처럼 실제로 한 일을 적어야 한다. 처리기도 Guard OFF 설명을 "실제 단계 결과로" 쓰므로(ADR-006 2.5 6단계) 같은 방향이다. 7단계 구현 PR에서 확인한다(지금 수정 불요).
+2. [하, 참고] 새 규칙은 인터페이스 주석과 6장 후속 표에만 있고 ADR-006 2.5 본문(:99 매도 불가 항목, :102 계약 요약)에는 없다. 1차 F4와 같이, 7단계에서 6장 항목이 확정되면 2.5 본문으로 옮긴다.
+
+## 판정
+승인
+
+- architect 범위(B 점검표)는 실패·확인 못 함 없음. 실전 관련 PR이므로 독립 QA 재검토 승인과 사용자 직접 머지가 따로 필요하다.
