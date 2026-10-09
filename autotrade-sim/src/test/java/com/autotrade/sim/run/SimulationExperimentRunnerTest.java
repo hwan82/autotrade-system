@@ -179,7 +179,7 @@ class SimulationExperimentRunnerTest {
     }
 
     @Test
-    void 리스크_정책은_모든_모의_주문에_적용된다() {
+    void 진입_규칙은_모든_모의_진입에_적용된다() {
         SimulationExperimentRunner denyAll = new SimulationExperimentRunner(DATA, TestKrxRules.INSTANCE, COST,
                 new FixtureStrategies(),
                 RiskChain.builder(BlacklistSnapshot.EMPTY).entryRule((o, a) -> RiskDecision.reject("DENY", "테스트")).build(),
