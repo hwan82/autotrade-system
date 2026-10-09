@@ -32,9 +32,27 @@ jobs:
         run: |
           ./gradlew --no-daemon :autotrade-app-engine:installDist :autotrade-app-gateway:installDist \
             :autotrade-app-watchdog:installDist :autotrade-app-lab:bootJar
-          for p in engine gateway watchdog; do
+          for p in gateway watchdog; do
             "autotrade-app-$p/build/install/autotrade-$p/bin/autotrade-$p"
           done
+          # 실전 엔진은 명령 채널(로컬 소켓)을 열고 계속 돈다(ADR-006). 소켓이 생기는지 확인하고, 실험실이 붙은 뒤에 끈다
+          ENGINE_PID=""; LAB_PID=""
+          # 어느 단계에서 실패해도 띄운 프로세스를 남기지 않는다
+          trap 'kill $LAB_PID $ENGINE_PID 2>/dev/null || true' EXIT
+          autotrade-app-engine/build/install/autotrade-engine/bin/autotrade-engine > engine.log 2>&1 &
+          ENGINE_PID=$!
+          for i in $(seq 1 30); do
+            if [ -S "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock" ]; then break; fi
+            if ! kill -0 "$ENGINE_PID" 2>/dev/null; then cat engine.log; exit 1; fi
+            sleep 1
+          done
+          test -S "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock" || { cat engine.log; exit 1; }
+          test "$(stat -c '%a' "$AUTOTRADE_CONFIG_DIR/run")" = "700"
+          test "$(stat -c '%a' "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock")" = "600"
+          # 같은 설정 폴더로 두 번째 엔진은 뜨지 않는다(run/engine.lock)
+          if autotrade-app-engine/build/install/autotrade-engine/bin/autotrade-engine > engine2.log 2>&1; then
+            echo "두 번째 엔진이 떴습니다"; cat engine2.log; exit 1
+          fi
           # 실험실은 대시보드 웹 서버(127.0.0.1)를 띄우고 계속 돈다(ADR-005). 응답을 확인한 뒤 끈다
           java -jar autotrade-app-lab/build/libs/autotrade-app-lab-*-SNAPSHOT.jar --spring.main.banner-mode=off \
             --server.port=18480 > lab.log 2>&1 &
@@ -47,7 +65,11 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:18480/ || { cat lab.log; exit 1; }
           # 루프백이 아닌 Host는 거부해야 한다(DNS rebinding 방지, UI-01)
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:18480/api/session)" = "403"
-          kill "$LAB_PID"
+          # 운영 화면 API가 명령 채널로 실전 엔진 상태를 읽는다(계좌 미설정이라 빈 목록)
+          curl -fsS http://127.0.0.1:18480/api/real/status | grep -q '"engineState":"UP"' || { cat lab.log engine.log; exit 1; }
+          kill "$LAB_PID" "$ENGINE_PID"
+          wait "$ENGINE_PID" || true
+          test ! -e "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock" || { echo "종료 후 소켓이 남았습니다"; cat engine.log; exit 1; }
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4

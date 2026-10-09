@@ -36,7 +36,7 @@ class SecretTest {
                         config.brokers().toss()),
                 new RuntimeConfig.RealTrading(
                         List.of(new RuntimeConfig.RealAccount("KIS-1", BrokerId.KIS, Market.KRX)),
-                        Map.of("KIS-1", Secret.of(FAKE_SECRET))));
+                        Map.of("KIS-1", Secret.of(FAKE_SECRET)), Secret.of(FAKE_SECRET)));
         assertThat(withKey.toString()).doesNotContain(FAKE_SECRET);
     }
 

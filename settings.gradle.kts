@@ -20,6 +20,7 @@ include(
     "autotrade-sim",
     "autotrade-broker-api",
     "autotrade-config",
+    "autotrade-control",
     "autotrade-app-engine",
     "autotrade-app-gateway",
     "autotrade-app-lab",

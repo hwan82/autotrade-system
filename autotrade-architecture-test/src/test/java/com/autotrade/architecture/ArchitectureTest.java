@@ -10,10 +10,15 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.autotrade.app.engine.command.ForgedConfirmation;
+import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
+import com.autotrade.archfixture.MisplacedControlChannel;
 import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.control.ControlClient;
+import com.autotrade.control.ControlServer;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
@@ -50,6 +55,7 @@ class ArchitectureTest {
         "com.autotrade.sim..",
         "com.autotrade.broker..",
         "com.autotrade.config..",
+        "com.autotrade.control..",
     };
     // 실험실(Spring)을 뺀 프로세스 진입점도 Spring을 쓰지 않는다
     private static final String[] PLAIN_PROCESSES = {
@@ -133,7 +139,7 @@ class ArchitectureTest {
                     .and(target(owner(assignableTo(BrokerPlugin.class)))))
             .because("실전 주문은 RealTradingGuard를 거친 출구로만 나가야 한다(RSK-01)");
 
-    /** Guard를 올리는 조작이 허용되는 곳: 7단계 활성화 명령 채널 패키지(아직 없음). */
+    /** Guard를 올리는 조작이 허용되는 곳: 실전 제어 명령 채널 패키지(ADR-006). */
     static final String GUARD_COMMAND_CHANNEL = "com.autotrade.app.engine.command..";
 
     /**
@@ -147,6 +153,29 @@ class ArchitectureTest {
             .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
                     .and(target(name("<init>"))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
+
+    /**
+     * 명령 채널 안에서도 2차 확인({@link SecondConfirmation})은 비밀번호 검증기만 만든다(ADR-002 3장 되돌릴 조건, ADR-006 2.4).
+     * 검증을 거치지 않은 확인으로 Guard를 올리는 코드를 빌드로 막는다.
+     */
+    static final ArchRule ONLY_AUTHENTICATOR_CREATES_CONFIRMATION = noClasses()
+            .that().doNotHaveFullyQualifiedName(OperatorAuthenticator.class.getName())
+            .and().resideOutsideOfPackage("com.autotrade.risk.guard..")
+            .should().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
+                    .and(target(name("<init>"))))
+            .because("2차 확인은 운영자 비밀번호와 확인 문구 검증을 통과해야만 만들어진다(RSK-01)");
+
+    /** 명령 채널 서버(실전 제어 명령을 받는 쪽)는 실전 엔진만 연다(ADR-006 2.1). */
+    static final ArchRule ONLY_ENGINE_OPENS_CONTROL_SERVER = noClasses()
+            .that().resideOutsideOfPackages("com.autotrade.app.engine..", "com.autotrade.control..")
+            .should().dependOnClassesThat().areAssignableTo(ControlServer.class)
+            .because("실전 제어 명령은 실전 엔진만 받는다(ADR-006)");
+
+    /** 명령 채널 클라이언트(실전 엔진에 명령을 보내는 쪽)는 실험실(UI 서버)만 쓴다(ADR-006 2.1). */
+    static final ArchRule ONLY_LAB_SENDS_CONTROL_COMMANDS = noClasses()
+            .that().resideOutsideOfPackages("com.autotrade.app.lab..", "com.autotrade.control..")
+            .should().dependOnClassesThat().areAssignableTo(ControlClient.class)
+            .because("실전 제어 명령은 사람이 UI에서 2차 확인을 거쳐 보낸다. 게이트웨이·감시·엔진은 보내지 않는다(ADR-006)");
 
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
@@ -213,6 +242,13 @@ class ArchitectureTest {
     @Test
     void Guard를_올리는_조작은_명령_채널에서만_한다() {
         ONLY_COMMAND_CHANNEL_RAISES_GUARD.check(PRODUCTION);
+        ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.check(PRODUCTION);
+    }
+
+    @Test
+    void 명령_채널_서버는_엔진만_열고_클라이언트는_실험실만_쓴다() {
+        ONLY_ENGINE_OPENS_CONTROL_SERVER.check(PRODUCTION);
+        ONLY_LAB_SENDS_CONTROL_COMMANDS.check(PRODUCTION);
     }
 
     @Test
@@ -249,5 +285,13 @@ class ArchitectureTest {
         // 2차 확인 생성·beginActivation 호출 2건, 메서드·생성자 참조 4건
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
+        // 명령 채널 패키지 안이라도 검증기가 아니면 2차 확인을 만들 수 없다: 생성 1건, 생성자 참조 1건
+        JavaClasses insideChannel = new ClassFileImporter().importClasses(ForgedConfirmation.class, OperatorAuthenticator.class);
+        assertThat(ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.evaluate(insideChannel)
+                .getFailureReport().getDetails()).hasSize(2);
+
+        JavaClasses misplaced = new ClassFileImporter().importClasses(MisplacedControlChannel.class);
+        assertThat(ONLY_ENGINE_OPENS_CONTROL_SERVER.evaluate(misplaced).hasViolation()).isTrue();
+        assertThat(ONLY_LAB_SENDS_CONTROL_COMMANDS.evaluate(misplaced).hasViolation()).isTrue();
     }
 }

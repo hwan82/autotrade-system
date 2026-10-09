@@ -79,7 +79,7 @@ parameters:
 
 ## 5. REST 계약 (`/api`, JSON)
 
-공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403).
+공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403). 실전 운영 API(`/api/real/*`, ADR-006 2.3)는 여기에 `UNKNOWN_ACCOUNT` 404, `CONFIRMATION_FAILED` 403, `LOCKED` 423, `PASSWORD_NOT_CONFIGURED`·`INVALID_STATE`·`STALE` 409, `BUSY`·`ENGINE_UNREACHABLE` 503, `INTERNAL` 502를 더한다).
 
 | 메서드·경로 | 설명 |
 |---|---|
