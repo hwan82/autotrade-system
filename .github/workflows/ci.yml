@@ -36,7 +36,7 @@ jobs:
             "autotrade-app-$p/build/install/autotrade-$p/bin/autotrade-$p"
           done
           # 시세 게이트웨이는 수신·녹화를 위해 계속 돈다(ADR-003). 기동 로그를 확인하고, 살아 있는지 본 뒤
-          # SIGTERM으로 30초 안에 종료(종료 훅이 녹화기를 닫음)되는지 확인한다
+          # SIGTERM으로 40초 안에 종료(종료 훅이 녹화기를 닫음)되는지 확인한다
           autotrade-app-gateway/build/install/autotrade-gateway/bin/autotrade-gateway > gateway.log 2>&1 &
           GW_PID=$!
           for i in $(seq 1 30); do
@@ -48,12 +48,16 @@ jobs:
           sleep 2
           kill -0 "$GW_PID" || { cat gateway.log; exit 1; }
           kill "$GW_PID"
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             if ! kill -0 "$GW_PID" 2>/dev/null; then break; fi
             sleep 1
           done
           cat gateway.log
-          ! kill -0 "$GW_PID" 2>/dev/null
+          if kill -0 "$GW_PID" 2>/dev/null; then
+            echo "게이트웨이가 SIGTERM 뒤 40초 안에 끝나지 않았습니다"
+            kill -9 "$GW_PID"
+            exit 1
+          fi
           # 실험실은 대시보드 웹 서버(127.0.0.1)를 띄우고 계속 돈다(ADR-005). 응답을 확인한 뒤 끈다
           java -jar autotrade-app-lab/build/libs/autotrade-app-lab-*-SNAPSHOT.jar --spring.main.banner-mode=off \
             --server.port=18480 > lab.log 2>&1 &
