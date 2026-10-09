@@ -54,7 +54,7 @@ function body(view, refresh, result) {
   const unknown = engine === 'UNKNOWN';
   if (unknown && !lastUp) {
     return h('div', { class: 'notice warn' },
-      h('h2', {}, '실전 엔진이 응답하지 않습니다'),
+      h('h2', {}, '실전 엔진 상태를 확인하지 못했습니다'),
       h('p', {}, `${view.message}. 엔진은 살아 있을 수 있고 실전 계좌가 열려 있을 수 있습니다. 실전 엔진 터미널을 확인하세요.`));
   }
   const st = unknown ? lastUp.status : view.status;
@@ -63,7 +63,7 @@ function body(view, refresh, result) {
   const lockOnly = !(st.passwordConfigured && !st.lockedUntil);
   return h('div', {},
     unknown ? h('div', { class: 'notice warn' },
-      h('p', {}, `실전 엔진이 응답하지 않습니다(${view.message}). 아래는 ${new Date(lastUp.asOf).toLocaleTimeString('en-GB')}에 마지막으로 확인한 상태입니다.`),
+      h('p', {}, `실전 엔진 상태를 확인하지 못했습니다(${view.message}). 아래는 ${new Date(lastUp.asOf).toLocaleTimeString('en-GB')}에 마지막으로 확인한 상태입니다.`),
       h('p', { class: 'small' }, '지금 상태와 다를 수 있습니다. 활성화는 막아 두었고, PANIC SELL과 내리기는 보낼 수 있지만 반영 여부는 엔진이 다시 응답해야 알 수 있습니다.')) : null,
     !st.passwordConfigured ? h('div', { class: 'notice warn' },
       h('p', {}, '운영자 비밀번호가 설정되지 않아 실전 활성화를 할 수 없고, PANIC SELL은 보호 모드 고정(신규 주문 차단)까지만 됩니다.'),

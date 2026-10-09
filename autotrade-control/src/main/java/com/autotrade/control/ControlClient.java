@@ -83,19 +83,25 @@ public final class ControlClient implements AutoCloseable {
     /**
      * 소켓에 닿지 못했을 때 엔진 프로세스가 정말 없는지 본다. 잠금 파일({@code engine.lock})에 적힌 PID의 프로세스가
      * 살아 있으면 엔진이 살아 있는데 소켓만 없어진 것일 수 있으므로 UNKNOWN으로 본다(가상으로 보이면 안 됨).
-     * PID를 읽지 못하면 NOT_RUNNING. 다른 프로세스가 같은 PID를 다시 쓰면 UNKNOWN이 되는데, 이는 안전한 쪽이다.
+     * 잠금 파일이 없을 때만 NOT_RUNNING이다. 파일은 있는데 읽지 못하거나(Windows는 엔진이 잡은 잠금 때문에 읽기가 막힐 수
+     * 있음) 내용이 PID가 아니면 판단할 수 없으므로 UNKNOWN이다. 다른 프로세스가 같은 PID를 다시 쓰면 UNKNOWN이 되는데,
+     * 확인할 수 없을 때는 모두 안전한 쪽(가상으로 보이지 않음)으로 둔다.
      */
     private EngineUnreachableException notRunningOrUnknown() {
         Path lockFile = socket.toAbsolutePath().getParent().resolve(ControlServer.LOCK_FILE);
+        long pid;
         try {
-            String text = Files.readString(lockFile, StandardCharsets.US_ASCII).strip();
-            long pid = Long.parseLong(text);
-            if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
-                return new EngineUnreachableException(Reach.UNKNOWN,
-                        "실전 엔진 프로세스는 살아 있지만 명령 채널에 닿지 못했습니다");
-            }
+            pid = Long.parseLong(Files.readString(lockFile, StandardCharsets.US_ASCII).strip());
+        } catch (NoSuchFileException e) {
+            // 이 설정 폴더로 엔진이 한 번도 뜨지 않았다
+            return new EngineUnreachableException(Reach.NOT_RUNNING, "실전 엔진이 실행 중이 아닙니다");
         } catch (IOException | NumberFormatException e) {
-            // 잠금 파일이 없거나 비었다: 엔진이 한 번도 뜨지 않았거나 PID를 적기 전
+            return new EngineUnreachableException(Reach.UNKNOWN,
+                    "실전 엔진 명령 채널에 닿지 못했고 엔진 프로세스가 있는지도 확인하지 못했습니다");
+        }
+        if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+            return new EngineUnreachableException(Reach.UNKNOWN,
+                    "실전 엔진 프로세스는 살아 있지만 명령 채널에 닿지 못했습니다");
         }
         return new EngineUnreachableException(Reach.NOT_RUNNING, "실전 엔진이 실행 중이 아닙니다");
     }

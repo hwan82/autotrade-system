@@ -306,13 +306,32 @@ class ControlChannelTest {
         }
         // 비정상 종료로 소켓 파일과 잠금 파일만 남은 경우도 실행 중이 아니다(잠금 파일의 PID가 죽음)
         deadSocket();
-        Process finished = new ProcessBuilder("true").start();
+        Process finished = new ProcessBuilder(ProcessHandle.current().info().command().orElseThrow(), "-version")
+                .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
         finished.waitFor();
         Files.writeString(socket().getParent().resolve(ControlServer.LOCK_FILE), Long.toString(finished.pid()));
         try (ControlClient client = new ControlClient(socket(), Duration.ofSeconds(1))) {
             assertThatThrownBy(() -> client.send(ControlRequest.status()))
                     .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
                             e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.NOT_RUNNING));
+        }
+    }
+
+    @Test
+    void 잠금_파일을_읽지_못하거나_내용이_PID가_아니면_알_수_없음이다() throws Exception {
+        deadSocket();
+        Path lock = socket().getParent().resolve(ControlServer.LOCK_FILE);
+        Files.writeString(lock, "");
+        try (ControlClient client = new ControlClient(socket(), Duration.ofSeconds(1))) {
+            assertThatThrownBy(() -> client.send(ControlRequest.status()))
+                    .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
+                            e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.UNKNOWN));
+            // 읽기 오류(Windows 강제 잠금 등)를 폴더로 흉내 낸다
+            Files.delete(lock);
+            Files.createDirectory(lock);
+            assertThatThrownBy(() -> client.send(ControlRequest.status()))
+                    .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
+                            e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.UNKNOWN));
         }
     }
 
