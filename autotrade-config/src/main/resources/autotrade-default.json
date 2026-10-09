@@ -1,6 +1,6 @@
 {
   "market-data": {
-    "priority": ["KIWOOM", "KIS", "TOSS"],
+    "priority": ["KIWOOM", "KIS"],
     "mode": "AUTO",
     "toss-polling-scope": "HELD_ONLY"
   },
