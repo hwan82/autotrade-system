@@ -232,3 +232,34 @@
 
 ### 판정
 승인. 점검표 B 전 항목 통과 또는 해당 없음이고 확인 못 함은 없다. QA F-1(E1)의 우회는 직접 재현해 이제 잡히는 것을 확인했다. 이 판정은 architect 검토에 한한다. 실전 관련 PR(보호 테스트 변경 포함)이므로 Claude가 머지하지 않으며, risk-ops 재검토, 독립 QA 재검토(A14), 사용자 직접 머지(D-035 출처 확인 포함)가 남아 있다.
+
+## 재검토 2026-10-09 (7)
+- 대상: PR #19 / 브랜치 HEAD ad92710(요청 커밋 2b0b105 + 그 위 QA 원문 커밋 ad92710) / `git diff origin/main...ad92710` 전체. 지난 재검토(5304721) 뒤 바뀐 것: 2b0b105의 `ArchitectureTest.java` 2줄(`ApproveAllRiskPolicy` 단언을 `hasViolation()`에서 `getDetails()).hasSize(2)`로, 주석 1줄)과 ad92710의 `docs/reviews/pr-19/qa.md` 4줄(F-2 사용자 확인 기록). 운영 코드와 다른 문서 변경 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - 별도 git worktree(ad92710, 검토 후 제거)에서 `./gradlew clean build --no-daemon`: BUILD SUCCESSFUL, EXIT=0. 테스트 XML 합계 320건, 실패·오류·건너뜀 0.
+  - 규칙 변이(같은 worktree, `:autotrade-architecture-test:test`, 되돌린 뒤 `git status` 깨끗함): 패키지 조건을 `com.autotrade..`로 넓힘 → 1건 실패, 모듈 조건 제거 → 1건 실패. 지난 재검토 참고 1의 구멍(패키지 조건이 빠져도 `ApproveAllRiskPolicy` 단언이 통과)이 이제 `hasSize(2)`로 닫혔다.
+  - GitHub REST check-runs(ad92710): `DB schema`, `Secret scan and collector boundary` success, `Gradle build`는 검토 시점에 in_progress(로컬 빌드로 판정). 2b0b105 단독 check-run은 없다(함께 푸시됨).
+  - `git merge-tree --write-tree origin/main ad92710` 충돌 없음(origin/main 52ad85f). 다른 원격 브랜치에 `D-035` 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 worktree `./gradlew clean build` EXIT=0, 320건 통과 |
+| B2 | 통과 | 규칙 정의는 그대로(ArchitectureTest.java:158-178), 자기 검사 단언만 정밀해졌다. 모듈 의존 변경 없음. ADR-001:81 설명과 일치 |
+| B3 | 해당 없음 | 계약·문서 변경 없음 |
+| B4 | 통과 | 운영 코드 변경 없음. 지난 검토의 결정론·실험 재실행 결과 유효 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 보호 테스트가 강해졌다: `ApproveAllRiskPolicy`(패키지·모듈 둘 다 위반)는 정확히 2건(:288-289), `SplitPackageApproveAll`(모듈만 위반)은 1건(:290-291), `RiskChain`은 통과(:293-294). 두 조건 중 어느 쪽을 빼도 테스트가 실패한다(위 변이 2건). 테스트 삭제·`@Disabled` 없음 |
+| B7 | 통과(risk-ops 검토 필요) | 보호 테스트(`ArchitectureTest`)를 바꾼 실전 관련 PR. ad92710 기준 risk-ops 재검토, 독립 QA 재검토(A14), 사용자 직접 머지가 필요하다 |
+| B8 | 통과 | 바뀐 줄에 비밀값 없음. QA 원문의 사용자 확인 줄은 표시 이름과 시각만 적는다 |
+
+### 지난 지적 처리
+- 재검토(6) 참고 1(`hasViolation()` 정밀도): 해소(위 B6, 변이로 확인).
+- 재검토(6) 참고 2(경로 문자열 휴리스틱)·참고 3(람다 미검출): 그대로이며 막지 않는다.
+- S1/F-2(D-035 출처): QA 원문(qa.md 사용자 확인 2026-10-09)에 사용자 답변 시각과 선택이 기록됐다. 저장소 밖 원문은 검토자가 직접 대조하지 못했으나, 독립 QA가 확인해 닫은 항목이고 사용자 직접 머지 대상이므로 이 검토의 조건으로 남기지 않는다.
+
+### 새 발견
+- 없음. 참고: QA 원문(qa.md 마지막 줄)은 A14 판정을 5304721 이후 재검토로 정한다고 적고 있다. QA 재검토 판정이 "승인"인지 머지 전에 확인할 것.
+
+### 판정
+승인. 점검표 B 전 항목 통과 또는 해당 없음이고 확인 못 함은 없다. 이 판정은 architect 검토에 한한다. 실전 관련 PR(보호 테스트 변경 포함)이므로 Claude가 머지하지 않으며, risk-ops 재검토, 독립 QA 재검토(A14), 사용자 직접 머지가 남아 있다.
