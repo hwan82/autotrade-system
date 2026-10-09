@@ -43,6 +43,8 @@
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
+- 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
+- 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
 
 ## 예시 (자리표시자)
 `runtime-config.json`

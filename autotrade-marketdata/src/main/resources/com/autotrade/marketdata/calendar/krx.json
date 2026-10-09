@@ -1,0 +1,38 @@
+{
+  "market": "KRX",
+  "zone": "Asia/Seoul",
+  "coverageFrom": "2026-01-01",
+  "coverageTo": "2026-12-31",
+  "regularOpen": "09:00",
+  "regularClose": "15:30",
+  "checkedOn": "2026-10-08",
+  "sources": {
+    "KRX-2026": "한국거래소 2026년 휴장일(17일) 정리: https://glasswallet.com/blog/stock-market-holiday-2026-guide/ (2차 자료, 한국거래소 공지 원문 대조 필요)",
+    "KRX-0603-0717": "한국거래소 2026-05-19 발표, 6·3 지방선거와 제헌절 휴장: https://www.hankyung.com/article/2026052094456",
+    "KRX-OPEN-0102": "2026-01-02 연초 개장일 10:00 개장 안내(KB증권 공지): https://www.kbsec.com/go.able?linkcd=s060901010000&seq=10009341&idt=20251222",
+    "KRX-CSAT": "수능일 1시간 늦은 개장·폐장 관행(2025-11-13 사례): https://www.heraldk.com/article/2025111215214040899"
+  },
+  "holidays": [
+    { "date": "2026-01-01", "name": "신정", "source": "KRX-2026", "verified": false },
+    { "date": "2026-02-16", "name": "설날 연휴", "source": "KRX-2026", "verified": false },
+    { "date": "2026-02-17", "name": "설날", "source": "KRX-2026", "verified": false },
+    { "date": "2026-02-18", "name": "설날 연휴", "source": "KRX-2026", "verified": false },
+    { "date": "2026-03-02", "name": "삼일절 대체공휴일", "source": "KRX-2026", "verified": false },
+    { "date": "2026-05-01", "name": "근로자의 날", "source": "KRX-2026", "verified": false },
+    { "date": "2026-05-05", "name": "어린이날", "source": "KRX-2026", "verified": false },
+    { "date": "2026-05-25", "name": "부처님오신날 대체공휴일", "source": "KRX-2026", "verified": false },
+    { "date": "2026-06-03", "name": "전국동시지방선거", "source": "KRX-0603-0717", "verified": true },
+    { "date": "2026-07-17", "name": "제헌절", "source": "KRX-0603-0717", "verified": true },
+    { "date": "2026-08-17", "name": "광복절 대체공휴일", "source": "KRX-2026", "verified": false },
+    { "date": "2026-09-24", "name": "추석 연휴", "source": "KRX-2026", "verified": false },
+    { "date": "2026-09-25", "name": "추석", "source": "KRX-2026", "verified": false },
+    { "date": "2026-10-05", "name": "개천절 대체공휴일", "source": "KRX-2026", "verified": false },
+    { "date": "2026-10-09", "name": "한글날", "source": "KRX-2026", "verified": false },
+    { "date": "2026-12-25", "name": "성탄절", "source": "KRX-2026", "verified": false },
+    { "date": "2026-12-31", "name": "연말 휴장", "source": "KRX-2026", "verified": false }
+  ],
+  "specialSessions": [
+    { "date": "2026-01-02", "open": "10:00", "close": "15:30", "name": "연초 개장일", "source": "KRX-OPEN-0102", "verified": true },
+    { "date": "2026-11-19", "open": "10:00", "close": "16:30", "name": "대학수학능력시험일", "source": "KRX-CSAT", "verified": false }
+  ]
+}
