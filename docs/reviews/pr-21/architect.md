@@ -90,3 +90,33 @@
 
 ### 판정(재검토 2)
 승인. 점검표 B 전 항목이 통과 또는 해당 없음이고(B7은 "risk-ops 검토 필요"), 확인 못 함은 없다. 이 판정은 architect 관점(B 점검표)에 한한다. 74a0f41 변경은 보호 테스트를 바꾸므로 머지 전에 risk-ops 재검토, 독립 QA 재검토 승인(현재 QA 원문 판정은 "수정 필요"), 사용자 직접 확인·머지가 따로 필요하다(지침 10·11장).
+
+## 재검토 3 2026-10-09
+- 대상: PR #21 / 브랜치 `claude/project-thread-bl5qbg` HEAD f03b6bf / `git diff origin/main...HEAD` 전체(merge-base = origin/main 52ad85f, `git merge-tree` 충돌 없음). 재검토 2(74a0f41) 뒤 커밋 2개: 846054c(risk-ops 재검토 2 원문, 판정 "수정 필요(A2, A14, R-7)"), f03b6bf(R-7 반영). 바뀐 코드: `autotrade-architecture-test/build.gradle.kts`(시스템 속성 `autotrade.projectLayout`), `ArchitectureTest.java`(가져오기 판정 한 곳), `ModuleOwnershipTest.java`, `OurModules.java`. 문서: ADR-002 9.3·9.4, D-034. 운영 코드(`*/src/main/*`) 변경 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon -I <저장소 밖 미러 init 스크립트> --console=plain` (HEAD f03b6bf, 작업 트리 깨끗함): BUILD SUCCESSFUL, EXIT=0. 테스트 XML 집계 323건, 건너뜀·실패·오류 0. `ArchitectureTest` 12/12, `ModuleOwnershipTest` 13/13.
+  - 변이 검사(별도 git worktree, 검토 후 `git worktree remove`, 본 작업 트리 깨끗함 확인):
+    1. R-7 M7 재현: 새 모듈 `autotrade-zz`(settings include, 자원 1개, `autotrade-risk` 의존)를 `MODULES_WITHOUT_PACKAGES`에 등록하고 `sourceSets.main.java.destinationDirectory`를 `autotrade-risk/build/classes/java/zz`로 돌린 뒤 `com.autotrade.risk.guard.ZzRaiser`가 `beginActivation` 호출 → `./gradlew build` EXIT=1. `#운영_클래스는_패키지를_소유한_모듈에만_있다`("ZzRaiser (:autotrade-zz): 패키지 com.autotrade.risk.guard은 autotrade-risk 소유"), `#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`("선언 출력이 자기 프로젝트 폴더 밖: :autotrade-zz MAIN …", "… BUILT …") 실패. (세 번째 실패 `#클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다`는 내가 예외 목록 고정값을 바꾼 탓으로, 그 목록 변경을 테스트가 고정한다는 설계대로의 동작이다.)
+    2. 재검토 2에서 내가 남긴 RR2-1(프로젝트 밖 파일 jar) 재현: 실전 엔진 모듈에 `implementation(files("../libs/evil.jar"))`(저장소 안 jar, `qa.probe.Evil`이 `BrokerPlugin.orderGateway` 직접 호출) → EXIT=1, "저장소 안인데 선언 출력이 아닌 클래스패스 항목". 같은 jar를 저장소 밖 경로로 옮겨 의존 → EXIT=1, "허용 위치(Gradle 의존성 캐시·배포판) 밖 클래스패스 항목". RR2-1이 닫혔다.
+  - `ArchitectureTest` 가져오기 판정 변경 검토: 예전 `DO_NOT_INCLUDE_TESTS`는 경로 모양으로 테스트를 뺐다. 새 `OurModules.architectureImportOption()`은 우리 폴더 안이면 선언 종류로 정하고(MAIN 포함, 이 모듈의 TEST 출력만 제외, 선언되지 않은 우리 폴더 위치는 포함), 우리 폴더 밖(외부 jar)은 예전 패턴 그대로다. 예전에 포함되던 위치 중 새 판정이 빼는 것은 이 모듈의 선언 테스트 출력뿐인데, 그것은 예전에도 `build/classes/java/test` 패턴으로 빠졌다. 따라서 범위가 좁아지지 않으며, `#ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다`가 예전 `importPackages("com.autotrade")` 결과 포함을 계속 단언한다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` BUILD SUCCESSFUL(EXIT=0), 323건 통과 |
+| B2 | 통과 | 운영 코드 의존 방향 변경 없음. `ArchitectureTest` 규칙 정의 무변경, 범위·가져오기 판정만 바뀌었고 위 분석대로 강화 방향이다(ArchitectureTest.java:62-65). 위치 → 프로젝트 매핑이 선언 출력 정확 일치(`OurModules.outputOf`, `containingOutput`)로 바뀌고 배치 검사(`layoutProblems`: 출력이 자기 폴더 밖·다른 프로젝트 폴더 안·두 프로젝트 공유), 선언되지 않은 항목(`undeclaredEntries`), 허용 위치 밖 항목(`unexpectedClasspathEntries`), 클래스 없음 선언 검증(`declaredEmptyButHasClasses`)이 더해졌다(ModuleOwnershipTest.java:175-196). ADR은 ADR-002 9.3(대안 가·나·다, 되돌릴 조건)·9.4 |
+| B3 | 통과 | 빌드→테스트 시스템 속성이 `autotrade.projectDirs`에서 `autotrade.projectLayout`(DIR·MAIN·TEST·BUILT·ROOT·EXTERNAL, 탭·`|` 구분)으로 바뀌었다. 빌드 내부 계약이며 build.gradle.kts 주석, `OurModules.parseLayout` Javadoc, ADR-002 9.1(대체 표기)·9.3에 반영. 속성이 없으면 예외로 닫힌 쪽 실패(`OurModules.layout()`). 운영 설정 키·스키마·REST 변경 없음 |
+| B4 | 통과 | 새 코드에 시계·난수 없음. 배치표는 Gradle에서 `sortedBy { it.path }`, 테스트 쪽 `TreeMap`·정렬된 위반 목록. `@TempDir`를 쓰는 단위 테스트는 결과가 경로 값에 의존하지 않는다. 시뮬레이션 코드 변경 없음, 골든 테스트 통과 |
+| B5 | 해당 없음 | 이번 변경분에 금액 계산 없음 |
+| B6 | 통과 | 새 동작 테스트: `#출력을_다른_프로젝트_폴더로_돌리면_잡아낸다`(M7 가짜 표, 태스크 출력만 돌린 경우, 같은 출력 공유, 중첩 폴더, 대조군), `#선언되지_않은_클래스패스_항목과_테스트처럼_보이는_운영_출력을_잡아낸다`(저장소 안 파일 jar, 허용 위치 밖 jar 포함), `#클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다`(폴더·jar). 내 변이 3건 모두 빌드 실패. 테스트 삭제·`@Disabled`·`assume` 없음, `ArchitectureTest` 12건 그대로 |
+| B7 | risk-ops 검토 필요 | 보호 테스트 `ArchitectureTest`(가져오기 판정)와 `ModuleOwnershipTest`를 바꿨다. risk-ops 최신 원문(재검토 2) 판정이 "수정 필요(A2, A14, R-7)"라 같은 검토자의 재검토가 필요하고, 독립 QA 원문(qa.md) 판정도 "수정 필요(A2, A14)"다. 이 시점에 둘 다 f03b6bf 기준 재검토 절이 없다 |
+| B8 | 통과 | 변경분 grep에서 비밀값 없음. 배치표에는 로컬 빌드 경로만 들어가며 테스트 실패 메시지에 경로가 찍힐 뿐 비밀값은 없다 |
+
+### 점검표 밖 발견(재검토 3)
+- R-7(M7)과 재검토 2의 RR2-1은 직접 재현으로 닫힌 것을 확인했다. ADR-002 9.4·D-034의 보장 문장은 이번 실행 결과와 맞고, 남은 한계 (가)~(라)가 정확히 적혀 있다.
+- **RR3-1 (참고) 환경 의존 실패 가능성.** `unexpectedClasspathEntries`는 Gradle 사용자 홈·배포판 밖 클래스패스 항목을 실패로 본다. 지금 저장소는 `FAIL_ON_PROJECT_REPOS` + `mavenCentral()`만 써서 문제없고 이 환경에서도 통과했다. 나중에 `mavenLocal()`이나 사내 미러 캐시 경로, 일부 IDE의 Gradle 위임 외 실행을 쓰면 이 검사가 거짓 실패를 낼 수 있다. 그때는 허용 위치를 늘리는 쪽으로 고치되 저장소 안 항목 금지는 유지한다(닫힌 쪽 실패라 안전 방향).
+- **RR3-2 (참고) 외부 의존성은 신뢰 범위다.** 9.4 (나)대로 Gradle 캐시 안의 외부 jar가 `com.autotrade` 밖 패키지에서 Guard API를 불러도 두 테스트는 보지 않는다. 실전 엔진의 새 외부 의존성은 risk-ops 검토 대상으로 둔 결정에 동의한다.
+- 재검토 2의 RR2-2(configuration cache 비호환)는 그대로다. provider가 실행 시점에 `SourceSetContainer`·태스크 출력까지 읽으므로 configuration cache를 켤 때 함께 손봐야 한다. 지금은 쓰지 않아 영향 없음.
+
+### 판정(재검토 3)
+승인. 점검표 B 전 항목이 통과 또는 해당 없음이고(B7은 "risk-ops 검토 필요"), 확인 못 함은 없다. 이 판정은 architect 관점(B 점검표)에 한한다. 머지 전에 risk-ops 재검토 승인(최신 원문 판정 "수정 필요"), 독립 QA 재검토 승인(최신 원문 판정 "수정 필요"), 사용자 직접 확인·머지가 따로 필요하다(지침 10·11장).
