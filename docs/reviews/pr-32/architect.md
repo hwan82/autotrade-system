@@ -39,3 +39,33 @@
 수정 필요(F1)
 
 - F1(PanicLiquidator.java:11 매도 불가 예시에 VI 추가)을 고칠 것. F2(ADR-006:203 합격 테스트 문구)는 risk-ops도 수정 필요로 냈으므로 같은 커밋에서 고칠 것. 수정 뒤 architect·risk-ops 재검토를 받는다.
+
+## 재검토 2026-10-09 (2차, 대상 커밋 38ab8aa·07a319c)
+- 대상: 브랜치 최신 07a319c(마지막 비검토 원문 커밋 38ab8aa). main 대비 diff(`git diff origin/main...HEAD`, merge-base 0a4adf4): `PanicLiquidator.java` +4 −3, `ADR-006-real-control-channel.md` +3 −3, 검토 원문 2개(`docs/reviews/pr-32/architect.md`, `risk-ops.md`). 1차 뒤 변경은 05ece15(PanicLiquidator.java 2줄, ADR-006 2줄)·38ab8aa(ADR-006 1줄). 두 커밋 모두 `docs/reviews/`를 건드리지 않음(`git show --stat`)
+- 직접 실행한 것: 같은 작업 트리에서 `./gradlew build --no-daemon --console=plain` → `BUILD SUCCESSFUL in 21s`(104 tasks, 16 executed). 테스트 결과 XML 집계 522건, 실패 0·오류 0·건너뜀 0. 변경이 Javadoc뿐이라 컴파일 산출물이 같아 test 태스크는 up-to-date로 1차 실행 결과(같은 522건, 실패 0)를 재사용했다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 실행 결과 |
+| B2 | 통과 | 의존·import·ArchUnit 규칙 변경 없음. `ArchitectureTest` 15, `ModuleOwnershipTest` 13 통과 |
+| B3 | 통과 | 시그니처 무변경. 주석 예시가 D-037(decisions/README.md:42)·RSK-13(autotrade-spec.md:191)·ADR-006:99와 같은 "거래정지·VI·LULD 정지"가 됨(PanicLiquidator.java:11). VI 분류가 사용자 결정 대상임을 주석에 밝힘(ADR-006:205와 일치) |
+| B4 | 해당 없음 | sim·strategy·시계·난수 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 실행 동작 변경 없음. 합격 테스트는 7단계 구현 조건으로 ADR-006:202-203에 등록. 테스트 삭제·비활성화 없음 |
+| B7 | 통과(risk-ops 검토 필요) | 실전 경로(PANIC SELL 증권사 단계 계약, 서버 측 손절 재설정 장애 대응 계약)를 건드림 → **risk-ops 검토 필요**. A 점검표 원문 `docs/reviews/pr-32/risk-ops.md`가 있고 87763a9 기준 판정 "수정 필요(A9·A14)". 그 지적(VI 누락, 합격 테스트 문구, ③~④ 정지 테스트)은 05ece15에 반영됐으나 이 재검토 시점(origin 07a319c)에 risk-ops 재검토 절은 아직 없다. 머지 전 risk-ops 재검토 승인, 독립 QA, 사용자 직접 머지가 필요하다(지침 10·11장) |
+| B8 | 통과 | 변경분 전문 확인. 비밀값 없음 |
+
+## 1차 발견 처리
+- F1 해소: PanicLiquidator.java:11 "장 외 시간, 거래정지·VI·LULD 정지 등. VI 분류는 ADR-006 6장에서 사용자 결정".
+- F2 해소: ADR-006:203 합격 테스트가 "마감 전에 서버 측 손절이 다시 걸리고, 재설정이 거절·실패해 서버 측 손절 없이 마감을 넘기면 FAILED·긴급(`urgent`) 표시와 Guard OFF 없음(DONE·SKIPPED로 숨기지 않음)"으로 바뀜. 보강 (다)의 ③ 뒤 ④ 전 정지 합격 테스트도 추가됨(risk-ops 발견 2).
+- F3 해소: ADR-006:202 상태 칸 "주석은 PR #32에서 고침", 앞부분의 옛 주석 서술도 과거형으로 정리(risk-ops 발견 3).
+- F4(참고): 7단계 구현 PR에서 처리할 사항으로 그대로 둠.
+- 추가로 주석 첫 줄(PanicLiquidator.java:8)이 "미체결 취소 확인(매도 불가면 매수만)"으로 바뀌어 11-12행과 같은 뜻이 됨(risk-ops 발견 4). RSK-13 단계 이름 "미체결 전부 취소 확인"과 문언이 다르지만 ADR-006 2.5 예외 규칙을 요약한 것이라 모순 없음.
+
+## 점검표 밖 발견
+- 없음.
+
+## 판정
+승인
+
+- architect 범위(B 점검표)는 실패·확인 못 함 없음. 이 PR은 실전 관련 PR이므로 이 승인은 머지 조건의 일부일 뿐이다. risk-ops 재검토 승인, 독립 QA, 사용자 직접 머지가 따로 필요하다.
