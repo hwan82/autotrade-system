@@ -1,6 +1,6 @@
 # ADR-006 실전 제어 명령 채널과 운영 화면 1차(실전 활성화 2차 확인, PANIC SELL)
 
-- 상태: 채택 (PR #18 머지, 2026-10-09 사용자 결정. 이전 상태: 제안). 검토 원문: [risk-ops](../reviews/claude-project-thread-r930sh/risk-ops.md), [architect](../reviews/claude-project-thread-r930sh/architect.md). 실전 경로라 **사용자가 직접 확인하고 머지**한다(지침 10장). 이 PR 머지가 아래 7장 결정의 사용자 결정이다(ADR-002 7장과 같은 방식). 결정 로그 번호는 머지 후 pm-lead가 부여한다
+- 상태: 채택 (PR #18 머지, 2026-10-09 사용자 결정. 이전 상태: 제안). 검토 원문: [risk-ops](../reviews/claude-project-thread-r930sh/risk-ops.md), [architect](../reviews/claude-project-thread-r930sh/architect.md). 실전 경로라 **사용자가 직접 확인하고 머지**한다(지침 10장). 이 PR 머지가 아래 7장 결정의 사용자 결정이다(ADR-002 7장과 같은 방식). 결정 로그 번호: [D-037](../decisions/README.md)
 - 날짜: 2026-10-09
 - 단계: 로드맵 5단계(UI)의 실전 운영 화면 부분. 7단계 실전 연동의 명령 경로 바닥
 - 기획서: v13 RSK-01(2차 확인), RSK-13(PANIC SELL), UI-05(운영 화면), UI-06(읽기 전용 경로, 별도 명령 채널), CFG-02·03
@@ -198,7 +198,7 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 | 잠금 남용으로 PANIC 청산을 막는 경로 대책: (1) 확인 잠금이 걸리면 외부 알림(실전 활성화 알림과 같은 경로), (2) 잠긴 동안 PANIC 청산을 어떻게 할지 결정(예: 감시 프로세스 긴급 PANIC 경로, 잠금과 별개인 청산 확인 수단). 결정은 Q 번호로 사용자에게 묻는다. 합격 기준: 잠금 상태에서 알림이 나가고, 정해진 청산 경로가 장애 테스트로 확인됨 (QA [pr-18](../reviews/pr-18/qa.md) 3) | risk-ops | 7단계 완료 조건 |
 | `hash-password` 안내 문구를 config-keys.md와 맞추기, 잠금 파일을 `NOFOLLOW_LINKS`로 열기, PID 쓰기 실패 시 빈 잠금 파일 처리 (QA [pr-18](../reviews/pr-18/qa.md) 4·5, [architect 재검토 3](../reviews/claude-project-thread-r930sh/architect.md) 참고 2) | architect | 7단계 |
 | 기존 엔진 확인용 프로브 연결(`ControlServer.isListening`)에 연결 시간 상한 두기 (architect 재검토 2 참고) | architect | 7단계 |
-| 머지 후 기획서 RSK-13 문구 갱신(1단계는 2차 확인 전, Q-017 결과) | pm-lead(autotrade-spec-keeper) | 머지 직후 |
+| 머지 후 기획서 RSK-13 문구 갱신(1단계는 2차 확인 전, Q-017 결과) | pm-lead(autotrade-spec-keeper) | 1단계 반영 완료(기획서 v14.1, D-037). Q-017 결정 후 장 외 시간 문구 확정 |
 
 ## 7. 사용자 결정 항목(이 PR 머지로 결정)과 질문
 
