@@ -251,3 +251,54 @@ risk-ops 의견: 이 결정은 지침 4장 3번을 문자 그대로 지키는 �
 
 ### 재검토 (5) 판정
 승인. 실전 관련 PR(블랙리스트·리스크 검증)이므로 지침 10·11장에 따라 독립 QA 뒤 사용자가 직접 머지한다. 머지 전에 D-035 결정 출처가 본인 선택과 맞는지 사용자가 확인할 것.
+
+## 재검토 2026-10-09 (6)
+- 대상: PR #19 / 최신 헤드 2b0b105(앞 재검토 98cc10a 이후 aa3742c QA 원문, 5304721 QA F-1 반영, a01642f architect 재검토(6) 원문, 2b0b105 ArchitectureTest 단언 고정) / `git diff origin/main...2b0b105` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - 별도 worktree(5304721, 2b0b105 각각 detached)에서 `./gradlew --no-daemon build` → 둘 다 BUILD SUCCESSFUL, 86 tasks 모두 실행. JUnit XML(두 커밋 같음): risk 55, architecture-test 13, app-engine 7, sim 75, 모두 실패·오류·건너뜀 0. `리스크_규칙은_리스크_모듈에만_있다()`, `규칙은_위반을_실제로_잡아낸다()` 실행·통과 확인. worktree는 검토 뒤 지움
+  - CI: 5304721은 Gradle build, Secret scan and collector boundary, DB schema 모두 success. 2b0b105는 이 시점에 check-run 없음(로컬 전체 빌드로 대신 확인)
+  - `git diff 98cc10a 2b0b105`(검토 원문 제외): `ArchitectureTest.java`(규칙 강화와 단언), 새 위반 픽스처 `autotrade-architecture-test/src/test/java/com/autotrade/risk/archfixture/SplitPackageApproveAll.java`, ADR-001 2줄, D-032 2곳이 바뀌었다. 운영 코드(`src/main`) 변경 0. `risk-ops.md`는 바뀌지 않음
+  - **우회 실험(5304721 worktree, 커밋하지 않고 실험마다 삭제, `git status` 깨끗함 확인)**: `:autotrade-architecture-test:test --tests '*ArchitectureTest'`
+
+| 실험 | 넣은 코드 | 결과 |
+|---|---|---|
+| E1-sim | `autotrade-sim/src/main/java`에 `package com.autotrade.risk; final class RoSplitApprove implements RiskPolicy { approve() }` | **잡음.** `리스크_규칙은_리스크_모듈에만_있다() FAILED`, "Class <com.autotrade.risk.RoSplitApprove> does not satisfy come from module autotrade-risk" |
+| E1-engine | 실전 엔진 `autotrade-app-engine/src/main/java`에 같은 분할 패키지 클래스 `RoEngineSplit` | **잡음.** 같은 규칙, "RoEngineSplit does not satisfy come from module autotrade-risk" |
+| E3-engine | `autotrade-app-engine`에 익명 클래스 `new RiskPolicy() { approve() }` | **잡음.** 패키지·모듈 두 조건 모두 위반 |
+| E2-engine | `autotrade-app-engine`에 `static final RiskPolicy LAMBDA = (o, a) -> RiskDecision.approve();` | **못 잡음(EXIT 0).** D-032 위험과 한계와 규칙 주석에 적힌 알려진 한계와 일치 |
+
+### 이번 변경과 판단
+- **[사실] QA F-1 반영(5304721)**: `RISK_POLICIES_LIVE_IN_RISK_MODULE`에 `FROM_RISK_MODULE` 조건이 더해졌다(`ArchitectureTest.java:158`, `:177`). 패키지만 보던 규칙이 클래스 파일 출처(경로에 `/autotrade-risk/`)까지 본다. 위반 픽스처 검사는 세 가지다(`:288–294`): 다른 패키지 클래스 → 위반, 리스크 패키지를 빌린 다른 모듈 클래스 → 1건, 실제 `RiskChain` → 위반 없음. 마지막 검사는 위치 판정이 모든 클래스를 거절하는 오류를 막는 양성 대조다. 위 우회 실험으로 실제 운영 모듈(sim, 실전 엔진)에 둔 분할 패키지 클래스도 잡는 것을 직접 확인했다.
+- **[사실] 2b0b105**: `ApproveAllRiskPolicy` 검출 단언을 `hasViolation()`에서 `getFailureReport().getDetails()).hasSize(2)`로 바꿨다. 패키지와 모듈 두 조건이 따로 세어지므로 2건이 맞다. 다른 패키지 픽스처가 한 조건만 위반해도 통과하던 느슨한 단언이 정확해졌다. 보호 테스트를 강화하는 변경이고 약화가 아니다. 위 빌드에서 통과했다.
+- **[사실] 문서**: D-032 결정 6, 위험과 한계, ADR-001 두 행이 "패키지와 클래스 파일 위치, 람다 제외"로 실제 규칙과 같게 바뀌었다. 또 "7단계 주문 파이프라인은 `RiskPolicy` 인터페이스를 받는 자리를 두지 않고 `RiskChain`만 받아야 한다"를 람다 우회 차단의 선행 조건으로 적었다(QA F-1 E2 대응).
+- **risk-ops 자기 점검**: 첫 검토와 재검토 (1)~(5)에서 A2·A11을 통과로 적었지만, 이 규칙이 패키지만 본다는 점(F-1 E1)을 실험하지 않아 놓쳤다. 이번에는 우회 실험을 직접 돌려 확인했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·테스트·설정 변경 없음. ArchitectureTest 13건 통과(`Guard를_올리는_조작은_명령_채널에서만_한다` 포함) |
+| A2 | 통과 | 기존 ArchUnit 규칙(`ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`, `ONLY_COMMAND_CHANNEL_RAISES_GUARD`)과 그 위반 수 단언(4건, 6건)은 그대로다. `RiskPolicy` 규칙은 모듈 조건이 더해져 강화됐다(`ArchitectureTest.java:174–178`). 운영 코드 `submit` 호출 위치는 두 곳 그대로(`GuardedOrderGateway.java:68`, `SimulationExperimentRunner.java:249`). 실전 엔진 모듈에 승인만 하는 분할 패키지 정책·익명 클래스를 두면 빌드가 실패하는 것을 실험으로 확인(E1-engine, E3-engine) |
+| A3 | 해당 없음 | 증권사·주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·조회 로직 변경 없음 |
+| A5 | 통과 | 멱등 키 발급 경로 변경 없음(`SimulationExperimentRunner.java:241`) |
+| A6 | 통과 | `RiskChain.java:53–57`이 모든 의도를 먼저 거절한다. 이는 D-035, 기획서 v13.1과 일치한다. `RiskChainTest` 9건, `SimulationExperimentRunnerTest` 블랙리스트 단언 통과. 블랙리스트를 건너뛰는 `RiskPolicy` 클래스를 리스크 모듈 밖에 둘 수 없다(E1·E3). 람다는 `RiskChain.entryRule`로만 들어가 블랙리스트 뒤·진입에만 적용된다 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 운영 코드 변경 없음, app-engine 테스트 7건과 프로세스 격리 ArchUnit 통과 |
+| A9 | 통과 | 보호 경로 변경 없음. 진입 규칙이 보호 주문을 건너뛰는 구조 그대로(`RiskChain.java:58–60`). 블랙리스트 보유분의 공백은 D-035 사용자 결정으로 받아들인 위험이다. 경고 구현 전에는 실전 연결 금지(아래 2) |
+| A10 | 통과 | 새 픽스처·규칙에 비밀값 없음. CI 비밀값 스캔 success(5304721) |
+| A11 | 통과 | 보호 테스트 `ArchitectureTest`는 강화만 됐다. 규칙에 조건이 하나 더해졌고, 위반 픽스처 1개와 양성 대조가 추가됐으며, 느슨한 `hasViolation()` 단언은 정확한 `hasSize(2)`로 바뀌었다. 삭제·비활성화 없음. 새 동작(모듈 조건)에 실패 사례 테스트(`SplitPackageApproveAll` 1건)와 통과 사례 테스트(`RiskChain`)가 있다 |
+| A12 | 통과 | 장애 대응 경로 변경 없음 |
+| A13 | 통과 | 시장·시간·금액 계산 변경 없음 |
+| A14 | 통과 | QA A14(F-1)가 지적한 대로 D-032 "지금 보장하는 것 (1)"과 테스트 이름이 실제 규칙과 달랐다. 이제 규칙이 모듈까지 검사하고, 문서는 람다 제외를 명시해 같아졌다. D-032 결정 6, ADR-001 검사 표·계약 표, 테스트 주석이 일치한다. D-035·기획서 v13.1·결정 로그는 앞 재검토 (5)와 같고 바뀌지 않았다 |
+
+### 재검토 (6) 점검표 밖 발견
+1. **[권고] 모듈 판정 경로 문자열.** `FROM_RISK_MODULE`은 클래스 파일 URI에 `/autotrade-risk/`가 들어 있는지만 본다(`ArchitectureTest.java:158–165`). 저장소를 `autotrade-risk`라는 이름의 상위 폴더 아래에 체크아웃하면 모든 클래스가 모듈 조건을 통과해 F-1 E1을 다시 못 잡는다(패키지 조건은 남음). 지금 CI·로컬 경로에서는 문제가 없고 양성·음성 픽스처가 오판을 일부 잡아 주므로 판정에는 반영하지 않는다. 루트 프로젝트 경로 기준으로 `<root>/autotrade-risk/build/`처럼 고정하는 방식을 권한다.
+2. **[7단계 전 필수, 이번 판정 조건 아님]** 람다 우회(E2)는 남는다. 7단계 실전 주문 파이프라인은 `RiskChain`만 받아야 한다(D-032에 선행 조건으로 기록됨). 아래 항목이 없으면 그 PR은 A9·A6 실패로 본다.
+   - QA R-1·D-035: 보유 종목 블랙리스트 등록 시 경고와 긴급 알림, 그 발생 테스트
+   - QA R-2: 계좌 불일치 시 크게 실패
+   - QA R-4: 실전 경로에서 `EMPTY` 사용 금지, 실험 메타에 블랙리스트 지문 기록
+3. **사용자 확인 사항(머지 시)**: D-035 결정 출처(QA F-2와 같음)는 저장소 밖 기록이라 risk-ops도 대조하지 못했다. 머지하는 사용자가 직접 확인해야 한다.
+4. 독립 QA 판정(`docs/reviews/pr-19/qa.md`)은 98cc10a 기준 "수정 필요(A14)"다. 이번 변경이 그 지적을 고쳤으므로 QA 재검토가 필요하다.
+
+### 재검토 (6) 판정
+승인. QA F-1(A14)이 고쳐졌고 risk-ops가 우회 실험으로 직접 확인했다. 실전 관련 PR이므로 독립 QA 재검토 뒤 사용자가 직접 머지한다. 머지 전에 D-035 결정 출처를 사용자가 확인할 것.
