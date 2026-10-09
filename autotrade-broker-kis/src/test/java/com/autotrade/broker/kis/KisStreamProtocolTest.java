@@ -1,12 +1,14 @@
 package com.autotrade.broker.kis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.broker.BrokerCapability;
 import com.autotrade.broker.BrokerCredentials;
 import com.autotrade.broker.BrokerStatus;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.live.CredentialsRejectedException;
 import com.autotrade.marketdata.live.Decoded;
 import com.autotrade.marketdata.live.LiveRuntime;
 import com.autotrade.marketdata.live.RawQuote;
@@ -117,6 +119,20 @@ class KisStreamProtocolTest {
         assertThat(ok.control()).isEqualTo(Decoded.Control.IGNORED);
         assertThat(protocol.decode("1|H0STCNI0|001|abcdef", RX).quotes()).isEmpty();
         assertThat(protocol.decode("0|H0STCNT0|003|a^b", RX).control()).isEqualTo(Decoded.Control.IGNORED);
+    }
+
+    @Test
+    void 접속키_발급이_401_403이면_자격_증명_거절로_알리고_그_밖의_실패는_구분한다() {
+        for (int status : new int[] {401, 403}) {
+            KisApprovalClient c = new KisApprovalClient(new FakeHttp().respond(status, "SECRET-KEY"),
+                    new BrokerCredentials("APP-KEY", "SECRET-KEY"), CLOCK);
+            assertThatThrownBy(c::fetch).isInstanceOf(CredentialsRejectedException.class)
+                    .hasMessageNotContaining("SECRET-KEY").hasMessageNotContaining("APP-KEY");
+        }
+        KisApprovalClient c500 = new KisApprovalClient(new FakeHttp().respond(500, "SECRET-KEY"),
+                new BrokerCredentials("APP-KEY", "SECRET-KEY"), CLOCK);
+        assertThatThrownBy(c500::fetch).isInstanceOf(java.io.IOException.class)
+                .isNotInstanceOf(CredentialsRejectedException.class).hasMessageNotContaining("SECRET-KEY");
     }
 
     @Test

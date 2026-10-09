@@ -70,9 +70,13 @@ class ArchitectureTest {
         "com.autotrade.app.engine..", "com.autotrade.app.gateway..", "com.autotrade.app.watchdog..",
     };
 
-    private static final JavaClasses PRODUCTION = new ClassFileImporter()
-            .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-            .importPackages("com.autotrade");
+    // 검사 범위: 우리 프로젝트(settings의 모든 Java 모듈)의 운영 클래스 전체(패키지 필터 없음) + 클래스패스의 com.autotrade
+    // 위치 전체. com.autotrade 밖 패키지에 둔 우리 클래스도 실전 경로 규칙이 본다(독립 QA PR #21 Q-1). 예전 범위
+    // (importPackages("com.autotrade"))를 포함하는지는 ModuleOwnershipTest#ArchitectureTest_범위는_... 가 확인한다.
+    // 운영·테스트 구분은 우리 프로젝트면 선언 출력 종류로, 외부 jar면 예전 경로 패턴으로 한다(risk-ops 재검토 2 R-7).
+    static final JavaClasses PRODUCTION = new ClassFileImporter()
+            .withImportOption(OurModules.architectureImportOption())
+            .importLocations(OurModules.architectureScope());
 
     /** 순수 모듈은 Spring·JDBC·JPA를 모른다. */
     static final ArchRule PURE_MODULES_HAVE_NO_FRAMEWORK = noClasses()

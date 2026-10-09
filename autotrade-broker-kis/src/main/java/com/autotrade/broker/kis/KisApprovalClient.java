@@ -1,6 +1,7 @@
 package com.autotrade.broker.kis;
 
 import com.autotrade.broker.BrokerCredentials;
+import com.autotrade.marketdata.live.CredentialsRejectedException;
 import com.autotrade.marketdata.live.HttpPort;
 import com.autotrade.marketdata.live.TokenCache;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -40,6 +41,9 @@ final class KisApprovalClient implements TokenCache.Fetcher {
                 "appkey", credentials.appKey(),
                 "secretkey", credentials.appSecret()));
         HttpPort.Response r = http.post(APPROVAL_URI, Map.of("Content-Type", "application/json; charset=utf-8"), body);
+        if (r.status() == 401 || r.status() == 403) {
+            throw new CredentialsRejectedException("한국투자 접속키 발급 거절: HTTP " + r.status());
+        }
         if (r.status() != 200) {
             throw new IOException("한국투자 접속키 발급 실패: HTTP " + r.status());
         }

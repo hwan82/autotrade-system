@@ -1,6 +1,7 @@
 package com.autotrade.broker.kiwoom;
 
 import com.autotrade.broker.BrokerCredentials;
+import com.autotrade.marketdata.live.CredentialsRejectedException;
 import com.autotrade.marketdata.live.HttpPort;
 import com.autotrade.marketdata.live.TokenCache;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,6 +42,9 @@ final class KiwoomTokenClient implements TokenCache.Fetcher {
                 "secretkey", credentials.appSecret()));
         HttpPort.Response r = http.post(TOKEN_URI,
                 Map.of("Content-Type", "application/json;charset=UTF-8", "api-id", "au10001"), body);
+        if (r.status() == 401 || r.status() == 403) {
+            throw new CredentialsRejectedException("키움 토큰 발급 거절: HTTP " + r.status());
+        }
         if (r.status() != 200) {
             throw new IOException("키움 토큰 발급 실패: HTTP " + r.status());
         }
@@ -48,7 +52,8 @@ final class KiwoomTokenClient implements TokenCache.Fetcher {
         int code = n.path("return_code").asInt(0);
         String token = n.path("token").asText("");
         if (code != 0 || token.isEmpty()) {
-            throw new IOException("키움 토큰 발급 실패: return_code " + code);
+            // 200이면서 return_code가 0이 아니면 키·시크릿 오류로 본다 `[가정]`(코드별 의미는 Q-015에서 확인)
+            throw new CredentialsRejectedException("키움 토큰 발급 거절: return_code " + code);
         }
         String expires = n.path("expires_dt").asText("");
         if (expires.length() != 14) {

@@ -67,8 +67,10 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     private boolean awaitingLogin;
     /** 이번 연결에서 인증이 확인됐는지(로그인 응답 또는 첫 시세). 확인 전에는 재연결 대기를 초기화하지 않는다. */
     private boolean confirmed;
-    /** 연속 인증 실패 횟수. 확인되면 0. */
+    /** 연속 인증 실패 횟수(접속 후 거절과 발급 거절 모두). 확인되면 0. */
     private int authFailures;
+    /** 직전 자격 증명 준비(토큰·접속키 발급)가 실패했는지. 실패 원인과 무관하게 다음 발급까지 60초를 둔다. */
+    private boolean issuanceFailed;
     private long nextSubId;
     private long sequence;
     private Instant lastMessageAt;
@@ -219,8 +221,20 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         } catch (Exception e) {
             // 예외 메시지에는 비밀값이 섞일 수 있어 종류만 남긴다
             LOG.log(Level.WARNING, "{0} 인증 준비 실패({1}), 재연결 대기", sourceId, e.getClass().getSimpleName());
+            synchronized (lock) {
+                // 발급 API는 증권사가 횟수를 제한하고(한국투자 1분 1회) 과금 대상일 수 있어, 실패 원인과 무관하게
+                // 다음 발급은 60초 뒤다(독립 QA PR #10 과금 8.4). 자격 증명 거절이면 인증 실패로도 센다
+                issuanceFailed = true;
+                if (e instanceof CredentialsRejectedException) {
+                    protocol.invalidateCredentials();
+                    countAuthFailure();
+                }
+            }
             onConnectFailed(gen);
             return;
+        }
+        synchronized (lock) {
+            issuanceFailed = false;
         }
         transport.connect(protocol.endpoint(), new Handler(gen)).whenComplete((conn, err) -> {
             if (err != null) {
@@ -289,6 +303,16 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         return setState(ConnectionState.CONNECTED);
     }
 
+    /** 잠금 안에서 부른다. */
+    private void countAuthFailure() {
+        authFailures++;
+        stats.authFailures++;
+        if (authFailures == AUTH_FAILURE_LIMIT) {
+            LOG.log(Level.ERROR, "{0} 인증 {1}회 연속 실패: 자격 증명 거부로 보고 DEGRADED. 키 확인 필요",
+                    sourceId, authFailures);
+        }
+    }
+
     private void confirm() {
         if (!confirmed) {
             confirmed = true;
@@ -335,7 +359,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
             pendingTask.cancel();
         }
         Duration delay = backoff.nextDelay();
-        if (authFailures > 0 && delay.compareTo(AUTH_RETRY_MIN) < 0) {
+        if ((authFailures > 0 || issuanceFailed) && delay.compareTo(AUTH_RETRY_MIN) < 0) {
             delay = AUTH_RETRY_MIN;
         }
         pendingTask = scheduler.schedule(delay, () -> {
@@ -412,12 +436,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 }
                 case LOGIN_FAILED -> {
                     protocol.invalidateCredentials();
-                    authFailures++;
-                    stats.authFailures++;
-                    if (authFailures == AUTH_FAILURE_LIMIT) {
-                        LOG.log(Level.ERROR, "{0} 인증 {1}회 연속 실패: 자격 증명 거부로 보고 DEGRADED. 키 확인 필요",
-                                sourceId, authFailures);
-                    }
+                    countAuthFailure();
                     dropGen = gen;
                     dropWhy = "인증 실패 " + d.detail();
                 }

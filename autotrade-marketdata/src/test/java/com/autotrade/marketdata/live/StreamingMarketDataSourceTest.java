@@ -194,16 +194,43 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
-    void 인증_준비_실패도_재연결_대기로_넘긴다() {
+    void 인증_준비_실패도_재연결_대기로_넘기고_다음_발급은_1분_뒤다() {
         protocol.failPrepare = true;
         StreamingMarketDataSource s = source(SerialDispatcher.direct());
         s.start();
         scheduler.runDue();
         assertThat(transport.connections).isEmpty();
         protocol.failPrepare = false;
+        scheduler.advance(Duration.ofSeconds(59));
+        assertThat(protocol.prepareAttempts).isEqualTo(1);       // 발급 API를 1초 만에 다시 두드리지 않는다
         scheduler.advance(Duration.ofSeconds(1));
         assertThat(transport.connections).hasSize(1);
         assertThat(s.state()).isEqualTo(ConnectionState.CONNECTING);
+        assertThat(s.credentialsRejected()).isFalse();            // 네트워크 오류 등은 거부로 세지 않는다
+    }
+
+    @Test
+    void 발급이_자격_증명_거절로_이어져도_발급은_1분에_한_번이고_3회면_거부로_본다() {
+        protocol.rejectPrepare = true;
+        StreamingMarketDataSource s = source(SerialDispatcher.direct());
+        s.subscribe(Set.of(SAMSUNG), received::add);
+        s.start();
+        scheduler.runDue();
+        scheduler.advance(Duration.ofSeconds(600));
+
+        assertThat(protocol.prepareAttempts).isBetween(10, 11);  // 600초에 1분 간격
+        assertThat(transport.connections).isEmpty();
+        assertThat(protocol.invalidated).isEqualTo(protocol.prepareAttempts);
+        assertThat(s.credentialsRejected()).isTrue();
+        assertThat(s.stats().authFailures()).isEqualTo(protocol.prepareAttempts);
+        assertThat(s.state()).isIn(ConnectionState.DISCONNECTED, ConnectionState.CONNECTING);
+
+        // 키를 고쳐 발급과 로그인이 되면 풀린다
+        protocol.rejectPrepare = false;
+        scheduler.advance(Duration.ofSeconds(60));
+        transport.last().push("LOGIN OK");
+        assertThat(s.state()).isEqualTo(ConnectionState.CONNECTED);
+        assertThat(s.credentialsRejected()).isFalse();
     }
 
     @Test

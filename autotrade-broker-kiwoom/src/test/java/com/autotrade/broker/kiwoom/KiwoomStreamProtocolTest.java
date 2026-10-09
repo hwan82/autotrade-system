@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.autotrade.broker.BrokerCredentials;
 import com.autotrade.domain.market.PriceLevel;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.live.CredentialsRejectedException;
 import com.autotrade.marketdata.live.Decoded;
 import com.autotrade.marketdata.live.RawQuote;
 import com.autotrade.marketdata.live.TokenCache;
@@ -141,11 +142,15 @@ class KiwoomStreamProtocolTest {
     void 토큰_발급_실패_메시지에_비밀값이_없다() {
         FakeHttp bad = new FakeHttp().respond(200, "{\"return_code\":3,\"return_msg\":\"appkey SECRET-KEY 오류\"}");
         KiwoomTokenClient client = new KiwoomTokenClient(bad, new BrokerCredentials("APP-KEY", "SECRET-KEY"));
-        assertThatThrownBy(client::fetch).isInstanceOf(IOException.class)
+        assertThatThrownBy(client::fetch).isInstanceOf(CredentialsRejectedException.class)
                 .hasMessageNotContaining("SECRET-KEY").hasMessageNotContaining("APP-KEY");
         FakeHttp http500 = new FakeHttp().respond(500, "SECRET-KEY");
         assertThatThrownBy(new KiwoomTokenClient(http500, new BrokerCredentials("APP-KEY", "SECRET-KEY"))::fetch)
+                .isInstanceOf(IOException.class).isNotInstanceOf(CredentialsRejectedException.class)
                 .hasMessageNotContaining("SECRET-KEY");
+        FakeHttp http401 = new FakeHttp().respond(401, "SECRET-KEY");
+        assertThatThrownBy(new KiwoomTokenClient(http401, new BrokerCredentials("APP-KEY", "SECRET-KEY"))::fetch)
+                .isInstanceOf(CredentialsRejectedException.class).hasMessageNotContaining("SECRET-KEY");
     }
 
     @Test

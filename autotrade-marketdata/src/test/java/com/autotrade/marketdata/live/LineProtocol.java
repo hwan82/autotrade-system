@@ -19,6 +19,9 @@ final class LineProtocol implements StreamProtocol {
     int opened;
     int invalidated;
     boolean failPrepare;
+    /** true면 발급 자체가 자격 증명 거절로 실패한다(HTTP 401·403과 같은 경우). */
+    boolean rejectPrepare;
+    int prepareAttempts;
     boolean loginAck = true;
     final int max;
 
@@ -43,6 +46,10 @@ final class LineProtocol implements StreamProtocol {
 
     @Override
     public List<String> openingMessages() throws Exception {
+        prepareAttempts++;
+        if (rejectPrepare) {
+            throw new CredentialsRejectedException("HTTP 401");
+        }
         if (failPrepare) {
             throw new IllegalStateException("token");
         }

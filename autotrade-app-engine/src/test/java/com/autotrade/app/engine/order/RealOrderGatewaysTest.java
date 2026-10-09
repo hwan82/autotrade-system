@@ -73,7 +73,7 @@ class RealOrderGatewaysTest {
         OrderGateway gw = RealOrderGateways.open(guard, kis, KIS_KR);
 
         assertThat(gw).isInstanceOf(GuardedOrderGateway.class);
-        assertThat(gw.submit(order(KIS_KR.id(), OrderIntent.ENTRY)).state()).isEqualTo(OrderState.SUBMITTED);
+        assertThat(gw.submit(order(KIS_KR.id(), OrderIntent.ENTRY)).state()).isEqualTo(OrderState.ACCEPTED);
         guard.shutdown(KIS_KR.id(), "BAE", "킬스위치");
         assertThat(gw.submit(order(KIS_KR.id(), OrderIntent.STOP_LOSS)).state()).isEqualTo(OrderState.REJECTED);
         assertThat(kis.submitted).hasSize(1);
@@ -147,7 +147,7 @@ class RealOrderGatewaysTest {
                 @Override
                 public OrderAck submit(OrderRequest request) {
                     submitted.add(request);
-                    return new OrderAck(request.key(), OrderState.SUBMITTED, false, "B-1", "");
+                    return new OrderAck(request.key(), OrderState.ACCEPTED, false, "B-1", "");
                 }
 
                 @Override
@@ -157,7 +157,7 @@ class RealOrderGatewaysTest {
 
                 @Override
                 public OrderAck cancel(IdempotencyKey key) {
-                    return new OrderAck(key, OrderState.CANCELLED, false, "B-1", "");
+                    return new OrderAck(key, OrderState.CANCEL_REQUESTED, false, "B-1", "");
                 }
             });
         }
