@@ -141,3 +141,49 @@
 
 ### 판정
 승인. 점검표 A에 실패와 확인 못 함이 없다. P1~P3은 권장이고 7단계 전 목록으로 넘긴다. 이 PR은 증권사 플러그인, 장애 전환, 보호 시세 경로를 건드리는 실전 관련 PR이다. 지침 10·11장과 D-031에 따라 Claude가 머지하지 않는다. 사용자가 직접 확인하고 독립 QA 검토를 거쳐 머지한다.
+
+## 재검토 2026-10-09 (3차)
+- 대상: PR #10 / 커밋 e58009c (현재 head, `git diff origin/main...e58009c` 전체, 106개 파일 +8192 −15). 직전 risk-ops 승인(eecb2d2) 뒤 코드 변경은 c9cffb0 하나다(architect 재검토 반영). 그 밖의 커밋은 ae90625 `.gitignore` 한 줄과 aa9c398·e58009c 검토 원문뿐이다
+- 점검표: A
+- 직접 실행한 것:
+  - e58009c를 별도 작업 트리(detached)로 꺼내 `./gradlew build --rerun-tasks --no-daemon` 실행 → BUILD SUCCESSFUL, 104개 작업 전부 실행. 모듈별 테스트(실패·오류·건너뜀 0): risk 41, architecture-test 13, app-engine 7, app-gateway 19, marketdata 64, broker-kis 7, broker-kiwoom 13, broker-toss 7, broker-api 1, config 29, domain 27, sim 59, strategy 25, app-lab 86, app-watchdog 1
+  - c9cffb0가 바꾼 두 테스트(`RecordingReplayTest`, `StreamingMarketDataSourceTest`)를 `--rerun-tasks`로 5회 반복 → 5회 모두 통과
+  - 변이 실험(작업 트리에서만, 되돌림): `StreamingMarketDataSource.Handler.drop`의 `Thread.holdsLock(lock)` 조건을 `false &&`로 꺼서 예전처럼 잠금 안에서 바로 끊게 했다 → `StreamingMarketDataSourceTest` 17건 중 1건 실패. 새 테스트가 회귀를 실제로 잡는다
+  - main 대비 `autotrade-risk`·`autotrade-config`·`autotrade-app-engine`·`autotrade-domain/.../order` 변경 0, 삭제 파일 0, 테스트 파일에서 지운 줄은 ArchitectureTest 주석 1줄뿐, `@Disabled`·`assume*` 추가 0
+  - origin/main이 이 PR의 분기점(0ea575d) 뒤로 3커밋(c50ab6f, 2dcea43, 52ad85f) 나아갔다. 그 변경 파일과 이 PR 변경 파일의 겹침 0, `git merge-tree --write-tree origin/main e58009c` 충돌 없음
+  - 새 main 코드의 엔드포인트 전수 grep: 키움 토큰·WebSocket, 한투 접속키·WebSocket, 토스 토큰·현재가뿐. 주문 엔드포인트 0. 하드코딩 키 패턴·비밀값 로그 grep 0건
+
+### 직전 승인 뒤 변경(c9cffb0) 검토
+| 변경 | 실전 영향 판단 | 근거 |
+|---|---|---|
+| 전송 실패 시 끊기·상태 알림을 잠금 밖으로 미룸 | 안전 쪽. 잠금 안에서 허브로 알림이 나가 같은 스레드에서 재진입하거나 허브·소스 잠금 순서가 뒤집히는 경로를 없앴다. 미뤄진 끊기는 `dropConnection(gen, …)`의 세대 검사로 중복·낡은 실행이 무시되고, 닫힌 소스에서는 아무것도 하지 않는다(StreamingMarketDataSource.java:307-311). 공백 시작은 `lastMessageAt`이라 미뤄진 시간만큼 공백이 줄어 기록되지 않는다 | StreamingMarketDataSource.java:600-606, WsHandler.java Javadoc, `StreamingMarketDataSourceTest#보내던_스레드에서_바로_온_전송_실패는_잠금_밖에서_끊고_알린다`(:116) 통과, 변이 실험에서 실패 확인 |
+| 녹화기 쓰기 스레드 주입 생성자, `queued()` | 테스트용 package-private. 공개 생성자 동작(데몬 스레드, 이름) 그대로 | MarketEventRecorder.java:58-80, :125 |
+| 녹화 큐 넘침 테스트 결정론화 | 약화 아님. 예전 단언(버림 양수, 누락 표시 양수, 건수 일치)을 정확한 값(받은 2건·버린 98건, 누락 표시 1건의 원인·시작·끝, 최종 건수)으로 바꿔 더 강하다. 이 테스트는 이 PR에서 새로 생긴 것이라 보호 테스트 약화 대상도 아니다 | RecordingReplayTest.java:194 |
+| 일봉 검사 기준일을 시장마다 1회 계산 | 결과 동일(같은 `createdAt`, 같은 시장이면 같은 날짜). 시간대 기준 그대로 | DailyBarQualityCheck.java:38, :61, `SnapshotDailyBarSourceTest#스냅샷_기준일은_생성_시각의_거래소_현지_날짜다` 통과 |
+| `LiveMarketDataSource`·`stats()` Javadoc 위치 정리 | 직전 권장 P3 반영. 동작 변화 없음 | LiveMarketDataSource.java:23-35 |
+
+### 점검표 A (e58009c 기준)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk`·`autotrade-config` main 대비 변경 0. `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`, `#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `GuardedOrderGatewayTest#OFF_계좌로는_출구를_만들_수_없다` 재실행 통과 |
+| A2 | 통과 | `GATEWAY_HAS_NO_ORDER_PORT`(ArchitectureTest.java:123)·`ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`(:133) 본문 변경 없음. `시세_게이트웨이는_주문_포트를_모른다`(:212), `실전_주문_출구는_Guard_팩토리만_연다`(:217), `규칙은_위반을_실제로_잡아낸다`(:243) 통과. 세 플러그인 `orderGateway`는 `Optional.empty()`(KisPlugin.java:93-95, KiwoomPlugin.java:92-94, TossPlugin.java:81-83). `OrderGateway` 구현은 main에 있던 `GuardedOrderGateway`·`VirtualExchange`뿐(grep) |
+| A3 | 통과 | 주문 전환 경로 없음. 시세 재배분(MarketHub)은 구독만 옮긴다. c9cffb0도 시세 연결 끊기 시점만 바꿨다 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 로직 변경 없음(`autotrade-risk`, `autotrade-domain/.../order` diff 0) |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 주문·청산·복구 경로 변경 없음. 게이트웨이 held 목록은 구독 우선순위에만 쓰인다 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 엔진의 금지 의존에 `:autotrade-app-gateway` 유지(autotrade-app-engine/build.gradle.kts:13), `프로세스_진입점끼리_참조하지_않는다` 통과, 게이트웨이→엔진 IPC 없음. 실전 계좌가 설정된 증권사 키는 게이트웨이가 쓰지 않는다(GatewayMain.java:86-92, :107, `GatewayMainTest#계좌번호까지_설정된_실전_계좌의_증권사는_게이트웨이가_쓰지_않는다` 통과). c9cffb0의 잠금 순서 정리는 게이트웨이 안의 교착 가능성을 줄인다 |
+| A9 | 통과 | 보호 수단 약화 없음. `SourcePlannerTest#모든_소스가_장애면_보유_종목_전체가_경보_대상이다`, `GatewayTest#키움이_끊기면_보유_종목을_한투로_옮기고_전환_공백을_녹화한다`, `#모든_소스가_끊겼다가_돌아오면_받지_못한_구간을_남긴다`, `#받을_소스_없이_끝나면_종료_시각까지_공백을_남긴다` 통과. 미뤄진 끊기의 지연 한계는 아래 Q1(권장) |
+| A10 | 통과 | 새 로그 없음(c9cffb0). 끊김 사유는 예외 클래스 이름만(StreamingMarketDataSource.java:595). 테스트 픽스처는 자리표시자. 비밀값 패턴 grep 0건 |
+| A11 | 통과 | 보호 테스트 삭제·비활성화·약화 없음(지운 줄은 ArchitectureTest 주석 1줄). 새 동작(전송 실패 지연 끊기)에 실패 경우 테스트가 있고 변이 실험으로 잡는 것을 확인. 녹화 넘침 테스트는 강화 |
+| A12 | 통과 | 장애표 1번(시세 끊김)·7번(인증 실패 DEGRADED) 전제 유지. 전송 실패도 끊김→재연결→공백 기록 경로를 그대로 탄다(테스트에서 DISCONNECTED와 소켓 닫힘 확인). 장애 테스트 합격은 이 PR이 주장하지 않으며 7단계에서 판정 |
+| A13 | 통과 | 시장 차이는 `KrxMarketRules`/`UsMarketRules`와 캘린더 데이터로만. 일봉 기준일 계산은 시장별 현지 날짜를 그대로 쓴다(DailyBarQualityCheck.java:61). `금액에_실수형을_쓰지_않는다`, `ExchangeCalendarTest` 통과 |
+| A14 | 통과 | c9cffb0는 결정·설정 키·계약을 바꾸지 않는다(WsHandler Javadoc에 콜백 제약만 추가). D-024 키 공유 제약, D-028, Q-015, ADR-003 2.1·4·5·6장과 코드가 직전 승인 때와 같이 일치 |
+
+### 점검표 밖 발견 (3차, 모두 권장, 막지 않음)
+- Q1. 미뤄진 끊기는 게이트웨이 전체가 쓰는 단일 스레드 스케줄러(GatewayMain.java:51 `gateway-scheduler`)에서 돈다. 같은 스레드에서 다른 소스의 `attempt()`가 접속키·토큰 HTTP 발급을 동기로 하면(연결 10초 + 요청 10초 시한, GatewayMain.java:52-54), 그동안 전송 실패 소스의 끊기·재배분이 최대 약 20초 늦어질 수 있다 `[추론]`. 무응답 감시·재연결 예약도 같은 스레드라 기존에도 있던 구조이고, 공백은 `lastMessageAt`부터 기록되며, 아직 엔진이 시세를 쓰지 않으므로 계좌 위험은 없다. 7단계에서 보호 시세가 게이트웨이를 거치게 되면 소스별 스케줄러를 두거나 자격 증명 발급을 스케줄러 밖으로 옮긴다. 7단계 전 필수 목록(ADR-003 6장)에 더한다.
+- Q2. 닫는 순서상 스케줄러가 먼저 닫히고 그 뒤 잠금 안 전송 실패가 오면 `schedule`이 `RejectedExecutionException`을 던질 수 있다. JDK 전송에서는 `whenComplete` 콜백 안이라 삼켜지고 종료 중에만 생기므로 영향 없음. 기록만 한다.
+- 이전 권장 R4~R8, N3·N4, P1·P2는 여전히 7단계 전 필수 목록이다. P3은 c9cffb0로 해결됐다.
+
+### 판정
+승인. 점검표 A에 실패와 확인 못 함이 없다. 직전 승인 뒤 변경(c9cffb0)은 실전 안전을 약화하지 않고, 새 동작에는 회귀를 잡는 테스트가 있다. Q1·Q2는 권장이고 7단계 전 목록으로 넘긴다. 이 PR은 증권사 플러그인, 장애 전환, 보호 시세 경로를 건드리는 실전 관련 PR이다. 지침 10·11장과 D-031에 따라 Claude가 머지하지 않는다. 사용자가 직접 확인하고 독립 QA 검토를 거쳐 머지한다.
