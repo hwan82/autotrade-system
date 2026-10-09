@@ -38,4 +38,12 @@ class GatewayMainTest {
         assertThat(GatewayMain.reservedForRealTrading(rt)).containsExactly(BrokerId.KIWOOM);
         assertThat(GatewayMain.reservedForRealTrading(new RuntimeConfig.RealTrading(List.of(), Map.of(), Secret.empty()))).isEmpty();
     }
+
+    @Test
+    void 기본_목록의_토스는_키가_있어도_실시간을_구현하기_전까지_건너뛴다() {
+        // D-039로 TOSS가 기본 우선순위에 들어갔지만 토스 실시간 프로토콜은 아직 없다(ADR-003 2.1). 키가 설정돼도 연결하지 않는다
+        RuntimeConfig.BrokerKeys keys = new RuntimeConfig.BrokerKeys(Secret.of("<APP_KEY>"), Secret.of("<APP_SECRET>"));
+        assertThat(keys.isConfigured()).isTrue();
+        assertThat(GatewayMain.plugin(BrokerId.TOSS, keys, null)).isEmpty();
+    }
 }

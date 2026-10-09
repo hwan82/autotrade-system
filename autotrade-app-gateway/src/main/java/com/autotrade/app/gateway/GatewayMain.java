@@ -114,7 +114,7 @@ public final class GatewayMain {
         return out;
     }
 
-    private static Optional<BrokerPlugin> plugin(BrokerId id, RuntimeConfig.BrokerKeys keys, LiveRuntime runtime) {
+    static Optional<BrokerPlugin> plugin(BrokerId id, RuntimeConfig.BrokerKeys keys, LiveRuntime runtime) {
         if (!keys.isConfigured()) {
             return Optional.empty();
         }
