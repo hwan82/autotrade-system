@@ -93,3 +93,39 @@ D. **[권장]** `LiveMarketDataSource.java:22-25`에 `lastReceivedAt`의 Javadoc
 
 ### 판정
 수정 필요(B1·B6 → 발견 A: 비결정적 테스트, 발견 B: 전송 실패 알림의 잠금 안 호출, 발견 C: 행마다 캘린더 재파싱). 세 가지 모두 수정 범위가 작다. 고친 뒤 같은 검토자에게 재검토를 맡긴다. CI Gradle build 성공도 머지 전에 확인한다. 이 PR은 실전 관련 PR로 분류됐으므로(risk-ops 원문) architect 승인 뒤에도 사용자 직접 머지와 독립 QA를 거친다.
+
+## 재검토 2026-10-09 (2차)
+- 대상: PR #10 / 커밋 c9cffb0(현재 head) / `git diff origin/main...c9cffb0` 전체(106파일, +8156 −15). 직전 재검토(bf23fc3) 이후 바뀐 것은 c9cffb0(코드·테스트 8파일)과 검토 원문 커밋 aa9c398뿐이다
+- 점검표: B
+- 직접 실행한 것(공유 체크아웃과 분리된 작업 트리에서):
+  - `./gradlew clean build` (c9cffb0): 종료 코드 0. 테스트 399건, 건너뜀 0, 실패 0, 오류 0
+  - 지난번 재현 조건(바쁜 루프 8개로 CPU 부하)에서 `RecordingReplayTest`·`StreamingMarketDataSourceTest`를 `--rerun-tasks`로 20회 반복했다. 실패 0/20. 같은 조건에서 bf23fc3은 15회 중 4회 실패했다
+  - CI check-runs(c9cffb0): Secret scan 성공, DB schema 성공, Gradle build는 검토 시점에 진행 중. 앞선 커밋들(4160936, aa9c398)의 Gradle build는 다음 push로 취소돼 결과가 없다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 c9cffb0에서 `./gradlew clean build`를 직접 돌려 종료 코드 0을 받았다. 지난 재검토의 비결정적 실패(발견 A)는 부하 반복 20회에서 재현되지 않는다. CI Gradle build 성공은 머지 전에 확인한다(아래 판정) |
+| B2 | 통과 | 이번 커밋은 ArchUnit 규칙과 모듈 의존을 바꾸지 않는다. `ArchitectureTest` 13건 통과 |
+| B3 | 통과 | 계약 변경은 `WsHandler.onError` 주석뿐이다. "전송 실패는 `send`를 부른 스레드에서 바로 불릴 수 있다"고 적었다(WsHandler.java). 시그니처는 그대로다. `MarketEventRecorder`의 `ThreadFactory` 생성자와 `queued()`는 패키지 공개라 외부 계약이 아니다. 고아 Javadoc 정리(LiveMarketDataSource, StreamingMarketDataSource `stats()`)도 반영됐다 |
+| B4 | 통과 | 운영 코드의 시간은 주입 `Clock`과 스케줄러만 쓴다. 새 테스트의 `System.nanoTime`·`Thread.sleep`은 테스트 코드라 `NO_SYSTEM_TIME` 대상 밖이다(가져오기 옵션 `DO_NOT_INCLUDE_TESTS`). 리플레이 결정론·sim 골든 테스트 통과 |
+| B5 | 통과 | 금액 표현 변경 없음 |
+| B6 | 통과 | `RecordingReplayTest#녹화_큐가_넘치면_기다리지_않고_버린_뒤_누락을_표시한다`가 latch로 쓰기 스레드를 세워 두고 검사한다. 그래서 스레드 일정과 무관하게 받은 2건, 버린 98건, 공백 1건(시작=처음 버린 이벤트, 끝=다음 이벤트), 총 4줄을 정확히 단언한다. 기존 단언보다 강해졌다. 새 테스트 `StreamingMarketDataSourceTest#보내던_스레드에서_바로_온_전송_실패는_잠금_밖에서_끊고_알린다`는 같은 스레드 전송 실패(`FakeTransport.Conn.failSends`)에서 `subscribe` 안에서는 알림이 없고 스케줄러 실행 뒤 잠금 밖에서 한 번 알림을 확인한다. 테스트 삭제·비활성화 없음 |
+| B7 | 통과 | 이번 커밋은 실전 경로를 바꾸지 않는다(marketdata 내부 수신·녹화·품질 검사). risk-ops 원문 "재검토 2026-10-09 (2차)" 판정은 승인이다(eecb2d2 기준). 이 PR은 risk-ops가 실전 관련 PR로 분류했다. 사용자 직접 머지와 독립 QA 대상이다. c9cffb0의 잠금 처리 변경이 risk-ops 판정 범위(A8·A12 등)에 닿는지는 risk-ops가 판단한다 |
+| B8 | 통과 | 새 로그·예외 메시지 없음. 테스트 예외 메시지는 "Output closed"뿐이다 |
+
+### 지난 재검토 수정 필요 항목 처리
+- A(비결정적 테스트): 해결. 위 B1·B6
+- B(전송 실패 알림이 잠금 안에서 나감): 해결.
+  - `Handler.drop`이 `Thread.holdsLock(lock)`이면 `dropConnection`을 `scheduler.schedule(Duration.ZERO, ...)`로 미룬다(StreamingMarketDataSource.java:601). 그 밖의 경우는 바로 처리한다.
+  - `sendAll`(:494)은 모두 소스 잠금 안에서 불리므로 같은 스레드 실패는 빠짐없이 미뤄진다.
+  - 미뤄진 끊기는 세대(`gen`) 확인을 그대로 거친다. 그 사이 실패가 겹쳐도 한 번만 끊긴다.
+  - 남은 한계: 미루는 동안(스케줄러 한 번 도는 시간) 소스는 CONNECTED로 보인다. 이 사이 배분이 그 소스로 갈 수 있지만 끊김 알림이 곧바로 다시 배분하고, 공백은 `lastReceivedAt` 기준으로 남는다. 막을 사유는 아니다
+- C(행마다 캘린더 재파싱): 해결. `snapshotDates` `EnumMap`으로 시장마다 한 번 계산한다(DailyBarQualityCheck.java:38, 61)
+- D(고아 Javadoc): 해결
+
+### 점검표 밖 발견 (2차)
+- 막는 것은 없다.
+- risk-ops P1·P2(한투 거부 상태가 재기동 전까지 안 풀림, 시세 없을 때 `authFailures` 미초기화)는 7단계 전 목록(ADR-003 5·6장)으로 남는다. 첫 검토의 권장 중 공용 스케줄러에서 도는 블로킹 토큰 발급(ADR-003 5장 기록)도 같다. 이번 수정으로 그 스케줄러가 미뤄진 끊기도 맡게 됐다. 토큰 발급 지연이 끊김 처리까지 늦출 수 있으니 그 후속 작업 때 함께 본다.
+
+### 판정
+승인. 점검표 B에 실패와 확인 못 함이 없다. 머지 전에 c9cffb0 이후 head의 CI "Gradle build" 성공을 확인해야 한다. risk-ops 원문에 따라 이 PR은 실전 관련 PR이다. Claude가 머지하지 않고, 사용자가 직접 확인하고 독립 QA(D-031)를 거쳐 머지한다.
