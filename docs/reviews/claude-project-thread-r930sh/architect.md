@@ -145,3 +145,56 @@
 - /home/claude/autotrade-system/docs/adr/ADR-001-module-structure.md
 - /home/claude/autotrade-system/docs/adr/ADR-006-real-control-channel.md
 - /home/claude/autotrade-system/docs/config/config-keys.md
+
+## 재검토 2026-10-09
+
+# architect 검토: 실전 운영 화면(ADR-006) 1차 검토 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, 커밋 a3f31de, `git diff origin/main...HEAD` 전체(57개 파일, origin/main c50ab6f 기준)
+- 점검표: B
+- 직접 실행한 것:
+  - 다른 검토자의 빌드와 겹치지 않도록 `git archive HEAD`를 scratchpad로 풀어 그곳에서 `./gradlew build --offline --no-daemon --rerun-tasks` 실행: **BUILD SUCCESSFUL**(91 tasks 실행, EXIT=0). 테스트 359건, 실패 0, 오류 0, 건너뜀 0. 이 중 ArchitectureTest 13, ControlChannelTest 18, EngineCommandHandlerTest 21, OperatorAuthenticatorTest 9, EngineMainTest 8, OperatorPasswordHashTest 5, RealOpsControllerTest 11, ConfigLoaderTest 20, RuntimeConfigHolderTest 6, SecretTest 3.
+  - `verifyPureDependencies`·`verifyProcessIsolation` 작업이 빌드 로그에 실행됨(13회).
+  - 이 PC에서 PBKDF2-HMAC-SHA256 600,000회 1회 계산 시간 측정: 약 190~270ms(4코어 Linux).
+  - Linux에서만 실행했다. Windows·macOS와 GitHub Actions CI 단계(엔진 기동·소켓 권한 셸 검사)는 실행하지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 결과(로컬, --offline). CI 러너 결과는 보지 않았다 |
+| B2 | 통과 | `ArchitectureTest.java:58` PURE에 `com.autotrade.control..` 추가, 161-179행 새 규칙 3개(`ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`, `ONLY_ENGINE_OPENS_CONTROL_SERVER`, `ONLY_LAB_SENDS_CONTROL_COMMANDS`)와 위반 픽스처(`ForgedConfirmation`, `MisplacedControlChannel`)로 규칙이 위반을 잡는지 확인(ArchitectureTest 13건 통과). `autotrade-control/build.gradle.kts`는 pure-java-conventions, 의존은 config·Jackson뿐. gateway·watchdog `processIsolation`에 `:autotrade-control` 금지 추가. architecture-test 의존에 control 추가. 규칙 변경은 ADR-006 2.1, ADR-001:64에 기록. 단 ADR-001:83 "ArchUnit (10개 규칙)" 문구는 현재 15개와 맞지 않음(참고-5) |
+| B3 | 통과 | 설정 키 `real-trading.operator-password-hash`: `RuntimeConfig.java` RealTrading 레코드, `autotrade-default.json`, `docs/config/config-keys.md:30`(기본값·형식·범위·재기동 범위), ConfigLoaderTest 비밀값 경로 목록 갱신. REST: ADR-005:82 오류 코드 추가, `RealOpsController` 매핑과 일치(BAD_REQUEST→INVALID 포함). 명령 채널 프로토콜·응답 코드: ADR-006 2.2·2.3 |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음, 골든 테스트 포함 전체 테스트 통과. 새 코드의 현재 시각은 주입 Clock(`OperatorAuthenticator`, `RealOpsController`), 시스템 시계 생성은 `EngineMain.main:49`뿐. `ControlServer.java:219-222`의 `System.nanoTime()`은 대기 시간 측정용(ADR-001:224 허용 범위). 난수는 해시 salt용 `SecureRandom`(EngineMain:133)뿐이며 결과 재현성과 무관 |
+| B5 | 해당 없음 | 금액을 다루는 코드 변경 없음 |
+| B6 | 통과 | 새 동작마다 테스트 있음(위 건수). 1차 지적 테스트 결함 수정 확인: `ControlChannelTest.java:29` 클래스 `@Timeout(30)`, 35행 CopyOnWriteArrayList, 166-195행 직렬 처리 테스트가 `calls==2`·두 응답 모두 ok 확인, 110-121행 읽기 타임아웃 하한·상한, 연결 상한 초과·슬롯 반환(124행), 정확히 MAX_BYTES(92행), 실제 죽은 소켓(358·391행). `git diff origin/main...HEAD`에 삭제된 파일·`@Disabled`·삭제된 `@Test` 없음 |
+| B7 | 확인 못 함 | 실전 경로(Guard 전이, PANIC SELL, 2차 확인, 명령 채널)를 건드림 → **risk-ops 검토 필요**. `docs/reviews/claude-project-thread-r930sh/risk-ops.md`에는 4ab3553 대상 1차 원문만 있고 a3f31de 대상 A 점검표 재검토가 아직 없다 |
+| B8 | 통과 | 테스트의 비밀값은 자리표시자(`PLACEHOLDER-...`, 테스트용 비밀번호). `ControlRequest.toString`(ControlRequest.java:47-52)이 비밀번호·계좌 칸을 가림, `ControlCodec` 파싱 예외에 원문 없음, `ControlServer.java:238` 오류 로그는 명령 이름과 예외 클래스만, `RealOpsController.java:88,92` 로그는 명령·코드만, `EngineCommandHandler.auditTarget`은 설정에 있는 별칭만 기록. gitleaks는 이 환경에 없어 실행하지 않았다(CI가 실행) |
+
+### 1차 지적 사항 반영 확인
+- 중요-1(상태 조회가 명령 뒤에 줄 섬, 응답 없음이 "가상"으로 보임): **해결.** `ControlServer.java:60,211-214` STATUS·DEACTIVATE 직접 처리, `ControlClient` NOT_RUNNING/UNKNOWN 구분, `RealOpsController` `EngineState` 3상태와 `asOf`, 상태 조회 2초 제한, `app.js` modeBand가 UNKNOWN일 때 마지막 UP 상태를 경고 띠로 유지. 남은 점은 참고-2.
+- 중요-2(ArchUnit이 control을 덮지 못함): **해결.** B2 근거.
+- 중요-3(ADR-001 미갱신): **대체로 해결.** 모듈 표·프로세스 금지 의존·설계 근거 갱신. 규칙 개수 문구만 남음(참고-5).
+- 중요-4(검증 통과 표시가 계좌·명령에 묶이지 않음): **해결.** `OperatorAuthenticator.java:36,75,97-104`(확인 문구에 묶이고 한 번 쓰면 지움), `EngineCommandHandler.java:71-73`(명령 끝에 항상 버림). 남은 점은 참고-3.
+- 중요-5(잠금이 PANIC을 막음): **해결 방향 확인.** PANIC 1단계(보호 모드 고정)를 2차 확인 전에 수행(`EngineCommandHandler.java:176-183,189-200`), 잠금 중 UI 안내(`real.js:71-72`). 잠금 정책 자체는 ADR-006 7장 사용자 결정 항목. 실전 정책 판단은 risk-ops 몫.
+- 중요-6(테스트 결함): **해결.** B6 근거.
+- 1차 참고 항목: 코덱 크기 검사·엄격 파싱(`ControlCodec.java:29-42,108`), 늦게 도착한 요청 무시(`ControlServer.java:198-201`), accept 백오프(147-152), RejectedExecution 처리(167-171), 소켓 권한 설정 실패 시 정리(110-116), engine.lock(83-98), 클라이언트 AtomicReference, NFC 정규화, ADR-005 오류 코드, CI 소켓 권한 검사가 반영됐다. 남은 것: 프로브 connect 타임아웃 없음(`ControlServer.java:280-287`), close 시 진행 중 명령 interrupt(323행, ADR-006에 7단계 조건으로 기록), Windows ACL, macOS sun_path(테스트가 여전히 `@TempDir` 사용, macOS에서 실행해 보지 않음).
+
+## 점검표 밖 발견
+
+**중요-A. PANIC SELL이 `BUSY`로 통째로 거절될 수 있다(1단계 보호 모드 고정 포함)**
+- 근거: `ControlServer.java:212-218`. DIRECT가 아닌 명령(ACTIVATE, PANIC_ACCOUNT, PANIC_ALL)은 `queued` 세마포어(MAX_QUEUED=2, 실행 중 포함)를 못 얻으면 바로 `BUSY`를 돌려준다. PANIC도 예외가 아니다. 이때 처리기가 불리지 않으므로 `EngineCommandHandler`의 "2차 확인 전에 하는 보호 모드 고정"도 일어나지 않는다.
+- 생기는 경우: 활성화 1건 실행 중 + 1건 대기(탭 두 개, 이중 클릭 등), 또는 전체 PANIC 실행 중 + 계좌 PANIC 대기 중에 다시 PANIC을 누를 때. 화면은 BUSY에서 대화상자를 닫는다(`real.js:162`).
+- 영향: ADR-006 2.2의 "PANIC은 기다렸어도 실행한다(내리는 방향)"와 D-023 공통 원칙 2(내리는 전이는 언제나 허용)에 어긋난다. 지금은 활성화 단계가 즉시 실패해 대기열이 거의 차지 않으므로 실제 위험은 낮다 `[추론]`. DEACTIVATE는 대기열을 거치지 않아 우회 수단은 있다.
+- 수정 제안(둘 중 하나, risk-ops 판단):
+  - (a) PANIC_ACCOUNT·PANIC_ALL은 BUSY 대상에서 빼고 항상 대기열에 넣는다(대기 상한은 ACTIVATE에만 적용).
+  - (b) PANIC 1단계(보호 모드 고정)를 연결 스레드에서 바로 수행한 뒤 2차 확인·증권사 단계만 대기열로 보낸다. 이 경우 1단계는 활성화 진행 중에도 즉시 일어난다. ADR-006 148행의 "긴 활성화 중 PANIC도 기다린다" 위험도 1단계만큼은 해소된다.
+  - 어느 쪽이든 "대기열이 찬 상태에서 PANIC을 보내면 보호 모드로 내려간다" 테스트를 추가하고 ADR-006 2.2 문구를 맞춘다.
+
+### 참고
+1. **늦게 끝나는 활성화**: `STALE`은 대기열 대기 시간만 본다(`ControlServer.java:222-223`). 9초 기다린 ACTIVATE가 실행되면 PBKDF2 검증과 활성화 단계 시간이 더해져 실험실 15초 제한을 넘길 수 있다. 그러면 화면은 "응답 없음"인데 엔진은 OPEN이 될 수 있다. 지금은 단계가 즉시 실패해 문제없다. 7단계에서 활성화 단계가 생기면 Guard를 올리기 직전(`beginActivation` 전)과 마지막 단계 전에 요청 시작 후 경과 시간을 다시 확인하는 기한(deadline)을 처리기에 넘기는 것을 권한다. ADR-006 7단계 완료 조건 표에 추가하는 것을 권한다.
+2. **상태 조회가 해시 검증 동안 막힘**: `OperatorAuthenticator.verify`(60행)는 `synchronized` 안에서 PBKDF2(이 PC에서 약 0.2초, 느린 PC나 부하 시 더 김 `[추론]`)를 계산한다. STATUS가 부르는 `lockedUntil()`(48행)과 DEACTIVATE 뒤의 `discardVerification()`(107행)이 같은 모니터를 기다린다. Guard 전이는 그 전에 끝나므로 안전 영향은 없지만, "STATUS는 바로 답한다"는 설명과 다르고 STATUS 2초 제한에 걸리면 UNKNOWN 띠가 뜬다. 해시 비교를 모니터 밖에서 하고 실패 횟수·잠금·검증 문구 갱신만 동기화하는 것을 권한다.
+3. **동시 DEACTIVATE가 진행 중인 활성화의 검증을 지움**: DEACTIVATE는 연결 스레드에서 `apply`를 거치므로 끝에서 `discardVerification()`(EngineCommandHandler.java:72)을 부른다. 명령 스레드의 ACTIVATE가 `confirm` 통과(111행) 후 `confirmationFor`(116행) 전이면 검증이 지워져 `INVALID_STATE "이 계좌로 2차 확인 검증을 통과하지 않았습니다"`로 끝난다. 안전한 방향(열리지 않음)이고 창이 매우 짧다. 다만 메시지가 원인을 오해하게 하므로 `discardVerification`은 대기열 명령(ACTIVATE·PANIC)에서만 부르거나, `verify`가 일회용 검증 값을 돌려주게 바꾸는 것을 권한다(1차 중요-4 제안 (a)).
+4. **NOT_RUNNING 판정이 소켓 파일 존재에만 기댐**: `ControlClient.java:50`. 엔진이 살아 있는데 누가 소켓 파일을 지우면 화면이 "실험실 · 가상 계좌만"이 된다. engine.lock 덕분에 두 번째 엔진은 뜨지 않지만 표시는 틀린다. 실험실에서 `run/engine.lock`에 공유 잠금 시도(잡히면 엔진 없음, 못 잡으면 UNKNOWN)를 보조 판정으로 쓰는 방안을 검토할 만하다. Windows 이식성(참고: 1차 5번)과 함께 7단계 전 정리.
+5. **ADR-001 규칙 개수**: `docs/adr/ADR-001-module-structure.md:83` "ArchUnit (10개 규칙)"과 설명 목록이 현재 `ArchitectureTest`의 규칙 15개(Guard 팩토리, 명령 채널, 2차 확인, control 서버·클라이언트 규칙 포함)와 다르다. main에서 이미 어긋나 있던 것(main 12개)이 더 벌어졌다.
+6. **코덱 줄 뒤 바이트 검사 범위**: `ControlCodec.java:102-105`는 같은 read 청크 안의 남은 바이트만 거절한다. 다음 read에 오는 바이트는 보지 않는다. 연결 하나에 요청 하나라 해는 없으나, ADR-006·테스트 설명의 "두 줄 거절"은 같은 청크일 때만 성립한다는 점을 Javadoc에 적어 두면 좋다.
+
+## 판정
+수정 필요(B7 확인 못 함: a3f31de 대상 risk-ops A 점검표 재검토 원문이 없음, 중요-A: PANIC이 BUSY로 거절되어 보호 모드 고정도 안 되는 경로)
