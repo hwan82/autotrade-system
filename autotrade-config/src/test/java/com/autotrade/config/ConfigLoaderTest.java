@@ -38,9 +38,8 @@ class ConfigLoaderTest {
         assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_NO_FILE);
         assertThat(loaded.warning()).isEmpty();
         RuntimeConfig c = loaded.config();
-        // 요금이 공식 확인되지 않은 토스 시세는 기본 목록에 없다(D-033, QA 보고서 P3). 쓰려면 사용자가 runtime-config에 넣는다
-        assertThat(c.marketData().priority()).containsExactly(BrokerId.KIWOOM, BrokerId.KIS);
-        assertThat(c.marketData().priority()).doesNotContain(BrokerId.TOSS);
+        // 토스 시세 조회는 무료(Q-020 사용자 확인, D-039)라 D-024 순서(키움 1, 토스 2, 한국투자 3)가 기본값이다
+        assertThat(c.marketData().priority()).containsExactly(BrokerId.KIWOOM, BrokerId.TOSS, BrokerId.KIS);
         assertThat(c.marketData().mode()).isEqualTo(MarketDataMode.AUTO);
         assertThat(c.lab().maxParallelRuns()).isEqualTo(4);
         assertThat(c.lab().defaultSeedCapitalKrw()).isEqualTo(10_000_000L);
@@ -77,15 +76,15 @@ class ConfigLoaderTest {
     }
 
     @Test
-    void 사용자가_토스를_넣으면_적은_순서대로_쓴다() throws IOException {
-        // D-024 순서(키움 1, 토스 2, 한국투자 3)를 쓰려면 사용자가 직접 켠다(D-033)
+    void 사용자가_토스를_빼면_적은_순서대로_쓴다() throws IOException {
+        // 기본값은 토스를 포함하지만(D-039) 사용자가 runtime-config에서 빼면 그 목록만 쓴다
         runtime("""
-                { "market-data": { "priority": ["KIWOOM", "TOSS", "KIS"] } }
+                { "market-data": { "priority": ["KIWOOM", "KIS"] } }
                 """);
         LoadedConfig loaded = loader.load(paths);
         assertThat(loaded.source()).isEqualTo(ConfigSource.RUNTIME_FILE);
         assertThat(loaded.config().marketData().priority())
-                .containsExactly(BrokerId.KIWOOM, BrokerId.TOSS, BrokerId.KIS);
+                .containsExactly(BrokerId.KIWOOM, BrokerId.KIS);
     }
 
     @Test
