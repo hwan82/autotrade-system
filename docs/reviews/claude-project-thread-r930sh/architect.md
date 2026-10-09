@@ -198,3 +198,46 @@
 
 ## 판정
 수정 필요(B7 확인 못 함: a3f31de 대상 risk-ops A 점검표 재검토 원문이 없음, 중요-A: PANIC이 BUSY로 거절되어 보호 모드 고정도 안 되는 경로)
+
+## 재검토 2 2026-10-09
+
+# architect 검토: 실전 운영 화면(ADR-006) 재검토 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, HEAD c7e158b, `git diff origin/main...HEAD` 전체(origin/main 2dcea43 = merge-base, 57개 파일). 직전 검토(a3f31de) 뒤 바뀐 것은 c7e158b(코드 7개·ADR 2개)와 main 반영 4f36e2a(main 쪽 파일만, 이 브랜치 diff에는 나타나지 않음)
+- 점검표: B
+- 직접 실행한 것:
+  - `git archive c7e158b`를 scratchpad의 이 검토 전용 폴더에 풀고 `./gradlew build --offline --no-daemon --rerun-tasks`: **BUILD SUCCESSFUL**(91 tasks 모두 실행, EXIT=0). 테스트 377건, 실패 0, 오류 0, 건너뜀 0. 이 중 ArchitectureTest 13, ControlChannelTest 19, EngineCommandHandlerTest 22, OperatorAuthenticatorTest 9, EngineMainTest 8, OperatorPasswordHashTest 5, RealOpsControllerTest 11. `verifyPureDependencies`·`verifyProcessIsolation` 13회 실행.
+    - 참고: 처음 두 번은 같은 scratchpad의 공용 이름 폴더(`rv2`)에서 돌렸다가 빌드 도중 `autotrade-config/build/classes`의 클래스 파일이 사라져 `:autotrade-app-lab:compileJava`가 실패했다(NoSuchFileException). 같은 시각 다른 검토자의 작업이 그 폴더를 건드린 것으로 본다 `[추론]`. 코드 문제가 아니므로 판정에 쓰지 않았고, 전용 폴더에서 다시 돌린 위 결과를 쓴다.
+  - 시간에 민감한 테스트 반복: `:autotrade-control:test`와 `EngineCommandHandlerTest`를 `--rerun-tasks`로 3회 더 실행, 3회 모두 통과.
+  - gitleaks 8.21.2(저장소 `.gitleaksignore` 적용): `origin/main..HEAD` 5개 커밋, 전 이력 54개 커밋 모두 "no leaks found".
+  - Linux에서만 실행했다. Windows·macOS와 GitHub Actions CI 단계(엔진 기동·소켓 권한 셸 검사)는 실행하지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 결과(로컬, --offline, 전용 폴더). CI 러너 결과는 보지 않았다 |
+| B2 | 통과 | c7e158b는 모듈 의존과 ArchUnit 규칙을 바꾸지 않았다. 새 코드는 `ControlClient`(control 모듈)의 JDK `ProcessHandle`·`Files`뿐이고 control은 계속 PURE 패키지(`ArchitectureTest.java:58`), 서버·클라이언트 위치 규칙과 위반 픽스처 통과(ArchitectureTest 13건). `ADR-001-module-structure.md:83`이 규칙 개수 대신 "ArchitectureTest의 규칙 전체"와 목록으로 바뀌어 직전 참고-5 해소 |
+| B3 | 통과 | 새 프로세스 간 계약(잠금 파일 `run/engine.lock`에 엔진 PID를 US-ASCII 10진수로 기록, 실험실이 이를 읽어 NOT_RUNNING/UNKNOWN 판정)이 ADR-006 2.2(48행)·2.3(78행)에 기록됨. 응답 코드 표 `BUSY(ACTIVATE만)`(72행), 2.4 검증 폐기 범위(85행), 5장 테스트 표 건수(22·19건)가 코드와 일치. REST·설정 키·스키마 변경 없음 |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음, 골든 테스트 포함 전체 통과. 새 코드에 시스템 시계·난수 없음(`ControlServer.java:237-241`의 `System.nanoTime()` 상대값은 기존 그대로, ArchUnit `NO_SYSTEM_TIME` 통과) |
+| B5 | 해당 없음 | 금액을 다루는 코드 변경 없음 |
+| B6 | 통과 | 바뀐 동작마다 테스트: PANIC은 대기열이 차도 BUSY 아님(`ControlChannelTest.java:222` `대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다`, ACTIVATE가 정확히 MAX_QUEUED건 처리되고 PANIC 1건 ok 확인), 소켓만 없어지면 UNKNOWN(320행), 잠금 파일 PID가 죽었으면 NOT_RUNNING(309행 근처), DEACTIVATE가 검증을 지우지 않음(`EngineCommandHandlerTest.java:350`). 기존 BUSY 테스트는 지운 것이 아니라 바뀐 계약에 맞게 고쳐 단언을 늘렸다. `git diff origin/main...HEAD`에 삭제된 파일·`@Disabled`·assume·삭제된 `@Test` 없음 |
+| B7 | 확인 못 함 | 실전 경로(명령 채널 대기열 정책, PANIC 수락, 2차 확인 검증 폐기, 엔진 생존 판정)를 건드림 → **risk-ops 검토 필요**. `docs/reviews/claude-project-thread-r930sh/risk-ops.md`에는 a3f31de 대상 재검토(판정 "수정 필요 F1, F2")까지만 있고, F1·F2를 고친 c7e158b 대상 A 점검표 재검토 원문이 아직 없다(이 검토를 쓰는 시점 기준) |
+| B8 | 통과 | gitleaks 이력 전체 무결과(위). 새 코드의 로그·예외 메시지에 비밀값 없음: `ControlClient.java:94-95,99` 메시지는 고정 문구, 잠금 파일에는 PID만 기록(`ControlServer.java:104-107`). 테스트 값은 자리표시자·실행 중 생성 해시 |
+
+### 직전 지적(재검토 1) 처리 확인
+- B7(a3f31de 대상 risk-ops 재검토 없음): 해당 원문은 생겼다(risk-ops.md 185행 이후). 다만 그 결과로 다시 고친 c7e158b에 대한 재검토가 필요해져 이번 B7도 확인 못 함이다.
+- 중요-A(PANIC이 BUSY로 거절되고 보호 모드 고정도 안 됨): **해결.** `ControlServer.java:228-232` PANIC_ACCOUNT·PANIC_ALL은 세마포어 없이 명령 스레드에 넣고 기다린다. 전체 수는 연결 상한 8(`ControlServer.java:56`)이 묶는다. ACTIVATE만 `queued`를 쓰고 STALE 검사도 ACTIVATE에만 남았다. PANIC이 같은 단일 명령 스레드에서 돌므로 ACTIVATE·PANIC 사이의 검증 경합도 없다. ADR-006 2.2 문구 일치. 1차 제안 (b)(1단계를 연결 스레드에서 즉시)는 택하지 않았고, 긴 활성화 뒤에서 PANIC 1단계가 기다리는 문제는 ADR-006 4장 149행에 7단계 완료 조건으로 남아 있다.
+- 참고-3(동시 DEACTIVATE가 활성화 검증을 지움): **해결.** `EngineCommandHandler.java:71-76`.
+- 참고-4(NOT_RUNNING이 소켓 파일 존재에만 기댐): **부분 해결.** 잠금 파일 PID로 보조 판정(`ControlClient.java:88-101`). 제안했던 "잠금을 잡아 보기" 대신 PID를 택해 실험실이 엔진 기동을 막을 위험을 피했다. 남은 점은 아래 참고-1·2.
+- 참고-5(ADR-001 규칙 개수): **해결.**
+- 참고-1(늦게 끝나는 활성화: 처리기에 기한 전달)과 참고-2(PBKDF2를 `synchronized` 안에서 계산해 STATUS가 막힘, `OperatorAuthenticator.java:48,60`): **반영 안 됨, ADR에도 기록 없음.** 둘 다 참고 등급이고 지금은 영향이 없으므로 이번 판정 사유로 삼지 않는다. 7단계 전에 ADR-006 6장 후속 표에 올려 두기를 권한다.
+- 1차 참고 중 남은 것(프로브 connect 타임아웃, close 시 진행 중 명령 interrupt, Windows ACL, macOS sun_path)은 그대로이며 ADR-006 6장에 후속으로 기록돼 있다(프로브 타임아웃은 기록 없음).
+
+## 점검표 밖 발견
+
+### 참고
+1. **Windows에서는 PID 보조 판정이 동작하지 않을 수 있다** `[추론, 미검증]`. 엔진은 `lockChannel.tryLock()`(`ControlServer.java:90`)으로 파일 전체 구간을 잠근다. Windows의 파일 잠금(LockFileEx)은 강제 잠금이라 다른 프로세스가 잠긴 구간을 읽으면 실패한다. 그러면 `ControlClient.java:91`의 `Files.readString`이 IOException을 던지고 99행으로 빠져 `NOT_RUNNING`이 된다. 즉 재검토 1 참고-4와 risk-ops F2가 막으려던 "엔진은 도는데 소켓만 없어 가상으로 보임"이 Windows에서는 그대로 남는다. 리눅스에서는 fcntl 권고 잠금이라 문제없다(테스트 통과). 수정 제안: PID를 잠그지 않는 별도 파일(`run/engine.pid`)에 쓰거나, 잠금 구간을 PID 기록 구간과 겹치지 않게(예: 파일 끝 너머 1바이트) 잡는다. 실사용 PC가 Windows로 정해지면 ADR-006 6장의 "Windows ACL·macOS 경로 길이" 항목에 이 확인을 함께 넣는다. 근본 해결인 "엔진이 지워진 소켓을 다시 만들기"는 이미 7단계 완료 조건(ADR-006 6장)이다.
+2. **정상 종료 뒤에도 PID가 남아 PID 재사용 시 UNKNOWN이 뜬다.** `ControlServer.close()`(334-350행)는 잠금만 풀고 PID를 지우지 않는다. PC 재부팅 뒤처럼 PID가 다시 쓰이면 엔진이 꺼져 있어도 실험실은 "엔진 프로세스는 살아 있지만 명령 채널에 닿지 못했습니다"(UNKNOWN)를 보인다. 안전한 쪽(가상으로 보이지 않음)이고 엔진을 다시 띄우면 PID가 덮어써져 풀리므로 등급은 참고. ADR-006 48행이 재사용을 "안전한 쪽"으로 적어 둔 것과도 맞다. 완화 제안: close에서 잠금을 풀기 전에 `lockChannel.truncate(0)`, 판정에서 `ProcessHandle.info().startInstant()`가 잠금 파일 수정 시각보다 늦으면 다른 프로세스로 본다.
+3. **테스트 이식성**: `ControlChannelTest.java:309` `new ProcessBuilder("true")`는 Windows에 없는 명령이다. CI(ubuntu)와 macOS에서는 동작한다. Windows에서 개발·검증하게 되면 `ProcessHandle`이 끝난 JVM 하위 프로세스(`java -version`) 등으로 바꾼다.
+4. **PANIC 대기 상한**: PANIC은 이제 상한 없이 명령 스레드 뒤에 쌓인다(연결 8개가 상한). 실험실 쪽 대기 제한(15초)이 지나면 화면은 "응답 없음"인데 엔진은 나중에 PANIC을 실행한다. 내리는 방향이라 ADR 의도("기다렸어도 실행")와 맞고 위험하지 않다. 화면 문구가 "반영 여부는 엔진이 다시 응답해야 알 수 있습니다"(real.js 67행)로 이미 이 경우를 안내한다. 기록만 해 둔다.
+
+## 판정
+수정 필요(B7 확인 못 함: c7e158b 대상 risk-ops A 점검표 재검토 원문이 없음). architect 관점의 코드·계약 지적은 남지 않았다(점검표 B 실패 0, 중요 지적 0, 참고 4건). c7e158b 대상 risk-ops 재검토 원문이 생기면 B7만 다시 확인한다. 실전 경로 PR이므로 그 뒤에도 머지는 사용자가 직접 한다(지침 10장).

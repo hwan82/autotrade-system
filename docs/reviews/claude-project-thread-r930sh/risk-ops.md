@@ -243,3 +243,57 @@
 
 ## 판정
 수정 필요(F1, F2). 점검표 A는 실패 0, 확인 못 함 0이다(gitleaks는 CI에 맡기고 수동 grep으로 확인). 1차 지적 M1~M6, M8, M10, R1~R10은 반영을 확인했고 M7·M9 일부는 ADR에 7단계 조건으로 남았다. F1·F2는 지금 열 수 있는 계좌가 없어 현재 계좌 피해는 없지만, F1은 이번 수정으로 생긴 PANIC 경로 회귀이고 F2는 1차 M1이 막으려던 "실전을 가상으로 착각"의 남은 경로다. 둘 다 코드로 고치거나, 최소한 ADR 2.2·2.3·4장 정정과 7단계 완료 조건 등록(F1은 화면 BUSY 안내 포함)을 하면 승인한다. 실전 경로 PR이므로 승인 후에도 머지는 사용자가 직접 한다(지침 10장).
+
+## 재검토 2 2026-10-09
+
+# risk-ops 검토: 실전 운영 화면(ADR-006) 재검토 반영본
+- 대상: 브랜치 claude/project-thread-r930sh, 커밋 c7e158b / `git diff origin/main...HEAD`(origin/main 2dcea43, merge-base 같음, 57개 파일). 직전 재검토(a3f31de) 이후 변경은 c7e158b(ControlServer·ControlClient·EngineCommandHandler·real.js·ADR-001·ADR-006·테스트 3개)와 main 반영 4f36e2a(실험 문서·ScreeningCriteriaTest, 이미 main에 있어 branch diff에는 안 잡힘)다. diff 전체와 영향받는 실전 경로(EngineMain, EngineCommandHandler, OperatorAuthenticator, RealTradingGuard 호출부, ControlServer/Client, RealOpsController, real.js·app.js)를 다시 봤다
+- 점검표: A
+- 직접 실행한 것(같은 폴더의 다른 검토자 빌드와 겹치지 않게 HEAD를 scratchpad에 clone해서 실행):
+  - `./gradlew --offline build --rerun-tasks`: 첫 실행은 `:autotrade-config:compileTestJava`에서 "package com.autotrade.domain.account does not exist" 28건으로 실패했다. 바로 다시 돌린 `--rerun-tasks --continue` 1회, `--rerun-tasks` 1회, `git clean -xfd` 후 `--rerun-tasks` 1회는 모두 BUILD SUCCESSFUL(91개 작업 모두 실행)이었고 재현되지 않았다. autotrade-config는 `api(project(":autotrade-domain"))`로 의존이 선언돼 있어 코드 결함으로 보기 어렵다. 같은 Gradle 사용자 홈을 쓰는 동시 빌드와의 간섭으로 본다 `[추론]`
+  - 마지막 성공 빌드의 테스트 결과(XML 집계): 377건, 실패 0, 오류 0, 건너뜀 0. app-engine 48, control 19, architecture-test 13, risk 41, config 29, app-lab 97, sim 75, domain 27, strategy 25, gateway 1, watchdog 1, broker-api 1
+  - 실제 프로세스 점검: `:autotrade-app-engine:installDist`로 엔진을 짧은 설정 폴더에서 띄우고, 별도 JVM에서 `ControlClient`로 상태를 읽었다. (1) 정상: OK, `run/engine.lock` 내용 = 엔진 PID(19923), 폴더 700·소켓 600. (2) 실행 중 소켓 파일 삭제: `UNKNOWN "실전 엔진 프로세스는 살아 있지만 명령 채널에 닿지 못했습니다"`. (3) SIGTERM 후: `NOT_RUNNING`(잠금 파일 PID는 남지만 프로세스 없음). 직전 재검토 F2는 리눅스에서 프로세스 간에도 해결됐다
+  - gitleaks 8.21.2: `gitleaks git --redact --log-opts=origin/main..HEAD`(5 commits) no leaks found, 저장소 전 이력(54 commits) no leaks found
+  - `scripts/ci/check-python-collectors.sh`: 종료 코드 0
+  - diff에 추가된 `@Disabled`·`assume*` 없음(검토 원문 인용 줄만 걸림), 삭제된 파일 없음(`git diff --diff-filter=D` 결과 없음)
+- 코드는 고치지 않았다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk` 변경 없음. EngineMain.java:97이 설정 계좌로 Guard를 만들고 모두 OFF로 시작. 설정에 올리는 키 없음(autotrade-default.json은 `operator-password-hash` 자리만). 잠금 파일 PID 기록(ControlServer.java:103-111)은 Guard 상태와 무관. EngineMainTest#실전_계좌가_설정돼_있어도_기동_직후_모두_OFF다, #설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다, EngineCommandHandlerTest#기동_직후_상태는_모든_계좌_OFF이고_비밀값을_담지_않는다 통과 |
+| A2 | 통과 | ArchitectureTest.java:136 `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`, 149 `ONLY_COMMAND_CHANNEL_RAISES_GUARD`, 161 `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`, 169·175 명령 채널 위치 규칙과 위반 픽스처(283-295행) 통과, c7e158b는 ArchitectureTest를 바꾸지 않음. `RealOrderGateways.open` 운영 호출 없음. EngineMain.java:117 `BROKER_NOT_CONNECTED` 배선, EngineMainTest#실제_배선으로_활성화하면_증권사_연동_전이라_첫_단계에서_OFF로_돌아간다 통과 |
+| A3 | 통과 | 주문 전송 코드 없음. PanicLiquidator·ActivationStepRunner는 `AccountRef`만 받고 증권사 선택 인자 없음. 증권사 전환 경로 없음 |
+| A4 | 통과 | 주문 타임아웃 경로 변경 없음. 명령 채널은 재전송 없음(ControlClient.java:64-80, RealOpsController 503 안내). ACTIVATE는 오래 기다리면 STALE(ControlServer.java:239-244). PANIC은 이제 대기열 상한 없이 기다렸다가 실행(228-232). ControlChannelTest#오래_기다린_활성화는_버리고_PANIC은_기다렸어도_실행한다, #대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다 통과 |
+| A5 | 해당 없음 | 주문을 만드는 코드 없음. 멱등 키 코드(domain) 변경 없음. 7단계 PanicLiquidator 매도 구현 때 다시 본다 |
+| A6 | 통과 | 새 자동 주문 경로 없음(PANIC 증권사 단계는 `BROKER_NOT_CONNECTED` 구현으로 수행 불가). 블랙리스트·수동 보유 제외는 PanicLiquidator 계약과 ADR 2.5에 7단계 조건으로 남음 |
+| A7 | 통과 | 계좌별 큐·토큰 버킷 코드 변경 없음. PANIC 1단계는 계좌별 Guard 전이만(EngineCommandHandler.java:230-243). 계좌별 순차 PANIC은 ADR 4·6장 7단계 조건. 직전 F1(PANIC이 BUSY로 거절)은 ControlServer.java:228-232로 해결, 테스트로 확인 |
+| A8 | 통과 | 실험실은 클라이언트만, 엔진은 서버만(ArchUnit 169·175), 게이트웨이·감시 런타임에 control 금지(verifyProcessIsolation, build 통과). 실험실의 PID 확인(ControlClient.java:88-101)은 실험실 쪽 읽기만 하고 엔진에 영향 없음. 명령 채널 장애는 Guard 판정에 영향 없음. 연결 8개·ACTIVATE 대기열 2개·입력 64KB·읽기 5초 제한과 테스트(ControlChannelTest 19건) 있음. PANIC 대기 연결이 연결 자리를 차지할 수 있는 점은 G2(참고) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. PANIC은 증권사 단계 4개가 모두 DONE일 때만 OFF(EngineCommandHandler.java:262-268, 287-291), 서버 측 손절 취소 후 매도 미확정은 긴급 표시(275-285). EngineCommandHandlerTest#서버_측_손절을_취소한_뒤_매도가_끝나지_않으면_긴급으로_알린다, #매도가_하나라도_끝나지_않으면_Guard를_끄지_않는다 통과 |
+| A10 | 통과 | gitleaks 브랜치 5커밋·전 이력 54커밋 no leaks. 잠금 파일에는 PID만(ControlServer.java:105-106). 해시는 secrets.json 경로에만, 요청 toString 마스킹(ControlChannelTest#요청_문자열에는_비밀번호와_계좌_칸이_보이지_않는다), 실험실 로그는 명령 이름과 결과 코드만(RealOpsControllerTest#활성화는_확인_문구와_비밀번호를_엔진에_넘기고_응답과_로그에는_남기지_않는다) |
+| A11 | 통과 | 삭제·비활성화된 테스트 없음. c7e158b가 바꾼 기존 테스트는 `대기열이_차면_BUSY로_거절한다` → `대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다`(동작 변경에 맞춰 BUSY 단언 유지 + PANIC 성공·ACTIVATE 2건 실행 단언 추가, 약화 아님), 죽은 소켓 테스트에 "잠금 파일 PID 죽음" 전제 추가, RealOpsControllerTest @AfterEach 잠금 파일 정리. 새 동작 테스트: ControlChannelTest#엔진이_살아_있는데_소켓만_없어지면_실행_중이_아님이_아니라_알_수_없음이다, EngineCommandHandlerTest#활성화_검증_직후_들어온_내리기는_그_검증을_지우지_않는다 |
+| A12 | 통과 | 대응표 #8(엔진 크래시 후 재기동): 남은 잠금 파일 PID가 죽어 있으면 NOT_RUNNING, 재기동 시 잠금 재획득·PID 덮어쓰기(ControlServer.java:104 truncate) → 재기동을 막지 않음(실제 프로세스로 확인). #9(실험실·UI 크래시): 실험실은 클라이언트일 뿐. 장애 테스트 8종의 전제(주문 경로, 큐, 대사) 변경 없음. 해외 O1~O8 영향 없음 |
+| A13 | 해당 없음 | 시장별 분기·시간·금액 계산 없음. 대기 경과는 `System.nanoTime` 상대값(ControlServer.java:237-240)으로 ArchUnit `NO_SYSTEM_TIME`(105행) 통과 |
+| A14 | 통과 | ADR-006 2.2·2.4·5·6장이 c7e158b 동작(PANIC은 BUSY 없음, 잠금 파일 PID, DEACTIVATE는 검증을 지우지 않음)과 일치. 7단계 완료 조건에 소켓 재생성·하향 명령 연결 자리 예약·RSK-13 문구 갱신 추가(ADR-006 6장 표). Q-016·Q-017 결정 로그에 있음. 문구 불일치 두 곳은 G3(참고) |
+
+### 직전 재검토 지적 처리 확인
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| F1 PANIC이 BUSY로 거절 | 반영 | ControlServer.java:228-232에서 PANIC은 세마포어를 거치지 않고 명령 스레드에 넣는다. ControlChannelTest#대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다(ACTIVATE 2건으로 대기열을 채운 상태에서 ACTIVATE는 BUSY, PANIC_ALL은 ok) 통과 |
+| F2 엔진이 살아 있는데 소켓 없음 → 가상 | 리눅스에서 반영, Windows 미검증 | ControlServer.java:103-111 PID 기록, ControlClient.java:88-101 PID 생존 확인. 실제 프로세스로 UP/UNKNOWN/NOT_RUNNING 확인. Windows에서는 G1 |
+| F3 DEACTIVATE가 진행 중 검증을 지움 | 반영 | EngineCommandHandler.java:71-76. DEACTIVATE는 검증을 만들지 않고, ACTIVATE·PANIC은 모두 단일 명령 스레드에서 돌고 끝에 검증을 버리므로 남는 검증이 생기지 않는다. 테스트 통과 |
+| F4 비밀번호 미설정 문구 | 반영 | real.js:69 |
+| F5 하향 명령 연결 자리 | 7단계 조건으로 기록 | ADR-006 6장 표 |
+| F6 RSK-13 갱신 | 머지 직후 과제로 기록 | ADR-006 6장 표(pm-lead, autotrade-spec-keeper) |
+
+## 점검표 밖 발견
+- **G1 (중요, 수정 필요) Windows에서는 F2 수정이 동작하지 않고 "가상"으로 떨어질 수 있다.**
+  - 근거: ControlClient.java:90-99는 잠금 파일을 읽다가 `IOException`이 나면 무조건 `NOT_RUNNING`으로 본다. 엔진은 같은 파일을 `FileChannel.tryLock()`(전체 구간 배타 잠금)으로 쥐고 있다(ControlServer.java:87-90). Windows의 파일 잠금은 강제 잠금이라, 엔진이 살아 있는 동안 다른 프로세스가 잠긴 구간을 읽으면 잠금 위반 `IOException`이 난다 `[추론: FileLock Javadoc "advisory or mandatory is platform-dependent", Windows LockFileEx 동작. 리눅스에서만 실행해 직접 확인 못 함]`. 그러면 F2가 막으려던 경우(엔진은 살아 있는데 소켓만 없음)에 화면이 다시 "실험실 · 가상 계좌만"이 되고 버튼이 사라진다. ADR-006 5장 "검증하지 못한 것"에는 소켓 권한과 경로 길이만 있고 이 경우가 없다. 실사용 PC가 Windows일 수 있다(ADR-006 154·190행)
+  - 판단 기준: 확인할 수 없는 경우의 기본값이 위험 쪽(NOT_RUNNING)이다. 직전 F2의 수정 방향("확인 못 하면 가상으로 보이지 않게")과 맞지 않는다
+  - 수정 제안: `NoSuchFileException`(잠금 파일 없음)만 `NOT_RUNNING`으로 두고, 그 밖의 `IOException`(읽기 실패·잠금 위반)은 `UNKNOWN`으로 본다. 빈 파일·숫자 아님은 지금처럼 `NOT_RUNNING`이어도 된다(기동 직후 PID 기록 전 순간이라 모든 계좌가 OFF). 테스트: 잠금 파일을 읽을 수 없게(권한 000 등) 만든 상태에서 소켓이 없으면 `UNKNOWN`. 코드로 고치지 않으면 최소한 ADR-006 5장 "검증하지 못한 것"과 6장 표(실사용 PC 확정 후, 6단계 전)에 "Windows에서 잠금 파일 PID 읽기"를 넣는다
+  - 지금은 열 수 있는 계좌가 없어 현재 계좌 피해는 없다
+- **G2 (참고) PANIC 대기 연결이 연결 자리 8개를 채울 수 있다.** ControlServer.java:228-232는 PANIC에 시간 상한 없이 `get()`으로 기다린다. 긴 ACTIVATE 뒤에 PANIC이 여러 건(여러 탭·여러 클라이언트) 쌓이면 연결 자리를 쥐고 있어 STATUS·DEACTIVATE 연결이 즉시 닫힌다(167-170행). 화면은 보내는 동안 버튼을 막아(real.js:155·220) 한 탭에서는 생기지 않는다. 직전 F5(하향 명령 연결 자리 예약, 7단계 조건)에 "PANIC 대기 수 상한 또는 같은 계좌 중복 PANIC 합치기"를 같이 적는 것을 권한다. 7단계에서 PANIC 매도가 붙으면 같은 계좌 PANIC이 연달아 실행돼 매도 단계가 두 번 도는 경우도 이때 함께 정한다(PanicLiquidator 계약에 재실행 시 보유 재조회 후 매도 명시)
+- **G3 (참고) 문구 불일치 두 곳.** (a) ADR-006 2.3(78행)의 `UNKNOWN` 정의가 아직 "연결은 됐지만 2초 안에 답이 없거나 끊김"뿐이다. 2.2(48행)에 추가된 "소켓은 없지만 엔진 PID가 살아 있음"을 2.3에도 넣는다. (b) real.js:66 UNKNOWN 안내 "PANIC SELL과 내리기는 보낼 수 있지만"은 소켓이 없어진 경우에는 명령이 엔진에 닿지 않는다. 메시지(ControlClient.java:95)가 이 경우를 구분하므로, 그때는 "엔진 터미널에서 확인하세요(명령 채널 소켓 없음)"로 안내하는 것을 권한다. 소켓 재생성(7단계 조건)이 들어가면 해소된다
+- **G4 (참고) 빌드 첫 실행 실패 1회.** 위 "직접 실행한 것" 참고. 3회 연속 재현되지 않았고 의존 선언도 맞아 이 PR의 결함으로 보지 않는다. CI 결과로 한 번 더 확인하면 된다
+
+## 판정
+수정 필요(G1). 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 2(A5, A13)다. 직전 지적 F1·F3·F4는 반영을 확인했고, F2는 리눅스에서 실제 프로세스로 해결을 확인했다. F5·F6은 ADR-006 6장에 7단계 조건·머지 직후 과제로 남았다. G1은 F2 수정이 Windows에서 위험 쪽 기본값(NOT_RUNNING → "가상" 표시)으로 떨어지는 문제로, 현재 계좌 피해는 없지만 F2와 같은 UI-05 착각 방지 항목이다. 한 줄 수정(그 밖의 IOException → UNKNOWN)과 테스트 1건, 또는 최소한 ADR-006 5장·6장에 Windows 미검증과 6단계 전 확인 조건을 적으면 승인한다. G2~G4는 참고다. 실전 경로 PR이므로 승인 후에도 머지는 사용자가 직접 한다(지침 10장).
