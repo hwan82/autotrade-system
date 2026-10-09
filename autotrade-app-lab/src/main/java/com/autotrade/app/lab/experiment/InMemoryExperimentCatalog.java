@@ -1,6 +1,7 @@
 package com.autotrade.app.lab.experiment;
 
 import com.autotrade.app.lab.web.Page;
+import com.autotrade.marketdata.symbols.SymbolNames;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.run.OrderRejection;
@@ -17,10 +18,24 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-/** 프로세스 메모리에만 두는 실험 목록. 실험실을 다시 띄우면 비어 있다(DB 저장 전 임시 구현). */
+/**
+ * 프로세스 메모리에만 두는 실험 목록. 실험실을 다시 띄우면 비어 있다(DB 저장 전 임시 구현).
+ * 종목명 표는 응답에 이름을 붙이는 데만 쓰며 결과에는 영향을 주지 않는다.
+ */
 public final class InMemoryExperimentCatalog implements ExperimentCatalog {
 
     private final TreeMap<String, Entry> entries = new TreeMap<>(Comparator.reverseOrder());
+
+    private final SymbolNames names;
+
+    /** 종목명을 모르는 카탈로그. */
+    public InMemoryExperimentCatalog() {
+        this(SymbolNames.empty());
+    }
+
+    public InMemoryExperimentCatalog(SymbolNames names) {
+        this.names = Objects.requireNonNull(names, "names");
+    }
 
     private record Entry(ExperimentSpec spec, SimulationReport report) {
     }
@@ -65,14 +80,14 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
 
     @Override
     public synchronized Optional<Page<ExperimentViews.FillRow>> fills(ExperimentId id, String runId, int page, int size) {
-        return run(id, runId).map(r -> Page.of(r.fills().stream().map(ExperimentViews.FillRow::of).toList(), page, size));
+        return run(id, runId).map(r -> Page.of(r.fills().stream().map(a -> ExperimentViews.FillRow.of(a, names)).toList(), page, size));
     }
 
     @Override
     public synchronized Optional<Page<ExperimentViews.RoundTripRow>> roundTrips(
             ExperimentId id, String runId, int page, int size) {
         return run(id, runId).map(r -> Page.of(
-                r.roundTrips().stream().map(ExperimentViews.RoundTripRow::of).toList(), page, size));
+                r.roundTrips().stream().map(t -> ExperimentViews.RoundTripRow.of(t, names)).toList(), page, size));
     }
 
     @Override
@@ -82,10 +97,17 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
             List<ExperimentViews.RejectionRow> filtered = r.rejections().stream()
                     .filter(j -> stage == null || stage.isBlank() || j.stage().equals(stage))
                     .filter(j -> code == null || code.isBlank() || j.code().equals(code))
-                    .map(ExperimentViews.RejectionRow::of)
+                    .map(j -> ExperimentViews.RejectionRow.of(j, names))
                     .toList();
             return new ExperimentViews.RejectionPage(Page.of(filtered, page, size), counts(r.rejections()));
         });
+    }
+
+    @Override
+    public synchronized Optional<ExperimentViews.RunSummary> runSummary(ExperimentId id, String runId) {
+        return entry(id).flatMap(e -> e.report().runs().stream()
+                .filter(r -> r.summary().runId().equals(runId)).findFirst()
+                .map(r -> ExperimentViews.RunSummary.of(e.spec(), r, names)));
     }
 
     /** 건수 내림차순, 같으면 stage·code 이름순(결과가 매번 같은 순서). */

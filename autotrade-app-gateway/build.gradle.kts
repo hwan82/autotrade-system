@@ -33,3 +33,13 @@ tasks.register<JavaExec>("replayCheck") {
     mainClass.set("com.autotrade.app.gateway.ReplayCheck")
     workingDir = rootProject.projectDir // 보고서 상대 경로는 저장소 루트 기준
 }
+
+// 종목명 표 만들기: 한국투자 공개 종목 마스터 파일을 받아 <설정 폴더>/symbols/KRX.csv를 만든다(키·주문 API 안 씀).
+// 사용: ./gradlew :autotrade-app-gateway:symbolMaster
+tasks.register<JavaExec>("symbolMaster") {
+    group = "application"
+    description = "한국투자 공개 종목 마스터(코스피·코스닥)를 받아 설정 폴더의 symbols/KRX.csv를 만든다"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.gateway.SymbolMasterUpdate")
+    workingDir = rootProject.projectDir
+}

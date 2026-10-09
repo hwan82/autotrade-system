@@ -16,6 +16,8 @@ import com.autotrade.marketdata.recording.RecordedReplaySource;
 import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.recording.RecordingMeta;
+import com.autotrade.marketdata.symbols.SymbolNameFiles;
+import com.autotrade.marketdata.symbols.SymbolNames;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.math.BigDecimal;
@@ -51,6 +53,8 @@ import java.util.TreeSet;
  *
  * <p>사용: {@code ./gradlew :autotrade-app-gateway:replayCheck --args="2026-10-12"} (설정 폴더의 {@code recordings/KRX/<날짜>}),
  * 또는 녹화일 폴더 경로. 두 번째 인자로 보고서 파일 경로를 주면 같은 내용을 Markdown으로 쓴다.
+ * 표의 종목명은 설정 폴더의 {@code symbols/KRX.csv}({@link SymbolMasterUpdate}로 만듦)에서 읽으며, 없으면 "–"로 둔다.
+ * 종목명은 표시용이라 두 회차 비교와 해시에 들어가지 않는다.
  * 종료 코드 0: 동일하고 녹화 완전, 1: 다름, 2: 읽기 실패, 3: 동일하나 녹화 불완전.
  */
 public final class ReplayCheck {
@@ -65,12 +69,19 @@ public final class ReplayCheck {
     }
 
     static int run(String[] args, PrintStream out, PrintStream err) {
+        Path config = ConfigPaths.defaultLocation().runtimeFile().toAbsolutePath().getParent();
+        SymbolNameFiles.Loaded loaded = SymbolNameFiles.load(config);
+        loaded.warnings().forEach(err::println);
+        return run(args, loaded.names(), out, err);
+    }
+
+    static int run(String[] args, SymbolNames names, PrintStream out, PrintStream err) {
         if (args.length < 1 || args.length > 2) {
             err.println("사용법: replayCheck <yyyy-MM-dd | 녹화일 폴더> [보고서 파일]");
             return 2;
         }
         try {
-            Report report = check(resolveDay(args[0]));
+            Report report = check(resolveDay(args[0]), names);
             String text = report.toMarkdown();
             out.print(text);
             if (args.length == 2) {
@@ -107,6 +118,10 @@ public final class ReplayCheck {
 
     /** 녹화일 하나를 두 번 리플레이해 비교하고 종목별 요약을 만든다. 회차마다 녹화를 따로 읽고, 이벤트 목록은 들고 있지 않는다. */
     static Report check(Path dayDir) {
+        return check(dayDir, SymbolNames.empty());
+    }
+
+    static Report check(Path dayDir, SymbolNames names) {
         Market market = Market.valueOf(dayDir.getParent().getFileName().toString());
         LocalDate date = LocalDate.parse(dayDir.getFileName().toString());
         Optional<TradingSession> session = regularSession(market, date);
@@ -114,7 +129,7 @@ public final class ReplayCheck {
         Run first = replayOnce(dayDir, session);
         Run second = replayOnce(dayDir, session);
         return new Report(dayDir, first.meta(), first.truncated(), first.eventCount(), first.gapCount(), session,
-                first.digest(), second.digest(), first.replayed(), second.replayed(), first.symbols());
+                first.digest(), second.digest(), first.replayed(), second.replayed(), first.symbols(), names);
     }
 
     private static Optional<TradingSession> regularSession(Market market, LocalDate date) {
@@ -222,8 +237,9 @@ public final class ReplayCheck {
             return p == null ? "-" : p.toPlainString();
         }
 
-        String row(Symbol s) {
-            return "| " + s.code() + " | " + trades + " | " + px(open) + " | " + px(high) + " | " + px(low) + " | "
+        String row(Symbol s, SymbolNames names) {
+            String name = names.name(s).map(n -> n.replace("|", "\\|")).orElse("–");
+            return "| " + s.code() + " | " + name + " | " + trades + " | " + px(open) + " | " + px(high) + " | " + px(low) + " | "
                     + px(close) + " | " + volume + " | " + time(firstTrade) + " | " + time(lastTrade) + " | "
                     + outsideTrades + " / " + outsideVolume + " | " + books + " | " + gaps + " |";
         }
@@ -231,7 +247,7 @@ public final class ReplayCheck {
 
     record Report(Path dir, Optional<RecordingMeta> meta, boolean truncated, long eventCount, long gapCount,
             Optional<TradingSession> session, String firstDigest, String secondDigest, long firstCount, long secondCount,
-            Map<Symbol, SymbolSummary> symbols) {
+            Map<Symbol, SymbolSummary> symbols, SymbolNames names) {
 
         boolean complete() {
             return meta.map(RecordingMeta::complete).orElse(false);
@@ -279,9 +295,9 @@ public final class ReplayCheck {
                     + "\"정규장 밖\" 칸에 건수 / 수량으로 적었다. 대조 상대는 HTS의 **KRX 단독 정규장** 일봉이다"
                     + "(NXT 통합·시간외 포함 값과 비교하지 않는다).")
                     .orElse("캘린더에 이 날짜의 정규장 구간이 없어(휴장·수록 범위 밖) 모든 체결을 집계했다."));
-            b.append("\n\n| 종목 | 체결 수 | 시가 | 고가 | 저가 | 종가 | 체결 수량 합 | 첫 체결 | 마지막 체결 | 정규장 밖 | 호가 수 | 끊김 |\n");
-            b.append("|---|---|---|---|---|---|---|---|---|---|---|---|\n");
-            symbols.forEach((s, sum) -> b.append(sum.row(s)).append('\n'));
+            b.append("\n\n| 종목 | 종목명 | 체결 수 | 시가 | 고가 | 저가 | 종가 | 체결 수량 합 | 첫 체결 | 마지막 체결 | 정규장 밖 | 호가 수 | 끊김 |\n");
+            b.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+            symbols.forEach((s, sum) -> b.append(sum.row(s, names)).append('\n'));
             return b.toString();
         }
     }
