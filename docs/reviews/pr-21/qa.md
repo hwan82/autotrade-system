@@ -95,3 +95,88 @@ PR이 닫는다고 한 지적을 같은 방법으로 다시 시도했다. 각 �
 - A2: `com.autotrade` 밖 패키지의 운영 클래스는 `ArchitectureTest`의 실전 경로 규칙과 `ModuleOwnershipTest`를 모두 피한다(Q-1, E2·E3 실측, `./gradlew build` 통과). 같은 이름 중첩 프로젝트도 소유 규칙을 피한다(Q-2, E5).
 - A14: ADR-002 9장, D-034, PR 본문이 F-1을 닫힌 것으로 기록하지만 위 우회가 남아 있다. 고치거나, 고치지 않으면 남은 범위를 기록에 정확히 적어야 한다.
 - 닫힌 것으로 확인한 것: main QA F-1의 실측 형태(E1, E7), PR #19 QA F-1 E1 형태의 분할 패키지(E6), risk-ops R-1(E4), `OrderState`·RSK-01·장애표 종 수 불일치(main QA A14 (1)~(3)), 토스 기본 켜짐(main QA P3).
+
+## 재검토 2026-10-09
+- 대상: PR #21 / 커밋 `d736306` / main(`52ad85f`, merge-base 같음) 대비 전체 diff. 앞 검토(`218942a`) 뒤 바뀐 것: `74a0f41`(검사 범위를 우리 모듈 운영 클래스 전체로, 모듈 식별을 프로젝트 경로로), `f03b6bf`(클래스패스 항목을 선언 출력과 정확히 맞춤), 역할 검토 원문 4건. 코드 변경은 `autotrade-architecture-test`(빌드 스크립트, `ArchitectureTest.PRODUCTION` 정의, `ModuleOwnershipTest`, 새 `OurModules`, 픽스처 `qa.probe.*`)와 문서(ADR-002 9.1~9.4, D-033, D-034, CLAUDE.md)뿐이다.
+- 점검표: A 전체 + B1, B6 + 프로젝트 지침 8장 과금 검사
+- 직접 실행한 것:
+  - `./gradlew clean build --no-daemon` (커밋 `d736306`) → **BUILD SUCCESSFUL**. 테스트 323건, 실패 0, 오류 0, 건너뜀 0. `ArchitectureTest` 12/12, `ModuleOwnershipTest` 13/13, `RealTradingGuardTest` 31/31, `GuardedOrderGatewayTest` 8/8, `RealOrderGatewaysTest` 4/4. (앞 검토와 같은 환경 메모: Maven Central 429 때문에 이 검토 환경의 `~/.gradle/init.d`에서 미러만 바꿨다. 저장소 파일 변경 없음)
+  - 변조 실험 8건(별도 git worktree, 커밋하지 않음, 실험 뒤 worktree 삭제하고 `git status` 깨끗함 확인): 아래 표.
+
+### 지적 항목 재현
+
+| 실험 | 넣은 코드 | 앞 검토(`218942a`) | 이번(`d736306`) |
+|---|---|---|---|
+| E1 | 실험실에 `com.autotrade.risk.guard.QaProbe`(`beginActivation`) | 실패(잡음) | 실패(잡음): `#운영_클래스는_패키지를_소유한_모듈에만_있다` |
+| E2 (Q-1) | 실험실 운영 코드에 `qa.probe.OutsideRaiser`(2차 확인 생성 → `beginActivation` → `completeStep` 3단계) | **통과(우회)** | **실패(잡음)**: `ArchitectureTest#Guard를_올리는_조작은_명령_채널에서만_한다` + `ModuleOwnershipTest#운영_클래스는_패키지를_소유한_모듈에만_있다` |
+| E3 (Q-1) | 실전 엔진 운영 코드에 `qa.probe.OutsideOpener`(`plugin.orderGateway` 직접 호출) | **통과(우회)** | **실패(잡음)**: `ArchitectureTest#실전_주문_출구는_Guard_팩토리만_연다`("Method <qa.probe.OutsideOpener.open(...)> calls ...") + 소유 위반 |
+| E4 (R-1) | settings에만 넣은 `autotrade-rogue`의 `com.autotrade.risk.guard.RogueRaiser` | 실패(잡음) | 실패(잡음): 소유 위반 + `#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다` |
+| E5 (Q-2) | settings에 `tools:autotrade-risk`(group `qa.tools`), 그 안에 `com.autotrade.risk.guard.NestedRaiser` | **통과(우회)** | **실패(잡음)**: "NestedRaiser (:tools:autotrade-risk): 패키지 com.autotrade.risk.guard은 autotrade-risk 소유", "같은 이름의 프로젝트가 여럿: autotrade-risk (:autotrade-risk, :tools:autotrade-risk)", "소유 모듈 표(OWNERS)에 없는 프로젝트: :tools:autotrade-risk" |
+| E6 | sim에 `com.autotrade.risk.QaSplitPackageApprove` | 실패(잡음) | 실패(잡음) |
+| E7 | 실험실에 같은 FQN `com.autotrade.app.engine.order.RealOrderGateways` | 실패(잡음) | 실패(잡음): "(:autotrade-app-lab): 패키지 com.autotrade.app.engine.order은 autotrade-app-engine 소유" |
+| E8 (새로 시도) | 실전 엔진 운영 코드 `com.autotrade.app.engine.qaprobe.ReflectiveRaiser`: `Class.forName`·`getMethod("begin"+"Activation")`·`invoke`로 2차 확인 생성과 3단계 통과. 같은 모듈 테스트가 실제 Guard로 실행해 `GuardState.OPEN` 단언 | (시도 안 함) | **`./gradlew build` 통과(우회), 테스트로 OPEN 도달 확인**. ADR-002 9.4·D-034 (다)에 "리플렉션·`MethodHandle` 접근은 보지 않는다"로 이미 적힌 한계와 같다(Q-4) |
+
+결론: Q-1(E2·E3), Q-2(E5)는 실제로 닫혔다. 앞서 닫혔던 E1·E4·E6·E7은 회귀 없이 그대로 잡힌다. 남은 우회 E8은 문서에 적힌 ArchUnit 한계다.
+
+### 점검표 A (재검토)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard·설정 코드 변경 없음(이번 변경은 `autotrade-architecture-test`와 문서뿐). `RealTradingGuardTest` 31/31(생성 직후 OFF, 재기동 OFF 포함), `EngineMainTest` 통과 |
+| A2 | 통과 | 두 실전 경로 규칙 자체(`ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`, `ONLY_COMMAND_CHANNEL_RAISES_GUARD`)는 그대로이고 검사 범위만 넓어졌다: `ArchitectureTest.java:63-65`가 `OurModules.architectureScope()`(`OurModules.java:323`, 예전 `com.autotrade` 위치 전체 ∪ 우리 프로젝트 운영 항목 전체)를 `architectureImportOption()`(`:336`, 우리 폴더 안은 선언 종류로, 외부 jar는 예전 `DoNotIncludeTests`)로 가져온다. 예전 범위 포함은 `ModuleOwnershipTest#ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다`가 단언한다. E2·E3·E5 실측으로 앞 검토의 우회가 닫혔다. 남은 우회 E8(리플렉션)은 ArchUnit의 정적 분석 한계로 ADR-002 9.4에 보장 범위 밖으로 적혀 있다. 지금은 증권사 플러그인 구현이 없어 열 출구가 없다. Q-4 참고 |
+| A3 | 통과 | 앞 검토와 같음(증권사 선택·주문 전송 코드 변경 없음, `RealOrderGatewaysTest` 4/4) |
+| A4 | 해당 없음 | 타임아웃·재전송 경로 코드 없음, 이번 변경 무관(앞 검토 근거 유지) |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 계좌 큐·토큰 버킷 변경 없음 |
+| A8 | 해당 없음 | 런타임 의존 변경 없음. 바뀐 것은 아키텍처 테스트 모듈의 테스트 클래스패스와 시스템 속성뿐 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | 이번 diff grep(키·시크릿·토큰·계좌번호 패턴) 0건. 시스템 속성 `autotrade.projectLayout`에는 경로만 들어간다(`build.gradle.kts` `projectLayout`) |
+| A11 | 통과 | 보호 테스트 `ArchitectureTest`는 `PRODUCTION` 정의만 바뀌었고 규칙·위반 픽스처·검출 수 단언은 그대로 12/12다. 범위는 넓어졌고 좁아지지 않음을 별도 테스트가 단언한다(강화). `ModuleOwnershipTest` 8→13, 새 테스트마다 실패 경우를 담는다(`#com_autotrade_밖_패키지의_운영_클래스도_잡아낸다`, `#같은_이름의_중첩_프로젝트는_소유_모듈로_인정하지_않는다`, `#출력을_다른_프로젝트_폴더로_돌리면_잡아낸다`, `#선언되지_않은_클래스패스_항목과_테스트처럼_보이는_운영_출력을_잡아낸다`, `#클래스가_없다고_선언한_모듈에_클래스가_있으면_잡아낸다`). 삭제·`@Disabled`·건너뜀 0건 |
+| A12 | 통과 | 실전 주문 동작 변경 없음(앞 검토 근거 유지) |
+| A13 | 해당 없음 | 시장·시각·금액 계산 변경 없음 |
+| A14 | 통과 | 앞 검토 실패 근거였던 "F-1이 닫혔다"는 기록이 이번에는 실측과 맞다: ADR-002 9.2가 Q-1·Q-2 원인과 고친 방식을, 9.4가 보장 범위와 남은 한계(사용자 정의 태스크·`jar from`, 외부 의존성의 `com.autotrade` 밖 코드, `includeBuild`, 리플렉션·`MethodHandle`)를 적었다. D-034 표와 "F-1 보장 범위·남은 한계"가 같은 내용이다. 내가 재현한 결과(E2·E3·E5 잡힘, E8 통과)가 이 문서의 보장·한계 구분과 일치한다. Q-3도 D-033 "영향과 남은 위험"에 토스 클라이언트 PR 전 조건으로 기록됐다. 사소한 부정확 1건: `ModuleOwnershipTest.java:93` 주석이 "람다 메서드 참조"를 바이트코드 호출로 드러나지 않는 접근에 넣었지만, ArchUnit은 메서드 참조를 접근으로 잡고 `ArchitectureTest`의 출구 규칙 주석도 "메서드 참조든 막는다"고 적는다. 동작에는 영향이 없는 테스트 주석이라 실패로 보지 않는다 |
+
+### 점검표 B (재검토)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | `./gradlew clean build` BUILD SUCCESSFUL, 323건 실패 0·건너뜀 0(커밋 `d736306`) |
+| B6 | 통과 | 새 동작(범위 확대, 프로젝트 경로 매핑, 선언 출력 정확 일치, 배치 검사, 예외 목록 고정)마다 실패 경우 테스트가 있고, 앞 검토의 E2·E3 형태가 `qa.probe.OutsideRaiser`·`OutsideOpener` 픽스처로 들어갔다. 테스트 삭제·건너뜀 없음 |
+
+### 점검표 밖 발견 (재검토)
+
+**Q-1 해소, Q-2 해소** (위 재현표). **Q-3 기록됨**(D-033, 코드 변경은 토스 시세 클라이언트 PR 전 조건).
+
+**Q-4 [중간, 실측, 문서화된 한계] 리플렉션으로 Guard를 사람 확인 없이 OPEN까지 올리는 실전 엔진 코드가 빌드를 통과한다 (E8).**
+- [사실] 실전 엔진 모듈 운영 코드가 문자열로 만든 메서드 이름과 `Method.invoke`로 `SecondConfirmation` 생성, `beginActivation`, `completeStep` 3단계를 부르면 `ArchitectureTest`·`ModuleOwnershipTest` 모두 통과하고, 실제 Guard가 OPEN이 된다. 같은 방법으로 `BrokerPlugin.orderGateway`도 부를 수 있다 `[추론]`(같은 메커니즘이라 따로 실측하지 않음).
+- [사실] ADR-002 9.4, D-034 (다), `ModuleOwnershipTest` 주석이 이 한계를 보장 범위 밖으로 적었다. 그래서 이번 PR이 약속한 것과 다르지 않다.
+- [추론] 위험은 7단계다. 실전 엔진·리스크·증권사 모듈은 Spring을 쓰지 않는 순수 Java라(`ArchitectureTest#실험실_외_프로세스는_Spring을_쓰지_않는다`) 리플렉션을 쓸 정상적인 이유가 거의 없다. 그런데도 지금은 막는 규칙이 없어, 직렬화·플러그인 로딩 같은 이유로 리플렉션 유틸이 들어오면 Guard 상향·출구 생성 우회를 빌드가 보지 못한다.
+- 고칠 점(제안, 이 PR을 막지 않음): `autotrade-app-engine`, `autotrade-risk`, `autotrade-broker-*`, `autotrade-app-watchdog` 운영 코드에서 `java.lang.reflect.Method#invoke`, `Constructor#newInstance`, `Class#forName`, `java.lang.invoke.MethodHandles$Lookup#find*` 호출을 금지하는 ArchUnit 규칙과 위반 픽스처(E8 형태). 필요한 예외(예: `ServiceLoader` 기반 플러그인 로딩)는 허용 목록으로 둔다. 기획서 TST-07(7단계 진입 관문)에 넣는 것을 권한다.
+
+### 위험 시나리오 (재검토)
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| R-1 | 실전 엔진에 `com.autotrade` 밖 패키지 클래스가 들어와 `orderGateway`를 직접 부름 | **막힘**(E3 실측, 두 테스트 모두 실패) |
+| R-2 | 실험실·UI 모듈이 밖 패키지에서 2차 확인을 만들어 Guard를 올림 | **막힘**(E2 실측) |
+| R-3 | 같은 이름 중첩 프로젝트로 `risk.guard` 소유를 위장 | **막힘**(E5 실측, 같은 이름 프로젝트 자체도 실패) |
+| R-4 | 실전 엔진 코드가 리플렉션으로 Guard를 올리거나 출구를 엶 | **보호 공백(빌드 통과)**. E8 실측. 문서화된 한계. Q-4 |
+| R-5 | 새 외부 라이브러리(Gradle 캐시 안 jar)가 `com.autotrade` 밖 패키지에서 Guard API를 부름 | 빌드가 보지 않는다(ADR-002 9.4 (나)). 의존성 추가는 빌드 파일 변경으로 보이고, 실전 엔진의 새 외부 의존성은 risk-ops 검토 대상으로 적혀 있다. 실측하지 않음(risk-ops 재검토 3의 M11이 실측했다고 적었으나 QA는 그 주장을 확인하지 않았다) |
+
+### 과금 검사 (재검토)
+
+| # | 항목 | 결과 | 근거 |
+|---|---|---|---|
+| 8.1 | 유료 API 호출 경로 식별 | 통과 | 이번 변경은 아키텍처 테스트(테스트 소스, 빌드 스크립트)와 문서뿐이다. 운영 코드 변경 없음(`git diff 6ec4a29 d736306 --stat`: `autotrade-architecture-test`, `docs`, `CLAUDE.md`). 빌드 스크립트는 로컬 경로(`rootDir`, `gradleUserHomeDir`, 출력 경로)만 읽고 새 저장소·원격 호출을 더하지 않는다. 운영 코드 전체의 외부 호출 0건은 앞 검토 근거 그대로다 |
+| 8.2 | 필요성과 대체 수단 | 통과 | 유료 호출 없음(8.1) |
+| 8.3 | 사용자 옵션 제어(기본 꺼짐) | 통과 | 기본 `priority`는 `["KIWOOM", "KIS"]` 그대로(`autotrade-default.json:3`). Q-3(이전 기본값이 저장된 파일)은 D-033에 토스 클라이언트 PR 전 조건으로 기록됐고, 지금 호출 코드가 없어 실제 호출 0건 |
+| 8.4 | 폭주 방지 | 통과 | 새 반복·재시도·외부 호출 경로 없음 |
+| 8.5 | 실주문 비용 | 통과 | 실주문 경로 변경 없음, Guard 기본 OFF, 증권사 구현 없음. TST-05 상한(Q-021) 조건 유지 |
+
+### 판정 (재검토)
+**승인**
+- 앞 검토의 수정 필요 항목 A2(Q-1·Q-2)와 A14가 닫혔음을 직접 재현으로 확인했다(E2·E3·E5 모두 빌드 실패로 바뀜, 문서가 실측과 일치).
+- 실패·확인 못 함 항목 없음. 과금 검사 5항목 모두 통과.
+- 남은 위험: Q-4(리플렉션 우회, 문서화된 한계, 7단계 진입 관문에 규칙 추가 권장), R-5(외부 의존성, 문서화된 한계), Q-3(토스 클라이언트 PR 전 처리 필요).
+- 이 PR은 실전 관련 PR(보호 테스트 `ArchitectureTest` 범위 변경, `OrderState` 계약 변경)이므로 머지는 사용자가 직접 한다.
