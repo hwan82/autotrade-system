@@ -42,3 +42,35 @@
 
 ## 판정
 수정 필요(R-1, R-2)
+
+## 재검토 2026-10-09
+- 대상: PR #27 / 커밋 `ab20acf` / `git diff origin/main...HEAD` 전체(main `1bd0ddc` 기준). 앞 검토 뒤 바뀐 것은 `git diff 2e6ee04 ab20acf`(9개 파일)로 따로 확인
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks` → BUILD SUCCESSFUL, 104개 태스크 모두 실행, 테스트 결과 XML 합계 521건(건너뜀 0, 실패 0, 오류 0). `ReplayCheckTest` 5건 통과(앞 검토보다 2건 늘어남).
+  - 앞 검토의 임시 탐침을 다시 실행(검토 뒤 삭제, 커밋 안 함): 체결 1건을 넣고 `close()` 없이 끝낸 녹화(메타 `complete=false`, 해시 빈 값) → `verdict=INCOMPLETE`, 보고서는 "eventsSha256 `-` (파일 대조 안 함: 정상 종료 녹화만 대조)", "판정: **불완전**…". 앞 검토에서 재현한 거짓 "확인됨"·"동일"이 더는 나오지 않음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` BUILD SUCCESSFUL, 521건 실패 0 |
+| B2 | 통과 | `ReplayCheck`의 새 의존은 `com.autotrade.marketdata.calendar`(기존 의존 모듈 `autotrade-marketdata`)뿐. build.gradle.kts 의존 변경 없음. ArchitectureTest·ModuleOwnershipTest 통과. 다른 모듈 변경(SourcePlanner, BrokerPlugin, TossPollingScope, LastPrice, PollingQuoteSource)은 주석 한 줄씩만 바뀜 |
+| B3 | 통과 | 인터페이스·스키마·설정 키·REST 변경 없음. `BrokerPlugin`은 Javadoc만 바뀜(BrokerPlugin.java:40). config-keys.md는 `market-data.toss-polling-scope` 근거 열에 D-024만 더함(키·기본값·범위 그대로) |
+| B4 | 통과 | 시계·난수 없음. 정규장 판정은 녹화 날짜와 내장 캘린더(`ExchangeCalendar.bundled`)로만 정한다(ReplayCheck.java:110-126). 집계는 `TreeMap`(ReplayCheck.java:139) |
+| B5 | 통과 | 가격 `BigDecimal`(ReplayCheck.java:171-174), 수량 `long` |
+| B6 | 통과 | 새 동작 테스트 추가: 메타 없음 → 불완전·종료 코드 3(`정상_종료_메타가_없으면_두_회차가_같아도_불완전으로_보고_3을_돌려준다`), 잘림·0건 → 불완전, 해시 다름 → 다름·종료 코드 1(`잘림이나_0건이면_불완전이고_회차가_다르면_다름이다`), 정규장 밖 체결 분리(기존 테스트에 08:30·15:45 체결 추가, 손 계산 값 `2 / 150`). 기존 단언은 바뀐 요약 열에 맞춰 갱신됐고 약화되지 않음(`hashVerified`·"일치 확인됨" 단언 추가). 삭제·`@Disabled` 없음 |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·장애 대응 코드 변경 없음. 바뀐 운영 코드는 `ReplayCheck`(녹화 파일 읽기 전용)와 주석뿐 |
+| B8 | 통과 | 추가된 출력은 판정·정규장 구간·종목 요약뿐. diff에 키·토큰 값 없음(직접 확인). gitleaks는 로컬에 없어 CI에 맡김 |
+
+### 앞 지적 처리
+- R-1 해결: `hashVerified()`가 `complete && !eventsSha256.isEmpty()`일 때만 참(ReplayCheck.java:239-241)이고, 그때만 "(파일과 일치 확인됨)"을 쓴다(ReplayCheck.java:263). `verdict()`는 두 회차가 다르면 DIFFERENT(1), 같아도 비정상 종료·잘림·0건이면 INCOMPLETE(3)(ReplayCheck.java:243-251). 실행 절차 7번이 종료 코드 3의 뜻과 "다른 날 다시 녹화"를 적었다. 테스트와 위 탐침으로 확인했다.
+- R-2 해결: 시가~수량은 캘린더 정규장 구간(마감 뒤 1분 유예, `[가정]`으로 표시, ReplayCheck.java:58-59, 183-186) 체결만 집계하고, 그 밖은 "정규장 밖" 열에 건수 / 수량으로 낸다. 보고서와 실행 절차 8번이 대조 상대를 KRX 단독 정규장 일봉으로 정했고, 수량은 "같아야 한다" 대신 "차이를 적는다"로 바뀌었다. 캘린더에 날짜가 없으면 전부 집계하고 그렇게 했다고 적는다.
+- R-3 해결: `Run`이 `RecordedDay`와 이벤트 목록을 들고 있지 않아(ReplayCheck.java:128-129) 1회차 줄 목록은 2회차를 읽기 전에 해제될 수 있다. 회차 하나의 줄 목록(`RecordedDay` 전체 적재)은 여전히 메모리에 올라가는데, 이는 기존 `RecordedDay` 설계의 한계라 이 PR 범위 밖이다.
+- R-4 해결: "같은 실행 안의 두 회차 비교에만 쓴다"를 클래스 주석에 적었다(ReplayCheck.java:44-45).
+- R-5 해결: 대체된 D-008을 근거로 들던 주석 5곳을 D-024로 바꿨다. config-keys.md는 D-008을 남기고 D-024를 더했는데, 보호 폴링의 원래 근거라 맞다.
+
+### 점검표 밖 발견(비차단)
+- 이벤트가 모두 `DataGap`이거나 호가뿐이고 체결이 0건이면, `eventCount > 0`이라 판정은 SAME이 된다(ReplayCheck.java:247). 종목 표의 체결 수 0과 끊김 열로 사람이 알아볼 수는 있다. 완료 증거로 올릴 때 QA가 종목별 체결 수를 함께 보면 된다. 다음에 고칠 때 "체결 0건 종목이 있으면 불완전"을 검토하기를 권한다.
+- 마감 뒤 1분 유예와 정규장 판정에 `exchangeTime`을 쓰는 방식은 실제 메시지 형식이 `[가정]`인 동안의 추정이다(Q-015). 실제 녹화에서 종가 단일가 체결의 시각이 15:31 뒤로 찍히면 종가가 "정규장 밖"으로 빠지니, 첫 실녹화 보고서에서 함께 확인하기를 권한다.
+
+## 판정
+승인
