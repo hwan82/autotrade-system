@@ -56,10 +56,10 @@
 
 ### 2.4 실험 실행기 (`run.SimulationExperimentRunner`)
 
-- 입력: `MarketDataSet`(불변 이벤트 목록과 스냅샷 ID), `MarketRules`, `CostModel`, `StrategyFactory`, `RiskPolicy`, `ExecutionSettings`, `CodeVersion`, 병렬 수, 벤치마크 종목(선택).
+- 입력: `MarketDataSet`(불변 이벤트 목록과 스냅샷 ID), `MarketRules`, `CostModel`, `StrategyFactory`, `RiskChain`(D-032, 승인만 하는 정책은 넣을 수 없음), `ExecutionSettings`, `CodeVersion`, 병렬 수, 벤치마크 종목(선택).
 - 시작 검증(어기면 Run 없이 `IllegalArgumentException`): `clockMode == REPLAY`(실시간 모의는 6단계), 데이터 스냅샷 ID 일치, 비용 모델 ID 일치, 시장 일치, 비용 표 범위, 이벤트 sequence 오름차순.
 - Run마다 새로 만드는 것: `VirtualAccount`, `VirtualExchange`, `ReplayClock`, `Strategy`, 멱등 키 발급기. 공유하는 것은 불변 입력과 스레드 안전 계약을 가진 팩토리·정책뿐이다. 그래서 병렬 수가 결과에 영향을 주지 않는다(테스트로 확인).
-- 이벤트 처리 순서: (거래일이 바뀌면 전날 마감) → 시계 이동 → 거래소가 기존 주문 체결 → 전략 신호 → 신호마다 키 발급 → `RiskPolicy` → 거래소 접수.
+- 이벤트 처리 순서: (거래일이 바뀌면 전날 마감) → 시계 이동 → 거래소가 기존 주문 체결 → 전략 신호 → 신호마다 키 발급 → `RiskChain` → 거래소 접수.
 - 거래일 마감: 남은 주문 취소, 자산 곡선 한 점(평가 가격은 마지막 체결가, 없으면 최우선 매수 호가, 없으면 원가), 계좌 불변식 검사(SIM-15, `LedgerCheck`). 위반이면 그 Run만 FAILED.
 - 식별자: `runId = accountId = <실험ID>-A01, -A02 …`(프로필 목록 순서).
 - Run 시드: `SHA-256("run-seed-v1|" + randomSeed + "|" + profileHash)` 앞 8바이트(big-endian long). 바꾸면 접두어 버전을 올린다.
@@ -105,7 +105,7 @@
 |---|---|---|
 | 녹화 형식 어댑터(`RecordedDay` → `MarketDataSet`)와 같은 골든을 녹화 형식으로 다시 돌리는 테스트 | sim-engine | PR #10 머지 후. 3단계 완료 기록(결정 로그)은 이 작업 뒤에 한다 |
 | 실제 `KrxMarketRules`·`UsMarketRules`로 실행 | sim-engine | PR #10 머지 후. 테스트는 같은 호가 단위표의 테스트 규칙을 쓴다 |
-| 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)을 가상·실전이 공유(SIM-12), ORD-06 신호 경과 폐기, ORD-07 상태머신 | risk-ops | 실행기는 `RiskPolicy` 하나를 받아 모든 모의 주문에 적용한다. 체인이 생기면 그 구현을 넣는다. 가상 거래소 상태는 domain `OrderState` 값만 쓴다 |
+| 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)을 가상·실전이 공유(SIM-12), ORD-06 신호 경과 폐기, ORD-07 상태머신 | risk-ops | 실행기는 공통 체인 `RiskChain`(D-032)만 받아 모든 모의 주문에 적용한다(블랙리스트·리스크 단계 반영됨, 멱등 키·상태머신 단계는 남음). 가상 거래소 상태는 domain `OrderState` 값만 쓴다 |
 | 일봉(다음 날 시가)·분봉(다음 봉 시가) 체결 해상도(SIM-06) | sim-engine | 2단계 일봉 스냅샷(`DailyBar`) 머지 후. 스윙 프로필 실험 전 필요 |
 | 고정 슬리피지 0.15%와 호가 기반 체결의 오차 측정(D-021 위험 항목) | sim-engine, strategy-researcher | 실제 녹화일이 생긴 뒤 같은 신호를 두 방식으로 체결해 비교 |
 | DB 저장(experiment·experiment_run·virtual_account·virtual_trade_log·equity_curve)과 `experiment.execution_model_id` 열 추가 | architect(스키마), sim-engine(저장) | 변경 제안: `execution_model_id VARCHAR(64) NOT NULL`. 같은 체결 모델끼리만 비교하려면 필요 |
