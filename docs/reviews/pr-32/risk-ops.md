@@ -68,3 +68,36 @@
 
 ## 판정 (재검토)
 승인
+
+## 재검토 2026-10-09 (2차, 독립 QA 수정 필요 반영 후)
+- 대상: PR #32 / 커밋 1827f8c(0c0d613 뒤 추가: 4441029·1477dfb architect 원문, 45607ca QA 원문, 1827f8c 수정) / main 대비 diff(merge-base 0a4adf4, `git diff origin/main...HEAD`: `PanicLiquidator.java` +7 −3(주석만), `ADR-006-real-control-channel.md` +3 −3, `docs/reviews/pr-32/`의 architect·qa·risk-ops 원문)
+- 점검표: A
+- 직접 실행한 것: `./gradlew build --console=plain` → `BUILD SUCCESSFUL`. `./gradlew :autotrade-risk:test --rerun :autotrade-architecture-test:test --rerun :autotrade-app-engine:test --rerun` → 세 test 태스크 실제 실행, `BUILD SUCCESSFUL`. 테스트 결과 XML 집계 522건, 실패·오류·건너뜀 0. `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `ArchitectureTest` 15, `ModuleOwnershipTest` 13, `EngineCommandHandlerTest` 22 통과
+- 원문 보존 확인: 이 파일은 22555e9·0c0d613(둘 다 risk-ops 커밋) 외에 바뀐 적 없음(`git log -- docs/reviews/pr-32/risk-ops.md`)
+- 먼저 밝힐 것: 독립 QA 발견 1(② 시점 매도 불가 → ③ 시점 매도 가능 방향)은 앞의 두 risk-ops 검토가 놓친 보호 공백이다. QA 지적이 타당하다고 판단하고 이번 수정을 그 기준으로 대조했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 실행 코드 변경 0행(주석만). `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | 주문 출구·ArchUnit 변경 없음. `ArchitectureTest` 15·`ModuleOwnershipTest` 13 통과. 주입 구현은 `BROKER_NOT_CONNECTED`(PanicLiquidator.java:33-38, EngineMain.java:117) |
+| A3 | 통과 | 추가 문구는 같은 계좌 안의 단계 진행·결과 값만 다룸. 증권사 전환 없음 |
+| A4 | 통과 | 재설정 주문 "타임아웃 시 재전송 없이 조회" 유지(ADR-006:203). 새 규칙은 매도 불가로 시작한 실행에서 ③~⑤를 하지 않아 주문 수를 줄이는 방향 |
+| A5 | 통과 | 멱등 키 요구 변경 없음. 재실행은 사용자가 PANIC을 다시 보내 ②부터 시작(PanicLiquidator.java:20-22). 같은 주문의 재전송이 아님 |
+| A6 | 통과 | 블랙리스트·수동 보유 제외 유지(PanicLiquidator.java:11) |
+| A7 | 통과 | 큐·토큰 버킷·계좌 격리 변경 없음. 종목 단위 처리 범위가 ADR-006:205에 추가됐지만 계좌 간 영향 없음 |
+| A8 | 해당 없음 | 프로세스·정지 순서 변경 없음 |
+| A9 | 통과 | QA 발견 1 해소: PanicLiquidator.java:20-22와 ADR-006:203 (다)가 "② 직전 판정이 매도 불가면 그 실행에서 ③~⑤를 하지 않음, 매수만 취소한 ②는 SKIPPED, ③~⑤ SKIPPED, 정지가 풀려도 ③으로 넘어가지 않고 사용자 재실행으로 ②부터"를 정함. 미체결 매도가 남은 채 서버 측 손절을 지우는 경로가 계약상 막힘. 현재 처리기와의 정합도 직접 확인: Guard OFF는 ②~⑤ 모두 DONE일 때만(EngineCommandHandler.java:290-296 `allBrokerStepsDone`), ③이 DONE이 아니면 6단계 설명은 "손절·익절과 서버 측 손절 계속"(비긴급, EngineCommandHandler.java:278-287)이라 실제 상태와 맞음. 매도 가능 판정 시 기존 서버 측 손절 취소·재설정 계약과 VI 포함 매도 불가 예시 유지 |
+| A10 | 통과 | 추가 diff 전문 확인. 비밀값 없음 |
+| A11 | 통과 | 테스트 파일 변경 없음. 보호 테스트 통과. ADR-006:203 합격 테스트에 "② 시점 매도 불가 → ③ 시점 매도 가능이어도 ③ 미수행(②·③~⑤ SKIPPED, Guard OFF 없음)"이 추가됨(7단계 전 필수) |
+| A12 | 통과 | 대응표 17종·O1~O8·장애 테스트 8종 전제 변경 없음. O4(LULD 중 보유분 유지)·6.1(서버 측 손절은 마지막 방어선)과 같은 방향 |
+| A13 | 통과 | 시장 분기 없음. 판정은 계좌·종목의 시장 단위, `MarketRules` 출처 유지 |
+| A14 | 통과 | QA 발견 2·3 반영 확인: ADR-006:205에 "종목 단위로 건너뛰면 ②의 매도 취소와 ③은 매도 가능 종목에만", ADR-006:203 (나)에 "일괄 취소 대상에 서버 측 손절 포함 여부는 사용자 결정(지침 8장 2번)", 기획서 RSK-11·RSK-13 반영 추적 문장이 (가)~(다) 뒤로 옮겨져 새 합격 테스트 전부와 일괄 취소 대상 정의를 덮음(pm-lead). 주석·ADR·D-037·RSK-13의 매도 불가 규칙 서로 일치 |
+
+## 점검표 밖 발견 (2차 재검토)
+1. [하, 참고] 매수만 취소한 ②를 SKIPPED로 보고하면 "실제로 매수 취소는 했다"는 사실이 결과 값에서 사라진다. `PanicStepResult`에 `note`가 있으므로(autotrade-control/.../PanicStepResult.java:12) 7단계 구현 때 ②의 note에 "매도 불가(사유)라 미체결 매수 N건만 취소, 미체결 매도·서버 측 손절 유지"처럼 실제 처리와 사유를 적을 것을 권고. 결과 값을 새로 늘리는 대안(예: PARTIAL)도 있으나 처리기·화면 계약을 바꾸므로 이 PR 범위 밖이며, SKIPPED는 Guard OFF를 막는 안전한 쪽이라 머지를 막지 않는다.
+2. [하, 참고] "② 직전 판정"의 대상 단위가 종목 단위 건너뛰기(ADR-006:205, 미결정)와 만날 때, 일부 종목만 매도 불가인 계좌에서 ②를 SKIPPED로 볼지 DONE으로 볼지는 :205 결정 때 같이 정해야 한다. :205가 이미 "②의 매도 취소와 ③은 매도 가능 종목에만"을 적어 방향은 정해져 있으므로 7단계 전 필수 항목 안에서 추적된다.
+3. 남은 후속(머지를 막지 않음, ADR-006 6장에서 7단계 전 필수로 추적): `PanicLiquidator` 실패 테스트, RSK-11·RSK-13 기획서 반영(pm-lead), VI 분류·일괄 취소 대상·종목 단위 처리에 대한 사용자 결정.
+4. 이 PR은 실전 관련 PR이므로 지침 10·11장에 따라 독립 QA 재검토 후 사용자가 직접 머지한다.
+
+## 판정 (2차 재검토)
+승인
