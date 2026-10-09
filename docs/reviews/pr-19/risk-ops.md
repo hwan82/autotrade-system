@@ -51,3 +51,38 @@
 
 ## 판정
 수정 필요(A14, 점검표 밖 발견 1): 블랙리스트가 시스템 보유분의 손절·청산까지 막는 동작을 D-032에 시나리오와 함께 명시하고, D-023 원칙 1과의 충돌을 사용자 결정 Q 항목으로 올린 뒤(이 항목은 잠정 표시) 재검토를 요청할 것. 코드 변경은 요구하지 않는다. 그 밖의 A 항목은 통과 또는 해당 없음이다.
+
+## 재검토 2026-10-09
+- 대상: PR #19 / 커밋 4975a9e(앞 검토 3c24cea 이후 8e48a0b architect 원문, 4975a9e 검토 반영) / `git diff origin/main...4975a9e` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - 별도 worktree(4975a9e, detached)에서 `./gradlew --no-daemon build` → BUILD SUCCESSFUL, 86 tasks 모두 실행(캐시 재사용 없음). JUnit XML: risk 55, architecture-test 13, app-engine 7, sim 75, 모두 실패·오류·건너뜀 0. 이름을 바꾼 `SimulationExperimentRunnerTest#진입_규칙은_모든_모의_진입에_적용된다` 실행 확인
+  - `git diff 3c24cea 4975a9e`: 코드 변경은 `BlacklistSnapshot.java` 주석 2줄과 테스트 메서드 이름 1개뿐. 로직 변경 없음. 나머지는 ADR-001·ADR-004·D-032·결정 로그 README 문서
+  - `docs/reviews/pr-19/risk-ops.md`는 3c24cea 뒤로 바뀌지 않음(`git diff --quiet` 확인)
+  - CI(4975a9e): DB schema success, Secret scan and collector boundary success, Gradle build 이 시점 in_progress(로컬 전체 빌드로 대신 확인)
+  - Q 번호 충돌 확인: 모든 원격 브랜치에서 `git grep "Q-01[5-8]"` 실행
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·테스트·설정 로딩 변경 없음(앞 검토와 같고, 4975a9e는 Guard 경로를 건드리지 않음). ArchitectureTest 13건 통과 |
+| A2 | 통과 | ArchUnit 규칙 줄 변경 없음(4975a9e diff에 ArchitectureTest 없음). 운영 코드 `submit` 호출 위치는 그대로 두 곳 |
+| A3 | 해당 없음 | 증권사·주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·조회 로직 변경 없음 |
+| A5 | 통과 | 멱등 키 발급 경로 변경 없음(`SimulationExperimentRunner.java:241`) |
+| A6 | 통과 | `RiskChain.java:53–57` 그대로. `RiskChainTest` 9건, `SimulationExperimentRunnerTest#손_계산과_맞는다`(RISK/BLACKLIST 거절) 통과. 청산·손절 차단은 D-032 결정 1.1에 "Q 결정 전까지 잠정"으로 표시됨 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | app-engine 변경 없음, 테스트 7건 통과, 프로세스 격리 ArchUnit 통과 |
+| A9 | 통과 | 보호 시세·서버 측 손절 경로 변경 없음. 진입 규칙이 보호 주문을 막지 못하는 구조 그대로(`RiskChain.java:58–60`) |
+| A10 | 통과 | 4975a9e diff에 비밀값 없음. CI 비밀값 스캔 success |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음. 테스트 이름 변경(`리스크_정책은_모든_모의_주문에_적용된다` → `진입_규칙은_모든_모의_진입에_적용된다`)은 본문 그대로이고, 진입 규칙이 청산을 막지 않는 새 구조에 맞춘 정확한 이름이다 |
+| A12 | 통과 | 장애 대응 경로 변경 없음. D-032 위험과 한계 첫 항목이 서버 측 손절 없는 계좌의 무방비 위험을 적고, 7단계 체인 1단계 확정을 Q 결정 뒤로 미룸 |
+| A13 | 통과 | 시장 분기·시간·금액 계산 변경 없음 |
+| A14 | 실패 | 앞 검토 요구 3가지는 반영됨: (1) D-032 위험과 한계 첫 항목에 시나리오와 현재 동작 기록, (2) 결정 로그 미확정에 사용자 결정 Q 항목과 추천안·대안 추가, (3) D-032 결정 1.1에 잠정 표시. ADR-001 계약표(`RiskChain` 행)와 ADR-004 2.4·6장의 `RiskPolicy` → `RiskChain` 갱신도 확인. **다만 새 Q 번호 `Q-018`이 열린 브랜치 `origin/claude/project-thread-r930sh`의 `docs/decisions/README.md`와 `docs/adr/ADR-006-real-control-channel.md`에서 이미 다른 실전 영향 사용자 결정("장애 테스트 목록에 run 폴더 삭제 시 두 번째 엔진 기동 차단 추가")에 쓰이고 있다.** 같은 브랜치는 Q-016·Q-017도 쓰고, `project-thread-u03g6l`은 Q-015를 쓴다. 두 PR이 모두 머지되면 결정 로그에 Q-018이 두 개가 되고, 사용자가 "Q-018 추천안"이라고 답했을 때 어느 실전 질문인지 갈리지 않는다 |
+
+### 재검토 점검표 밖 발견
+1. **[수정 필요] Q 번호 충돌.** 이 PR의 Q-018을 다른 열린 브랜치와 겹치지 않는 번호(현재 원격 브랜치 기준 Q-019 이후)로 바꾼다. `docs/decisions/README.md`, `docs/decisions/D-032-shared-risk-chain.md`(2곳), `docs/adr/ADR-001-module-structure.md`(1곳)를 함께 고친다. 번호를 바꾸지 않을 거라면 r930sh 쪽을 바꾸게 조정하고, 그 결과를 PR 본문에 적는다. 어느 쪽이든 머지 시점의 main에서 Q 번호가 하나씩만 있어야 한다.
+2. 앞 검토 권고 2~5(계좌 불일치 시 손절 거절의 관측성, 보호 주문 수량 검사 자리, `BlacklistSnapshot.EMPTY` 실전 사용 금지, 진입 규칙 오류 누적 알림)는 이번 PR에 반영되지 않았다. 7단계 과제로 남는 권고이므로 판정에는 반영하지 않는다. D-032 변경 제안 표에 옮겨 두기를 권한다.
+3. `BlacklistSnapshot` 주석 추가("같은 스냅샷인지는 fingerprint로만 판단, equals는 사유까지 비교")는 실제 동작과 맞다(`equals`가 `entries.equals`이고 `BlacklistEntry` record가 `reason`을 포함). 리스크 영향 없음.
+
+### 재검토 판정
+수정 필요(A14: Q-018 번호가 열린 브랜치 r930sh의 다른 실전 결정 Q-018과 겹침). 번호만 바꾸면 되고 코드 변경은 필요 없다. 앞 검토의 실질 지적(블랙리스트와 손절이 부딪치는 문제를 사용자 결정으로 올리기)은 해결됐다.
