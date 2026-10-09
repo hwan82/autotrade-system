@@ -1,0 +1,51 @@
+# architect 검토: 4단계 전략 탐색: 전략 프로필 카탈로그, 다중 전략 비교 실험, 선발 기준 (D-027) (#14)
+- 대상: PR #14 / squash 커밋 d27f309 / `git diff d27f309^ d27f309` 전체(58개 파일, +5185 −5). 머지 뒤 사후 검토다. 이후 main(0ea575d)까지 바뀐 파일은 문서·에이전트 정의 13개뿐이고 이 PR의 코드·프로필·실험 파일은 그대로다(`git diff --name-only d27f309 HEAD`로 확인).
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (작업 트리 = origin/main 0ea575d): BUILD SUCCESSFUL, 86 tasks, EXIT=0. `verifyPureDependencies`(domain·strategy·sim·risk 등)와 ArchUnit 포함.
+  - `./gradlew :autotrade-strategy:test --rerun :autotrade-sim:test --rerun :autotrade-app-lab:test --rerun`: EXIT=0. 테스트 XML 집계 strategy 25건, sim 59건, app-lab 86건, 실패·오류·건너뜀 0. 이 PR이 더한 `CatalogStrategyTest`, `ProfileYamlTest`, `StrategyStudyTest`, `SyntheticMarketTest`, `ProfileFileCompatibilityTest` 결과 파일이 모두 있다.
+  - `./gradlew :autotrade-sim:runStrategyStudy`로 EXP-20261008-STR01 전체 재실행: EXIT=0, "결정론 확인: 같음". `git diff experiments/` 결과 `results.md`의 코드 커밋 한 줄(260f7a6… → 0ea575d…)만 다르고 `runs.tsv`, `experiment.yaml`, 나머지 표는 바이트 일치. 확인 후 `git checkout -- experiments/`로 되돌렸다(작업 트리 변경 없음).
+  - 새 main 코드의 import 집계: `java.*`, `com.autotrade.{domain,strategy,sim,risk}`만 있음. Spring·증권사 SDK·DB 드라이버 없음.
+  - diff 전체에서 키·토큰·계좌번호 패턴 grep: 걸린 것은 합성 데이터 스냅샷 ID(`SYNTH-KRX-V1-S20261008-…`)뿐.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` BUILD SUCCESSFUL(EXIT=0). 바뀐 세 모듈 테스트를 `--rerun`으로 다시 돌려 170건 전부 통과 |
+| B2 | 통과 | 새 코드는 순수 모듈(autotrade-strategy `catalog`·`profile`, autotrade-sim `study`·`synthetic`)에만 있고 import는 `java.*`와 domain/strategy/sim/risk뿐(위 집계). 의존 변경은 autotrade-sim/build.gradle.kts의 `runStrategyStudy` JavaExec 태스크 추가뿐이고 `dependencies` 블록은 그대로. autotrade-architecture-test, settings.gradle.kts는 diff에 없음(규칙 무변경). Jackson을 쓰는 호환 테스트는 app-lab 테스트(ProfileFileCompatibilityTest.java)에만 있다 |
+| B3 | 통과 | 기존 계약(StrategyProfile, StrategyFactory, Strategy, StrategyContext, TradeSignal, RiskPolicy, MarketRules, ExperimentSpec, REST, DB 스키마, 설정 키)은 하나도 바뀌지 않았다. 변경된 기존 Java 파일 없음(name-status가 전부 A). 프로필 파일 배치는 기존 계약(D-026, ADR-005 4장)을 따르고 경로 문서 3곳(SKILL.md, role-guides.md, strategies/README.md)을 함께 고쳤다. 새 공개 타입(`CatalogStrategyFactory`, `ProfileYaml`, `TradingRules`, `study.*`)과 파라미터 키 목록의 ADR 계약화는 D-027 "다른 역할에 넘기는 변경 제안" 마지막 줄에 architect 후속 과제로 남아 있다(아래 L6) |
+| B4 | 통과 | 시각은 `ctx.now()`와 이벤트 거래소 시각만 씀(ManagedStrategy.java:93-97). 난수는 Run 시드의 `SplittableRandom`(RandomEntry.java:23)과 SHA-256 파생 시드(SyntheticMarket.java seedFor)뿐. `HashMap`/`HashSet`은 키 조회와 교환법칙이 성립하는 합(BigDecimal 정확 덧셈, 개수 세기)에만 쓰여 순회 순서가 결과에 영향 없음(ManagedStrategy.java:250-254, 275, 290-296). 결과 표의 순회는 `LinkedHashMap`(프로필 목록 순)과 `TreeMap`. 기존 골든 테스트(SimulationExperimentRunnerTest)와 골든 파일은 이 PR에서 바뀌지 않았고 통과. 실험 전체 재실행이 바이트 일치(위) |
+| B5 | 통과 | 가격·금액·비율은 BigDecimal, 수량·거래량은 long, 시드머니는 `Money`(StudyMain.java StudyConfig 생성부). double/float 없음(grep). 수량은 `RoundingMode.DOWN` 후 수량 단위로 내림(ManagedStrategy.java:270-284), 합성 가격은 `roundToTick`으로 호가 단위에 맞춤(SyntheticMarket.java step/startDay, SyntheticMarketTest#평일_정규장_안에서만_호가_단위대로_만들고_번호는_오름차순이다) |
+| B6 | 실패 | 매매 골격·프로필 읽기·합성 시세는 손 계산·경계 테스트가 있다(CatalogStrategyTest 12건: 만료 신호, 당일 손실 한도, 연속 손절, 진입 수·재진입 금지, 손절 의도, 장 마감 청산 등 / ProfileYamlTest 6건 / ProfileFileCompatibilityTest 경계 20건). 그러나 **선발 기준 C1~C10의 판정 로직(ScreeningCriteria.java:42-288)에는 기대값을 손으로 계산한 테스트가 없다.** StrategyStudyTest는 `quantile` 하나와 "검사 항목이 10개다"(`checks()).hasSize(10)`)만 본다. 경계(PF 정확히 1.3, MDD 정확히 20%), PF가 null인 경우, C6 예열 일수 빼기와 학습 손실 시 FAIL, C7 NOT_AVAILABLE 경로, C8 주별 묶음(월요일 기준), C9, C10의 엄격한 초과(`>`)가 어느 것도 검증되지 않는다. 승격 후보를 가르는 계산이라 테스트 기준("지표는 손 계산 기대값과 비교")에 못 미친다. 건너뛰거나 지운 테스트는 없다 |
+| B7 | 해당 없음 | 실전 주문 경로, RealTradingGuard, 블랙리스트 구현, 실전 리스크 한도, 장애 대응, 증권사 연동, 프로세스 격리, 보호 테스트를 건드리는 파일이 diff에 없다(broker·risk·app-engine·app-gateway·app-watchdog·architecture-test 무변경). `TradingRules`의 한도는 모의 전략 파라미터이고 실전 한도와 별개라고 명시(TradingRules.java 클래스 주석, D-027 상태 줄). 단, 아래 L1의 approve-all RiskPolicy는 실험실 경로가 녹화 데이터로 넘어갈 때 블랙리스트 공유(안전 불변식 7) 문제가 되므로 그때 risk-ops 검토 대상이다 |
+| B8 | 통과 | diff 전체 grep에서 API 키·토큰·계좌번호 없음. 로그는 진행 문구와 파일 경로만(StudyMain.java log). 예외 메시지는 프로필 ID·키·값만 담고 비밀값을 다루는 코드가 없다 |
+
+## 점검표 밖 발견
+- **M1 실험 결과의 코드 커밋을 main에서 찾을 수 없다(추적성).** `experiments/EXP-20261008-STR01/results.md`의 코드 줄은 `260f7a6c8eef…`인데, 이 커밋은 squash 머지로 main 이력에 없고(`git merge-base --is-ancestor 260f7a6c origin/main` → not-ancestor) 로컬의 어떤 ref도 가리키지 않는다(`git for-each-ref --contains` 결과 없음). GitHub의 `refs/pull/14/head`가 지워지거나 정리되면 "어떤 코드로 나온 결과인지"를 되짚을 수 없다. 내가 main에서 다시 돌린 결과가 커밋 줄 빼고 바이트 일치하므로, main 커밋으로 재실행해 그 줄을 갱신하거나(가장 간단) results.md에 squash 커밋(d27f309)을 함께 적는다. squash 머지 흐름에서는 매번 같은 일이 생기므로 `runStrategyStudy` 주석(autotrade-sim/build.gradle.kts)과 strategy-lab 스킬에 "머지 후 main에서 재실행해 커밋 줄 갱신" 절차를 넣을 것을 권한다.
+- **L1 비교 실험이 블랙리스트 없는 approve-all RiskPolicy로 돈다.** StudyMain.java:82 `RiskPolicy risk = (order, account) -> RiskDecision.approve();`. 합성 데이터에는 제외 종목이 없어 지금 결과에는 영향이 없다. 그러나 녹화 데이터 실험(PR #10 이후)부터는 가상·실전이 같은 블랙리스트·리스크 코드를 써야 한다(안전 불변식 7, 프로젝트 지침 5장). 현재 저장소에 RiskPolicy 실구현이 없다(`implements RiskPolicy`는 테스트의 TestBlacklist뿐). StrategyStudy.java:59 주석에 risk-ops 작업이라고만 적혀 있고 결정 로그·Q 목록에는 없다. 녹화 데이터 실험 전에 공유 검증 체인을 넣는 작업을 risk-ops 후속 과제로 등록하고, 그때까지 StudyMain이 녹화 데이터로 실행되지 않도록 막을 것(예: 합성 스냅샷 ID가 아니면 시작 거절).
+- **L2 미체결 매수가 남아 있으면 손절이 나가지 않는다.** ManagedStrategy.java:154-156은 같은 종목에 미체결 주문이 있으면 청산 판단 전체를 건너뛴다. BOOK-V1 시장가 매수는 남은 수량을 다음 스냅샷으로 넘기고 VI 중에는 체결하지 않으므로(VirtualExchange.java:47-48, 56), 일부 체결된 보유분이 손절선 아래로 내려가도 매수 잔량이 끝날 때까지 손절이 늦어진다. 합성 데이터의 주문 규모에서는 드물지만 녹화 데이터(얇은 호가, VI)에서는 성과를 좋게 보이게 할 수 있다. 주문 취소 신호 계약이 없어(D-027 위험과 한계) 지금 고칠 수는 없으니 D-027 위험 목록에 이 경우를 적고, 취소 신호가 생기면 "손절 조건이면 매수 잔량 취소 후 손절"로 바꾼다.
+- **L3 `study.warmup-days`를 검증하지 않는다.** ScreeningCriteria.java:86-89가 `Integer.parseInt`만 한다. `study.*`는 ProfileParams가 문서용으로 건너뛰므로(ProfileParams.java:21, 121) 음수나 거래일보다 큰 값이 C6 분모를 조용히 바꾼다. StudyConfig 생성 때 0 이상, 학습·검증 거래일 미만으로 검사한다.
+- **L4 숫자가 아닌 `study.key-param` 대상은 실험 전체를 중단시킨다.** StrategyStudy.java:211 `new BigDecimal(raw)`가 `valid()` 밖에서 NumberFormatException을 던진다. 해당 프로필의 C7만 판단 불가로 두는 기존 처리(StrategyStudy.java:105-108)와 맞지 않는다. StudyConfig에서 미리 거르거나 같은 경로로 처리한다.
+- **L5 KRX 호가 단위 표가 세 곳에 생긴다.** SyntheticKrxRules(main), TestKrxRules(test), 그리고 PR #10의 KrxMarketRules. 클래스 주석대로 PR #10 머지 후 호가 표는 하나로 모으고 SyntheticKrxRules는 캘린더만 다르게 위임하도록 정리한다. 표 값 자체는 KRX 2023-01-25 시행 호가 단위 구간과 같다.
+- **L6 계약화 후속 과제(이미 D-027에 있음).** `catalog`·`profile` 공개 타입과 파라미터 키 목록(strategies/README.md)을 ADR로 계약화하는 일과 `StudyMain`(파일 쓰기·System.out을 하는 CLI)을 실험실 연동 때 app-lab으로 옮기는 일은 architect 후속 과제로 받는다. UI가 이 키를 직접 다루기 시작하기 전(프로필 저장 시 `validate` 연동, D-027 표)에 ADR을 먼저 쓴다.
+- **L7 사소한 정리.** MovingAverageTrend.java:44-45의 `entryTried` 필드가 메서드 사이에 FQN 타입으로 선언되어 있다. 다른 필드와 함께 위로 옮긴다.
+- 참고: D-027 상태 줄이 인용한 이전 architect 1·2차 검토 원문은 docs/reviews에 없다. 검토 원문 보존 규칙(docs/reviews/README.md)이 이 PR 머지 뒤에 생겨 소급 의무는 아니다. 이 파일이 PR #14의 architect 검토 원문이다.
+
+## 판정
+수정 필요(B6: ScreeningCriteria C1~C10 판정에 손 계산 기대값 단위 테스트 추가, M1: 실험 결과의 코드 커밋을 main에서 찾을 수 있게 갱신). PR은 이미 머지됐으므로 두 항목은 후속 PR로 고치고, 그 PR에서 이 파일 아래에 재검토를 덧붙인다. L1은 녹화 데이터 실험 시작 전까지 risk-ops 후속 과제로 등록해야 하고, L2~L7은 권고다. 모듈 경계·결정론·금액 표현·비밀값·실전 경로 무접촉은 확인했다.
+
+## 재검토 2026-10-09
+- 대상: 후속 PR #17 / 브랜치 `claude/project-thread-z19xbf` HEAD d018b4c / `git diff origin/main...HEAD` 전체. PR #17 자체의 점검표 B 결과는 docs/reviews/pr-17/architect.md에 있다.
+- 직접 실행한 것: `./gradlew build --no-daemon` BUILD SUCCESSFUL(EXIT=0), `./gradlew :autotrade-sim:test --rerun` 75건 통과, `ScreeningCriteria.java` 변이 12개 검사(11개 잡힘, 1개는 동치 변이), `./gradlew :autotrade-sim:runStrategyStudy` 재실행(결정론 같음, results.md 코드 줄 한 줄만 다름, 되돌림), `git merge-base --is-ancestor 0ea575d origin/main`(조상임).
+
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| B6 선발 기준 C1~C10 손 계산 테스트 | 해소 | `autotrade-sim/src/test/java/com/autotrade/sim/study/ScreeningCriteriaTest.java` 16건. 내가 요구한 경계가 모두 있다: PF 정확히 1.3(:54-60), PF null(:63-71), MDD 정확히 20%(:76-82), C6 예열 빼기와 학습 손실 FAIL(:119-141), C7 NOT_AVAILABLE(:161-169), C8 월요일 시작 주 묶음(:174-193), C9(:198-208), C10 엄격한 초과(:213-228). 손 계산을 다시 해 맞았고, 경계 연산자와 묶음 기준을 바꾼 변이 11개를 모두 잡았다. B6 통과로 바꾼다 |
+| M1 실험 결과 코드 커밋 추적성 | 해소 | results.md:17과 report.md:22의 코드 줄이 main 커밋 0ea575d로 바뀌었고, 0ea575d는 origin/main의 조상이다. 0ea575d와 HEAD의 main 코드는 같다(`git diff --name-only 0ea575d HEAD`가 테스트·문서뿐). HEAD에서 다시 돌린 결과가 코드 줄 말고 바이트 일치. 재발 방지 절차가 experiments/README.md:19에 들어갔다. 권고했던 `autotrade-sim/build.gradle.kts:17-19` 주석과 strategy-lab 스킬 반영은 아직 없다(PR #17 검토 N2, 막지 않음) |
+| L1 approve-all RiskPolicy | 등록됨(미구현, 정상) | D-027-strategy-lab-protocol.md:49에 risk-ops·sim-engine 후속 과제로 등록. 지금은 StudyMain.java:77이 합성 시세만 만들어 녹화 데이터로 돌 경로가 없다. 녹화 데이터 입력을 더하는 PR에서 risk-ops 검토로 확인한다 |
+| L2 미체결 매수 중 손절 지연 | 미반영(권고) | D-027 위험 목록에 이 경우가 아직 없다 |
+| L3 `study.warmup-days` 검증 | 미반영(권고) | ScreeningCriteria.java:86-89 그대로. 새 테스트(:129-130)는 예열이 검증 일수 이상이면 C6이 판단 불가가 되는 현재 동작만 고정한다 |
+| L4 숫자 아닌 key-param | 미반영(권고) | StrategyStudy.java 변경 없음 |
+| L5·L6·L7 | 미반영(권고·후속 과제) | 코드 변경 없음. L6은 D-027:50에 이미 있음 |
+
+## 재검토 판정
+승인. 수정 필요 항목 B6·M1이 해소됐다. L1은 등록 요건을 채웠고, L2~L7과 N2는 막지 않는 권고로 남긴다.
