@@ -158,7 +158,7 @@ export async function runPage(id, runId) {
   return h('div', {},
     h('p', { class: 'crumb' }, h('a', { href: '#/experiments' }, '실험'), ' / ', h('a', { href: `#/experiments/${enc(id)}` }, id), ' / ', runId),
     h('h1', {}, runId),
-    summaryCard(summary, run),
+    summaryCard(summary),
     e.market === 'US' ? h('p', { class: 'muted small' }, '시각은 미국 동부(ET)와 한국(KST)을 함께 적습니다.') : null,
     h('h2', {}, '체결 내역'), fills,
     h('h2', {}, '왕복 거래'), trips,
@@ -170,7 +170,7 @@ function nameCell(name) {
 }
 
 /** 계좌 상세 머리: 계좌·기간·시드, 마지막 평가금액·수익률·누적 실현손익·비용, 기간 끝 보유 종목. 값은 서버가 계산해 준다. */
-function summaryCard(s, run) {
+function summaryCard(s) {
   const cur = s.currency;
   const failed = s.status === 'FAILED';
   const tile = (label, value, sub, cls) => h('div', { class: 'tile' },

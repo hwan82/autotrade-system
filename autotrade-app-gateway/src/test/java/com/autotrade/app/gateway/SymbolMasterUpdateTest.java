@@ -112,6 +112,20 @@ class SymbolMasterUpdateTest {
     }
 
     @Test
+    void 단축코드만_6자리가_아닌_줄은_1퍼센트를_넘게_섞여도_제외로_세고_통과한다() throws IOException {
+        KisSymbolMaster.Board b = KisSymbolMaster.Board.KOSPI;
+        List<String> kospi = new ArrayList<>(kospiOk());
+        for (int i = 0; i < 50; i++) {
+            String c = String.format("Q5%05d", i);
+            kospi.add(line(b, c, "KR75" + String.format("%05d", i) + "001", "가상 ETN " + i));
+        }
+
+        assertThat(SymbolMasterUpdate.run(dir, fetcher(kospi, kosdaqOk()), out, err)).isZero();
+        assertThat(SymbolNameFiles.load(dir).names().size()).isEqualTo(4);
+        assertThat(outBytes.toString(StandardCharsets.UTF_8)).contains("6자리 아닌 코드로 제외 50건");
+    }
+
+    @Test
     void 받기에_실패하면_2이고_성공_0건이어도_쓰지_않는다() {
         assertThat(SymbolMasterUpdate.run(dir, url -> {
             throw new IOException("응답 코드 503");

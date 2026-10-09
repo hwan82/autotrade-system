@@ -18,16 +18,21 @@ import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationReport;
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 실험 화면 REST 응답 모양(ADR-005 5장). 금액·비율은 정밀도를 잃지 않게 문자열(BigDecimal plain)로 내보내고
  * 통화 코드를 함께 둔다. 시각은 UTC ISO-8601이며 화면이 KST와 거래소 현지 시간으로 바꿔 보여 준다(UI-07).
  */
 public final class ExperimentViews {
+
+    private static final Logger log = LoggerFactory.getLogger(ExperimentViews.class);
 
     private ExperimentViews() {
     }
@@ -193,9 +198,7 @@ public final class ExperimentViews {
                 }
             }
             EquityPoint last = run.equityCurve().isEmpty() ? null : run.equityCurve().get(run.equityCurve().size() - 1);
-            String totalReturn = last == null ? null : last.equity().amount()
-                    .divide(spec.seedCapital().amount(), 6 + 2, RoundingMode.HALF_EVEN)
-                    .subtract(BigDecimal.ONE).setScale(6, RoundingMode.HALF_EVEN).toPlainString();
+            String totalReturn = summaryReturn(spec, s, last);
             return new RunSummary(spec.id().value(), s.runId(), s.accountId().value(), run.profile().id(),
                     run.profile().version(), s.profileHash(), s.status().name(), s.failureReason(),
                     spec.profiles().get(0).market().name(), currency.getCurrencyCode(), spec.from().toString(),
@@ -221,6 +224,7 @@ public final class ExperimentViews {
                                 plain(p.averagePrice()), plain(account.costBasisOf(p.symbol()))))
                         .toList();
             } catch (RuntimeException e) {
+                log.warn("보유 종목을 다시 계산하지 못했습니다: {} ({})", run.summary().runId(), e.toString());
                 return null;
             }
         }
@@ -233,6 +237,23 @@ public final class ExperimentViews {
     /** 기간 끝 보유 종목 한 줄. 평균 단가·보유 원가는 매수 비용 포함. */
     public record HoldingRow(String symbol, String symbolName, long quantity, String averagePrice, String costBasis) {
     }
+
+    /**
+     * 총수익률. 완료된 Run은 지표 값({@link RunMetrics#totalReturn()})을 그대로 써 리더보드와 같게 하고, 지표가 없는
+     * 실패 Run만 같은 규칙(정밀도 40자리로 나눈 뒤 소수 6자리 HALF_EVEN, MetricsCalculator)으로 직접 계산한다.
+     */
+    private static String summaryReturn(ExperimentSpec spec, RunResult s, EquityPoint last) {
+        if (s.metrics() != null) {
+            return d(s.metrics().totalReturn());
+        }
+        if (last == null) {
+            return null;
+        }
+        return last.equity().amount().divide(spec.seedCapital().amount(), RETURN_MC).subtract(BigDecimal.ONE)
+                .setScale(6, RoundingMode.HALF_EVEN).toPlainString();
+    }
+
+    private static final MathContext RETURN_MC = new MathContext(40, RoundingMode.HALF_EVEN);
 
     private static String name(SymbolNames names, Symbol symbol) {
         return names.name(symbol).orElse(null);

@@ -66,10 +66,11 @@ public final class KisSymbolMaster {
 
     /**
      * @param rows 검증을 통과한 줄(파일 순서)
+     * @param skippedLines 형식은 맞지만 단축코드가 6자리가 아니라 뺀 줄 수(ETN의 Q 코드 등). 검증 실패로 세지 않는다
      * @param failedLines 검증에 실패한 줄 수
      * @param failureSamples 실패한 줄의 번호와 사유 앞쪽 몇 건(종목 코드는 공개 정보라 적어도 된다)
      */
-    public record Parsed(Board board, List<Row> rows, int failedLines, List<String> failureSamples) {
+    public record Parsed(Board board, List<Row> rows, int skippedLines, int failedLines, List<String> failureSamples) {
 
         public Parsed {
             rows = List.copyOf(rows);
@@ -77,7 +78,7 @@ public final class KisSymbolMaster {
         }
 
         public int totalLines() {
-            return rows.size() + failedLines;
+            return rows.size() + skippedLines + failedLines;
         }
     }
 
@@ -115,6 +116,7 @@ public final class KisSymbolMaster {
         String text = new String(mst, CP949);
         List<Row> rows = new ArrayList<>();
         List<String> samples = new ArrayList<>();
+        int skipped = 0;
         int failed = 0;
         int lineNo = 0;
         for (String raw : text.split("\n", -1)) {
@@ -124,7 +126,9 @@ public final class KisSymbolMaster {
                 continue;
             }
             String problem = validate(board, line);
-            if (problem == null) {
+            if (problem == null && !SHORT_CODE.matcher(line.substring(0, SHORT_END).strip()).matches()) {
+                skipped++;
+            } else if (problem == null) {
                 int nameEnd = line.length() - board.tail();
                 rows.add(new Row(line.substring(0, SHORT_END).strip(), line.substring(STANDARD_END, nameEnd).strip(),
                         board.name()));
@@ -135,18 +139,21 @@ public final class KisSymbolMaster {
                 }
             }
         }
-        return new Parsed(board, rows, failed, samples);
+        return new Parsed(board, rows, skipped, failed, samples);
     }
 
-    /** 문제가 없으면 null, 있으면 사유. 줄 내용을 사유에 싣지 않는다. */
+    /**
+     * 문제가 없으면 null, 있으면 사유. 줄 내용을 사유에 싣지 않는다. 단축코드 길이(6자리 여부)는 여기서 보지 않는다:
+     * 형식이 맞는 6자리 아닌 코드(ETN 등)는 {@link #parse}가 검증 실패가 아니라 제외로 센다.
+     */
     private static String validate(Board board, String line) {
         int nameEnd = line.length() - board.tail();
         if (nameEnd <= STANDARD_END) {
             return "줄이 너무 짧습니다";
         }
         String shortCode = line.substring(0, SHORT_END).strip();
-        if (!SHORT_CODE.matcher(shortCode).matches()) {
-            return "단축코드가 6자리 영숫자가 아닙니다";
+        if (shortCode.isEmpty() || !shortCode.chars().allMatch(c -> c < 128 && Character.isLetterOrDigit(c))) {
+            return "단축코드가 영숫자가 아닙니다";
         }
         String standard = line.substring(SHORT_END, STANDARD_END).strip();
         if (standard.length() != 12 || !standard.startsWith("KR")) {

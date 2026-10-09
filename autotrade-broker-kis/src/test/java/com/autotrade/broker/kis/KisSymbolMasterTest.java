@@ -64,17 +64,33 @@ class KisSymbolMasterTest {
         KisSymbolMaster.Parsed p = KisSymbolMaster.parse(b, file("\n",
                 line(b, "005930", "KR7005930003", "삼성전자"),
                 "",
-                line(b, "Q500001X", "KR7005930003", "단축코드 8자리"),
+                line(b, "00-593", "KR7005930003", "단축코드 기호"),
                 line(b, "005931", "US7005930003", "표준코드 이상"),
                 line(b, "005932", "KR7005932009", "  "),
                 "짧은 줄"));
 
         assertThat(p.rows()).hasSize(1);
         assertThat(p.failedLines()).isEqualTo(4);
+        assertThat(p.skippedLines()).isZero();
         assertThat(p.totalLines()).isEqualTo(5);
         assertThat(p.failureSamples()).hasSize(4);
         assertThat(p.failureSamples().get(0)).contains("KOSPI").contains("3번째 줄").contains("단축코드");
         assertThat(String.join("", p.failureSamples())).doesNotContain("삼성전자");
+    }
+
+    @Test
+    void 형식은_맞고_단축코드만_6자리가_아닌_줄은_실패가_아니라_제외로_센다() {
+        KisSymbolMaster.Board b = KisSymbolMaster.Board.KOSPI;
+        KisSymbolMaster.Parsed p = KisSymbolMaster.parse(b, file("\r\n",
+                line(b, "005930", "KR7005930003", "삼성전자"),
+                line(b, "Q500001", "KR7500001001", "가상 ETN"),
+                line(b, "Q50000123", "KR7500001002", "아홉 자리")));
+
+        assertThat(p.rows()).extracting(KisSymbolMaster.Row::code).containsExactly("005930");
+        assertThat(p.skippedLines()).isEqualTo(2);
+        assertThat(p.failedLines()).isZero();
+        assertThat(p.failureSamples()).isEmpty();
+        assertThat(p.totalLines()).isEqualTo(3);
     }
 
     @Test

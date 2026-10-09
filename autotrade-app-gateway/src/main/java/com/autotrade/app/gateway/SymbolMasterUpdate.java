@@ -64,13 +64,16 @@ public final class SymbolMasterUpdate {
         }
 
         int lines = 0;
+        int skipped = 0;
         int failed = 0;
         for (KisSymbolMaster.Parsed p : parsed) {
             lines += p.totalLines();
+            skipped += p.skippedLines();
             failed += p.failedLines();
-            out.println(p.board() + ": 종목 " + p.rows().size() + "건, 검증 실패 " + p.failedLines() + "건");
+            out.println(p.board() + ": 종목 " + p.rows().size() + "건, 6자리 아닌 코드로 제외 " + p.skippedLines()
+                    + "건, 검증 실패 " + p.failedLines() + "건");
         }
-        int ok = lines - failed;
+        int ok = lines - skipped - failed;
         if (ok == 0 || failed > lines * MAX_FAILURE_RATIO) {
             err.println("검증 실패 줄이 " + failed + "/" + lines + "건이라 형식이 달라진 것으로 보고 파일을 쓰지 않았습니다"
                     + "(기준 " + (int) (MAX_FAILURE_RATIO * 100) + "% 이하, 성공 0건이면 실패). 실패 예:");
@@ -92,7 +95,7 @@ public final class SymbolMasterUpdate {
 
         SymbolNames names = SymbolNameFiles.load(configDir).names();
         out.println("쓴 파일: " + SymbolNameFiles.file(configDir, Market.KRX));
-        out.println("종목명 " + names.size() + "건 (검증 실패로 뺀 줄 " + failed + "건)");
+        out.println("종목명 " + names.size() + "건 (6자리 아닌 코드로 제외 " + skipped + "건, 검증 실패로 뺀 줄 " + failed + "건)");
         for (String code : SAMPLE_CODES) {
             out.println("  " + code + " " + names.name(Symbol.krx(code)).orElse("(없음)"));
         }
