@@ -54,6 +54,17 @@ class StreamingMarketDataSourceTest {
         return s;
     }
 
+    /** 다음 접속까지 1초씩 넘긴다(거부 뒤 간격 상한 30분을 넘으면 실패). */
+    private void advanceUntilConnected(StreamingMarketDataSource s) {
+        for (int i = 0; i <= StreamingMarketDataSource.AUTH_RETRY_MAX.toSeconds() + 1; i++) {
+            if (s.state() == ConnectionState.CONNECTED) {
+                return;
+            }
+            scheduler.advance(Duration.ofSeconds(1));
+        }
+        assertThat(s.state()).isEqualTo(ConnectionState.CONNECTED);
+    }
+
     @Test
     void 인증_응답_뒤에_구독을_등록하고_순번을_매긴다() {
         StreamingMarketDataSource s = connected();
@@ -87,7 +98,7 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
-    void 로그인_응답이_없는_프로토콜에서_인증_실패가_이어져도_재발급은_1분에_한_번이고_3회면_거부로_본다() {
+    void 로그인_응답이_없는_프로토콜에서_인증_실패가_이어져도_재발급은_1분_이상_간격이고_3회면_거부로_본다() {
         protocol.loginAck = false;
         StreamingMarketDataSource s = source(SerialDispatcher.direct());
         s.subscribe(Set.of(SAMSUNG), received::add);
@@ -100,14 +111,14 @@ class StreamingMarketDataSourceTest {
             }
             scheduler.advance(Duration.ofSeconds(1));
         }
-        assertThat(protocol.opened).isBetween(10, 11);      // 접속(=자격 증명 준비)은 60초에 한 번 꼴
+        // 접속(=자격 증명 준비)은 처음 3회 60초 간격, 거부 판정 뒤 2분·4분 간격: 0·60·120·240·480초 무렵 5회
+        assertThat(protocol.opened).isBetween(5, 6);
         assertThat(protocol.invalidated).isBetween(protocol.opened - 1, protocol.opened); // 마지막 접속은 아직 실패 전일 수 있다
         assertThat(s.credentialsRejected()).isTrue();
         assertThat(s.stats().authFailures()).isGreaterThanOrEqualTo(3);
 
-        // 시세가 다시 오면 인증이 확인돼 풀린다
-        scheduler.advance(Duration.ofSeconds(61));
-        assertThat(s.state()).isEqualTo(ConnectionState.CONNECTED);
+        // 시세가 다시 오면 인증이 확인돼 풀린다(다음 접속은 거부 뒤 늘어난 간격 뒤)
+        advanceUntilConnected(s);
         transport.last().push("T 005930 71500 1 1791446400");
         assertThat(s.credentialsRejected()).isFalse();
     }
@@ -210,24 +221,29 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
-    void 발급이_자격_증명_거절로_이어져도_발급은_1분에_한_번이고_3회면_거부로_본다() {
+    void 발급이_자격_증명_거절로_이어지면_1분_간격_3회_뒤_거부로_보고_간격을_30분까지_늘린다() {
         protocol.rejectPrepare = true;
         StreamingMarketDataSource s = source(SerialDispatcher.direct());
         s.subscribe(Set.of(SAMSUNG), received::add);
         s.start();
         scheduler.runDue();
-        scheduler.advance(Duration.ofSeconds(600));
-
-        assertThat(protocol.prepareAttempts).isBetween(10, 11);  // 600초에 1분 간격
+        // 처음 3회는 1분 간격(0, 60, 120초), 거부 판정 뒤에는 2·4·8·16·30·30…분
+        scheduler.advance(Duration.ofSeconds(121));
+        assertThat(protocol.prepareAttempts).isEqualTo(3);
+        assertThat(s.credentialsRejected()).isTrue();
+        scheduler.advance(Duration.ofHours(24).minusSeconds(121));
+        // 0·60·120초, 그 뒤 2·4·8·16분(1,920초까지 7회), 남은 시간은 30분마다 46회 → 하루 53회(수정 전 1,441회)
+        assertThat(protocol.prepareAttempts).isBetween(52, 54);
         assertThat(transport.connections).isEmpty();
         assertThat(protocol.invalidated).isEqualTo(protocol.prepareAttempts);
-        assertThat(s.credentialsRejected()).isTrue();
         assertThat(s.stats().authFailures()).isEqualTo(protocol.prepareAttempts);
         assertThat(s.state()).isIn(ConnectionState.DISCONNECTED, ConnectionState.CONNECTING);
 
-        // 키를 고쳐 발급과 로그인이 되면 풀린다
+        // 키를 고쳐 발급과 로그인이 되면 풀린다(다음 시도까지 최대 30분)
         protocol.rejectPrepare = false;
-        scheduler.advance(Duration.ofSeconds(60));
+        for (int i = 0; transport.connections.isEmpty() && i <= StreamingMarketDataSource.AUTH_RETRY_MAX.toSeconds() + 1; i++) {
+            scheduler.advance(Duration.ofSeconds(1));
+        }
         transport.last().push("LOGIN OK");
         assertThat(s.state()).isEqualTo(ConnectionState.CONNECTED);
         assertThat(s.credentialsRejected()).isFalse();

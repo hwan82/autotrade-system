@@ -46,6 +46,8 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
     static final Duration AUTH_RETRY_MIN = Duration.ofSeconds(60);
     /** 이 횟수만큼 연속 인증에 실패하면 자격 증명이 거부된 것으로 보고 경보한다. */
     static final int AUTH_FAILURE_LIMIT = 3;
+    /** 거부 판정 뒤 재발급 간격 상한. 거부 뒤에는 간격을 두 배씩 늘려 여기서 멈춘다(risk-ops 5차 T1). */
+    static final Duration AUTH_RETRY_MAX = Duration.ofMinutes(30);
 
     private final String sourceId;
     private final StreamProtocol protocol;
@@ -361,6 +363,12 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         Duration delay = backoff.nextDelay();
         if ((authFailures > 0 || issuanceFailed) && delay.compareTo(AUTH_RETRY_MIN) < 0) {
             delay = AUTH_RETRY_MIN;
+        }
+        if (authFailures >= AUTH_FAILURE_LIMIT) {
+            // 거부 판정 뒤에는 2분, 4분, 8분 … 30분. 고장 난 키로 발급 API를 분당 두드리지 않는다
+            int over = Math.min(authFailures - AUTH_FAILURE_LIMIT + 1, 5);
+            Duration rejected = AUTH_RETRY_MIN.multipliedBy(1L << over);
+            delay = rejected.compareTo(AUTH_RETRY_MAX) > 0 ? AUTH_RETRY_MAX : rejected;
         }
         pendingTask = scheduler.schedule(delay, () -> {
             ConnectionState changed;
