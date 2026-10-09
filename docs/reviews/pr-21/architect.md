@@ -30,3 +30,34 @@
 
 ## 판정
 승인. 점검표 B 전 항목이 통과이고(B7은 "risk-ops 검토 필요"), 확인 못 함은 없다. N1·N2는 막지 않는 권고다. 이 판정은 architect 관점(B 점검표)에 한한다. 이 PR은 실전 관련 PR(보호 테스트 수정, 실전 출구 계약 변경)이므로 머지에는 risk-ops 검토 원문, 사용자 직접 확인·머지, 머지 전 독립 QA가 따로 필요하다(지침 10·11장).
+
+## 재검토 2026-10-09
+- 대상: PR #21 / 브랜치 `claude/project-thread-bl5qbg` HEAD 7dd0d78 / `git diff origin/main...HEAD` 전체(merge-base = origin/main 52ad85f). 첫 검토(29323c1) 뒤 커밋 3개: 20f514a(risk-ops 원문), f2ffbab(R-2·R-3 문서), 7dd0d78(R-1 클래스패스 자동 구성). 그 사이 바뀐 파일 9개(+211 −15): `autotrade-architecture-test/build.gradle.kts`, `ModuleOwnershipTest.java`, CLAUDE.md, ADR-001, ADR-002 9장, D-033, D-034, broker-and-fault-design.md, risk-ops.md. 첫 검토 범위의 나머지 파일은 그대로다.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon -I <저장소 밖 미러 init 스크립트> --console=plain` (HEAD 7dd0d78, 작업 트리 깨끗함): BUILD SUCCESSFUL, EXIT=0, 86 tasks. 테스트 XML 집계 318건(첫 검토 315 + `ModuleOwnershipTest` 3건), 건너뜀·실패·오류 0. `ArchitectureTest` 12/12, `ModuleOwnershipTest` 8/8.
+  - `./gradlew :autotrade-architecture-test:test --rerun --warning-mode all`: EXIT=0. 경고는 내 미러 init 스크립트의 Groovy 문법 경고뿐이고 새 build.gradle.kts에서 나온 경고 없음.
+  - 변이 검사(별도 git worktree, 검토 후 `git worktree remove`로 제거, 본 작업 트리 깨끗함 확인):
+    1. settings에만 `autotrade-rogue`를 include(`autotrade-risk` 의존, `com.autotrade.risk.guard.RogueRaiser`가 `beginActivation` 호출, 의존 목록·OWNERS 손대지 않음) → `./gradlew build` EXIT=1. `운영_클래스는_패키지를_소유한_모듈에만_있다`(RogueRaiser 패키지 소유 위반)와 `클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`("소유 모듈 표(OWNERS)에 없는 모듈: autotrade-rogue") 2건 실패. risk-ops R-1 실측(BUILD SUCCESSFUL)이 닫혔다.
+    2. 같은 상태에서 `build.gradle.kts`를 첫 검토 시점 판(손 목록, 시스템 속성 없음)으로 되돌림 → EXIT=1, 시스템 속성 없음으로 닫힌 쪽 실패.
+    3. 부분 회귀: 시스템 속성 전달은 남기고 의존만 손 목록으로 되돌린 뒤 OWNERS에 `com.autotrade.rogue → autotrade-rogue`를 더함(표만 고친 경우) → EXIT=1, `클래스패스는_settings의…`가 클래스패스 누락으로 실패.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` BUILD SUCCESSFUL(EXIT=0), 318건 통과 |
+| B2 | 통과 | 운영 코드 의존 방향 변경 없음. architecture-test의 testImplementation을 `rootProject.subprojects`(자기 제외) 중 java 플러그인이 적용된 모듈로 자동 구성(build.gradle.kts:15, :24). 이 모듈은 테스트 전용이고 다른 모듈이 의존하지 않으므로 순환 없음. `autotrade-ui`(정적 자원만, java-conventions 적용)가 새로 클래스패스에 들어오지만 `MODULES_WITHOUT_PACKAGES`(ModuleOwnershipTest.java:102)로 명시하고, 그 모듈에 `com.autotrade` 클래스가 생기면 소유 위반으로 실패한다. 규칙 강화의 ADR은 ADR-002 9장 보강(대안 가·나·다 비교, 되돌릴 조건 JPMS)과 ADR-001 91·221행 갱신 |
+| B3 | 통과 | 새 계약은 빌드→테스트 시스템 속성 `autotrade.settingsJavaModules`(빌드 내부, 운영 설정 키 아님)뿐이고 ADR-002 9장·build.gradle.kts 주석·테스트 Javadoc에 적혀 있다. 첫 검토의 N2(ADR-001 미갱신)는 ADR-001 91·221행 갱신으로 해소. 설정 예시(broker-and-fault-design.md:68)도 기본값 `[KIWOOM, KIS]`와 일치 |
+| B4 | 통과 | 새 코드에 시계·난수 없음. 모듈 목록은 Gradle 쪽에서 `sorted()`, 테스트 쪽은 `TreeSet`, `coverageGaps` 결과도 정해진 순서(ModuleOwnershipTest.java:286 이하). 시뮬레이션 코드 변경 없음, 골든 테스트 통과 |
+| B5 | 해당 없음 | 이번 변경분에 금액 계산 없음(첫 검토 B5 통과 유지) |
+| B6 | 통과 | 새 동작 테스트: `아무도_의존하지_않는_새_모듈이_빠지면_잡아낸다`(클래스패스·표 누락, 표만 고친 경우, 표에만 남은 모듈, 대조군), `클래스패스_항목에서_모듈_이름을_알아낸다`(자원 폴더·jar·Windows 경로·외부 jar), 실제 클래스패스 교차 확인 `클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`(실전 경로 모듈 존재로 빈 손 통과 방지). 내 변이 3건 모두 실패로 잡힘. 기존 테스트 삭제·`@Disabled` 없음, `ArchitectureTest` 무변경 |
+| B7 | risk-ops 검토 필요 | 실전 경로 보호 테스트(`ModuleOwnershipTest`, 지침 11장 보호 테스트 범주인 아키텍처 규칙)와 그 범위를 정하는 빌드 스크립트를 바꿨다. risk-ops 첫 판정이 "수정 필요(A14, R-1)"(docs/reviews/pr-21/risk-ops.md 39행)이므로 같은 검토자의 재검토 원문이 필요하다. 이 재검토 시점에 risk-ops 재검토 절은 없다 |
+| B8 | 통과 | 변경분 grep에서 비밀값 없음. 픽스처 모듈 이름(`autotrade-rogue`)과 가상 경로뿐 |
+
+### 점검표 밖 발견(재검토)
+- 첫 검토 N1(클래스패스 밖 새 모듈)과 N2(ADR-001 미갱신)는 해소됐다. 위 변이 1·3이 그 근거다.
+- **RR1 (참고) 설정 캐시 비호환.** build.gradle.kts의 `provider { settingsJavaModules.filter { it.pluginManager.hasPlugin("java") } }`는 실행 시점에 `Project` 객체를 읽는다. 지금은 configuration cache를 켜지 않아(`gradle.properties` 없음, CI `./gradlew build --no-daemon`) 문제없다. 나중에 켜면 이 부분이 먼저 깨지므로, 그때 구성 단계에서 이름 목록을 문자열로 확정해 넘기는 방식으로 바꾼다.
+- **RR2 (참고) 남은 한계는 문서에 적힌 그대로다.** settings에 include하지 않은 폴더, Gradle 밖에서 만든 jar, 런타임 배포 클래스패스는 대상이 아니다(D-034 남은 위험, 테스트 Javadoc). java 플러그인을 적용하지 않은 모듈은 클래스를 만들 수 없으므로 대상 밖이어도 위장 경로가 되지 않는다 `[추론]`.
+- 첫 검토 N3~N6은 상태 변화 없음(N3은 risk-ops R-4와 같은 2단계 과제, R-3 예외는 D-033에 문구로 반영됨).
+
+### 판정(재검토)
+승인. 점검표 B 전 항목이 통과 또는 해당 없음이고(B7은 "risk-ops 검토 필요"), 확인 못 함은 없다. 이 판정은 architect 관점(B 점검표)에 한한다. risk-ops 첫 판정이 "수정 필요"였으므로 머지 전에 risk-ops 재검토 승인, 사용자 직접 확인·머지, 독립 QA가 따로 필요하다(지침 10·11장).
