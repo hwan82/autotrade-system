@@ -19,6 +19,8 @@ import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.archfixture.MisplacedControlChannel;
 import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.broker.fixturea.PluginA;
+import com.autotrade.broker.fixtureb.PluginB;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlServer;
 import com.autotrade.risk.RiskChain;
@@ -141,7 +143,8 @@ class ArchitectureTest {
     /**
      * 실전 주문 출구는 RealTradingGuard 허가를 받는 한 곳에서만 연다(RSK-01, ADR-002, 안전 불변식 2).
      * BrokerPlugin을 구현·상속한 어떤 타입의 {@code orderGateway}든, 호출이든 메서드 참조든 막는다.
-     * 플러그인이 출구 구현을 직접 생성하는 우회는 플러그인 모듈이 생기는 2단계에서 규칙을 더한다(ADR-002 6장).
+     * 플러그인이 출구 구현을 직접 생성하는 우회 규칙은 플러그인에 주문 코드를 넣는 첫 PR보다 먼저 더한다(ADR-002 6장,
+     * ADR-003 6장). 2단계 플러그인에는 주문 코드가 없다.
      */
     static final ArchRule ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY = noClasses()
             .that().doNotHaveFullyQualifiedName(RealOrderGateways.class.getName())
@@ -213,6 +216,11 @@ class ArchitectureTest {
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
+            .should().notDependOnEachOther();
+
+    /** 증권사 플러그인끼리 참조하지 않는다(ADR-001, ADR-003 2.1). 공통 계약은 broker-api 패키지에만 둔다. */
+    static final ArchRule PLUGINS_ARE_INDEPENDENT = slices()
+            .matching("com.autotrade.broker.(*)..")
             .should().notDependOnEachOther();
 
     /** double 금액 금지(ARC-08): 도메인·리스크·증권사 계약에는 실수형 필드와 double 기반 BigDecimal 생성이 없다. */
@@ -295,6 +303,11 @@ class ArchitectureTest {
     }
 
     @Test
+    void 증권사_플러그인끼리_참조하지_않는다() {
+        PLUGINS_ARE_INDEPENDENT.check(PRODUCTION);
+    }
+
+    @Test
     void 금액에_실수형을_쓰지_않는다() {
         NO_FLOATING_POINT_MONEY.check(PRODUCTION);
         NO_BIGDECIMAL_FROM_DOUBLE.check(PRODUCTION);
@@ -324,6 +337,13 @@ class ArchitectureTest {
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(6);
 
+        // 플러그인 A가 플러그인 B의 메서드를 부르는 1건. broker-api(BrokerCredentials) 참조는 위반이 아니다
+        JavaClasses pluginFixture = new ClassFileImporter().importClasses(PluginA.class, PluginB.class);
+        EvaluationResult plugins = PLUGINS_ARE_INDEPENDENT.evaluate(pluginFixture);
+        assertThat(plugins.hasViolation()).isTrue();
+        assertThat(String.join("\n", plugins.getFailureReport().getDetails()))
+                .contains("fixturea.PluginA", "fixtureb.PluginB")
+                .doesNotContain("BrokerCredentials");
         // 리스크 모듈 밖의 승인만 하는 정책: 다른 패키지 클래스 1개는 패키지·모듈 2건 위반, 리스크 패키지를 빌린 다른 모듈 클래스는 모듈 1건 위반
         assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
                 ApproveAllRiskPolicy.class)).getFailureReport().getDetails()).hasSize(2);

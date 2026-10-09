@@ -19,6 +19,8 @@ include(
     "autotrade-risk",
     "autotrade-sim",
     "autotrade-broker-api",
+    "autotrade-broker-kiwoom",
+    "autotrade-broker-kis",
     "autotrade-config",
     "autotrade-control",
     "autotrade-app-engine",
