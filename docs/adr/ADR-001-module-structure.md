@@ -102,7 +102,7 @@ ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래�
 | `BrokerPlugin` | ACTIVE이고 능력이 선언된 기능만 사용, `orderGateway(AccountRef)`는 다른 증권사 계좌면 빈 값 | 없음(빈 Optional) | 상태 조회는 비블로킹 |
 | `StrategyProfile` | 불변, `profileHash()`는 길이 접두 직렬화 SHA-256, 파라미터 순서 무관(골든 값 테스트) | 형식 위반 `IllegalArgumentException` | 불변 |
 | `RiskPolicy` | 순수 함수, I/O·현재 시각·난수 금지. 운영 구현은 `com.autotrade.risk..`에만(ArchUnit) | 거절은 값(`RiskDecision.Rejected`) | 필수 |
-| `RiskChain` | 가상·실전 공통 체인(D-032). `builder(BlacklistSnapshot)`만 있어 블랙리스트 없는 체인은 없음. 순서 고정: 블랙리스트·수동 보유(모든 의도, 거절 ID `BLACKLIST`·`MANUAL_HOLDING`, 청산·손절도 차단, D-033) → 청산·손절 승인 → 진입 규칙(첫 거절에서 멈춤). 진입 규칙 예외·null, 주문·스냅샷 계좌 불일치는 `RISK_RULE_ERROR` 거절 | 없음(거절은 값) | 불변, 필수 |
+| `RiskChain` | 가상·실전 공통 체인(D-032). `builder(BlacklistSnapshot)`만 있어 블랙리스트 없는 체인은 없음. 순서 고정: 블랙리스트·수동 보유(모든 의도, 거절 ID `BLACKLIST`·`MANUAL_HOLDING`, 청산·손절도 차단, D-035) → 청산·손절 승인 → 진입 규칙(첫 거절에서 멈춤). 진입 규칙 예외·null, 주문·스냅샷 계좌 불일치는 `RISK_RULE_ERROR` 거절 | 없음(거절은 값) | 불변, 필수 |
 | `ExperimentRunner` | 결정론(스레드 수와 무관), 미래 정보 금지, Run 간 상태 공유 금지, Run 시드는 실험 시드와 프로필 해시로 파생, 실전과 같은 리스크·상태머신·블랙리스트 코드 | 한 Run 실패는 그 Run만 FAILED(사유 기록) | 동기 실행 |
 | `MarketRules` | 불변, 시간은 거래소 현지 시간대, 통화는 시장 통화, 호가 단위 반올림 방향을 호출자가 지정, 수치는 공식 출처 주석 | 0 이하 가격 거부 | 필수 |
 | `Clock` | 비즈니스 로직은 주입된 `java.time.Clock`만 사용. 리플레이는 `ReplayClock`(앞으로만 이동, `advanceToAtLeast`) | 과거로 이동 시 예외 | 필수 |
