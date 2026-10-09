@@ -8,7 +8,7 @@ dependencies {
     testImplementation(libs.archunit.junit5)
     listOf(
         ":autotrade-domain", ":autotrade-marketdata", ":autotrade-strategy", ":autotrade-risk", ":autotrade-sim",
-        ":autotrade-broker-api", ":autotrade-config", ":autotrade-notification-jar", ":autotrade-monitor-agent-jar",
+        ":autotrade-broker-api", ":autotrade-config", ":autotrade-control", ":autotrade-notification-jar", ":autotrade-monitor-agent-jar",
         ":autotrade-app-engine", ":autotrade-app-gateway", ":autotrade-app-lab", ":autotrade-app-watchdog",
     ).forEach { testImplementation(project(it)) }
 }

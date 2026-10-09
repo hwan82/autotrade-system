@@ -141,10 +141,13 @@ public record RuntimeConfig(
      * @param accounts 실전 계좌 목록(runtime-config.json). 별칭은 겹치지 않는다
      * @param accountNumbers 계좌 별칭 → 증권사 계좌번호(secrets.json, 🔒). 목록에 없는 별칭은 버린다(경고는 로더).
      *     계좌번호가 없는 계좌는 활성화할 수 없다(NOT_CONFIGURED)
+     * @param operatorPasswordHash 2차 확인용 운영자 비밀번호의 해시(secrets.json, 🔒, ADR-006 2.4). 평문은 어디에도 두지 않는다.
+     *     없으면 실전 활성화와 PANIC SELL 명령이 모두 거절된다
      */
-    public record RealTrading(List<RealAccount> accounts, Map<String, Secret> accountNumbers) {
+    public record RealTrading(List<RealAccount> accounts, Map<String, Secret> accountNumbers, Secret operatorPasswordHash) {
         public RealTrading {
             accounts = accounts == null ? List.of() : List.copyOf(accounts);
+            operatorPasswordHash = operatorPasswordHash == null ? Secret.empty() : operatorPasswordHash;
             Set<String> ids = new HashSet<>();
             for (RealAccount a : accounts) {
                 if (!ids.add(a.id())) {
