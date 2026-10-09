@@ -188,3 +188,11 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | N-2·N-4·N-5 | 참고 | 변경 없음(안전한 방향, 4장 범위 안) |
 
 재검토(같은 날, 승인): 명령 채널 규칙이 메서드·생성자 참조를 못 잡는 점(권장 1)을 같은 방식(`accessTargetWhere`)으로 고치고 픽스처 4건 추가. 느린 감사 로그 테스트가 다른 Guard의 허가를 검사하던 점(N-6)과 secrets 사용 판정의 문자열 의존(N-8)도 고쳤다. 감사 기록 순서(N-7)는 7단계 영속 감사 로그에 계좌별 일련번호를 넣는 것으로 넘긴다.
+
+## 9. 보강: 패키지 이름 위장 차단 (독립 QA F-1, 2026-10-09)
+
+- 문제: 2.2의 두 ArchUnit 규칙은 허용 범위를 패키지 이름·FQN으로 정한다. JPMS가 없어 다른 모듈(예: 실험실)이 `com.autotrade.risk.guard`나 `com.autotrade.app.engine.command` 패키지에 클래스를 두면 허용 범위로 위장해 빌드를 통과했다([QA 보고서](../reviews/gates/main-realpath-2026-10-09.md) F-1 실측). 그래서 2.2의 "지금은 운영 코드 어디서도 실전을 열 수 없다"는 이 보강 전에는 성립하지 않았다.
+- 결정: 패키지 소유 모듈 규칙 `ModuleOwnershipTest`(`autotrade-architecture-test`)를 더한다. 클래스패스의 `com.autotrade` 위치를 모듈별로 따로 가져와 위치 경로에서 모듈을 알아내고, 패키지 루트별 소유 모듈 표(가장 긴 접두어 우선)와 다르면 실패한다. 표에 없는 패키지 루트, 모듈을 알 수 없는 위치도 실패한다. 위치별로 가져오므로 같은 FQN(`RealOrderGateways`)을 다른 모듈에 둔 경우도 잡는다. 이 규칙이 패키지 이름을 모듈과 같게 만들어 2.2 규칙들의 전제가 된다. 기존 `ArchitectureTest`는 바꾸지 않았다(열린 PR과의 충돌 회피, 보호 테스트 약화 없음).
+- 대안: JPMS(`module-info.java`) 도입은 가장 강하지만 전 모듈·Spring Boot 실험실·테스트 설정을 함께 바꿔야 해 버렸다. 7단계 플러그인 모듈이 늘어 표 관리 비용이 커지면 다시 검토한다. 규칙마다 출처 기반 술어로 바꾸는 안은 새 규칙이 또 패키지 이름만 쓰면 같은 구멍이 생겨 버렸다.
+- 검증: 위반 픽스처(테스트 소스의 `com.autotrade.risk.guard.SplitPackageGuardRaiser`, `app.engine.command.SplitPackageCommand`, `app.engine.order.SplitPackageGatewayOpener`, 표 밖 `com.autotrade.unowned`) 4건 검출, 실험실 운영 소스에 `com.autotrade.risk.guard.QaProbe`·`app.engine.command.QaCommandProbe`·같은 FQN `RealOrderGateways`를 임시로 넣으면 `ModuleOwnershipTest`가 3건으로 실패(그때 `ArchitectureTest`는 12/12 통과, 즉 기존 규칙만으로는 못 막음을 재현). 임시 파일은 커밋하지 않았다.
+- 운영 규칙: 새 모듈을 만들면 `autotrade-architecture-test` 의존과 함께 `ModuleOwnershipTest.OWNERS` 표도 고친다(CLAUDE.md).
