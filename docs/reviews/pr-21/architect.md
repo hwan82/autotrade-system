@@ -61,3 +61,32 @@
 
 ### 판정(재검토)
 승인. 점검표 B 전 항목이 통과 또는 해당 없음이고(B7은 "risk-ops 검토 필요"), 확인 못 함은 없다. 이 판정은 architect 관점(B 점검표)에 한한다. risk-ops 첫 판정이 "수정 필요"였으므로 머지 전에 risk-ops 재검토 승인, 사용자 직접 확인·머지, 독립 QA가 따로 필요하다(지침 10·11장).
+
+## 재검토 2 2026-10-09
+- 대상: PR #21 / 브랜치 `claude/project-thread-bl5qbg` HEAD 74a0f41 / `git diff origin/main...HEAD` 전체(merge-base = origin/main 52ad85f, `git merge-tree` 충돌 없음). 재검토(7dd0d78) 뒤 커밋 3개: 218942a(risk-ops 재검토 원문), 6ec4a29(독립 QA 원문, 판정 "수정 필요(A2, A14)"), 74a0f41(QA Q-1·Q-2·Q-3 반영). 바뀐 코드: `autotrade-architecture-test/build.gradle.kts`, `ArchitectureTest.java`(검사 범위 정의 한 곳), `ModuleOwnershipTest.java`, 새 `OurModules.java`, 새 픽스처 `qa/probe/OutsideRaiser.java`·`OutsideOpener.java`(테스트 소스). 문서: CLAUDE.md, ADR-002 9장(9.1~9.3), D-033(Q-3), D-034.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon -I <저장소 밖 미러 init 스크립트> --console=plain` (HEAD 74a0f41, 작업 트리 깨끗함): BUILD SUCCESSFUL, EXIT=0. 테스트 XML 집계 320건, 건너뜀·실패·오류 0. `ArchitectureTest` 12/12, `ModuleOwnershipTest` 10/10.
+  - 변이 검사(별도 git worktree, 검토 후 `git worktree remove`, 본 작업 트리 깨끗함 확인). 독립 QA 실측 형태를 그대로 재현했다:
+    1. E2·E3 형태: `autotrade-app-lab/src/main/java/qa/probe/LabRaiser.java`(SecondConfirmation 생성 → `beginActivation` → `completeStep`)와 `autotrade-app-engine/src/main/java/qa/probe/EngineOpener.java`(`plugin.orderGateway` 직접 호출) → `:autotrade-architecture-test:test` EXIT=1. 3건 실패: `ArchitectureTest#Guard를_올리는_조작은_명령_채널에서만_한다`, `ArchitectureTest#실전_주문_출구는_Guard_팩토리만_연다`, `ModuleOwnershipTest#운영_클래스는_패키지를_소유한_모듈에만_있다`("qa.probe.EngineOpener (:autotrade-app-engine)", "qa.probe.LabRaiser (:autotrade-app-lab)": 소유 모듈 표에 없는 패키지 루트). 실전 경로 규칙과 소유 규칙이 함께 잡는다.
+    2. E5 형태: settings에 `tools:autotrade-risk`(폴더 `tools/autotrade-risk`, `group = "qa.tools"`, `autotrade-risk` 의존)를 넣고 `com.autotrade.risk.guard.NestedRaiser`(`beginActivation`) → EXIT=1. 2건 실패: 소유 위반 "NestedRaiser (:tools:autotrade-risk)", "같은 이름의 프로젝트가 여럿: autotrade-risk (:autotrade-risk, :tools:autotrade-risk)", "표(OWNERS)에 없는 프로젝트: :tools:autotrade-risk".
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` BUILD SUCCESSFUL(EXIT=0), 320건 통과 |
+| B2 | 통과 | 운영 코드 의존 방향 변경 없음. `ArchitectureTest`의 규칙 정의는 그대로이고, 바뀐 것은 검사 대상 `PRODUCTION`(ArchitectureTest.java:62-64)뿐이다. 새 범위는 `Locations.ofPackage("com.autotrade")`(예전 범위)와 우리 프로젝트 운영 항목 전체의 합집합(OurModules.java `architectureScope()`)이라 좁아질 수 없고, `ModuleOwnershipTest#ArchitectureTest_범위는_우리_모듈_운영_클래스_전체를_덮는다`(:167)가 예전 `importPackages("com.autotrade")` 결과와 우리 모듈 운영 클래스 전체를 모두 포함하는지 단언한다. 보호 테스트 강화이며 약화가 아니다. 모듈 식별은 폴더 이름 대신 Gradle 프로젝트 경로 → `projectDir` 표(build.gradle.kts:35 `rootProject.allprojects`, java 플러그인만)로 하고, 가장 안쪽 폴더 우선·폴더 경계 준수(`OurModules.projectOf`, `#위치를_프로젝트_경로_표로_매핑한다`). ADR은 ADR-002 9.2(대안 가·나·다)·9.3(보장 범위와 한계) |
+| B3 | 통과 | 빌드→테스트 시스템 속성이 `autotrade.settingsJavaModules`에서 `autotrade.projectDirs`("경로=폴더"를 "|"로 연결)로 바뀌었다. 빌드 내부 계약이고 운영 설정 키가 아니며 build.gradle.kts 주석, `OurModules` Javadoc, ADR-002 9.1에 반영. 속성이 없으면 예외로 닫힌 쪽 실패(`OurModules.projectDirs()`). CLAUDE.md에 "운영 클래스는 소유 `com.autotrade` 패키지 안, 같은 이름 프로젝트 금지" 운영 규칙 반영. Q-3(이전 기본값이 저장된 파일)은 D-033에 토스 시세 클라이언트 PR 전 선행 과제로 기록(코드 변경 없음, 지금 호출 코드 없음) |
+| B4 | 통과 | 새 코드에 시계·난수 없음. 클래스패스 항목은 경로 순 정렬(`classpathEntries`), 프로젝트 표는 `TreeMap`, 위반은 `TreeSet`, Gradle 쪽도 `sortedBy { it.path }`. 시뮬레이션 코드 변경 없음, 골든 테스트 통과 |
+| B5 | 해당 없음 | 이번 변경분에 금액 계산 없음(첫 검토 B5 통과 유지) |
+| B6 | 통과 | 새 동작 테스트: 밖 패키지 픽스처를 예전 범위가 못 보고 새 경로가 읽으며 두 실전 경로 규칙과 소유 규칙이 모두 위반으로 판정(`#com_autotrade_밖_패키지의_운영_클래스도_잡아낸다` :227), 중첩 프로젝트(`#같은_이름의_중첩_프로젝트는_소유_모듈로_인정하지_않는다` :208), 범위 포함 관계(:167), 경로 매핑·폴더 경계·중복 경로(`#위치를_프로젝트_경로_표로_매핑한다`), 기존 R-1 회귀 테스트 유지. 내 변이 2건(E2·E3 합본, E5) 모두 실패로 잡힘. 테스트 삭제·`@Disabled`·`assume` 없음. 이전 판의 `#클래스패스_항목에서_모듈_이름을_알아낸다`는 폴더 이름 방식 자체가 없어져 `#위치를_프로젝트_경로_표로_매핑한다`로 대체됐다(대상 함수 제거에 따른 교체, 검사 범위는 넓어짐) |
+| B7 | risk-ops 검토 필요 | 보호 테스트 `ArchitectureTest`(검사 범위)와 `ModuleOwnershipTest`를 바꿨다. 지침 11장상 실전 관련 PR이다. risk-ops 재검토 원문(docs/reviews/pr-21/risk-ops.md 81행 "승인")은 7dd0d78 기준이고 74a0f41 변경 뒤의 risk-ops 검토 절은 이 시점에 없다. 독립 QA 원문(qa.md 93-94행)도 판정이 "수정 필요(A2, A14)"이므로 QA 재검토가 필요하다 |
+| B8 | 통과 | 변경분 grep에서 비밀값 없음. 픽스처 계좌 ID `KIS-1`·사용자 `nobody`는 가상 값 |
+
+### 점검표 밖 발견(재검토 2)
+- 독립 QA Q-1(E2·E3)과 Q-2(E5)는 위 변이로 직접 재현해 닫힌 것을 확인했다. ADR-002 9.3의 "보장 범위"(settings에 include한 Gradle Java 프로젝트의 운영 산출물) 서술은 실행 결과와 맞다.
+- **RR2-1 (참고) Gradle 프로젝트 밖 파일 의존은 여전히 범위 밖이다.** 우리 프로젝트가 `implementation(files("…/x.jar"))`처럼 프로젝트 폴더 밖(또는 Java 플러그인이 없는 루트 폴더 아래) jar를 의존하면 그 jar의 `com.autotrade` 밖 패키지 클래스는 `projectOf`가 매핑하지 못해 운영 항목에서 빠지고 `ArchitectureTest` 범위에도 들어오지 않는다(`com.autotrade` 클래스는 "우리 프로젝트가 아닌 위치"로 실패하므로 그쪽은 닫혀 있다). ADR-002 9.3의 "Gradle 밖에서 만든 jar" 한계와 같은 범주라 막지 않는다. 7단계 전에 손볼 거라면 "클래스패스 항목 중 우리 프로젝트도 아니고 Gradle 의존성 캐시(`~/.gradle/caches/modules-2`)도 아닌 jar·폴더가 있으면 실패" 검사를 더하는 방법이 있다 `[추론]`.
+- **RR2-2 (참고) 첫 재검토 RR1(configuration cache 비호환)은 그대로다.** `provider { rootProject.allprojects … }`가 실행 시점에 Project를 읽는다. 지금은 configuration cache를 쓰지 않아 영향 없음.
+- **RR2-3 (참고) 범위 확대로 `ArchitectureTest`의 다른 규칙(결정론·순수 모듈 등)도 우리 모듈의 `com.autotrade` 밖 클래스에 적용된다.** 지금은 그런 클래스가 없고(소유 규칙이 금지), 규칙이 강해지는 방향이라 문제없다.
+
+### 판정(재검토 2)
+승인. 점검표 B 전 항목이 통과 또는 해당 없음이고(B7은 "risk-ops 검토 필요"), 확인 못 함은 없다. 이 판정은 architect 관점(B 점검표)에 한한다. 74a0f41 변경은 보호 테스트를 바꾸므로 머지 전에 risk-ops 재검토, 독립 QA 재검토 승인(현재 QA 원문 판정은 "수정 필요"), 사용자 직접 확인·머지가 따로 필요하다(지침 10·11장).
