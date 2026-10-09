@@ -90,3 +90,34 @@
 ## 사용자 확인 2026-10-09
 - F-2: 사용자 BAE가 QA 스레드에서 2026-10-09 02:12:14Z(UTC)에 "B(\"지금처럼 차단\")을 골랐습니다."라고 답했다. D-035 결정 출처 기록(선택지 B)과 일치한다. F-2는 닫는다.
 - 판정은 바뀌지 않는다(A14 수정 필요). A14 수정 커밋(`5304721`)은 재검토 요청을 받으면 아래에 `## 재검토`로 판정한다.
+
+## 재검토 2026-10-09
+- 대상: PR #19 / 커밋 `10bfbf0` / main(`52ad85f`) 대비 전체 diff. 첫 검토(`98cc10a`) 뒤 바뀐 것: `ArchitectureTest.java`(모듈 조건 추가, 위반 검출 단언 변경), 새 위반 픽스처 `com.autotrade.risk.archfixture.SplitPackageApproveAll`(테스트 소스), ADR-001 표 2줄, D-032 결정 6과 위험과 한계 1줄, 역할 검토 원문. 운영 코드·설정·빌드 파일 변경 없음(`git diff 98cc10a 10bfbf0 --stat`).
+- 요청: 사용자 BAE, 프로젝트 채팅 2026-10-09 02:37:12Z "PR hwan82/autotrade-system#19 검토해줘"
+- 점검표: A 전체 + B1, B6 + 과금 검사
+- 직접 실행한 것:
+  - `./gradlew clean build --offline` (커밋 `10bfbf0`) → **BUILD SUCCESSFUL**. 테스트 320건, 실패 0, 오류 0, 건너뜀 0. `ArchitectureTest` 13/13, `RiskChainTest` 9/9, `BlacklistSnapshotTest` 5/5, `SimulationExperimentRunnerTest` 9/9, `StrategyStudyTest` 4/4, `RealTradingGuardTest` 31/31, `GuardedOrderGatewayTest` 8/8, `RealOrderGatewaysTest` 4/4, `EngineMainTest` 3/3.
+  - GitHub check-runs(02:15 실행): `Gradle build`, `DB schema (PostgreSQL 16)`, `Secret scan and collector boundary` 모두 success(교차 확인용).
+  - F-1 우회 실험 다시 실행(커밋하지 않음, 실험 뒤 삭제하고 `git status` 깨끗함 확인):
+
+| 실험 | 넣은 코드 | 첫 검토 | 재검토 |
+|---|---|---|---|
+| E1 | `autotrade-sim`에 `package com.autotrade.risk;` 승인만 하는 `RiskPolicy` 클래스 | 통과(못 잡음) | **실패(잡음)** `리스크_규칙은_리스크_모듈에만_있다() FAILED` |
+| E2 | `autotrade-sim`에 승인만 하는 람다 상수 | 통과(못 잡음) | 통과(못 잡음). 문서가 이제 이 한계를 정확히 적는다(아래 A14) |
+| E3 | `autotrade-sim`에 익명 클래스 | 실패(잡음) | 실패(잡음) |
+| E4 | E1과 같은 코드, 저장소를 이름이 `autotrade-risk`인 상위 폴더 아래에 체크아웃(`git worktree`) | - | 빌드 실패(잡음). 모듈 판정이 경로에 `/autotrade-risk/`가 있는지만 보므로 이 경로에서는 운영 규칙 `리스크_규칙은_리스크_모듈에만_있다`는 통과했지만, 자기 검사 `규칙은_위반을_실제로_잡아낸다`가 "Expected size: 2 but was: 1"로 실패해 빌드가 막혔다. 닫힌 쪽 실패라 보호 공백은 아니다(아래 참고 1) |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1~A13 | 첫 검토와 같음 | 운영 코드 변경 없음. A11: 보호 테스트 `ArchitectureTest`는 강화만 됐다(조건 추가 `ArchitectureTest.java:177`, 위반 단언 1건→2건 `:289`, 새 픽스처 1건 검출 `:291`, 실제 구현 `RiskChain` 통과 단언 `:294`). 삭제·약화 없음 |
+| A14 | **통과** | D-032 결정 6과 위험과 한계가 실제 규칙과 일치한다: 이름 있는 클래스·익명 클래스는 패키지와 클래스 파일 위치(모듈) 둘 다 검사(`ArchitectureTest.java:158-177`, 실험 E1·E3), 람다·메서드 참조는 제외(실험 E2)라고 적고, 7단계 실전 파이프라인은 `RiskPolicy` 인터페이스를 받지 말고 `RiskChain`만 받아야 한다고 선행 조건을 남겼다. ADR-001 표 2줄도 같은 내용. 첫 검토 실패 사유는 닫혔다 |
+| B1 | 통과 | 위 `./gradlew clean build --offline` 성공 |
+| B6 | 통과 | 새 동작(모듈 조건)에 위반 픽스처 검출 테스트와 정상 구현 통과 테스트가 있다(`:289-294`) |
+| 과금 8.1~8.5 | 통과 | 추가 변경은 테스트 코드와 문서뿐이다. 외부 호출·설정 키·반복 경로·실전 주문 경로 변경 없음(`git diff 98cc10a 10bfbf0 --stat`) |
+
+### 참고 (판정 조건 아님)
+1. 모듈 판정 `FROM_RISK_MODULE`(`ArchitectureTest.java:158-165`)은 클래스 파일 경로 문자열에 `/autotrade-risk/`가 있는지로 본다. 저장소 상위 폴더 이름이 `autotrade-risk`면 모든 클래스가 리스크 모듈로 판정된다(E4). 자기 검사가 이를 잡아 빌드는 실패하지만 실패 메시지가 원인을 바로 알려 주지 않는다. `RiskPolicy.class`(또는 `RiskChain.class`)의 클래스 위치와 같은 산출물인지 비교하는 방식이 더 단단하다. architect에 변경 제안으로 넘길 만하다.
+2. 첫 검토의 위험 R-1(보유 종목 블랙리스트 등록 시 경고·긴급 알림 미구현), R-2(계좌 불일치 시 손절도 조용히 거절), R-4(`BlacklistSnapshot.EMPTY` 실전 사용 금지·실험 메타 지문 기록 없음)는 그대로다. 7단계에서 이 체인을 실전 경로에 연결하는 PR 전에 닫아야 한다.
+
+### 재검토 판정
+**승인**. 점검표 A 전 항목 통과 또는 해당 없음, B1·B6 통과, 과금 검사 5항목 통과, 확인 못 함 없음. F-2(D-035 결정 출처)는 사용자 확인으로 닫혔다. 실전 관련 PR이므로 머지는 사용자가 직접 한다.
