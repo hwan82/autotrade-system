@@ -54,3 +54,59 @@
 - 항목: 점검표 밖 수정 필요 1(활성화 기한 확인 위치에 OPEN 전이 직전·`beginActivation` 직전 추가, 기준 시각을 실험실 기한보다 앞서게, 합격 테스트 명시), 2(행 3을 판정 가능한 조건으로 바꾸고 4장 위험 표 갱신), 3(행 2에 해시 반복 상한 재검토 추가).
 - 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 5(A3·A4·A5·A6·A13). 코드 변경이 없어 계좌 훼손 경로를 새로 만들지는 않는다. 수정 필요 사유는 7단계 합격 기준으로 쓰일 문구가 QA·architect가 지적한 결함을 다 막지 못하는 점이다.
 - 고친 뒤 같은 파일 아래 `## 재검토 <날짜>`로 다시 검토한다.
+
+## 재검토 2026-10-09
+- 대상: PR #22 / 커밋 60d66e6008140ccf02008dac3f9ae251e14db2c5 / main 대비 diff(merge-base 42acc86, origin/main 9eab2e6). 3개 파일: `docs/adr/ADR-006-real-control-channel.md`(+7 −2: 머리 상태 줄, 4장 위험 표 144행, 6장 표 196-200행), `docs/reviews/pr-22/architect.md`(신규), `docs/reviews/pr-22/risk-ops.md`(신규, 직전 검토 원문)
+- 점검표: A
+- 직접 실행한 것:
+  - scratchpad의 전용 폴더에 저장소를 새로 복제해 60d66e6을 체크아웃하고 `./gradlew build --rerun-tasks --max-workers=2` 실행: **종료 코드 0**. 테스트 결과 XML 집계 378건, 실패 0, 오류 0, 건너뜀 0 (app-engine 48, risk 41, architecture-test 13, control 20, app-lab 97, sim 75, config 29, domain 27, strategy 25, gateway 1, watchdog 1, broker-api 1). `RealTradingGuardTest`, `GuardedOrderGatewayTest`, `ArchitectureTest`, `EngineMainTest`, `EngineCommandHandlerTest` 결과 파일 존재·통과
+  - `git diff --stat origin/main...HEAD -- autotrade-* docs/team docs/decisions docs/spec scripts .github`: 빈 결과(코드·테스트·장애 설계·결정 로그·기획서·CI 무변경)
+  - diff 전체에서 키·토큰·비밀번호·계좌번호·긴 base64 형태 검색: 비밀값 0건(걸린 줄은 모두 `hash-password` 명령 이름, "secrets.json" 파일 이름, 검토 원문 인용)
+  - GitHub REST로 PR #18 상태 확인: `merged: true`, `merged_at 2026-10-09T06:12:40Z`. PR #22는 open, head 60d66e6
+  - 새 문구가 근거로 든 코드 사실 대조: `OperatorAuthenticator.java:26-27`(`MAX_FAILURES` 5, `LOCKOUT` 15분), `EngineCommandHandler.java:174-189`(PANIC은 `lock` 뒤 `confirm`, 거절이면 `lockOnly`로 보호 모드 고정만 하고 청산 생략), `EngineCommandHandler.java:120,138,143,149`(`beginActivation` → `steps.perform` → `failActivation`/`completeStep`), `OperatorPasswordHash.java:28`(`MAX_ITERATIONS` 10,000,000), `ControlServer.java:58,60,153-213,237`(READ_TIMEOUT 5초, STALE_AFTER 10초, 읽기 기한은 `serve` 시작부터, `enqueuedAt`은 요청 읽은 뒤), `ControlServer.java:298-300`(`isListening` 프로브 connect 시간 상한 없음), `LabWebConfiguration.java:35`(실험실 15초), `ControlClient.java:56-66`(실험실 기한은 connect 전부터 흐름). 모두 새 문구와 일치
+
+### 직전 지적 처리 확인
+| 직전 지적 | 처리 | 근거 |
+|---|---|---|
+| 수정 필요 1(a) 기한 확인 위치 | **해소** | ADR-006:196 ① 해시 검증 뒤 `beginActivation` 직전, ② 각 단계 직전, ③ 마지막 단계 뒤 OPEN 전이(`completeStep`) 직전. 코드 순서(`EngineCommandHandler.java:120,138,149`)와 맞는다 |
+| 수정 필요 1(b) 기한 기준 시각 | **해소** | ADR-006:196 (가) 요청에 절대 기한, (나) "엔진 기한 + 요청 읽기 상한(5초) < 실험실 대기 상한" 규칙 중 7단계 설계에서 택일. 지금 `STALE`이 `enqueuedAt` 기준이라는 한계도 적었다. 남은 세부는 아래 참고 1 |
+| 수정 필요 1(c) 합격 테스트 | **해소(부분 보완 권고)** | ADR-006:196 "단계·해시 검증·마지막 단계를 각각 기한 너머로 늦추면 OPEN이 되지 않고 출발 상태로 돌아온다". 실험실 쪽에서 본 끝-끝 테스트는 아래 참고 1 |
+| 수정 필요 2 행 3 판정 가능성, 4장 표 | **해소** | ADR-006:198 (1) 잠금 시 외부 알림, (2) 잠긴 동안 청산 경로 결정(Q 번호로 사용자 질문), 합격 기준 "잠금 상태에서 알림이 나가고 정해진 청산 경로가 장애 테스트로 확인됨". ADR-006:144 영향 칸에 "틀린 확인 5번으로 15분 잠금 반복 시 PANIC은 보호 모드 고정까지만(청산 서비스 거부)" 추가. 코드(`OperatorAuthenticator.java:26-27`, `EngineCommandHandler.java:182-185`)와 일치 |
+| 수정 필요 3 해시 반복 상한 | **해소** | ADR-006:197 "`MAX_ITERATIONS` 10,000,000, 직접 시험 약 10.8초를 활성화 기한 안에 들도록 낮출지 재검토" |
+| 참고 1 출처 표기 | **해소** | 196·197·199행에 `../reviews/claude-project-thread-r930sh/architect.md` 링크와 "재검토 3 참고 1/2" 명시 |
+| 참고 2 프로브 connect 상한 | **해소** | ADR-006:200 신규 행(`ControlServer.isListening`). 출처 "architect 재검토 2 참고"는 링크가 없으나 architect 원문 178·232행에 해당 내용 있음 |
+| 참고 3 ADR 상태 "제안" | **해소** | ADR-006:3 "채택 (PR #18 머지, 2026-10-09 사용자 결정. 이전 상태: 제안)". REST 조회로 PR #18 머지 확인. 결정 로그 번호는 여전히 pm-lead 후속 |
+| 참고 4 사용자 머지 대상 | 유지 | 아래 참고 4 |
+
+### 점검표 A
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드 무변경(위 diff --stat 빈 결과). `EngineMainTest#실전_계좌가_설정돼_있어도_기동_직후_모두_OFF다`, `#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다`, `RealTradingGuardTest` 포함 전체 통과. 새 문구 중 기본 OFF·재기동 OFF를 바꾸는 내용 없음. 196행은 OPEN 전이 조건을 더 좁힌다 |
+| A2 | 통과 | `ArchitectureTest` 무변경, 13건 통과. 196행 ①~③은 OPEN으로 가는 경로에 확인을 더하는 방향이며 우회 경로를 만들지 않는다 |
+| A3 | 해당 없음 | 증권사 선택·주문 전송 코드·문서 변경 없음. 198행의 "잠긴 동안 청산 경로"는 7단계 결정 항목이고 이 PR은 경로를 정하지 않는다 |
+| A4 | 해당 없음 | 주문 재전송 경로 변경 없음 |
+| A5 | 해당 없음 | 주문 생성·멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유·청산 코드 변경 없음 |
+| A7 | 통과 | 큐·토큰 버킷·계좌 격리 코드 무변경. 계좌 간 영향이 걸린 잠금 남용(모든 계좌의 PANIC 청산이 한 잠금에 묶임, `OperatorAuthenticator` 단일 인스턴스)이 4장 144행 위험과 6장 198행 완료 조건(알림 + 청산 경로 + 장애 테스트)으로 기록됨 |
+| A8 | 통과 | 프로세스 분리 코드 무변경. 197행(해시 계산을 모니터 밖으로)과 196행 (나) 규칙은 엔진이 실험실 설정을 읽지 않고 상수 관계로만 맞추는 방향이라 프로세스 독립을 해치지 않는다 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절·PANIC 보호 모드 코드 무변경, `EngineCommandHandlerTest` 통과. 144행 갱신은 보호 모드 고정이 잠금과 상관없이 된다는 사실(`EngineCommandHandler.java:180-181`)을 유지해 적었다 |
+| A10 | 통과 | diff 비밀값 검색 0건(위). 해시 리터럴·계좌번호·키 없음 |
+| A11 | 통과 | 테스트 파일 변경 없음, 보호 테스트 전부 통과. 새 동작 없음. 7단계 완료 조건 3행(196·197·198)에 합격 기준이 적혀 있다(197행은 재검토 항목이라 테스트 대신 결과 기록) |
+| A12 | 통과 | `docs/team/broker-and-fault-design.md` 무변경. 198행은 장애 테스트를 추가하는 방향이며 대응표 14종·O1~O8·장애 테스트 8종의 전제를 바꾸지 않는다 |
+| A13 | 해당 없음 | 시장별 계산 없음 |
+| A14 | 통과 | 동작 변경 없음. 상태 "채택"은 PR #18 머지 사실과 일치(REST 확인). 결정 로그 번호 미부여는 ADR 문구대로 pm-lead 후속이고, 198행은 새 결정을 Q 번호로 묻겠다고 적어 결정 로그 절차와 맞다 |
+
+### 점검표 밖 발견
+
+#### 참고 (판정 사유 아님, 7단계 설계·검토 때 반영)
+1. **196행 (나) 규칙의 기준점과 끝-끝 합격 기준.** `[사실]` 실험실 15초는 connect 전부터 흐르고(`ControlClient.java:56-66`), 엔진의 읽기 기한 5초는 `serve` 시작(수락 뒤)부터다(`ControlServer.java:199-200`). 수락 전 대기(커널 backlog, 수락 스레드 지연)와 OPEN 뒤 응답 쓰기 시간은 "엔진 기한 + 5초" 식에 들어 있지 않다. `[추론]` (나)를 고르면 엔진 기한의 시작점을 "연결 수락 시각"으로 명시하고 실험실 상한과의 차이에 여유(예: 수 초)를 두어야 한다. (가)를 고르면 두 프로세스가 같은 기준 시계를 써야 하는데, 벽시계는 NTP 보정으로 뛸 수 있으니 엔진이 받은 즉시 남은 시간으로 바꿔 단조 시계로 재는 방식이 안전하다. 또한 합격 테스트에 "실험실 클라이언트가 시간 초과(`EngineUnreachableException`)로 끝난 뒤에는 엔진 쪽 OPEN 0건"을 끝-끝으로 하나 넣으면 위 틈까지 한 번에 확인된다. 7단계 risk-ops 검토에서 이 두 가지를 합격 조건으로 본다.
+2. **architect 승인 원문의 대상 커밋.** `docs/reviews/pr-22/architect.md`의 승인은 84e69de(4행 추가) 기준이고, 60d66e6에서 바뀐 머리 상태 줄·4장 144행·6장 196-200행에 대한 architect 재검토는 저장소에 없다. 문서뿐이고 내용은 위에서 대조했지만, 지침 11장대로 architect 재검토를 받아 같은 파일에 덧붙이는 것이 맞다.
+3. **200행 출처 링크 없음.** "architect 재검토 2 참고"에 원문 링크가 없다(실제 위치: `docs/reviews/claude-project-thread-r930sh/architect.md` 178·232행). 다음에 표를 고칠 때 붙이면 된다.
+4. 이 PR은 실전 경로(#18)의 7단계 합격 기준과 위험 표를 정하는 문서라 지침 10장에 따라 사용자 확인 후 머지 대상으로 본다. 이 판정은 그 확인을 대신하지 않는다.
+
+### 판정
+판정은 **승인**
+
+- 직전 수정 필요 1·2·3과 참고 1·2·3이 모두 해소됐다(위 표). 점검표 A는 실패 0, 확인 못 함 0, 해당 없음 5(A3·A4·A5·A6·A13). 코드·테스트·장애 설계 변경이 없어 계좌 훼손 경로를 새로 만들지 않고, 추가 문구는 OPEN 전이 조건을 좁히고 PANIC 청산 방해 위험을 기록하는 방향이다. 전체 빌드 378건 통과.
+- 참고 1~4는 승인 조건이 아니다. 단, 참고 2(architect 재검토)는 지침 11장 절차 항목이다.
