@@ -196,7 +196,7 @@ class ConfigLoaderTest {
         assertThat(Arrays.stream(RuntimeConfig.class.getRecordComponents()).map(c -> c.getName()))
                 .containsExactly("marketData", "lab", "notification", "brokers", "realTrading");
         assertThat(Arrays.stream(RuntimeConfig.RealTrading.class.getRecordComponents()).map(c -> c.getName()))
-                .containsExactly("accounts", "accountNumbers");
+                .containsExactly("accounts", "accountNumbers", "operatorPasswordHash");
         assertThat(Arrays.stream(RuntimeConfig.RealAccount.class.getRecordComponents()).map(c -> c.getName()))
                 .containsExactly("id", "broker", "market");
     }
@@ -311,7 +311,7 @@ class ConfigLoaderTest {
                         "brokers/kiwoom/app-key", "brokers/kiwoom/app-secret",
                         "brokers/toss/app-key", "brokers/toss/app-secret",
                         "notification/slack/webhook-url", "notification/kakao/access-token",
-                        "real-trading/account-numbers/*");
+                        "real-trading/account-numbers/*", "real-trading/operator-password-hash");
     }
 
     private void runtime(String json) throws IOException {

@@ -109,6 +109,7 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.sim", "autotrade-sim"),
             Map.entry("com.autotrade.broker", "autotrade-broker-api"),
             Map.entry("com.autotrade.config", "autotrade-config"),
+            Map.entry("com.autotrade.control", "autotrade-control"),
             Map.entry("com.autotrade.notification", "autotrade-notification-jar"),
             Map.entry("com.autotrade.monitor", "autotrade-monitor-agent-jar"),
             Map.entry("com.autotrade.app.engine", "autotrade-app-engine"),

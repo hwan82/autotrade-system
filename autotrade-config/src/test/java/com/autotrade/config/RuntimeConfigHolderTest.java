@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 class RuntimeConfigHolderTest {
 
     private static final String FAKE_SECRET = "PLACEHOLDER-NOT-A-REAL-KEY-7f3a";
+    private static final String FAKE_HASH = "PLACEHOLDER-OPERATOR-HASH";
 
     @TempDir
     Path dir;
@@ -98,7 +99,7 @@ class RuntimeConfigHolderTest {
         assertThatThrownBy(() -> holder.update(c -> new RuntimeConfig(
                         c.marketData(), c.lab(), c.notification(), c.brokers(),
                         new RuntimeConfig.RealTrading(
-                                List.of(new RuntimeConfig.RealAccount("KIS-1", BrokerId.KIS, Market.KRX)), Map.of()))))
+                                List.of(new RuntimeConfig.RealAccount("KIS-1", BrokerId.KIS, Market.KRX)), Map.of(), null))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("CFG-05");
         assertThat(paths.runtimeFile()).doesNotExist();
@@ -112,12 +113,14 @@ class RuntimeConfigHolderTest {
                 loader.defaults().brokers(),
                 new RuntimeConfig.RealTrading(
                         List.of(new RuntimeConfig.RealAccount("KIS-US-1", BrokerId.KIS, Market.US)),
-                        Map.of("KIS-US-1", Secret.of(FAKE_SECRET))));
+                        Map.of("KIS-US-1", Secret.of(FAKE_SECRET)), Secret.of(FAKE_HASH)));
 
         new RuntimeConfigStore(paths).save(withAccount);
 
-        assertThat(Files.readString(paths.runtimeFile())).contains("KIS-US-1").doesNotContain(FAKE_SECRET);
-        assertThat(Files.readString(paths.secretsFile())).contains(FAKE_SECRET).doesNotContain("\"broker\"");
+        assertThat(Files.readString(paths.runtimeFile())).contains("KIS-US-1").doesNotContain(FAKE_SECRET)
+                .doesNotContain(FAKE_HASH);
+        assertThat(Files.readString(paths.secretsFile())).contains(FAKE_SECRET).contains(FAKE_HASH)
+                .doesNotContain("\"broker\"");
         LoadedConfig reloaded = loader.load(paths);
         assertThat(reloaded.warning()).isEmpty();
         assertThat(reloaded.config()).isEqualTo(withAccount);

@@ -8,6 +8,7 @@
 - 외부 파일이 깨지면(문법 오류, 모르는 키, 범위 위반) 그 파일 없이 기동하고 어느 파일이 문제인지 경고한다(값은 경고에 남기지 않음).
 - 실시간 변경: **즉시** = 다음 틱부터 반영, **재기동** = 해당 프로세스 재기동 필요, **재연결 절차** = 미체결·보유 확인 → 세션 종료 → 재연결(해당 작업에서 구현 전까지 UI 변경 불가).
 - 비밀값(🔒)은 화면·로그·REST 응답에 `****`로만 나온다.
+- 실전 엔진은 설정 폴더 안 `run/engine-control.sock`에 실전 제어 명령 채널을 열고 `run/engine.lock`을 잡는다(ADR-006). 같은 설정 폴더로 엔진을 두 번 띄우면 두 번째는 뜨지 않는다. 단, 엔진이 도는 중에 `run` 폴더나 `engine.lock`을 지우면 이 보호가 사라지므로 지우지 않는다(ADR-006 4장). 실험실 운영 화면은 같은 설정 폴더를 써야 엔진에 닿는다. 소켓 경로가 약 100자를 넘으면 엔진이 뜨지 않으니 설정 폴더는 짧은 경로에 둔다.
 
 | 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
 |---|---|---|---|---|---|---|
@@ -26,6 +27,7 @@
 | `brokers.{kis,kiwoom,toss}.app-secret` 🔒 | 문자열 | 빈 값 | 키움은 secret-key, 토스는 secret을 여기에 넣는다 | 재연결 절차 | 증권사 플러그인 | |
 | `real-trading.accounts` | 배열 | `[]` | 항목은 `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가)·`broker`(KIS·KIWOOM·TOSS)·`market`(KRX·US)만. **활성화 키(`enabled` 등)는 없다**: 넣으면 그 파일 전체를 쓰지 않는다(CFG-02). RealTradingGuard는 기동 시 모든 계좌 OFF | 계좌 교체 절차(CFG-05, 구현 전까지 UI 변경 불가) | 실전 엔진 | [ADR-002](../adr/ADR-002-real-trading-guard.md), D-010, D-016 |
 | `real-trading.account-numbers.<id>` 🔒 | 문자열 맵 | `{}` | 키는 `accounts`의 id만 쓴다. 목록에 없는 항목은 그 항목만 무시하고 건수만 경고한다(값·별칭은 남기지 않음). 값이 없는 계좌는 활성화할 수 없다 | 계좌 교체 절차 | 실전 엔진(증권사 플러그인에 전달) | [ADR-002](../adr/ADR-002-real-trading-guard.md) 2.4 |
+| `real-trading.operator-password-hash` 🔒 | 문자열 | 빈 값 | `pbkdf2-sha256$<반복>$<salt>$<해시>`(반복 100,000 이상, 기본 600,000). `autotrade-engine hash-password`로 만든다(비밀번호 15자 이상). 반복은 100,000~10,000,000. 평문 비밀번호는 어디에도 두지 않는다. 비었거나 형식이 틀리면 실전 활성화와 PANIC 청산을 거절한다(PANIC의 보호 모드 고정은 한다). 모든 프로세스가 secrets.json을 함께 읽으므로 이 값도 4개 프로세스 메모리에 올라간다. **바꾼 뒤에는 실전 엔진과 실험실을 모두 다시 시작한다**: 실험실은 기동 때 읽은 값과 디스크가 다르면 설정 화면 저장을 `CONFIG_CHANGED_ON_DISK`(409)로 막는다(ADR-005 저장 안전장치) | 재기동(실전 엔진, 실험실) | 실전 엔진(2차 확인 검증) | [ADR-006](../adr/ADR-006-real-control-channel.md) 2.4, RSK-01 |
 
 ## 실험실 프로세스 속성 (Spring, `application.yml`)
 설정 파일 계층(runtime-config.json)이 아니라 실험실 프로세스 기동 속성이다. 실행 중에 바뀌지 않는다.
@@ -58,6 +60,9 @@
   "brokers": {
     "kiwoom": { "app-key": "<KIWOOM_APP_KEY>", "app-secret": "<KIWOOM_SECRET_KEY>" }
   },
-  "real-trading": { "account-numbers": { "KIS-US-1": "<ACCOUNT_NUMBER>" } }
+  "real-trading": {
+    "account-numbers": { "KIS-US-1": "<ACCOUNT_NUMBER>" },
+    "operator-password-hash": "<OUTPUT_OF_autotrade-engine_hash-password>"
+  }
 }
 ```
