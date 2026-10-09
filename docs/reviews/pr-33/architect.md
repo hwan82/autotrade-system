@@ -29,3 +29,33 @@
 - F1: 단축코드 형식만 다른 줄을 실패에서 분리해 1% 판정에서 빼거나 `Symbol` 형식으로 받아들이고, ADR-003:150 문구와 맞추며, 7자 코드 줄이 1%를 넘게 섞인 경우의 테스트를 추가할 것.
 - F2·F3는 같은 수정 커밋에서 고치기를 권고(머지를 막지는 않음). F4·F5는 참고.
 - 실전 경로를 건드리지 않아 risk-ops 검토 대상이 아니다. F1 수정 뒤 architect 재검토 "승인"이면 지침 10장에 따라 Claude 머지 대상이다.
+
+## 재검토 2026-10-09 (대상 커밋 6a93cc1)
+- 대상: PR #33 / 커밋 6a93cc1 / main 대비 diff 전체(`git diff origin/main...HEAD`, merge-base 84f6678, 24개 파일. 위 원문 이후 변경은 `git diff 8c4e6db 6a93cc1` 7개 파일 +78 −17이고 `docs/reviews/`는 건드리지 않음)
+- 점검표: B
+- 직접 실행한 것: `./gradlew build --rerun-tasks`(6a93cc1) → `BUILD SUCCESSFUL in 1m 36s`. 테스트 XML 집계 548건, 실패·오류·건너뜀 0. 보호 테스트 `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `ArchitectureTest` 15, `ModuleOwnershipTest` 13 통과. `SymbolMasterUpdateTest` 6(+1), `KisSymbolMasterTest` 7(+1), `ExperimentControllerTest` 12, `SymbolNameViewsTest` 2 통과. 커밋 메시지는 사실로 받지 않고 코드로 대조함
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 직접 실행 `./gradlew build --rerun-tasks` → BUILD SUCCESSFUL, 548건 실패·오류·건너뜀 0 |
+| B2 | 통과 | 새 의존 없음. `ExperimentViews`에 slf4j 로거 추가(:26-27, :35)는 app-lab 안이라 경계 문제 없음. `ArchitectureTest`·`ModuleOwnershipTest` 통과 |
+| B3 | 통과 | `KisSymbolMaster.Parsed`에 `skippedLines` 추가(공개 레코드, 호출처는 `KisSymbolMaster.java:142`와 `SymbolMasterUpdate`뿐). ADR-003:150 문구를 "형식은 맞고 단축코드만 6자리가 아닌 줄은 제외로 따로 세고 1% 판정에 넣지 않음"으로 고쳐 구현과 일치. REST 응답 모양 무변경 |
+| B4 | 통과 | sim·strategy 변경 없음. 총수익률은 이제 완료 Run이면 `RunMetrics.totalReturn()`을 그대로 씀(ExperimentViews.java:245-255) |
+| B5 | 통과 | 실패 Run의 총수익률 직접 계산은 `MathContext(40, HALF_EVEN)`로 나눈 뒤 6자리 HALF_EVEN(ExperimentViews.java:252-256)으로 `MetricsCalculator.compute`(:36-37)와 같은 규칙. 금액 `double` 없음 |
+| B6 | 통과 | F1 새 테스트 `KisSymbolMasterTest#형식은_맞고_단축코드만_6자리가_아닌_줄은_실패가_아니라_제외로_센다`(7자·9자 코드 → 제외 2, 실패 0), `SymbolMasterUpdateTest#단축코드만_6자리가_아닌_줄은_1퍼센트를_넘게_섞여도_제외로_세고_통과한다`(Q 코드 50줄/전체 54줄 → 종료 0, 이름 4건). 기존 테스트 `검증에_실패한_줄은_세고_사유만_남기며_빈_줄은_건너뛴다`의 입력 `Q500001X`→`00-593`은 실패 정의가 "6자리 아님"에서 "영숫자 아님"으로 바뀐 데 맞춘 것이고 단언(실패 4, 사유에 "단축코드")은 그대로이며 `skippedLines` 0 단언이 더해짐(약화 아님). F2의 경계값 테스트는 추가되지 않음(권고였으며 지표 값을 그대로 쓰게 되어 이중 반올림 경로 자체가 사라짐) |
+| B7 | 해당 없음 | 실전 주문 경로, Guard, 블랙리스트, 리스크 한도, 장애 대응, 증권사 주문 연동, 보호 테스트 변경 없음 |
+| B8 | 통과 | 수정 diff 전문 확인. 비밀값 없음. 새 warn 로그는 Run ID와 예외 문자열만 남김(ExperimentViews.java:227) |
+
+### 지적 항목 처리
+- F1 해소: `validate`는 단축코드를 "비어 있지 않은 ASCII 영숫자"로만 보고(KisSymbolMaster.java:155), 구조 검증을 통과했지만 `[0-9A-Z]{6}`이 아닌 줄은 `skipped++`(:129-130)로 따로 센다. `SymbolMasterUpdate`는 `failed`만 1% 기준에 쓰고(:77), 제외 건수를 보드별·총계로 출력한다. 표준코드 `KR` 12자리 검사는 남아 있어 꼬리 길이가 바뀌는 형식 변경은 여전히 실패로 잡힌다 `[추론]`.
+- F2 해소: 위 B4·B5.
+- F3 해소: warn 로그 추가(ExperimentViews.java:227).
+- F5 해소: `summaryCard(s)`로 인자 정리(experiments.js:161, :173).
+- F4: 처리 안 함(참고 항목이라 머지를 막지 않음).
+
+### 새 발견
+1. [참고] 1% 판정의 분모 `lines`에 제외 줄이 들어간다(SymbolMasterUpdate.java:77, `totalLines()`가 `skippedLines` 포함). 제외 줄이 많을수록 허용 실패 수가 조금 늘어난다(예: 제외가 15%면 실질 기준 약 1.18%). 형식 변경 탐지 목적에 비해 영향이 작아 머지를 막지 않으나, 다음에 손댈 때 분모를 `lines - skipped`로 바꾸기를 권고.
+2. [참고] 제외 줄도 소문자 단축코드처럼 `Symbol` 형식(`[A-Z0-9.]`)에 안 맞는 경우까지 "제외"로 들어간다. 이름표 용도라 영향 없음.
+
+## 판정
+승인
