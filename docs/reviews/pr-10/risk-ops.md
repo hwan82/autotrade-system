@@ -242,3 +242,75 @@
 
 ### 판정
 승인. 점검표 A에 실패와 확인 못 함이 없다. 직전 승인 뒤 변경(CI 2건, main 병합)은 실전 안전을 약화하지 않는다. 병합에서 main의 보호 규칙·테스트가 빠지지 않았음을 원본 대조와 전체 빌드로 확인했다. 이 PR은 증권사 플러그인, 장애 전환, 보호 시세 경로를 건드리는 실전 관련 PR이다. 지침 10·11장과 D-031에 따라 Claude가 머지하지 않는다. 사용자가 직접 확인하고 독립 QA 검토를 거쳐 머지한다.
+
+## 재검토 2026-10-09 (5차)
+- 대상: PR #10 / 커밋 e35b29f (현재 head, `git diff origin/main...e35b29f` 전체, 103개 파일 +8144 −17). 직전 risk-ops 승인(67e9ebf) 뒤 변경은 다음과 같다.
+  - 검토 원문 2건: 0e9c2ad architect, 0b306be 독립 QA `qa.md`(수정 필요)
+  - fd6892c: main 병합(#21 f6a49be, #22 9576a19)과 QA 지적 반영. OWNERS, 발급 실패 보호, 토스 클라이언트 제거
+  - e35b29f: 국내 실시간 요금 조사 문서와 Q-015 갱신
+  - 분기점이 현재 origin/main(9576a19)과 같다. 그래서 두 점 diff와 세 점 diff가 같다(직접 대조)
+- 점검표: A
+- 직접 실행한 것:
+  - e35b29f를 별도 작업 트리(detached)로 꺼내 `./gradlew build --rerun-tasks --no-daemon` 실행 → BUILD SUCCESSFUL, 104개 작업 전부 실행. 테스트 516건, 실패·오류·건너뜀 0.
+    - 모듈별 건수: risk 55, architecture-test 28, app-engine 48, app-gateway 19, marketdata 65, broker-kis 8, broker-kiwoom 13, broker-api 1, config 30, control 20, domain 31, sim 75, strategy 25, app-lab 97, app-watchdog 1
+    - `ModuleOwnershipTest#클래스패스는_settings의_모든_Java_모듈을_담고_표와_같다`, `#운영_클래스는_패키지를_소유한_모듈에만_있다` 통과(QA B1에서 실패하던 테스트)
+  - main 대비 이 PR의 변경 중 main 소유 파일은 3개다: `ModuleOwnershipTest.java`(OWNERS 2줄 추가만), `ci.yml`(게이트웨이 백그라운드 점검, 4차와 같음), `config-keys.md`.
+    - `autotrade-risk`·`autotrade-config`·`autotrade-control`·`autotrade-app-engine`·`autotrade-domain/.../order`·`autotrade-sim` 변경 0. 병합으로 main 코드가 바뀐 곳이 없다
+  - 약화 점검: main 대비 삭제 파일 0. 테스트 파일에서 지운 줄은 ArchitectureTest 주석 1줄뿐. Java·Gradle 파일에 `@Disabled`·`assume*` 추가 0
+  - 탐침(일회용 테스트, 실행 후 삭제): 운영과 같은 `BackoffPolicy.standard()`, 무응답 90초로 두 경우를 각각 24시간 돌렸다. 결과는 아래 표와 같다. QA 탐침은 수정 전에 600초 24회(하루 약 2,880회)였다
+  - 변이 실험(되돌림): `scheduleReconnect`의 `|| issuanceFailed`를 지우면 `StreamingMarketDataSourceTest` 18건 중 1건이 실패한다. 새 하한을 테스트가 실제로 잡는다
+
+| 탐침 경우 | 600초 발급 시도 | 24시간 발급 시도 | `credentialsRejected()` |
+|---|---|---|---|
+| 일반 발급 실패(`IllegalStateException`) | 11회 | 1,441회 | false |
+| 자격 증명 거절(`CredentialsRejectedException`) | 11회 | 1,441회 | true |
+
+### 이전 검토에서 놓친 것
+2차 재검토(N1)에서 인증 실패 루프는 WebSocket 접속 뒤의 `LOGIN_FAILED` 경로만 확인했다. 발급 자체가 실패하는 경로(`openingMessages()` 예외 → `onConnectFailed`)는 확인하지 않았다. 독립 QA가 이 경로의 무제한 재발급을 찾았다(qa.md 과금 8.4, R-1). 이번에는 두 경로를 모두 탐침했다.
+
+### 독립 QA 지적 반영 확인 (risk-ops 범위)
+| QA 지적 | 결과 | 근거 |
+|---|---|---|
+| B1 / R-4 병합 후 `ModuleOwnershipTest` 실패 | 반영 | OWNERS에 `com.autotrade.broker.kiwoom`·`kis` 추가(ModuleOwnershipTest.java:111-112), 위 두 테스트 통과. 보호 테스트 모듈의 다른 규칙·픽스처는 main과 같다(diff는 이 PR의 플러그인 규칙·픽스처 추가와 주석 1줄뿐) |
+| 8.4 / R-1 발급 실패 무제한 재시도 | 반영 | (1) 발급 실패면 원인과 무관하게 다음 발급까지 60초를 둔다(`issuanceFailed`, StreamingMarketDataSource.java:227, 237, 362). (2) HTTP 401·403과 키움 `return_code`≠0은 `CredentialsRejectedException`이다(KisApprovalClient.java:45, KiwoomTokenClient.java:46, 56). 접속 후 인증 실패와 같은 카운터로 세서 3회면 ERROR와 DEGRADED다(:228-230, `countAuthFailure` :307). (3) 테스트는 `#인증_준비_실패도_재연결_대기로_넘기고_다음_발급은_1분_뒤다`(:197)와 `#발급이_자격_증명_거절로_이어져도_발급은_1분에_한_번이고_3회면_거부로_본다`(:213)다. 앞의 것은 기존 테스트로, 1초 재시도를 고정하던 단언을 60초 하한 단언으로 강화했다. 거절 판정과 그 밖의 실패를 구분하는지, 예외 메시지에 비밀값이 없는지는 `KisStreamProtocolTest#접속키_발급이_401_403이면_자격_증명_거절로_알리고_그_밖의_실패는_구분한다`와 `KiwoomStreamProtocolTest#토큰_발급_실패_메시지에_비밀값이_없다`가 확인한다 |
+| A14 / 8.3 / R-3 토스 클라이언트와 D-033 | 반영(제거) | `autotrade-broker-toss` 모듈 삭제, settings.gradle.kts에 없음. 토스 HTTP 호출 코드 0(grep). 게이트웨이 `TOSS -> Optional.empty()`(GatewayMain.java:125)는 그대로. ADR-003 머리말·2.1·대안표와 D-028에 "D-033 이전 처리와 함께 연결 PR"로 기록 |
+| 8.1·8.2 국내 실시간 요금 | risk-ops 판정 범위 밖(과금 검사는 QA 8장) | 조사 문서 1.5절(e35b29f)은 결론을 `확인 못 함`으로 남겼다. Q-015에 "키 등록 전 선행, 사용자 결정"으로 올렸다. 키가 없으면 호출 경로가 없다는 점은 코드로 확인했다(GatewayMain.java:118-119). 판정은 QA 재검토가 한다 |
+| R-2 게이트웨이 기동 뒤 실전 계좌 등록 | 미반영(7단계 전 필수, 기존 N3·S1과 같음) | 2단계에는 주문 코드가 없어 지금 계좌 피해 경로는 없다 |
+
+### 점검표 A (e35b29f 기준)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 이 PR의 Guard·설정 기본값 코드 변경 0. `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`, `#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `#자동으로_올라가는_경로는_없다`, `GuardedOrderGatewayTest#OFF_계좌로는_출구를_만들_수_없다`, `ArchitectureTest#Guard를_올리는_조작은_명령_채널에서만_한다` 재실행 통과 |
+| A2 | 통과 | `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`·`GATEWAY_HAS_NO_ORDER_PORT` 본문은 main과 같다(이 PR의 diff는 주석 1줄). `실전_주문_출구는_Guard_팩토리만_연다`, `시세_게이트웨이는_주문_포트를_모른다`, `규칙은_위반을_실제로_잡아낸다` 통과. 남은 두 플러그인의 `orderGateway`는 `Optional.empty()`, 주문 엔드포인트 0 |
+| A3 | 통과 | 주문 전환 경로 없음. 시세 재배분은 구독만 옮긴다 |
+| A4 | 해당 없음 | 이 PR은 주문 타임아웃·조회 로직을 바꾸지 않는다 |
+| A5 | 해당 없음 | 이 PR은 멱등 키를 바꾸지 않는다 |
+| A6 | 해당 없음 | 이 PR은 주문·청산·복구·RiskChain을 바꾸지 않는다 |
+| A7 | 해당 없음 | 이 PR은 주문 큐·토큰 버킷·킬스위치를 바꾸지 않는다 |
+| A8 | 통과 | 엔진 금지 의존에 게이트웨이 유지, 엔진은 플러그인 모듈 비의존, `프로세스_진입점끼리_참조하지_않는다` 통과. 실전 계좌가 설정된 증권사 키는 게이트웨이가 쓰지 않는다(`GatewayMainTest` 통과). 발급 실패 재시도는 이제 분당 1회 상한 |
+| A9 | 통과 | 보호 수단 약화 없음. 토스 클라이언트 제거는 엔진에 연결되지 않은 코드를 뺀 것이라, 기존 보호 경로가 줄지 않는다. 보호 시세 경로가 0개라는 점은 이전 R4(7단계 전 필수)에 이미 있다. `SourcePlannerTest`·`GatewayTest` 보유 종목 이관·공백 테스트 통과 |
+| A10 | 통과 | 새 예외 메시지는 증권사 이름, HTTP 상태, `return_code`만 담는다. 401·403·500·return_code 경우 모두 키·시크릿이 메시지에 없음을 테스트가 확인한다. 로그는 예외 클래스 이름만 남긴다(StreamingMarketDataSource.java:223) |
+| A11 | 통과 | 보호 테스트(ArchitectureTest, ModuleOwnershipTest, Guard 테스트) 삭제·약화 없음. ModuleOwnershipTest는 OWNERS 추가만이다. 토스 테스트 삭제는 시험 대상 코드와 함께 뺀 것이고 보호 테스트가 아니다. 발급 실패 하한·거절 판정에는 실패 경우 테스트가 있고, 변이 실험으로 잡는 것을 확인했다 |
+| A12 | 통과 | 장애표 7번(토큰 만료·인증 실패 → DEGRADED, 알림)이 이제 발급 실패 경로에서도 지켜진다. 3회 거절이면 ERROR와 DEGRADED다(탐침 `credentialsRejected()=true`). 일반 발급 실패는 DEGRADED로 세지 않지만 DISCONNECTED라 배분에서 빠진다 |
+| A13 | 통과 | 시장 차이 처리 변경 없음. `ExchangeCalendarTest`, `MarketRulesImplTest`, `금액에_실수형을_쓰지_않는다` 통과 |
+| A14 | 통과 | D-028 행과 ADR-003 2.1 "토큰" 항목이 발급 실패 60초 하한, 거절 판정, 키움 `return_code` `[가정]`까지 코드와 일치한다. 토스 제외는 D-033과 맞게 기록됐다. Q-015에 `return_code` 의미 확인과 요금 사용자 결정이 올라갔다 |
+
+### 점검표 밖 발견 (5차, 모두 권장, 막지 않음)
+- T1. 자격 증명이 거부된 뒤에도 발급 시도가 분당 1회로 끝없이 이어진다(탐침 24시간 1,441회).
+  - 허브는 DEGRADED 소스를 배분에서 빼지만 소스 자체의 재연결은 멈추지 않는다.
+  - 한국투자 재발급 제한이 1분 1회라면 하한에 딱 붙어 돈다 `[가정]`(H4, Q-015).
+  - 거부된 키가 반복 시도로 증권사 측 이용 제한을 받을 수 있다 `[추론]`.
+  - 실전 계좌 키는 게이트웨이가 쓰지 않으므로 계좌 피해 경로는 없다. 키를 넣는 것도 Q-015의 사용자 결정이다.
+  - 권장: `credentialsRejected()`가 참이 된 뒤에는 발급 간격을 늘린다(예: 60초부터 두 배씩, 상한 30분). 또는 설정이 바뀔 때까지 발급을 멈추고 감시 경보로 넘긴다. 이전 P1(거부 상태 자동 해제)과 함께 7단계 전에 정한다. 과금 폭주 판정(8.4)의 최종 판단은 QA 재검토에 맡긴다.
+- T2. 키움 `return_code`≠0을 전부 자격 증명 거절로 센다 `[가정]`.
+  - 레이트리밋 같은 다른 오류도 3회면 DEGRADED가 된다.
+  - 이것은 소스를 덜 쓰는 보수적 방향이고, 성공하면 풀리므로 안전하다.
+  - Q-015 실측에서 코드표를 확인해 인증 계열만 남긴다.
+- T3. 일반 발급 실패(네트워크 등)도 60초 하한이다. 그래서 토큰 갱신 시점의 일시 장애가 실시간 공백을 최대 60초 늘린다. 공백은 DataGap으로 남고 보유 종목은 다른 소스로 재배분되므로 계좌 위험은 없다. 7단계에 이 시세가 보호 경로가 되면 "갱신 실패 시 기존 토큰이 유효하면 기존 토큰으로 접속"을 검토한다.
+- 이전 권장 R4~R8, N3·N4, P1·P2, Q1·Q2, S1(= QA R-2)은 여전히 7단계 전 필수 목록이다.
+
+### 판정
+승인. 점검표 A에 실패와 확인 못 함이 없다.
+- 독립 QA의 수정 필요 중 실전·장애 범위인 B1, 8.4(R-1), A14(R-3)는 코드와 테스트로 반영됐고 직접 확인했다.
+- 과금 8.1·8.2는 이 점검표 밖이다. QA 재검토와 사용자 결정(Q-015)이 판정한다.
+- 이 PR은 실전 관련 PR이다. 지침 10·11장과 D-031에 따라 Claude가 머지하지 않는다. 사용자 직접 확인과 독립 QA 재검토(qa.md의 수정 필요 해소)를 거쳐 머지한다.
