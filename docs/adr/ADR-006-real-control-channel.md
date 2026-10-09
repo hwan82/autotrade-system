@@ -193,6 +193,10 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 | 엔진이 지워진 소켓·잠금 파일을 스스로 확인해 다시 만들고 긴급 알림, 지울 수 없는 단일 실행 보장 | architect + risk-ops | 7단계 완료 조건 |
 | 장애 테스트 후보: "엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 기동 차단, 화면 가상 표시 없음" (broker-and-fault-design.md 7장 목록 반영은 Q-018, 사용자 결정) | risk-ops | 7단계 |
 | 하향 명령(내리기·PANIC)용 연결 자리 예약, 기다리는 PANIC의 시간 상한, 감시 프로세스(MON) 점검 항목에 명령 채널 연결 포화 추가 | risk-ops | 7단계 완료 조건 |
+| 처리기가 활성화 각 단계 직전에 요청 접수 후 경과 시간을 다시 확인해 실험실 대기 상한을 넘기면 출발 상태로 되돌리기(지금 `STALE`은 대기열 시간만 봄, ControlServer). 화면이 "응답 없음"을 보인 뒤 실전이 열리는 경로 차단 (QA [pr-18](../reviews/pr-18/qa.md) 1, architect 재검토 3 참고 1) | risk-ops + architect | 7단계 완료 조건 |
+| 비밀번호 해시 계산을 검증기 잠금(`OperatorAuthenticator` `synchronized`) 밖으로 빼서 검증 중 STATUS·잠금 조회가 막히지 않게 하기 (QA 2, architect 참고 1) | architect | 7단계 완료 조건 |
+| 같은 OS 사용자 프로그램이 틀린 확인을 반복해 잠금을 걸면 PANIC이 보호 모드 고정까지만 되는 경로의 대책 검토 (QA 3) | risk-ops | 7단계 완료 조건 |
+| `hash-password` 안내 문구를 config-keys.md와 맞추기, 잠금 파일을 `NOFOLLOW_LINKS`로 열기, PID 쓰기 실패 시 빈 잠금 파일 처리 (QA 4·5, architect 참고 2) | architect | 7단계 |
 | 머지 후 기획서 RSK-13 문구 갱신(1단계는 2차 확인 전, Q-017 결과) | pm-lead(autotrade-spec-keeper) | 머지 직후 |
 
 ## 7. 사용자 결정 항목(이 PR 머지로 결정)과 질문
