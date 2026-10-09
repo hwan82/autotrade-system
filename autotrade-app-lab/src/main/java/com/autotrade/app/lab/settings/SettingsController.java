@@ -300,6 +300,8 @@ public class SettingsController {
             real.add(secretItem("real-trading.account-numbers." + a.id(), number, false, "계좌 교체 절차",
                     a.id() + " 계좌번호"));
         }
+        real.add(secretItem("real-trading.operator-password-hash", c.realTrading().operatorPasswordHash(), false,
+                "실전 엔진 재기동", "실전 활성화·PANIC SELL 2차 확인용 운영자 비밀번호 해시(ADR-006). 실전 엔진 hash-password로 만든다"));
         groups.add(new Group("real-trading", "실전 계좌", real));
         return new SettingsView(groups);
     }
