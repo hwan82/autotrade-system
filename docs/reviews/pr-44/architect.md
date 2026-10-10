@@ -66,3 +66,29 @@
 
 ## 판정 (재검토)
 승인
+
+## 재검토 2026-10-10 (2차: main 병합·R4)
+- 대상: PR #44 / head `67a2a07`(병합 커밋, 부모 `3846085`·main `c710520`) / main(`c710520`) 대비 `git diff origin/main...HEAD` 전체(41개 파일, +1618 −86). 2점 diff(`origin/main HEAD`)와 3점 diff가 같아 main 전체를 포함한다.
+- 점검표: B
+- 직접 실행한 것:
+  - 공유 작업 트리에서 `./gradlew build --rerun-tasks`와 `./gradlew clean build`를 돌렸을 때 두 번 다 **실패**했다(`:autotrade-broker-api:compileJava`가 marketdata 클래스를 찾지 못함, `:autotrade-app-lab:compileJava` `NoSuchFileException …/autotrade-sim/build/classes/…/ClockMode.class`). 소스 파일은 있었고, 같은 디렉터리에서 다른 Gradle 프로세스가 동시에 돌고 있었다(`ps`). 그래서 다른 빌드가 출력 폴더를 지운 것으로 보고 `[추론]` 코드 결함으로 판정하지 않았다.
+  - 그래서 `67a2a07`을 별도 worktree로 고정해 `./gradlew build --no-daemon --rerun-tasks`를 돌렸다: **BUILD SUCCESSFUL in 2m 31s, 117 tasks 모두 실행**, 테스트 678개(실패·오류·건너뜀 0). `verifyProcessIsolation` 4개 프로세스(engine, gateway, watchdog, collector) 통과.
+  - 이번 PR에서 바뀐 것 대조: 지난 승인(`8747b79`) 대비 PR diff 파일 목록에 더해진 것은 `autotrade-app-gateway/build.gradle.kts`, `autotrade-app-watchdog/build.gradle.kts` 둘뿐이다(나머지는 main PR #39 내용이 main 쪽에 이미 있어 PR diff에 나타나지 않음). 충돌 해소 지점(`settings.gradle.kts`, `ModuleOwnershipTest.java`, `ArchitectureTest.java`)의 PR diff는 selection 관련 줄 추가뿐이고 main의 collector 항목은 그대로다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 격리 worktree 빌드 성공(위). 공유 트리 실패는 동시 빌드 간섭으로 판단 `[추론]` |
+| B2 | 통과 | R4 반영: `autotrade-app-gateway/build.gradle.kts:12`, `autotrade-app-watchdog/build.gradle.kts:12`의 `forbiddenProjects`에 `:autotrade-selection` 추가(금지만 늘어남). main의 `:autotrade-app-collector` 금지 항목은 유지. ArchitectureTest·ModuleOwnershipTest 통과 |
+| B3 | 통과 | 이 커밋에서 계약 변경 없음. 지난 재검토의 F2 후속(설정 키 `lab.max-combinations`)은 PR #39가 머지돼 이제 진행할 수 있다. 여전히 후속 과제(권고) |
+| B4 | 통과 | sim·selection 코드 변경 없음. 골든·결정론 테스트 통과 |
+| B5 | 통과 | 금액 변경 없음 |
+| B6 | 통과 | 테스트 삭제·비활성 없음. 678개 통과 |
+| B7 | 해당 없음 | 실전 경로 변경 없음. 프로세스 격리 표는 금지만 더했다(약화 아님) |
+| B8 | 통과 | 바뀐 줄에 비밀값 없음 |
+
+### 남은 권고(차단 아님)
+- 조합 수 상한 128을 설정 키로 옮기는 후속, R3·R5·R6(지난 원문)은 그대로 후속 PR 몫.
+- 같은 작업 트리에서 여러 검토자·작업이 동시에 Gradle을 돌리면 빌드가 엉뚱하게 실패한다. 검토 빌드는 worktree로 격리하길 권한다(과정 권고).
+
+## 판정 (재검토 2차)
+승인
