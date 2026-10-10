@@ -312,6 +312,31 @@ class SelectionCalculatorTest {
         });
     }
 
+    /** 정확히 3% 오른 종가는 수정 계수가 1이 아니어도 0.03이다("3% 정확히는 탈락", PR #45 architect F2b). */
+    @Test
+    void 수익률_경계는_수정_계수가_1이_아니어도_정확하다() {
+        FixtureData d = new FixtureData();
+        d.stock("300001");
+        List<LocalDate> w = d.days.lastN(C_VOL, 40);
+        for (int i = 0; i < 40; i++) {
+            d.bar("300001", w.get(i), i == 39 ? "10929.33" : "10611", i < 20 ? 1000 : 3000, "0.9876543210123");
+        }
+        SelectionResult r = new SelectionCalculator(d).calculate(repoProfile("kr-vol-surge-quiet"), T_VOL);
+        assertThat(eval(r, "300001").values()).containsEntry("gate.01", "3").containsEntry("gate.02", "0.03");
+        assertThat(eval(r, "300001").reasons()).containsExactly("GATE_02");
+    }
+
+    /** 영업이익률이 정확히 1.5배(7/45 → 21/90)면 증가율은 0.5로 GE 0.5를 통과한다(PR #45 architect F2b). */
+    @Test
+    void 영업이익률_증가율_경계는_반올림에_흔들리지_않는다() {
+        FixtureData d = new FixtureData();
+        d.stock("300002").annual("300002", 2022, "R1", LocalDate.of(2023, 3, 10), false, new long[] {45, 7, 100, 10, 90})
+                .annual("300002", 2025, "R2", LocalDate.of(2026, 3, 10), false, new long[] {90, 21, 130, 10, 120});
+        SelectionResult r = new SelectionCalculator(d).calculate(repoProfile("kr-fin-quality-growth"), T1);
+        assertThat(eval(r, "300002").values()).containsEntry("gate.01", "0.5").containsEntry("gate.02", "0.3");
+        assertThat(eval(r, "300002").reasons()).doesNotContain("GATE_01", "GATE_02");
+    }
+
     // ---------------------------------------------------------------- 적용 범위
 
     @Test

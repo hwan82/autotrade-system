@@ -10,7 +10,7 @@
 ## 결정
 
 1. **선정 조건 문법**: `filter.kinds`·`filter.min-price`·`filter.min-bar-days`, `gate.<nn>.{metric,op,value,window|years}`(모두 AND), 선택 `score.{metric,window|years,order}` 한 지표. 모르는 키 거부(`notes.*` 예외). 지표 9종(`op-margin-growth`, `total-assets-growth`, `revenue-growth`, `op-margin`, `debt-ratio`, `market-cap`, `volume-ratio`, `return`, `avg-turnover`). 재무 지표는 KRX만.
-2. **계산 기준**: 선정 기준일 T = `apply_from`, 기준 데이터일 = T의 직전 거래일. 유니버스는 그날 상장 종목(이후 폐지 포함). 일봉 결측은 보간하지 않고 `NO_DATA`. 수정 거래량 = 거래량 ÷ 수정 계수. 값은 `DECIMAL64`(여러 날 합은 `DECIMAL128` 중간 계산) 뒤 `toPlainString`. 조건이 쓰는 입력이 없거나 manifest 수록 기준일이 기준 데이터일보다 이르면(재무는 수집 시각의 현지 날짜) 계산하지 않고 실패하며, 결과 `inputs`의 기준일은 manifest 값을 옮긴다(PR #45 architect F1).
+2. **계산 기준**: 선정 기준일 T = `apply_from`, 기준 데이터일 = T의 직전 거래일. 유니버스는 그날 상장 종목(이후 폐지 포함). 일봉 결측은 보간하지 않고 `NO_DATA`. 수정 거래량 = 거래량 ÷ 수정 계수. 값은 중간 계산 `DECIMAL128`, 마지막에 한 번 `DECIMAL64`로 줄인 뒤 `toPlainString`(경계값 보존, architect F2·F2b). 조건이 쓰는 입력이 없거나 manifest 수록 기준일이 기준 데이터일보다 이르면(재무는 수집 시각의 현지 날짜) 계산하지 않고 실패하며, 결과 `inputs`의 기준일은 manifest 값을 옮긴다(PR #45 architect F1).
 3. **재무 시점 규칙 구현**(MD-10): 사업보고서만, "접수일 < T". 그 연도 가장 늦은 공시 값이 있으면 기본 규칙, 없으면 그 연도를 아직 없는 것으로 보고 직전 사업연도를 씀(대체 규칙, 평가에 표시·건수). 비교 기준 연도 값을 모르면 대체하지 않고 결측.
 4. **순위**: 점수 순(같으면 종목 코드), 점수 없으면 종목 코드 순으로 `max-symbols`까지. 넘친 종목은 `RANK_CUTOFF`.
 5. **예시 프로필**: (가) `kr-fin-quality-growth@1` POSITION·주간·50종목·영업이익률 증가율 순, (나) `kr-vol-surge-quiet@1` SWING·매일·30종목·거래량 비율 순. 조건 값은 D-043 그대로.
@@ -38,6 +38,6 @@
 - 결과의 `selected`와 `passed=true` 평가가 맞는지 보는 일은 결과 파일 코덱 PR의 `MALFORMED` 판정에, ArchUnit 규칙 "실전 엔진은 선정 계산을 쓰지 않는다"는 엔진에 selection 의존을 더하는 PR에 넣는다(architect F5. 지금은 엔진에 그 의존이 없어 Gradle이 막는다).
 
 ## 검증
-- `autotrade-selection` 테스트: (가)(나) 손 계산 골든, 입력 수록 기준일 확인과 실제 스냅샷 폴더 읽기(`SnapshotSelectionDataTest`), 수정 계수가 1이 아닌 거래량 비율 경계, 경계값, 정정 두 갈래, 접수일 당일 미사용, 분할 시가총액, 상장폐지 유니버스, 결정론(같은 입력 같은 해시), 문법 거부, 정규 JSON 고정 문자열.
+- `autotrade-selection` 테스트: (가)(나) 손 계산 골든, 입력 수록 기준일 확인과 실제 스냅샷 폴더 읽기(`SnapshotSelectionDataTest`), 수정 계수가 1이 아닌 거래량 비율·수익률 경계, 영업이익률 증가율 경계, 경계값, 정정 두 갈래, 접수일 당일 미사용, 분할 시가총액, 상장폐지 유니버스, 결정론(같은 입력 같은 해시), 문법 거부, 정규 JSON 고정 문자열.
 - `autotrade-strategy` 테스트: POSITION 검증, 스윙·단타 최대 보유일 키 규칙, 최대 보유일 청산 시점, `random-daily` 결정론·하루 한 번.
 - `autotrade-sim` 테스트: KRX 2026 캘린더(추석·대체공휴일 낀 주)에서 주간 결과 하나가 한 주를 덮고 두 조합이 공유, 매일 갱신 결정론, 저장소 프로필 검사.

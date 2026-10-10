@@ -284,7 +284,7 @@ public final class SelectionCalculator {
     /** 지표 값 또는 결측 사유. */
     private record Value(BigDecimal number, String missing, boolean fallback) {
         static Value of(BigDecimal n, boolean fallback) {
-            return new Value(n.stripTrailingZeros(), null, fallback);
+            return new Value(n.round(MC).stripTrailingZeros(), null, fallback); // 중간 계산은 WIDE, 값은 한 번만 줄인다
         }
 
         static Value missing(String reason, boolean fallback) {
@@ -338,7 +338,12 @@ public final class SelectionCalculator {
         if (prior.signum() == 0) {
             return Value.missing(NO_DATA, false);
         }
-        return Value.of(recent.divide(prior, MC), false);
+        return Value.of(recent.divide(prior, WIDE), false);
+    }
+
+    /** 수정 종가. {@link DailyBar#adjustedClose()}는 DECIMAL64로 줄이므로 비를 낼 때는 넓게 다시 곱한다. */
+    private static BigDecimal adjustedClose(DailyBar b) {
+        return b.close().multiply(b.adjFactor(), WIDE);
     }
 
     private Value periodReturn(Context ctx, int w) {
@@ -346,11 +351,11 @@ public final class SelectionCalculator {
         if (bars == null) {
             return Value.missing(NO_DATA, false);
         }
-        BigDecimal base = bars.get(0).adjustedClose();
+        BigDecimal base = adjustedClose(bars.get(0));
         if (base.signum() <= 0) {
             return Value.missing(NO_DATA, false);
         }
-        return Value.of(bars.get(w).adjustedClose().divide(base, MC).subtract(BigDecimal.ONE, MC), false);
+        return Value.of(adjustedClose(bars.get(w)).divide(base, WIDE).subtract(BigDecimal.ONE, WIDE), false);
     }
 
     private Value avgTurnover(Context ctx, int w) {
@@ -362,7 +367,7 @@ public final class SelectionCalculator {
         for (DailyBar b : bars) {
             sum = sum.add(b.close().multiply(BigDecimal.valueOf(b.volume())), WIDE);
         }
-        return Value.of(sum.divide(BigDecimal.valueOf(w), MC), false);
+        return Value.of(sum.divide(BigDecimal.valueOf(w), WIDE), false);
     }
 
     /** 재무 항목(성장률 계산용). */
@@ -373,7 +378,7 @@ public final class SelectionCalculator {
         if (f.revenue() == null || f.operatingIncome() == null || f.revenue().signum() <= 0) {
             return null;
         }
-        return f.operatingIncome().divide(f.revenue(), MC);
+        return f.operatingIncome().divide(f.revenue(), WIDE);
     }
 
     private static BigDecimal item(FinancialFiling f, FinancialItem item) {
@@ -405,7 +410,7 @@ public final class SelectionCalculator {
         if (f.totalEquity().signum() <= 0) {
             return Value.missing(CAPITAL_IMPAIRED, latest.fallback());
         }
-        return Value.of(f.totalLiabilities().divide(f.totalEquity(), MC), latest.fallback());
+        return Value.of(f.totalLiabilities().divide(f.totalEquity(), WIDE), latest.fallback());
     }
 
     /** 최근 사업보고서 값 ÷ {@code years}개 사업연도 전 값 − 1. */
@@ -431,7 +436,7 @@ public final class SelectionCalculator {
         } else if (then.signum() <= 0) {
             return Value.missing(NO_DATA, fb);
         }
-        return Value.of(now.divide(then, MC).subtract(BigDecimal.ONE, MC), fb);
+        return Value.of(now.divide(then, WIDE).subtract(BigDecimal.ONE, WIDE), fb);
     }
 
     private static List<LocalDate> tail(List<LocalDate> window, int n) {
