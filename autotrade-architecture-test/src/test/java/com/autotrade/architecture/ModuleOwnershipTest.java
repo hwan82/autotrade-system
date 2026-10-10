@@ -105,6 +105,7 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.domain", "autotrade-domain"),
             Map.entry("com.autotrade.marketdata", "autotrade-marketdata"),
             Map.entry("com.autotrade.strategy", "autotrade-strategy"),
+            Map.entry("com.autotrade.selection", "autotrade-selection"),
             Map.entry("com.autotrade.risk", "autotrade-risk"),
             Map.entry("com.autotrade.sim", "autotrade-sim"),
             Map.entry("com.autotrade.broker", "autotrade-broker-api"),
