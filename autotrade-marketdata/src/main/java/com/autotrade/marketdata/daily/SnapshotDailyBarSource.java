@@ -4,14 +4,10 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.daily.QualityReport.Finding;
 import com.autotrade.marketdata.daily.QualityReport.Severity;
-import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.marketdata.rules.InstrumentKind;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -33,14 +29,16 @@ import java.util.TreeSet;
  * <pre>
  * daily_bars.csv:         market,code,date,open,high,low,close,volume,adj_factor
  * instrument_history.csv: market,code,name,kind,board,valid_from,valid_to
+ * listed_shares.csv:      market,code,date,listed_shares   (선택 파일, ADR-008. 이 클래스는 읽지 않는다)
  * </pre>
  */
 public final class SnapshotDailyBarSource implements DailyBarSource {
 
-    static final List<String> BAR_HEADER =
+    public static final List<String> BAR_HEADER =
             List.of("market", "code", "date", "open", "high", "low", "close", "volume", "adj_factor");
-    static final List<String> HISTORY_HEADER =
+    public static final List<String> HISTORY_HEADER =
             List.of("market", "code", "name", "kind", "board", "valid_from", "valid_to");
+    public static final List<String> SHARES_HEADER = List.of("market", "code", "date", "listed_shares");
 
     private final SnapshotManifest manifest;
     private final Map<Symbol, NavigableMap<LocalDate, DailyBar>> bars;
@@ -57,13 +55,9 @@ public final class SnapshotDailyBarSource implements DailyBarSource {
 
     public static SnapshotDailyBarSource load(Path dir) {
         try {
-            ObjectMapper m = new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-            SnapshotManifest manifest = m.readValue(dir.resolve(SnapshotManifest.FILE_NAME).toFile(), SnapshotManifest.class);
-            if (manifest.schemaVersion() != SnapshotManifest.SCHEMA_VERSION) {
-                throw new IllegalStateException("지원하지 않는 스냅샷 스키마 버전: " + manifest.schemaVersion());
-            }
-            List<List<String>> barRows = readVerified(dir, manifest, SnapshotManifest.DAILY_BARS, BAR_HEADER);
-            List<List<String>> histRows = readVerified(dir, manifest, SnapshotManifest.INSTRUMENT_HISTORY, HISTORY_HEADER);
+            SnapshotManifest manifest = SnapshotFiles.readManifest(dir);
+            List<List<String>> barRows = SnapshotFiles.readVerified(dir, manifest, SnapshotManifest.DAILY_BARS, BAR_HEADER);
+            List<List<String>> histRows = SnapshotFiles.readVerified(dir, manifest, SnapshotManifest.INSTRUMENT_HISTORY, HISTORY_HEADER);
             List<DailyBar> allBars = new ArrayList<>(barRows.size());
             for (List<String> r : barRows) {
                 allBars.add(new DailyBar(new Symbol(Market.valueOf(r.get(0)), r.get(1)), LocalDate.parse(r.get(2)),
@@ -103,25 +97,6 @@ public final class SnapshotDailyBarSource implements DailyBarSource {
         } catch (IOException e) {
             throw new UncheckedIOException("스냅샷을 읽을 수 없습니다: " + dir, e);
         }
-    }
-
-    private static List<List<String>> readVerified(Path dir, SnapshotManifest manifest, String name, List<String> header)
-            throws IOException {
-        SnapshotManifest.FileEntry entry = manifest.files().stream().filter(f -> f.name().equals(name)).findFirst()
-                .orElseThrow(() -> new IllegalStateException("manifest에 " + name + " 항목이 없습니다"));
-        Path file = dir.resolve(name);
-        if (!Files.exists(file)) {
-            throw new IllegalStateException("스냅샷 파일이 없습니다: " + name);
-        }
-        String sha = Sha256.ofFile(file);
-        if (!sha.equalsIgnoreCase(entry.sha256())) {
-            throw new IllegalStateException(name + " SHA-256이 manifest와 다릅니다");
-        }
-        List<List<String>> rows = Csv.read(file, header);
-        if (rows.size() != entry.rows()) {
-            throw new IllegalStateException(name + " 행 수가 manifest와 다릅니다: " + rows.size() + " != " + entry.rows());
-        }
-        return rows;
     }
 
     @Override

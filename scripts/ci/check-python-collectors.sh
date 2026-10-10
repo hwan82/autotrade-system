@@ -10,6 +10,8 @@ patterns=(
   '^\s*(import|from)\s+(pykis|mojito|koapy|kiwoom|pykiwoom|python_kis|tossinvest)\b'
   'openapi\.koreainvestment\.com|openapi\.kiwoom\.com|tossinvest\.com|ops:2[0-9]{4}'
   '(app[_-]?key|app[_-]?secret|secret[_-]?key|access[_-]?token|account[_-]?(no|number))\s*[:=]'
+  # MD-11: OpenDART 인증키 쿼리 파라미터. 코드·로그 예시에 키 값을 붙여 쓰지 않는다(자리표시자 <...>는 허용)
+  'crtfc_key\s*[:=]\s*["'"'"']?[A-Za-z0-9]{8,}'
 )
 status=0
 while IFS= read -r -d '' f; do

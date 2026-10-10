@@ -1,0 +1,147 @@
+package com.autotrade.app.collector;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import org.junit.jupiter.api.Test;
+
+/** 손 계산 기대값 골든 테스트(분할, 유상증자 권리락, 거래정지, 상장폐지, 소속부 이동, 상장주식수 변화). */
+class KrxDailySnapshotBuilderTest {
+
+    static final LocalDate D1 = LocalDate.of(2026, 10, 5);
+    static final LocalDate D2 = LocalDate.of(2026, 10, 6);
+    static final LocalDate D3 = LocalDate.of(2026, 10, 7);
+    static final LocalDate D4 = LocalDate.of(2026, 10, 8);
+
+    static KrxDailyRow row(LocalDate d, KrxBoard b, String code, String name, String section, String o, String h, String l,
+            String c, String chg, long vol, long shares) {
+        return new KrxDailyRow(d, b, code, name, section, dec(o), dec(h), dec(l), dec(c), dec(chg), vol, shares);
+    }
+
+    private static BigDecimal dec(String s) {
+        return s == null ? null : new BigDecimal(s);
+    }
+
+    static KrxDaySource source(Map<LocalDate, List<KrxDailyRow>> days) {
+        return new KrxDaySource() {
+            @Override
+            public List<LocalDate> dates() {
+                return List.copyOf(days.keySet());
+            }
+
+            @Override
+            public List<KrxDailyRow> rows(LocalDate date) {
+                return days.getOrDefault(date, List.of());
+            }
+        };
+    }
+
+    static Map<LocalDate, List<KrxDailyRow>> fixture() {
+        Map<LocalDate, List<KrxDailyRow>> m = new TreeMap<>();
+        // 111111: D3에 2:1 분할(전일 종가 10000, 기준가 5000 → 종가 5100, 전일 대비 +100), 주식수 100 → 200
+        // 222222: D2 거래정지(시고저 없음, 거래량 0), D3에 상장폐지(D3이 마지막)
+        // 333333: D4에 코스닥 → 코스피 이전
+        // 444444: D2에 유상증자 권리락(기준가 9000 = 전일 종가 10000의 0.9), D4 유상증자로 주식수 증가(기준가 그대로)
+        m.put(D1, List.of(
+                row(D1, KrxBoard.KOSPI, "111111", "가", "", "9900", "10100", "9800", "10000", "0", 10, 100),
+                row(D1, KrxBoard.KOSPI, "222222", "나", "", "500", "510", "490", "500", "0", 5, 50),
+                row(D1, KrxBoard.KOSDAQ, "333333", "다", "우량기업부", "2000", "2000", "2000", "2000", "0", 1, 30),
+                row(D1, KrxBoard.KOSPI, "444444", "라", "", "10000", "10000", "10000", "10000", "0", 1, 10)));
+        m.put(D2, List.of(
+                row(D2, KrxBoard.KOSPI, "111111", "가", "", "10000", "10000", "10000", "10000", "0", 10, 100),
+                row(D2, KrxBoard.KOSPI, "222222", "나", "", null, null, null, "500", "0", 0, 50),
+                row(D2, KrxBoard.KOSDAQ, "333333", "다", "우량기업부", "2000", "2000", "2000", "2000", "0", 1, 30),
+                row(D2, KrxBoard.KOSPI, "444444", "라", "", "9000", "9100", "8900", "9100", "100", 1, 10)));
+        m.put(LocalDate.of(2026, 10, 3), List.of()); // 휴장일
+        m.put(D3, List.of(
+                row(D3, KrxBoard.KOSPI, "111111", "가", "", "5000", "5200", "4900", "5100", "100", 20, 200),
+                row(D3, KrxBoard.KOSPI, "222222", "나", "", "480", "480", "470", "470", "-30", 9, 50),
+                row(D3, KrxBoard.KOSDAQ, "333333", "다", "우량기업부", "2000", "2000", "2000", "2000", "0", 1, 30),
+                row(D3, KrxBoard.KOSPI, "444444", "라", "", "9100", "9100", "9100", "9100", "0", 1, 10)));
+        m.put(D4, List.of(
+                row(D4, KrxBoard.KOSPI, "111111", "가", "", "5100", "5100", "5100", "5100", "0", 20, 200),
+                row(D4, KrxBoard.KOSPI, "333333", "다", "", "2000", "2000", "2000", "2000", "0", 1, 30),
+                row(D4, KrxBoard.KOSPI, "444444", "라", "", "9100", "9100", "9100", "9100", "0", 1, 12)));
+        return m;
+    }
+
+    record Out(List<List<String>> bars, List<List<String>> history, List<List<String>> shares,
+            KrxDailySnapshotBuilder.Stats stats) {}
+
+    static Out build(Map<LocalDate, List<KrxDailyRow>> days) throws IOException {
+        List<List<String>> bars = new ArrayList<>();
+        List<List<String>> hist = new ArrayList<>();
+        List<List<String>> shares = new ArrayList<>();
+        var stats = KrxDailySnapshotBuilder.build(source(days), bars::add, hist::add, shares::add);
+        return new Out(bars, hist, shares, stats);
+    }
+
+    @Test
+    void 수정_계수는_뒤_이벤트_비율의_곱이다() throws IOException {
+        Out o = build(fixture());
+        // 111111: D3 이벤트 0.5 → D1·D2 계수 0.5, D3·D4 계수 1
+        assertThat(o.bars()).contains(
+                List.of("KRX", "111111", "2026-10-05", "9900", "10100", "9800", "10000", "10", "0.5"),
+                List.of("KRX", "111111", "2026-10-06", "10000", "10000", "10000", "10000", "10", "0.5"),
+                List.of("KRX", "111111", "2026-10-07", "5000", "5200", "4900", "5100", "20", "1"),
+                // 444444: D2 권리락 0.9 → D1만 0.9. 주식수만 늘어난 D4는 이벤트가 아니다
+                List.of("KRX", "444444", "2026-10-05", "10000", "10000", "10000", "10000", "1", "0.9"),
+                List.of("KRX", "444444", "2026-10-06", "9000", "9100", "8900", "9100", "1", "1"));
+        assertThat(o.stats().adjustmentEvents()).isEqualTo(2);
+        // 수정 종가가 분할 전후로 이어진다: 10000 × 0.5 = 5000, 다음 날 5100
+    }
+
+    @Test
+    void 거래정지일은_종가로_채우고_세어_둔다() throws IOException {
+        Out o = build(fixture());
+        assertThat(o.bars()).contains(List.of("KRX", "222222", "2026-10-06", "500", "500", "500", "500", "0", "1"));
+        assertThat(o.stats().haltedBars()).isEqualTo(1);
+        assertThat(o.stats().bars()).isEqualTo(15);
+        assertThat(o.stats().firstDate()).isEqualTo(D1);
+        assertThat(o.stats().lastTradingDate()).isEqualTo(D4);
+    }
+
+    @Test
+    void 상장폐지와_소속부_이동을_구간으로_남긴다() throws IOException {
+        Out o = build(fixture());
+        assertThat(o.history()).containsExactly(
+                List.of("KRX", "111111", "가", "STOCK", "KOSPI", "2026-10-05", ""),
+                List.of("KRX", "222222", "나", "STOCK", "KOSPI", "2026-10-05", "2026-10-07"),
+                List.of("KRX", "333333", "다", "STOCK", "KOSDAQ/우량기업부", "2026-10-05", "2026-10-07"),
+                List.of("KRX", "333333", "다", "STOCK", "KOSPI", "2026-10-08", ""),
+                List.of("KRX", "444444", "라", "STOCK", "KOSPI", "2026-10-05", ""));
+    }
+
+    @Test
+    void 상장주식수는_바뀐_날만_남긴다() throws IOException {
+        Out o = build(fixture());
+        assertThat(o.shares()).containsExactly(
+                List.of("KRX", "111111", "2026-10-05", "100"),
+                List.of("KRX", "222222", "2026-10-05", "50"),
+                List.of("KRX", "333333", "2026-10-05", "30"),
+                List.of("KRX", "444444", "2026-10-05", "10"),
+                List.of("KRX", "111111", "2026-10-07", "200"),
+                List.of("KRX", "444444", "2026-10-08", "12"));
+    }
+
+    @Test
+    void 같은_입력이면_같은_행이다() throws IOException {
+        Out a = build(fixture());
+        Map<LocalDate, List<KrxDailyRow>> shuffled = new TreeMap<>();
+        fixture().forEach((d, rows) -> {
+            List<KrxDailyRow> r = new ArrayList<>(rows);
+            java.util.Collections.reverse(r);
+            shuffled.put(d, r);
+        });
+        Out b = build(shuffled);
+        assertThat(b.bars()).isEqualTo(a.bars());
+        assertThat(b.history()).isEqualTo(a.history());
+        assertThat(b.shares()).isEqualTo(a.shares());
+    }
+}
