@@ -43,3 +43,13 @@ tasks.register<JavaExec>("symbolMaster") {
     mainClass.set("com.autotrade.app.gateway.SymbolMasterUpdate")
     workingDir = rootProject.projectDir
 }
+
+// 녹화일 원본 대조용 키움 정규장 일봉 표(ka11081 조회 TR만, 주문·계좌 API 안 씀). 게이트웨이를 끈 뒤 실행한다.
+// 사용: ./gradlew :autotrade-app-gateway:kiwoomDaily --args="2026-10-12 kiwoom-daily-2026-10-12.md"
+tasks.register<JavaExec>("kiwoomDaily") {
+    group = "verification"
+    description = "키움 REST(ka11081)로 녹화 종목의 KRX 정규장 일봉을 받아 ReplayCheck 대조용 표를 만든다"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.gateway.KiwoomDailyCheck")
+    workingDir = rootProject.projectDir
+}

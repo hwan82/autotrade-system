@@ -87,7 +87,7 @@ class KiwoomPluginTest {
         p.marketData(Market.KRX).orElseThrow().subscribe(Set.of(Symbol.krx("005930")), events::add);
         p.liveSource().orElseThrow().start();
 
-        assertThat(connectedTo).hasToString("wss://api.kiwoom.com:10000/api/dostk/websocket");
+        assertThat(connectedTo).hasToString("wss://api.kiwoom.com:10000/api/websocket");
         handler.onText("{\"trnm\":\"LOGIN\",\"return_code\":0}");
         assertThat(p.status()).isEqualTo(BrokerStatus.ACTIVE);
         assertThat(sent.get(1)).contains("\"trnm\":\"REG\"").contains("005930");
