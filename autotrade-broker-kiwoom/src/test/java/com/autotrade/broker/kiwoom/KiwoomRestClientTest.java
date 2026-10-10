@@ -38,7 +38,7 @@ class KiwoomRestClientTest {
 
     /** 호출마다 앞으로 가는 시계. */
     private static final class StepClock extends Clock {
-        Instant now = Instant.parse("2026-10-10T07:00:00Z");
+        Instant now = Instant.parse("2026-10-08T07:52:09Z"); // 토큰 예시 만료(2026-10-09 08:37 KST) 전
 
         @Override
         public ZoneId getZone() {
