@@ -116,3 +116,39 @@
 승인
 
 참고: 실전 관련 PR(프로세스 격리, 자원 정지 순서)이다. 지침 10·11장에 따라 독립 QA를 받은 뒤 사용자가 직접 확인하고 머지한다. Q-041은 사용자 결정 대기다.
+
+## 재검토 2026-10-10 (3차)
+- 대상: PR #39 / 커밋 8deb727 / main(cf3759a) 대비 diff 전체. 2차 재검토(7cc5941) 뒤 바뀐 것은 `git diff 7cc5941..8deb727`(21개 파일)이다. 독립 QA 보고서 `docs/reviews/pr-39/qa.md`의 F1·F2와 R3~R5를 반영했다. 주요 변경: `DailyBarQualityCheck.checkSnapshot`(품질 리포트를 날짜 순으로 읽어 일봉 전체를 메모리에 올리지 않음), `CollectorMain.finishKrxSnapshot`(정리를 리포트보다 먼저, 재무 스냅샷은 정리 대상에서 뺌), 호출 기록 위치를 `<설정 폴더>/collector-state`로 옮김, `--max-calls` 상한을 약관 한도로 묶음, `KrxDailySnapshotBuilder` 구간별 수정 계수, CI `scripts/ci/check-collector-keys.sh`.
+- 점검표: A
+- 직접 실행한 것:
+  - 작업 폴더를 함께 쓰지 않도록 `/tmp/claude-0/review-riskops`에 복제해 8deb727을 체크아웃하고 `./gradlew build --no-parallel --max-workers=1 --no-build-cache`를 돌렸다. BUILD SUCCESSFUL in 3m 32s, 112개 작업 모두 실행, EXIT 0. 모듈별 결과(tests/failures/errors/skipped): `:autotrade-risk:test` 55/0/0/0(`RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8), `:autotrade-architecture-test:test` 29/0/0/0(`ArchitectureTest` 16), `:autotrade-app-engine:test` 48/0/0/0(`RealOrderGatewaysTest` 4), `:autotrade-app-collector:test` 56/0/0/0(`CollectorScaleTest` 1, `CollectorMainTest` 13, `RunGuardTest` 6), `:autotrade-marketdata:test` 79/0/0/0(`SnapshotDailyBarSourceTest` 12). 다른 모듈도 실패 0·건너뜀 0.
+  - 같은 복제본에서 `scripts/ci/check-collector-keys.sh`는 EXIT 0, `scripts/ci/check-python-collectors.sh`도 EXIT 0이었다.
+  - `git diff --name-only cf3759a...8deb727`에서 실전 쪽 모듈 변경은 engine·gateway·watchdog의 `build.gradle.kts`(수집기를 빌드 격리 목록에 추가)뿐이고, 지운 파일은 없다. 실전 프로세스 운영 코드는 `marketdata.daily`·`marketdata.financial`·`DailyBarQualityCheck`를 참조하지 않는다(grep 0건). `SnapshotDailyBarSource`의 행 파싱을 `bar`·`periods`로 뽑아낸 것은 동작을 바꾸지 않는 리팩터링이고 기존 테스트를 통과했다.
+  - 이 파일의 앞 내용은 바뀌지 않았다(`git diff 7cc5941..8deb727`에서 이 파일의 삭제 줄 0).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·설정·테스트 변경 없음, `RealTradingGuardTest` 31건 통과, `COLLECTOR_READS_ONLY_ITS_SECRETS` 유지. 새 호출 기록 위치 `collector-state`는 설정 폴더 아래 별도 폴더이고 `runtime-config.json`·`secrets.json`을 열지 않는다(`CollectorMain.Options.budgetDir`) |
+| A2 | 통과 | ArchitectureTest 변경 없음(16건 통과). `GuardedOrderGatewayTest` 8건, `RealOrderGatewaysTest` 4건 통과. 의존과 빌드 격리 목록은 그대로다 |
+| A3 | 통과 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 경로 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 통과 | 계좌 큐·버킷·킬스위치 변경 없음. 수집기 하루 상한은 `--cache-dir`를 바꿔도 합산되고(`budgetDir`), `--max-calls`가 약관 한도를 넘지 못한다(`CollectorMain.Options.parse`, KRX 10,000·OpenDART 20,000). 증권사 버킷과 무관하다 |
+| A8 | 통과 | QA F1 해소를 확인했다. 앞 검토들에서 내가 "남은 위험"(품질 리포트 전 기간 적재)으로만 둔 부분이 실측상 2GB 힙에서 OOM이었고, 그 때문에 F2 대응(스냅샷 정리)이 기본 배치에서 한 번도 돌지 않았다는 QA 지적이 맞았다. 수정: ① 정리를 리포트보다 먼저 한다(`finishKrxSnapshot`). ② 리포트는 날짜 순 스트리밍 검사라 메모리가 행 수와 무관하다(`DailyBarQualityCheck.checkSnapshot`). ③ 하루를 넘길 때마다 `guard::checkSession`을 불러, 앞 재검토 R1의 "리포트 단계는 도중에 멈추지 않음"도 해소됐다. 검증: `CollectorScaleTest#전_기간_규모에서도_정리와_품질_리포트가_힙_상한_안에서_끝난다`가 별도 JVM `-Xmx128m`에서 120만 행으로 정리와 리포트 완료를 확인하고, 같은 힙에서 예전 방식이 `OutOfMemoryError`인 것도 대조로 확인한다(통과). 장 시간 보호, 힙 2GB, 디스크 20GB 확인은 그대로다 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. A8대로 수집기가 실전 자원을 먼저 내주는 전제가 기본 배치에서도 실제로 성립한다 |
+| A10 | 통과 | 테스트 가짜 값을 `SECRETKEY`에서 `TESTKEY`로 바꿨고 단언은 같다(`ApiCallerTest`). 새 CI 검사 `check-collector-keys.sh`가 저장소 전체(검토 원문 제외)에서 `crtfc_key`·`crtfc-key`·`auth-key`·`AUTH_KEY` 값 패턴을 막고, 직접 실행해 EXIT 0이었다. `.github/workflows/ci.yml`에 단계를 추가했다 |
+| A11 | 통과 | 지운 테스트·건너뛰는 테스트 없음. 바뀐 기대값은 강화 쪽이다. `KrxDailySnapshotBuilderTest`는 재사용 코드의 새 회사 분할이 옛 회사 일봉에 곱해지지 않는지 행 단위로 더 확인하고(QA R5), `adjustmentEvents` 기대값이 0에서 1이 된 것은 테스트 입력에 분할을 더했기 때문이다. 새 동작마다 테스트가 있다(`CollectorScaleTest`, `CollectorMainTest` 2건 추가, `SnapshotDailyBarSourceTest` 3건 추가) |
+| A12 | 통과 | 장애표·5.2·장애 테스트 변경 없음. 전제는 수집기 자체 보호로 유지되고 Q-041은 사용자 결정 대기다 |
+| A13 | 해당 없음 | 미국 주문 경로 변경 없음 |
+| A14 | 통과 | D-051 ⑤(정리는 일봉만, 리포트 스트리밍), ADR-008, runbook, 기획서 MD-11(CI 검사 추가)이 코드와 일치한다 |
+
+### 남은 위험 (판정에 영향 없음)
+- KRX 캘린더가 2026-12-31까지라는 점(앞 재검토 R2)과, 실험실 DB에만 적힌 일봉 스냅샷 참조를 보관 규칙이 보지 못한다는 점(R3, 운영 규칙으로만 막음)은 그대로다.
+- 디스크 여유는 여전히 시작할 때와 스냅샷 쓰기 전에만 본다. 이번 수정으로 기본 배치에서 정리가 실제로 돌게 되어 누적 위험은 줄었다.
+- 검토자 메모: 1~2차 재검토에서 품질 리포트 메모리를 실측하지 않고 "영향은 제한된다"로 판단했는데, 그 판단이 틀렸다. 앞으로 자원 보호 항목(A8)은 실제 규모 테스트나 실측을 근거로만 통과를 준다.
+
+## 판정 (3차 재검토)
+승인
+
+참고: 실전 관련 PR(프로세스 격리, 자원 정지 순서)이다. 독립 QA의 재판정을 받은 뒤 사용자가 직접 확인하고 머지한다(지침 10·11장). Q-041은 사용자 결정 대기다.

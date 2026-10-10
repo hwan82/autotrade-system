@@ -55,3 +55,42 @@
 
 ## 판정
 수정 필요(G1 스냅샷 보관 규칙이 기본 배치에서 동작하지 않음, B7 risk-ops 재검토 원문 필요)
+
+## 재검토 2026-10-10 (3차, 커밋 8deb727)
+- 대상: PR #39 / 브랜치 claude/project-thread-vip8tu / 커밋 8deb727 / main 대비 diff 전체(`git diff origin/main...HEAD`). 2차 승인(7cc5941, [architect.md](architect.md) `## 재검토 2026-10-10 (2차)`) 뒤 바뀐 것은 `git diff 7cc5941..8deb727`이다. 두 커밋(2ff4310 검토 원문, 7f4f44a QA 보고서 [qa.md](qa.md))과 8deb727(QA F1·F2, R3·R4·R5 반영)이 들어왔다. 코드는 `CallBudget`, `CollectorMain`, `KrxDailySnapshotBuilder`, `SnapshotRetention`, marketdata `DailyBarQualityCheck`(새 `checkSnapshot`), `SnapshotDailyBarSource`(행 변환 메서드 분리)가 바뀌었다. 테스트 5개가 바뀌거나 추가됐다(`CollectorScaleTest`·`KrxScaleProbe` 신규). 그 밖에 CI 단계 1개와 스크립트 `scripts/ci/check-collector-keys.sh`가 새로 들어왔고, ADR-008·runbook·결정 로그 D-051·기획서 1줄이 바뀌었다.
+- 점검표: B
+- 원문 위치: 요청에 따라 이 파일 아래에 덧붙였다(앞 내용은 고치지 않음).
+- 직접 실행한 것:
+  - 작업 폴더를 함께 쓰지 않도록 별도 복제본 `/tmp/claude-0/review-architect`(8deb727)에서 `./gradlew build --rerun-tasks --no-daemon --no-parallel --max-workers=1`을 돌렸다. 결과는 **BUILD SUCCESSFUL, EXIT 0**, 112 tasks 모두 실행이다. 결과 XML 합계는 tests=612, failures=0, errors=0, skipped=0이다(수집기 56, marketdata 79, ArchitectureTest+ModuleOwnershipTest 29). `CollectorScaleTest#전_기간_규모에서도_정리와_품질_리포트가_힙_상한_안에서_끝난다`는 14.9초 걸려 통과했다. 이 테스트는 128MB 자식 JVM에서 120만 행 스냅샷으로 옛 스냅샷 정리와 리포트를 끝내고, 같은 힙에서 예전 전체 적재 방식은 `OutOfMemoryError`로 끝나는지도 함께 확인한다.
+  - 같은 복제본에서 `bash scripts/ci/check-collector-keys.sh` EXIT 0, `bash scripts/ci/check-python-collectors.sh` EXIT 0.
+  - 2차 원문이 2ff4310에 손대지 않은 채 커밋됐는지 확인했다: `git diff 7cc5941 8deb727 -- docs/reviews/pr-39/architect.md`에 지운 줄 0개.
+  - `checkSnapshot`과 기존 `check`의 규칙이 같은지 코드로 대조했다. DUPLICATE_BAR는 두 쪽 모두 같은 종목·같은 날짜 두 번째 행을 세고 `checkRow`·이전 행 갱신을 건너뛴다. UNADJUSTED_JUMP는 종목별 직전 유효 행 기준이다. MISSING_BAR는 그 시장에 일봉이 하나라도 있는 날이면서 상장 구간이 덮는 날만 보고, 일봉이 한 번도 없는 종목은 빼는데, 기존 쪽은 `bySymbol` 루프로, 새 쪽은 `seenEver`로 같은 효과를 낸다. 정렬 규칙도 같다. 무작위 이상 자료로 두 방식 결과를 비교하는 테스트(`SnapshotDailyBarSourceTest`)와 날짜 순·해시·행 수 거부 테스트가 있고 통과했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 별도 복제본에서 직접 실행 EXIT 0, 612건 실패 0·건너뜀 0(8deb727) |
+| B2 | 통과 | 모듈 의존·ArchUnit·`processIsolation` 변경 없음. 수집기는 marketdata의 공개 메서드 `DailyBarQualityCheck.checkSnapshot`만 새로 쓴다. `SnapshotDailyBarSource.bar`·`periods`는 패키지 내부 메서드다 |
+| B3 | 통과 | 공개 API 추가 `DailyBarQualityCheck.checkSnapshot(Path, Runnable)`: 전제(날짜 오름차순)와 결과 동치는 ADR-008 2.6에 있다. 호출 기록 위치 변경(`<설정 폴더>/collector-state/budget/`)은 ADR-008 2.3과 runbook 3·5장에 있다. `--max-calls` 상한(KRX 10,000, OpenDART 20,000)은 ADR-008 2.3과 runbook에 있다. 재무 스냅샷을 정리 대상에서 뺀 것은 ADR-008 2.7, runbook 5.1, D-051 ⑤에 있다. CI 단계 추가는 `.github/workflows/ci.yml`에 있다. 설정 파일 키와 DB 스키마 변경 없음 |
+| B4 | 통과 | 수정 계수 구간 나누기(`KrxDailySnapshotBuilder`)는 `TreeSet`·`TreeMap`과 거래일 순번 기준이라 결정론적이다. 같은 입력이면 같은 행이 나오는 테스트가 통과한다. 리포트 발견 정렬은 기존과 같다. 골든 테스트 변경 없음, 통과 |
+| B5 | 통과 | 계수 계산은 `BigDecimal`·`MathContext.DECIMAL64` 그대로다 |
+| B6 | 통과 | QA F1은 실제 규모 비교 테스트(`CollectorScaleTest`)와 결과 동치·거부 테스트로 덮였다. F2는 `CollectorMainTest`가 재무 스냅샷을 지우지 않는 경우를 확인한다(diff에서 확인). R5는 `KrxDailySnapshotBuilderTest`가 재등장 뒤 이벤트가 옛 구간에 곱해지지 않는지 확인한다. 지우거나 끈 테스트는 없다. `ApiCallerTest` 변경은 호출 기록 위치를 맞춘 것뿐이고 검증 내용은 그대로다 |
+| B7 | risk-ops 검토 필요 | 실전 엔진·게이트웨이·감시의 빌드 격리와 자원 보호(A8·A12, Q-041)에 걸린 PR이다. 7cc5941 기준 risk-ops 2차 재검토(승인)는 2ff4310에 커밋돼 있다. 8deb727 기준 risk-ops 3차 재검토(판정 승인)는 이 재검토를 마무리할 때 작업 트리의 [risk-ops.md](risk-ops.md)에 덧붙어 있었고 아직 커밋 전이다(검토자가 `git diff`로 확인). 그 절이 커밋되어야 이 커밋 기준 A 점검표 검토가 갖춰진다. 독립 QA([qa.md](qa.md)) 판정도 수정 필요로 남아 있어 QA 재검토가 필요하다. 지침 10·11장에 따라 머지는 사용자가 한다 |
+| B8 | 통과 | 새 CI 검사 `check-collector-keys.sh`가 저장소 전체에서 수집기 키 값 모양(`crtfc_key`, `"crtfc-key"`, `"auth-key"`, `AUTH_KEY`)을 검사한다(검토 원문 제외). 직접 실행 EXIT 0. 새 출력 메시지에 키 없음 |
+
+### QA 지적 처리 확인
+| QA 항목 | 결과 | 근거 |
+|---|---|---|
+| F1 품질 리포트 OOM, 정리 미동작 | 해결 | `finishKrxSnapshot`이 정리를 먼저 하고 그다음 `DailyBarQualityCheck.checkSnapshot`으로 날짜 순 스트리밍 검사를 한다. 메모리는 종목 수·발견 수에 비례한다. 날짜마다 `guard::checkSession`을 불러 리포트 단계도 보호 구간에서 멈춘다(QA R2 일부 해소). 실제 규모 비교 테스트 통과. 실험실이 `SnapshotDailyBarSource.load`로 읽을 때의 전체 적재 한계는 ADR-008 4장에 남는다(sim-engine 변경 제안) |
+| F2 재무 스냅샷 복원 불가 | 해결 | `dart-financials`는 `--keep-snapshots`를 줘도 정리하지 않고 그렇게 출력한다. ADR-008 2.7, runbook 5.1, `SnapshotRetention` 주석을 "일봉만 복원 가능"으로 고쳤다 |
+| R3 호출 한도 우회 | 해결 | 호출 기록을 설정 폴더 기준(`collector-state`)으로 옮겨 `--cache-dir`를 바꿔도 합산된다. `--max-calls`는 1 이상 하루 한도 이하만 받는다 |
+| R4 CI 패턴 범위 | 해결 | `check-collector-keys.sh`와 CI 단계 추가 |
+| R5 코드 재사용 시 새 회사 이벤트 | 해결 | 재등장일부터 구간을 나눠 구간별로 누적 계수를 계산한다(`segmentStarts`, `cumulative.floorEntry(d)`) |
+| R6 캘린더 수록 범위 | 그대로 | 안전한 쪽 실패. 후속 과제 |
+
+### 점검표 밖 발견 (모두 권고, 머지를 막지 않음)
+- **K1. OpenDART `--max-calls` 상한 20,000**: 하루 단위인지가 `[가정]`인 "일반적으로 20,000건"을 그대로 상한으로 받는다(`CollectorMain.DART_DAILY_LIMIT`). ADR-008 4장은 "상한을 절반으로 두어 여유"라고 적었는데, 사용자가 20,000까지 올릴 수 있다. 과금은 아니지만(QA 8장), 키 정지 위험을 줄이려면 상한을 기본값(10,000)과 같게 두거나 runbook에 근거를 적기를 권한다.
+- **K2. 호출 기록이 설정 폴더 기준이라 `--config-dir`를 바꾸면 다시 나뉜다**: 같은 키를 다른 설정 폴더에 두고 돌리면 합산되지 않는다. 키 값의 해시를 기록 파일 이름에 넣으면 폴더와 상관없이 키 단위로 합산할 수 있다. 실사용에서 드문 경우라 권고만 한다.
+- **K3. 앞 재검토 I1·I2는 그대로다**: 실험실이 `experiments/`에 스냅샷 ID를 남기지 않는 문제(일봉 정리 시 DB 참조만 있는 실험의 스냅샷이 지워짐, 같은 범위로 다시 만들면 복원 가능)와, `--report-dir`·`--experiments-dir`이 같을 때의 문제.
+
+### 판정
+승인
