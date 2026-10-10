@@ -21,7 +21,7 @@ import java.util.Set;
  * 토스 플러그인(D-053: 읽기 전용 조회와 현재가 폴링만). 키가 없으면 아무것도 만들지 않고 NOT_CONFIGURED로 남는다.
  *
  * <ul>
- *   <li>실시간(WebSocket, D-024 2순위)은 아직 없다. 실시간 명세(AsyncAPI)를 받아 {@code TossStreamProtocol}을 더할 때
+ *   <li>실시간(WebSocket, D-024 2순위)은 아직 없다. 토큰 소유(Q-042)를 정하고 {@code TossStreamProtocol}을 더할 때
  *       {@code REALTIME_QUOTE}를 선언한다. 그전까지 {@link #marketData}는 빈 값이다.</li>
  *   <li>주문·잔고 능력은 7단계 risk-ops 작업이다. {@link #orderGateway}는 항상 빈 값이다.</li>
  *   <li>어느 프로세스도 아직 이 플러그인을 띄우지 않는다. 토스 토큰은 클라이언트당 1개라 토큰을 가질 프로세스를 정한 뒤

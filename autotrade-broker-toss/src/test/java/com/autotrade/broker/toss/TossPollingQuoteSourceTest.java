@@ -43,7 +43,7 @@ class TossPollingQuoteSourceTest {
         LastPrice samsung = out.get(Symbol.krx("005930"));
         assertThat(samsung.price()).isEqualByComparingTo(new BigDecimal("71000"));
         assertThat(samsung.priceTime()).isEqualTo(Instant.parse("2026-10-10T00:29:58Z"));
-        assertThat(samsung.receivedAt()).isEqualTo(clock.instant());
+        assertThat(samsung.receivedAt()).isEqualTo(T0); // 국내 묶음을 받은 시각(미국 묶음 전 한도 대기로 시계가 간다)
         assertThat(samsung.sourceId()).isEqualTo("TOSS-POLL");
         assertThat(out.get(Symbol.krx("000660")).price()).isEqualTo(new BigDecimal("185500").stripTrailingZeros());
         assertThat(out.get(Symbol.us("AAPL")).priceTime()).isEqualTo(Instant.parse("2026-10-09T19:59:59Z"));

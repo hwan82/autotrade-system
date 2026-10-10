@@ -2,14 +2,15 @@
 
 - 작성: architect · 확인일: 2026-10-10 (KST)
 - 입력: 사용자(BAE)가 올린 토스증권 Open API REST 명세(OpenAPI 3.1.0, `info.version` 1.2.24, 약 466KB, 엔드포인트 42개). 원본은 저장소에 넣지 않았다(토스 배포물이고, 같은 내용을 토스 개발자 문서에서 받을 수 있다).
-- 실시간(WebSocket) 명세는 이 파일에 없다. 명세 머리말이 `wss://openapi-ws.tossinvest.com/ws/v1`과 별도 AsyncAPI 문서(`https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json`)를 실시간의 기준 문서로 지정한다. 이 작업 환경에서는 토스 도메인이 프록시에 막혀(HTTP 403) AsyncAPI를 받지 못했다.
+- 실시간(WebSocket) 명세는 이 파일에 없다. 명세 머리말이 `wss://openapi-ws.tossinvest.com/ws/v1`과 별도 AsyncAPI 문서(`https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json`)를 실시간의 기준 문서로 지정한다.
+- 보조 입력: 사용자가 안내한 토스 개발자 문서(`https://developers.tossinvest.com/docs`)의 `llms.txt`가 가리키는 개요(`overview.md`), FAQ(`faq.md`), AsyncAPI(`asyncapi.json`, `info.version` 1.2.2)를 2026-10-10에 웹 읽기 도구로 확인했다. 이 도구는 문서를 요약해 돌려주므로, 그 내용은 `[사실·요약]`으로 표시하고 코드로 옮기기 전에 원문 파일로 다시 확인한다(9장). 작업 환경의 셸에서는 토스 도메인 직접 접속이 프록시에 막힌다(HTTP 403).
 - 관련: [ADR-003 시세](../adr/ADR-003-market-data.md) 2.1·4장, [시세 사전 조사](market-data-limits.md) 1·3·5장, [D-039](../decisions/D-039-toss-quotes-free-default-on.md), [D-053](../decisions/D-053-toss-rest-read-only-client.md), 키움 쪽 같은 작업 [키움 명세 요약](kiwoom-rest-api-spec.md)(PR #40)
 - 표기: `[사실]`(명세 JSON 근거), `[추론]`, `[가정]`
 
 ## 0. 결론
 
 1. **토큰은 클라이언트(Client ID)당 1개만 유효하고, 다시 발급하면 이전 토큰은 즉시 무효가 된다** `[사실]`(`POST /oauth2/token` 설명). 무효가 된 토큰은 401 `token-revoked`로 구분된다. ADR-003 4장의 "토스 토큰 보유 프로세스는 하나"가 공식 근거로 확인됐다. 그래서 이 PR의 호출기는 `token-revoked`를 받으면 곧바로 다시 발급하지 않고 10분 쉰다(두 프로세스가 서로 끊는 왕복 방지, 3.2).
-2. **호출 한도 숫자는 명세에 없다.** 엔드포인트마다 Rate Limits Group(19개)이 있고 응답 헤더 `X-RateLimit-Limit`·`Remaining`·`Reset`, 429의 `Retry-After`로 알려 준다. 호출기는 그룹마다 초당 10회로 시작하고 헤더 값을 따른다(PR #29 architect R1 제안 그대로, 4장).
+2. **호출 한도는 Client ID × 그룹 단위다.** REST 명세에는 그룹 이름만 있고, 숫자는 개발자 문서 개요의 표에 있다(시세 `MARKET_DATA` 15회, 캔들 20회, 전체 종목 `STOCK_ALL` 1회, 시장 정보 3회 등, 4장). 호출기는 그룹마다 공식 한도와 초당 10회 중 작은 값으로 시작하고, 응답 헤더 `X-RateLimit-*`를 따르되 공식 한도를 넘지 않는다. 한도가 클라이언트 단위라 같은 Client ID를 쓰는 프로세스는 한도도 나눠 쓴다.
 3. **토큰 발급 403은 "허용 IP 목록에 없는 IP"다** `[사실]`. 2026-10-09 사용자 전달 내용(호출 PC IP 등록 필요)이 명세로 확인됐다. 로그에 조치 방법(WTS 설정 > Open API > 허용 IP 관리)을 같이 남긴다.
 4. **이 PR 범위는 읽기 전용 조회와 현재가 폴링이다.** 새 모듈 `autotrade-broker-toss`에 토큰 발급기, 그룹별 한도 제한기, 조회 호출기(허용 목록), 현재가 폴링 소스(`TOSS-POLL`, 능력 POLLING_QUOTE), 플러그인을 넣었다. 어느 프로세스에도 아직 연결하지 않았다(8장).
 5. **계좌·주문 API는 범위 밖이다.** 실전 관련(지침 10장)이라 7단계 risk-ops 작업으로 남기고, 명세에서 확인한 사실과 설계 제안만 6장에 적는다. 특히 주문 멱등 키 `clientOrderId`의 허용 문자·유효 시간(10분)이 우리 멱등 키 규칙과 다르다.
@@ -69,9 +70,9 @@
 
 되돌릴 조건: 7단계에서 실전 엔진이 토스 토큰을 가지면, 엔진 쪽은 C 또는 즉시 알림으로 바꿀지 risk-ops가 정한다.
 
-## 4. 호출 한도 `[사실]`(구조) / 숫자는 `[가정]`
+## 4. 호출 한도 `[사실]`(구조는 REST 명세, 숫자는 개요 문서 요약)
 
-명세에 숫자는 없고 그룹 이름과 헤더 의미만 있다.
+REST 명세에는 그룹 이름과 헤더 의미만 있다. FAQ는 "성공 응답에도 항상 `X-RateLimit-*` 헤더가 오며 클라이언트 단위로 매초 갱신된다"고 한다.
 
 | 헤더 | 의미 |
 |---|---|
@@ -80,9 +81,25 @@
 | `X-RateLimit-Reset` | 토큰 1개 재충전까지 예상 초 |
 | `Retry-After` | 429일 때 재시도 권장 초 |
 
-그룹: `AUTH`, `MARKET_DATA`(호가·현재가·체결·상하한가), `MARKET_DATA_CHART`(캔들), `STOCK`, `STOCK_ALL`, `STOCK_TRADING_TREND`, `MARKET_INFO`, `RANKING`, `MARKET_INDICATOR`, `MARKET_INDICATOR_CHART`, `SECTOR`, `SECTOR_RANKING`, `ACCOUNT`, `ASSET`, `ORDER`, `ORDER_HISTORY`, `ORDER_INFO`, `CONDITIONAL_ORDER`, `CONDITIONAL_ORDER_HISTORY`.
+그룹별 초당 한도(Client ID 단위, 개요 문서 Rate Limits 표, 2026-10-10 확인) `[사실·요약]`
 
-`TossRateLimiter` 규칙: 그룹마다 초당 10회로 시작 → `X-RateLimit-Limit`이 오면 그 값(상한 20, `[추론]` T1 공식 문서의 시세 15회에 여유) → `Remaining` 0이면 `Reset`초 쉼 → 429면 `Retry-After`초(없으면 1초, 최대 60초) 쉼. 숫자 비교(T1 문서 15회 vs 2차 자료 10회)는 [시세 조사](market-data-limits.md) 5장. 첫 실호출 때 헤더 값을 기록해 이 표를 확정한다(9장).
+| 그룹 | 초당 | 그룹 | 초당 |
+|---|---:|---|---:|
+| `AUTH` | 5 | `MARKET_INDICATOR_PRICE` | 10 |
+| `ACCOUNT` | 1 | `MARKET_INDICATOR` | 10 |
+| `ASSET` | 5 | `MARKET_INDICATOR_CHART` | 5 |
+| `STOCK` | 5 | `SECTOR` | 5 |
+| `STOCK_ALL` | 1 | `SECTOR_RANKING` | 5 |
+| `STOCK_TRADING_TREND` | 10 | `ORDER` | 10(09:00~09:10도 10) |
+| `MARKET_INFO` | 3 | `ORDER_HISTORY` | 5 |
+| `MARKET_DATA` | 15 | `ORDER_INFO` | 6(09:00~09:10 KST는 3) |
+| `MARKET_DATA_CHART` | 20 | `CONDITIONAL_ORDER` | 5 |
+| `RANKING` | 5 | `CONDITIONAL_ORDER_HISTORY` | 10 |
+
+- 개요 표에는 `MARKET_INDICATOR_PRICE`가 따로 있지만 REST 명세는 `GET /api/v1/market-indicators/prices`를 `MARKET_INDICATOR`로 표기한다. 둘 다 10회라 지금은 영향이 없다.
+- `MARKET_DATA` 15회는 [시세 조사](market-data-limits.md) T1과 같다. 2차 자료의 "약 10회"는 공식 표와 다르므로 공식 표를 따른다(시세 조사 5장의 미확정 항목을 닫는 근거).
+
+`TossRateLimiter` 규칙: 그룹마다 공식 한도와 초당 10회 중 작은 값으로 시작(표에 없는 그룹은 1회) → `X-RateLimit-Limit`이 오면 그 값을 쓰되 공식 한도를 넘지 않음 → `Remaining` 0이면 `Reset`초 쉼 → 429면 `Retry-After`초(없으면 1초, 최대 60초) 쉼. 시세를 10회로 시작하는 것은 PR #29 architect R1 제안을 지킨 것이고, 헤더가 15를 주면 15까지 올라간다.
 
 ## 5. 시세·종목 조회 엔드포인트 `[사실]`
 
@@ -104,6 +121,22 @@
 | `GET /api/v1/market-indicators/…` | MARKET_INDICATOR(_CHART) | 코스피·코스닥·국채 등 8종 현재가·캔들·투자자별 매매대금 | 시장 국면 지표 후보 |
 | `GET /api/v1/sectors…` | SECTOR(_RANKING) | 토스 자체 섹터(3단계 계층), 구성 종목, 관련 ETF, 랭킹 | 선정 조건 후보 |
 
+## 5.1 실시간 WebSocket (AsyncAPI 1.2.2) `[사실·요약]`
+
+코드는 이 PR에 없다. `TossStreamProtocol`을 만들 때의 입력으로 적는다.
+
+- 접속 `wss://openapi-ws.tossinvest.com/ws/v1`, 핸드셰이크 헤더 `Authorization: Bearer <토큰>`. 인증은 핸드셰이크 때 한 번만 보고, 나중에 토큰이 만료돼도 연결은 끊지 않는다. 핸드셰이크 실패는 401(토큰), 403(허용 IP 아님), 503.
+- 구독은 JSON 배열 하나로 **전체 구독 집합을 통째로 바꾼다**. 예 `[{"id":"req-1"},{"type":"trade:kr","codes":["005930"]},{"type":"trade:us","codes":["AAPL"]}]`. 해지 명령은 따로 없고 뺀 배열을 다시 보낸다(`[]`는 전부 해지). 종류 `trade:kr`, `trade:us`, `orderbook:kr`, `orderbook:us`, `personal:order`.
+- 응답: 구독 확인 `{"type":"subscriptions","subscribed":[…],"rejected":[{target,code,message}]}`(데이터보다 먼저 온다), 오류 `{"type":"error","error":{code,message},"id"}`. 오류 코드 `wrong-format`, `no-type`, `invalid-type`, `no-codes`, `too-many-topics`, `too-many`, `rate-limit-exceeded`, `internal-error`, `server-shutdown`. 거절 코드 `stock-not-found`, `symbol-market-mismatch`, `account-not-found`.
+- 체결 프레임 `{"type":"message","topic":"trade:kr:005930","data":{"price","volume","timestamp"(밀리초, +09:00),"currency"}}`. 호가 프레임은 `asks`(낮은 가격순)·`bids`(높은 가격순), 단계별 `price`·`volume`.
+- keepalive: 텍스트 `PING`을 약 60초마다 보내면 `{"type":"pong"}`. 클라이언트 입력이 180초 없으면 서버가 끊는다.
+- 한도: 계정당 동시 연결 2개(3번째가 오면 **가장 오래된 연결을 끊는다**), 연결당 구독 100건(종류 × 종목, 주문 채널 `accountSeq` 포함), 구독 선언 초당 5회(초과 시 약 1초 뒤 다시 선언, `Retry-After` 없음).
+- 재연결: `server-shutdown`이면 다시 접속해 다시 선언. 그 밖의 끊김은 닫기 코드가 없을 수 있다. 1·2·4초… 지수 백오프와 지터, **새로 접속하기 전에 옛 소켓을 닫는다**(안 닫으면 새 연결이 밀려날 수 있음).
+- **체결·호가는 LOSSY**: 밀리면 프레임을 버리고 순번 필드가 없으며 첫 스냅샷도 없다. 현재 상태는 REST(`trades`, `orderbook`)로 채운다. 주문 이벤트는 세션 안에서는 무손실이지만 끊긴 동안 것은 다시 주지 않으므로 재접속 뒤 `GET /api/v1/orders`로 맞춘다.
+- 심볼은 종목 마스터와 정확히 같아야 한다(소문자 등은 `stock-not-found`). 시장은 종류 접두어로 정해진다.
+
+우리 공통 엔진(`StreamingMarketDataSource`)과 맞춰 볼 점 `[추론]`: 구독 변경이 "전체 교체"라 `StreamProtocol`의 구독·해지 메시지를 현재 구독 집합 전체로 만들어야 한다. 순번이 없으니 녹화의 누락 표시는 연결 끊김 구간만 표시할 수 있고, 프레임 버림은 감지할 수 없다(녹화 품질 지표에 "토스 LOSSY" 표시 필요, 시세 조사 7장 sim-engine 항목과 같음). 계정당 2연결이라 D-036의 "3번째 연결" 시험 항목이 그대로 유효하다.
+
 ## 6. 계좌·주문 API (범위 밖, 7단계 제안용) `[사실]`
 
 - 계좌: `GET /api/v1/accounts`(현재 종합매매 `BROKERAGE`만), `GET /api/v1/holdings`(국내·미국 보유, 통화별 합산, 세금·수수료 공제 후 평가).
@@ -123,10 +156,10 @@
 
 | 대상 | 내용 | 담당 |
 |---|---|---|
-| ADR-003 4장 토큰 단일 보유 | 공식 근거 확인(`[사실]`). 토스 토큰을 받는 프로세스는 하나여야 한다. 게이트웨이(실시간·REST 보정)와 실전 엔진(보호 폴링·주문)이 모두 토스를 쓰려면 **별도 Client ID를 두 개 발급할 수 있는지** 확인이 필요하다(Q-042) | architect, risk-ops |
+| ADR-003 4장 토큰 단일 보유 | 공식 근거 확인(`[사실]`). FAQ는 "프로세스마다 토큰을 따로 발급하면 서로를 무효화한다, 모든 프로세스가 하나의 토큰을 쓰라"고 한다. 우리 구조(게이트웨이·실전 엔진 별도 프로세스, D-013)에서는 ⓐ Client ID를 두 개 발급해 프로세스마다 하나씩 쓰거나(가능 여부 미확인, 문서에 개수 언급 없음), ⓑ 한 프로세스만 토큰을 받고 다른 프로세스는 토스를 쓰지 않거나, ⓒ 토큰을 프로세스 사이에 나눠 쓰는 방식 중 하나를 골라야 한다. ⓒ는 실전 엔진이 다른 프로세스에 의존하게 되어 절대 규칙 6과 부딪힌다 `[추론]`. Q-042 | architect, risk-ops |
 | `GatewayMain` 토스 건너뜀(D-039) | 그대로 둔다. 실시간 프로토콜(AsyncAPI)도 없고, 토큰 소유가 정해지지 않았다 | architect |
 | 장애표 7번(인증 실패) | 토큰 발급 403 `access_denied`가 IP 미등록이다. 호출기 로그에 조치 안내를 넣었다. 운영 화면 "IP 미등록 의심" 안내는 시세 조사 4장 제안대로 risk-ops·ui-dev 검토 | risk-ops |
-| `TossStreamProtocol`(ADR-003 2.1) | AsyncAPI 명세가 있어야 만든다. 사용자에게 `asyncapi.json` 업로드를 요청한다(Q-042) | data-engineer |
+| `TossStreamProtocol`(ADR-003 2.1) | 5.1장 요약으로 설계는 가능하다. 필드 이름을 코드에 옮길 때는 원문 `asyncapi.json`으로 다시 확인한다 | data-engineer |
 | 거래소 캘린더 | 토스 KR 캘린더는 KRX+NXT 통합이라 우리 KRX 단독 캘린더와 정규장 경계가 같은지 실측 대조가 필요 | data-engineer |
 
 ## 8. 이 PR에서 한 것
@@ -150,13 +183,13 @@
 
 | 항목 | 지금 | 확인 방법 |
 |---|---|---|
-| 그룹별 한도 숫자 | 헤더로 받음, 시작 10회 `[가정]` | 첫 호출 응답 헤더 `X-RateLimit-Limit` 기록 |
+| 그룹별 한도 숫자 | 개요 표 확인(4장), 헤더로도 받음 | 첫 호출 응답 헤더 `X-RateLimit-Limit`가 표와 같은지 기록 |
 | 다건 조회 콤마를 인코딩하지 않고 보내도 되는지 | 명세 예시대로 `,` 그대로 `[가정]` | 첫 `prices` 호출 |
 | 미국 점 표기 티커(`BRK.B`) 심볼 형식 | 명세 허용 문자에 점 있음 `[가정]` | `stocks?symbols=BRK.B` 조회 |
-| Client ID를 여러 개 발급할 수 있는지 | 미확인 | 토스 WTS 설정 > Open API 화면 |
-| 실시간 구독 한도·keepalive·재연결 규칙 | AsyncAPI v1.2.2 요약만 있음(시세 조사 T2) | 사용자가 올리는 `asyncapi.json` |
+| Client ID를 여러 개 발급할 수 있는지 | 미확인(문서에 개수 언급 없음) | 토스 WTS 설정 > Open API 화면 |
+| 실시간 메시지 필드 이름 | 5.1장 요약 | `TossStreamProtocol` 작업 때 `asyncapi.json` 원문 |
 
 ## 10. 출처
 - 사용자 제공 `토스증권 Open API` OpenAPI 3.1.0 JSON, `info.version` 1.2.24 (2026-10-10 12:18Z 프로젝트 스레드 첨부). 원본 비보관.
-- 명세 `externalDocs`: `https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json`(실시간, 이 환경에서 미확인).
+- 토스 개발자 문서 `https://developers.tossinvest.com/llms.txt` → `https://openapi.tossinvest.com/openapi-docs/overview.md`(Rate Limits 표, WebSocket 한도), `…/faq.md`(토큰·IP·한도), `…/latest/asyncapi.json`(실시간 v1.2.2). 2026-10-10 웹 읽기 도구로 확인(요약본).
 - [시세 사전 조사](market-data-limits.md) T1(토스 개요), T2(AsyncAPI v1.2.2).

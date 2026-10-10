@@ -20,27 +20,39 @@ class TossRateLimiterTest {
     });
 
     @Test
-    void 처음에는_그룹마다_초당_10회_간격이다() throws Exception {
+    void 처음에는_공식_한도와_초당_10회_중_작은_값이다() throws Exception {
         limiter.acquire("MARKET_DATA");
         limiter.acquire("MARKET_DATA");
         limiter.acquire("MARKET_DATA_CHART"); // 다른 그룹은 따로 센다
 
         assertThat(slept).containsExactly(Duration.ofMillis(100));
         assertThat(limiter.perSecond("MARKET_DATA")).isEqualTo(10);
+        assertThat(limiter.perSecond("STOCK_ALL")).isEqualTo(1);
+        assertThat(limiter.perSecond("MARKET_INFO")).isEqualTo(3);
+        assertThat(limiter.perSecond("AUTH")).isEqualTo(5);
+        assertThat(limiter.perSecond("NEW_GROUP")).isEqualTo(1);
     }
 
     @Test
-    void 응답의_X_RateLimit_Limit을_따르되_상한을_넘지_않는다() throws Exception {
+    void 초당_1회_그룹은_1초_간격이다() throws Exception {
+        limiter.acquire("STOCK_ALL");
+        limiter.acquire("STOCK_ALL");
+
+        assertThat(slept).containsExactly(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void 응답의_X_RateLimit_Limit을_따르되_공식_한도를_넘지_않는다() throws Exception {
         limiter.onResponse("MARKET_DATA", ok(Map.of("x-ratelimit-limit", "5")));
         limiter.acquire("MARKET_DATA");
         limiter.acquire("MARKET_DATA");
         assertThat(slept).containsExactly(Duration.ofMillis(200));
 
         limiter.onResponse("MARKET_DATA", ok(Map.of("x-ratelimit-limit", "1000")));
-        assertThat(limiter.perSecond("MARKET_DATA")).isEqualTo(TossRateLimiter.MAX_PER_SECOND);
+        assertThat(limiter.perSecond("MARKET_DATA")).isEqualTo(15);
 
         limiter.onResponse("MARKET_DATA", ok(Map.of("x-ratelimit-limit", "abc")));
-        assertThat(limiter.perSecond("MARKET_DATA")).isEqualTo(TossRateLimiter.MAX_PER_SECOND);
+        assertThat(limiter.perSecond("MARKET_DATA")).isEqualTo(15);
     }
 
     @Test

@@ -14,12 +14,13 @@ import java.util.Optional;
  *
  * <p>`[사실]` 토스는 엔드포인트마다 그룹(MARKET_DATA, MARKET_DATA_CHART, AUTH 등 19개)을 두고, 응답 헤더
  * {@code X-RateLimit-Limit}(초당 허용 수), {@code X-RateLimit-Remaining}(남은 토큰), {@code X-RateLimit-Reset}(토큰 1개
- * 재충전까지 초), 429일 때 {@code Retry-After}(초)를 준다. 명세에는 한도 숫자가 없다(docs/research/toss-openapi-spec.md 4장).
+ * 재충전까지 초), 429일 때 {@code Retry-After}(초)를 준다. 한도는 <b>클라이언트(Client ID) × 그룹</b> 단위이고 숫자는 토스
+ * 개발자 문서 개요의 Rate Limits 표에 있다(2026-10-10 확인, docs/research/toss-openapi-spec.md 4장).
  *
  * <p>규칙(D-053, PR #29 architect R1 제안을 따름)
  * <ul>
- *   <li>처음에는 그룹마다 초당 {@link #START_PER_SECOND}회 간격으로 부른다.</li>
- *   <li>응답의 {@code X-RateLimit-Limit}이 오면 그 값을 그룹 한도로 쓴다({@link #MAX_PER_SECOND}을 넘지 않음).</li>
+ *   <li>처음에는 그룹마다 공식 한도와 초당 {@link #START_PER_SECOND}회 중 작은 값으로 부른다. 표에 없는 그룹은 초당 1회.</li>
+ *   <li>응답의 {@code X-RateLimit-Limit}이 오면 그 값을 그룹 한도로 쓰되 공식 한도를 넘지 않는다.</li>
  *   <li>{@code X-RateLimit-Remaining}이 0이면 {@code X-RateLimit-Reset}초(최소 1초) 동안 그 그룹을 쉰다.</li>
  *   <li>429면 {@code Retry-After}초(없으면 1초, 최대 {@link #MAX_BLOCK}) 동안 그 그룹을 쉰다. 자동 재시도는 하지 않는다.</li>
  * </ul>
@@ -27,8 +28,20 @@ import java.util.Optional;
 final class TossRateLimiter {
 
     static final int START_PER_SECOND = 10;
-    /** 헤더가 커도 이 이상으로는 올리지 않는다 `[추론]`(T1 공식 문서의 시세 15회에 여유). */
-    static final int MAX_PER_SECOND = 20;
+    /** 표에 없는 그룹의 한도. */
+    static final int UNKNOWN_GROUP_PER_SECOND = 1;
+    /**
+     * `[사실]` 공식 그룹별 초당 한도(토스 개발자 문서 overview.md Rate Limits, 2026-10-10 확인). 헤더 값이 커도 이 값을
+     * 넘기지 않는다. ORDER_INFO의 09:00~09:10 피크 한도(3회)는 이 호출기가 그 그룹을 부르지 않아 담지 않았다.
+     */
+    static final Map<String, Integer> OFFICIAL_PER_SECOND = Map.ofEntries(
+            Map.entry("AUTH", 5), Map.entry("ACCOUNT", 1), Map.entry("ASSET", 5), Map.entry("STOCK", 5),
+            Map.entry("STOCK_ALL", 1), Map.entry("STOCK_TRADING_TREND", 10), Map.entry("MARKET_INFO", 3),
+            Map.entry("MARKET_DATA", 15), Map.entry("MARKET_DATA_CHART", 20), Map.entry("RANKING", 5),
+            Map.entry("MARKET_INDICATOR_PRICE", 10), Map.entry("MARKET_INDICATOR", 10),
+            Map.entry("MARKET_INDICATOR_CHART", 5), Map.entry("SECTOR", 5), Map.entry("SECTOR_RANKING", 5),
+            Map.entry("ORDER", 10), Map.entry("ORDER_HISTORY", 5), Map.entry("ORDER_INFO", 6),
+            Map.entry("CONDITIONAL_ORDER", 5), Map.entry("CONDITIONAL_ORDER_HISTORY", 10));
     static final Duration MAX_BLOCK = Duration.ofSeconds(60);
 
     /** 대기. 운영은 {@link Thread#sleep}, 테스트는 기록만 한다. */
@@ -38,8 +51,14 @@ final class TossRateLimiter {
     }
 
     private static final class Group {
-        int perSecond = START_PER_SECOND;
+        final int cap;
+        int perSecond;
         Instant next = Instant.MIN;
+
+        Group(int cap) {
+            this.cap = cap;
+            this.perSecond = Math.min(cap, START_PER_SECOND);
+        }
     }
 
     private final Clock clock;
@@ -68,7 +87,7 @@ final class TossRateLimiter {
         Group g = group(group);
         Instant now = clock.instant();
         intHeader(r, "x-ratelimit-limit").filter(v -> v > 0)
-                .ifPresent(v -> g.perSecond = Math.min(v, MAX_PER_SECOND));
+                .ifPresent(v -> g.perSecond = Math.min(v, g.cap));
         if (r.status() == 429) {
             Duration d = retryAfter(r);
             g.next = later(g.next, now.plus(d));
@@ -92,7 +111,7 @@ final class TossRateLimiter {
 
     private Group group(String name) {
         Objects.requireNonNull(name, "group");
-        return groups.computeIfAbsent(name, k -> new Group());
+        return groups.computeIfAbsent(name, k -> new Group(OFFICIAL_PER_SECOND.getOrDefault(k, UNKNOWN_GROUP_PER_SECOND)));
     }
 
     private static Duration interval(int perSecond) {
