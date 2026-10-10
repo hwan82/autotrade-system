@@ -103,7 +103,7 @@ class SelectionCalculatorTest {
         assertThat(eval(r, "000040").values()).as("수정 거래량·수정 종가").isEqualTo(Map.of("gate.01", "2", "gate.02", "0.01"));
         assertThat(eval(r, "000050").values()).containsEntry("gate.02", "-0.05").containsEntry("score", "4");
         assertThat(eval(r, "000070").values()).as("수익률은 21거래일만 보므로 계산됨").isEqualTo(Map.of("gate.02", "0.0299"));
-        assertThat(r.inputs().barsLastTradingDate()).isEqualTo(C_VOL);
+        assertThat(r.inputs().barsLastTradingDate()).as("스냅샷 수록 기준일을 옮김").isEqualTo(FixtureData.TO);
         assertThat(r.inputs().sharesSnapshotId()).as("시가총액 조건이 없으면 상장주식수 입력을 적지 않음").isNull();
         assertThat(r.inputs().financialsSnapshotId()).isNull();
         assertThat(r.restatementFallbackCount()).isZero();
@@ -228,7 +228,7 @@ class SelectionCalculatorTest {
         assertThat(eval(r, "100060").restatementFallback()).as("정정 전 값이 없어 직전 기간 값 사용").isTrue();
         assertThat(eval(r, "100080").values()).containsEntry("gate.03", "299990000000");
         assertThat(r.restatementFallbackCount()).isEqualTo(1);
-        assertThat(r.inputs().sharesAsOfDate()).isEqualTo(LocalDate.of(2026, 4, 3));
+        assertThat(r.inputs().sharesAsOfDate()).isEqualTo(FixtureData.TO);
         assertThat(r.inputs().financialsSnapshotId()).isEqualTo("dart-test");
     }
 
@@ -245,13 +245,71 @@ class SelectionCalculatorTest {
     }
 
     @Test
-    void 재무_스냅샷이_없으면_재무_조건은_결측으로_탈락한다() {
-        FixtureData d = financialFixture();
-        d.withFinancials = false;
-        SelectionResult r = new SelectionCalculator(d).calculate(repoProfile("kr-fin-quality-growth"), T1);
-        assertThat(r.selected()).isEmpty();
-        assertThat(eval(r, "100010").reasons()).containsExactly("GATE_01_NO_DATA", "GATE_02_NO_DATA", "GATE_04_NO_DATA");
-        assertThat(r.inputs().financialsSnapshotId()).isNull();
+    void 조건이_쓰는_입력이_없으면_계산하지_않는다() {
+        FixtureData noFin = financialFixture();
+        noFin.withFinancials = false;
+        assertThatThrownBy(() -> new SelectionCalculator(noFin).calculate(repoProfile("kr-fin-quality-growth"), T1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("재무 입력이 없습니다");
+        FixtureData noShares = financialFixture();
+        noShares.withShares = false;
+        assertThatThrownBy(() -> new SelectionCalculator(noShares).calculate(repoProfile("kr-fin-quality-growth"), T1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("상장주식수 입력이 없습니다");
+        // 시가총액·재무 조건이 없는 프로필은 그 입력 없이도 계산한다
+        FixtureData vol = volumeFixture();
+        vol.withShares = false;
+        vol.withFinancials = false;
+        assertThat(new SelectionCalculator(vol).calculate(repoProfile("kr-vol-surge-quiet"), T_VOL).selected()).hasSize(2);
+    }
+
+    /** 입력 스냅샷이 기준 데이터일(직전 거래일)까지 오지 않으면 조용히 0종목을 내지 않고 실패한다(ADR-007 2.6 STALE_INPUT). */
+    @Test
+    void 입력_기준일이_기준_데이터일보다_이르면_계산하지_않는다() {
+        FixtureData bars = volumeFixture();
+        bars.lastTradingDate = LocalDate.of(2026, 3, 12);
+        assertThatThrownBy(() -> new SelectionCalculator(bars).calculate(repoProfile("kr-vol-surge-quiet"), T_VOL))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("2026-03-12").hasMessageContaining("2026-03-13");
+        bars.lastTradingDate = C_VOL;
+        assertThat(new SelectionCalculator(bars).calculate(repoProfile("kr-vol-surge-quiet"), T_VOL)
+                .inputs().barsLastTradingDate()).as("경계: 기준 데이터일과 같으면 계산").isEqualTo(C_VOL);
+
+        FixtureData shares = financialFixture();
+        shares.sharesAsOf = LocalDate.of(2026, 4, 2);
+        assertThatThrownBy(() -> new SelectionCalculator(shares).calculate(repoProfile("kr-fin-quality-growth"), T1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("상장주식수");
+
+        FixtureData fin = financialFixture();
+        fin.financialsCollected = LocalDate.of(2026, 4, 2);
+        assertThatThrownBy(() -> new SelectionCalculator(fin).calculate(repoProfile("kr-fin-quality-growth"), T1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("재무");
+        fin.financialsCollected = null;
+        assertThatThrownBy(() -> new SelectionCalculator(fin).calculate(repoProfile("kr-fin-quality-growth"), T1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("수집 시각");
+        fin.financialsCollected = LocalDate.of(2026, 4, 3);
+        assertThat(new SelectionCalculator(fin).calculate(repoProfile("kr-fin-quality-growth"), T1).selected())
+                .as("경계: 기준 데이터일에 수집했으면 계산").isNotEmpty();
+    }
+
+    /**
+     * 경계 포함(GE 3.0)은 수정 계수가 1이 아닐 때도 지켜진다. 앞·최근 구간 원거래량이 1:3이고 수정 계수가 같으면 수정 거래량
+     * 비율은 정확히 3이다. 일별 나눗셈의 반올림 오차가 쌓여 2.999…가 되면 안 된다(PR #45 architect F2).
+     */
+    @Test
+    void 거래량_비율_경계는_수정_계수가_1이_아니어도_정확하다() {
+        String[] factors = {"0.3", "0.7", "0.9", "1.3", "1.7", "2.3", "3", "6", "7", "9", "11", "13", "0.17", "0.123456789"};
+        FixtureData d = new FixtureData();
+        List<LocalDate> w = d.days.lastN(C_VOL, 40);
+        for (int k = 0; k < factors.length; k++) {
+            String code = String.format("2%05d", k);
+            d.stock(code);
+            for (int i = 0; i < 40; i++) {
+                d.bar(code, w.get(i), "10000", i < 20 ? 1_000_003L + k : 3L * (1_000_003L + k), factors[k]);
+            }
+        }
+        SelectionResult r = new SelectionCalculator(d).calculate(repoProfile("kr-vol-surge-quiet"), T_VOL);
+        assertThat(r.evaluations()).hasSize(factors.length).allSatisfy(e -> {
+            assertThat(e.passed()).as(e.code()).isTrue();
+            assertThat(e.values()).as(e.code()).containsEntry("gate.01", "3");
+        });
     }
 
     // ---------------------------------------------------------------- 적용 범위

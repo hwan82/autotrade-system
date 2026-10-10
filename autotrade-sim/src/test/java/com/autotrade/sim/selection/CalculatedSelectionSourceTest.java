@@ -42,6 +42,7 @@ class CalculatedSelectionSourceTest {
     /** UP은 매일 1%씩 오르고, DOWN은 9/30까지 오르다가 10/1부터 내린다. */
     static final class Data implements SelectionData {
         final TradingDays days = TradingDays.of(KRX);
+        int calculations;
 
         @Override
         public Market market() {
@@ -55,6 +56,7 @@ class CalculatedSelectionSourceTest {
 
         @Override
         public SortedSet<Symbol> universe(LocalDate date) {
+            calculations++; // 계산 한 번에 한 번 부른다
             return new TreeSet<>(List.of(UP, DOWN));
         }
 
@@ -88,6 +90,16 @@ class CalculatedSelectionSourceTest {
         }
 
         @Override
+        public LocalDate barsLastTradingDate() {
+            return LocalDate.of(2026, 10, 30);
+        }
+
+        @Override
+        public Optional<LocalDate> sharesAsOf() {
+            return Optional.empty();
+        }
+
+        @Override
         public String barsSnapshotId() {
             return "synthetic";
         }
@@ -116,7 +128,8 @@ class CalculatedSelectionSourceTest {
     @Test
     void 주간_결과_하나가_휴장_낀_주를_덮고_계좌들이_공유한다() {
         SelectionProfile weekly = rising("POST_CLOSE_WEEKLY", TradingStyle.POSITION);
-        CalculatedSelectionSource source = new CalculatedSelectionSource(new SelectionCalculator(new Data()));
+        Data data = new Data();
+        CalculatedSelectionSource source = new CalculatedSelectionSource(new SelectionCalculator(data));
         List<LocalDate> dates = KRX.tradingDays(LocalDate.of(2026, 9, 21), LocalDate.of(2026, 10, 9));
         SelectionSchedule schedule = SelectionSchedule.compute(
                 List.of(Combination.of(weekly, strategy(TradingStyle.POSITION)),
@@ -125,6 +138,7 @@ class CalculatedSelectionSourceTest {
         // 9/21 주(9/24·25 휴장), 9/28 주, 10/5 주(10/5·9 휴장 → 첫 거래일 10/6) 각각 결과 하나
         assertThat(source.results(weekly.selectionHash()).keySet()).containsExactly(
                 LocalDate.of(2026, 9, 21), LocalDate.of(2026, 9, 28), LocalDate.of(2026, 10, 6));
+        assertThat(data.calculations).as("주간 결과는 주마다 한 번만 계산(두 조합이 공유)").isEqualTo(3);
         assertThat(source.results(weekly.selectionHash()).get(LocalDate.of(2026, 9, 21)).applyTo())
                 .isEqualTo(LocalDate.of(2026, 9, 23));
         assertThat(schedule.days(weekly.selectionHash()).values()).allSatisfy(d -> assertThat(d.isValid()).isTrue());

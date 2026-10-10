@@ -38,6 +38,10 @@ final class FixtureData implements SelectionData {
     private final Map<Symbol, List<FinancialFiling>> filings = new TreeMap<>();
     boolean withShares = true;
     boolean withFinancials = true;
+    /** 스냅샷 수록 기준일(manifest coverage). 기본은 합성 데이터 끝날. */
+    LocalDate lastTradingDate = TO;
+    LocalDate sharesAsOf = TO;
+    LocalDate financialsCollected = TO;
 
     FixtureData() {
         List<LocalDate> d = new ArrayList<>();
@@ -149,6 +153,16 @@ final class FixtureData implements SelectionData {
     }
 
     @Override
+    public LocalDate barsLastTradingDate() {
+        return lastTradingDate;
+    }
+
+    @Override
+    public Optional<LocalDate> sharesAsOf() {
+        return withShares ? Optional.of(sharesAsOf) : Optional.empty();
+    }
+
+    @Override
     public String barsSnapshotId() {
         return "krx-daily-test";
     }
@@ -165,7 +179,8 @@ final class FixtureData implements SelectionData {
 
     @Override
     public Optional<FinancialSnapshotInfo> financials() {
-        return withFinancials ? Optional.of(new FinancialSnapshotInfo("dart-test", "b".repeat(64), "2026-06-30T09:00:00Z"))
+        return withFinancials ? Optional.of(new FinancialSnapshotInfo("dart-test", "b".repeat(64),
+                financialsCollected == null ? null : financialsCollected + "T09:00:00Z", financialsCollected))
                 : Optional.empty();
     }
 

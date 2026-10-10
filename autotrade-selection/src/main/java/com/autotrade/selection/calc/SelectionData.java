@@ -35,6 +35,15 @@ public interface SelectionData {
     /** 그 종목의 정기보고서 공시 행 전부(원 공시·정정 각각, 접수일 순). 재무 입력이 없으면 빈 목록. */
     List<FinancialFiling> filings(Symbol symbol);
 
+    /**
+     * 일봉 스냅샷이 담은 마지막 거래일(manifest {@code coverage.lastTradingDate}). 선정 결과 {@code inputs.bars.last_trading_date}가
+     * 이 값을 옮기고(ADR-007 2.6), 계산기는 이 날이 기준 데이터일보다 이르면 계산하지 않는다.
+     */
+    LocalDate barsLastTradingDate();
+
+    /** 상장주식수 기준일(manifest {@code coverage.sharesAsOf}). 상장주식수 입력이 없으면 빈 값. */
+    Optional<LocalDate> sharesAsOf();
+
     /** 일봉 스냅샷 ID와 {@code daily_bars.csv} SHA-256. */
     String barsSnapshotId();
 
@@ -49,8 +58,11 @@ public interface SelectionData {
     /** 거래일 계산에 쓴 캘린더 출처 요약 해시. */
     String calendarDigest();
 
-    /** @param lastCollectedAt 마지막 수집 시각(UTC ISO). 모르면 null */
-    record FinancialSnapshotInfo(String snapshotId, String sha256, String lastCollectedAt) {
+    /**
+     * @param lastCollectedAt 마지막 수집 시각(UTC ISO). 모르면 null
+     * @param collectedDate 그 시각의 거래소 현지 날짜. 모르면 null(재무 조건을 쓰는 계산은 실패)
+     */
+    record FinancialSnapshotInfo(String snapshotId, String sha256, String lastCollectedAt, LocalDate collectedDate) {
 
         public FinancialSnapshotInfo {
             java.util.Objects.requireNonNull(snapshotId, "snapshotId");

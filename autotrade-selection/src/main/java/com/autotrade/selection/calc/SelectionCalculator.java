@@ -51,6 +51,8 @@ public final class SelectionCalculator {
     public static final String RANK_CUTOFF = "RANK_CUTOFF";
 
     private static final MathContext MC = MathContext.DECIMAL64;
+    /** 여러 날을 더하는 중간 계산. 결과 값만 {@link #MC}로 줄여 경계 비교가 반올림 오차에 흔들리지 않게 한다. */
+    private static final MathContext WIDE = MathContext.DECIMAL128;
 
     private final SelectionData data;
 
@@ -94,6 +96,7 @@ public final class SelectionCalculator {
         LocalDate cutoff = days.previous(applyFrom);
         List<LocalDate> window = days.lastN(cutoff, criteria.lookbackDays());
         Set<Metric.Kind> kinds = criteria.inputKinds();
+        checkInputs(kinds, cutoff);
 
         List<Scored> passed = new ArrayList<>();
         Map<String, SelectionResult.Evaluation> evaluations = new TreeMap<>();
@@ -123,9 +126,9 @@ public final class SelectionCalculator {
             }
         }
         SelectionResult.Inputs inputs = new SelectionResult.Inputs(
-                data.barsSnapshotId(), data.barsSha256(), cutoff,
-                kinds.contains(Metric.Kind.SHARES) ? data.sharesSnapshotId().orElse(null) : null,
-                kinds.contains(Metric.Kind.SHARES) && data.sharesSnapshotId().isPresent() ? cutoff : null,
+                data.barsSnapshotId(), data.barsSha256(), data.barsLastTradingDate(),
+                kinds.contains(Metric.Kind.SHARES) ? data.sharesSnapshotId().orElseThrow() : null,
+                kinds.contains(Metric.Kind.SHARES) ? data.sharesAsOf().orElseThrow() : null,
                 kinds.contains(Metric.Kind.FINANCIAL)
                         ? data.financials().map(SelectionData.FinancialSnapshotInfo::snapshotId).orElse(null) : null,
                 kinds.contains(Metric.Kind.FINANCIAL)
@@ -135,6 +138,37 @@ public final class SelectionCalculator {
                 data.calendarDigest());
         return new SelectionResult(SelectionResult.Selection.of(profile), applyFrom, applyToFor(profile, applyFrom),
                 inputs, selected, List.copyOf(evaluations.values()));
+    }
+
+    /**
+     * 조건이 쓰는 입력이 있고 기준 데이터일 {@code cutoff}까지 담겼는지 본다(ADR-007 2.6 {@code STALE_INPUT}의 생산 쪽).
+     * 모자라면 결측 탈락으로 "0종목" 결과를 내지 않고 실패한다. 재무는 수집 시각의 현지 날짜가 {@code cutoff} 이상이어야 한다
+     * (엔진 판정의 지연 상한보다 엄격한 쪽. 실험실 리플레이는 보통 나중에 수집한 스냅샷을 쓰므로 걸리지 않는다).
+     */
+    private void checkInputs(Set<Metric.Kind> kinds, LocalDate cutoff) {
+        LocalDate bars = data.barsLastTradingDate();
+        if (bars.isBefore(cutoff)) {
+            throw new IllegalStateException("일봉 스냅샷 마지막 거래일 " + bars + "이 기준 데이터일 " + cutoff
+                    + "보다 이릅니다: " + data.barsSnapshotId());
+        }
+        if (kinds.contains(Metric.Kind.SHARES)) {
+            LocalDate asOf = data.sharesAsOf().filter(d -> data.sharesSnapshotId().isPresent())
+                    .orElseThrow(() -> new IllegalStateException("시가총액 조건이 있는데 상장주식수 입력이 없습니다"));
+            if (asOf.isBefore(cutoff)) {
+                throw new IllegalStateException("상장주식수 기준일 " + asOf + "이 기준 데이터일 " + cutoff + "보다 이릅니다");
+            }
+        }
+        if (kinds.contains(Metric.Kind.FINANCIAL)) {
+            SelectionData.FinancialSnapshotInfo f = data.financials()
+                    .orElseThrow(() -> new IllegalStateException("재무 조건이 있는데 재무 입력이 없습니다"));
+            if (f.collectedDate() == null) {
+                throw new IllegalStateException("재무 스냅샷의 수집 시각을 모릅니다: " + f.snapshotId());
+            }
+            if (f.collectedDate().isBefore(cutoff)) {
+                throw new IllegalStateException("재무 스냅샷 수집일 " + f.collectedDate() + "이 기준 데이터일 " + cutoff
+                        + "보다 이릅니다: " + f.snapshotId());
+            }
+        }
     }
 
     private record Scored(Symbol symbol, Eval eval) {
@@ -283,7 +317,7 @@ public final class SelectionCalculator {
 
     /** 수정 거래량 = 거래량 ÷ 수정 계수(가격에 곱하는 계수의 역, 분할 전 거래량을 분할 뒤 주식 수 기준으로). */
     private static BigDecimal adjustedVolume(DailyBar b) {
-        return BigDecimal.valueOf(b.volume()).divide(b.adjFactor(), MC);
+        return BigDecimal.valueOf(b.volume()).divide(b.adjFactor(), WIDE);
     }
 
     private Value volumeRatio(Context ctx, int w) {
@@ -296,9 +330,9 @@ public final class SelectionCalculator {
         for (int i = 0; i < bars.size(); i++) {
             BigDecimal v = adjustedVolume(bars.get(i));
             if (i < w) {
-                prior = prior.add(v, MC);
+                prior = prior.add(v, WIDE);
             } else {
-                recent = recent.add(v, MC);
+                recent = recent.add(v, WIDE);
             }
         }
         if (prior.signum() == 0) {
@@ -326,7 +360,7 @@ public final class SelectionCalculator {
         }
         BigDecimal sum = BigDecimal.ZERO;
         for (DailyBar b : bars) {
-            sum = sum.add(b.close().multiply(BigDecimal.valueOf(b.volume())), MC);
+            sum = sum.add(b.close().multiply(BigDecimal.valueOf(b.volume())), WIDE);
         }
         return Value.of(sum.divide(BigDecimal.valueOf(w), MC), false);
     }

@@ -33,9 +33,13 @@ public final class CalculatedSelectionSource implements SelectionSource {
     @Override
     public DailySelection select(SelectionProfile selection, LocalDate tradingDate) {
         LocalDate applyFrom = calculator.applyFromFor(selection, tradingDate);
-        SelectionResult r = calculator.calculate(selection, applyFrom);
-        results.computeIfAbsent(selection.selectionHash(), k -> Collections.synchronizedNavigableMap(new TreeMap<>()))
-                .put(applyFrom, r);
+        NavigableMap<LocalDate, SelectionResult> byDay = results.computeIfAbsent(selection.selectionHash(),
+                k -> Collections.synchronizedNavigableMap(new TreeMap<>()));
+        SelectionResult r = byDay.get(applyFrom);
+        if (r == null) { // 주간 결과는 그 주 거래일마다 다시 계산하지 않는다(입력이 같으면 결과도 같다)
+            r = calculator.calculate(selection, applyFrom);
+            byDay.put(applyFrom, r);
+        }
         TreeSet<Symbol> symbols = new TreeSet<>();
         r.selected().forEach(s -> symbols.add(new Symbol(selection.market(), s.code())));
         return new DailySelection.Selected(r.selection().hash(), r.contentHash(), r.applyFrom(), r.applyTo(), symbols);

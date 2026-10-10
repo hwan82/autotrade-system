@@ -117,8 +117,8 @@ public record SelectionResult(
     /**
      * 입력 데이터 기준(파일 {@code inputs} 칸, STR-15 "입력 데이터 기준일"). 쓰지 않은 입력은 {@code null}.
      *
-     * @param barsLastTradingDate 계산에 쓴 일봉 마지막 거래일(= 선정 기준일의 직전 거래일)
-     * @param sharesAsOfDate 시가총액에 쓴 상장주식수 기준일. 시가총액 조건이 없으면 null(그때 {@code sharesSnapshotId}도 null)
+     * @param barsLastTradingDate 일봉 스냅샷이 담은 마지막 거래일(manifest coverage). 선정 기준일의 직전 거래일 이상이다
+     * @param sharesAsOfDate 상장주식수 기준일(manifest coverage). 시가총액 조건이 없으면 null(그때 {@code sharesSnapshotId}도 null)
      * @param financialsSnapshotId 재무 조건이 없으면 null(그때 재무 칸 전체가 null)
      * @param financialsLastCollectedAt 재무 스냅샷 마지막 수집 시각(UTC ISO). 모르면 null
      * @param calendarDigest 거래일 계산에 쓴 캘린더 출처 요약 해시
