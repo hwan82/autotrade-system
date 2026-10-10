@@ -64,3 +64,46 @@
 수정 필요(A14: F1 보호 폴링 1초 한도 대기 상한이 토큰 재발급 경로에서 지켜지지 않아 D-053 ③·ADR-003·결정 로그 문구와 코드가 다름)
 
 빌드·CI·과금 검사는 모두 통과다. F1을 (가) 코드 수정+테스트 또는 (나) 문서 정정+연결 전 조건 기록 중 하나로 고친 뒤 재검토를 요청한다. 이 PR은 증권사 연동을 건드리므로 QA 승인 뒤에도 사용자가 직접 확인하고 머지한다(지침 10장).
+
+## 재검토 2026-10-10
+- 대상: PR #41 / 커밋 `fda6f93`(main `8680fde` 병합) / `git diff origin/main...fda6f93` 전체(34개 파일). 1차 QA(`c724e09`) 뒤 코드 변경은 `89f59f6` 한 커밋(`TossTokenClient.java`, `TossPollingQuoteSourceTest.java`, 문서 4개)과 main 병합 `fda6f93`이다. 그 뒤 `c18ce6f`(architect-7), `b13ce9b`(risk-ops-6)는 검토 원문 추가뿐이다(주장으로만 봄).
+- 직접 실행한 것
+  - 새 worktree에서 `./gradlew build --console=plain`(`fda6f93`): `BUILD SUCCESSFUL`(1회째). JUnit XML 합계 680건, 실패 0·오류 0·건너뜀 0. ArchitectureTest 15, ModuleOwnershipTest 13, RealTradingGuardTest 31, GuardedOrderGatewayTest 8, 토스 90건(TossPollingQuoteSourceTest 4→6) 통과.
+  - GitHub check-run(`fda6f93`): Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary 모두 success.
+  - `git merge-tree origin/main origin/pr-41` 충돌 없음. `git diff origin/main origin/pr-41`은 토스 모듈·`settings.gradle.kts`·`ModuleOwnershipTest` 한 줄·ADR-003·D-053·결정 로그 2행·명세 요약·검토 원문뿐이고, 병합으로 들어온 PR #37·#40 파일은 main과 같다. 앱 모듈의 토스 의존 0, `GatewayMain.java:125` `case TOSS -> Optional.empty()` 그대로.
+  - 1차 탐침 `QaProbe41Test` 재실행(커밋 안 함, 지움): `QAPROBE P1 waited=PT0.1S res=fail 토스 한도 대기 실패: HTTP 0, code=local-wait-exceeded posts=1`, 61초 뒤 `QAPROBE P1b after61s res=ok 1 health=OK`, `QAPROBE P2 calls=2 -> KRX 결과 반환 없이 예외`, `QAPROBE P3 fetches=2 getCalls=0 health=OK`.
+  - 변이 확인: `TossTokenClient.java:62`를 `limiter.acquire(GROUP)`(상한 제거)로 되돌리면 `TossPollingQuoteSourceTest#토큰_재발급이_발급_한도에_막혀도_폴링은_기다리지_않고_실패한다` 실패(90건 중 1건). 되돌림 확인.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 1차와 같음. RealTradingGuard·`autotrade-risk` 변경 없음, RealTradingGuardTest 31/31 |
+| A2 | 통과 | 1차와 같음. 주문 출구 없음, ArchitectureTest 15/15·GuardedOrderGatewayTest 8/8 |
+| A3 | 통과 | 1차와 같음 |
+| A4 | 해당 없음 | 주문 코드 없음 |
+| A5 | 해당 없음 | 주문 코드 없음 |
+| A6 | 해당 없음 | 허용 목록 변경 없음(`TossRestClient.java`는 1차 이후 바뀌지 않음) |
+| A7 | 해당 없음 | 1차와 같음 |
+| A8 | 통과 | 앱 모듈 의존 0(병합 후 재확인) |
+| A9 | 통과 | 지금 보호 시세 경로 변경 없음(미연결). F1 해소로 새 보호 폴링 구현도 토큰 경로에서 1초 상한을 지킨다(탐침 P1) |
+| A10 | 통과 | 새 테스트 자격 증명 `id-placeholder`·`secret-placeholder`, 토큰 `tok-1`. CI Secret scan success |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음. F1 회귀 테스트 추가, 상한 제거 변이에서 실패 확인. risk-ops N1(폴링이 `MAX_RATE_WAIT`를 넘기는지) 테스트 `#폴링은_조회_한도_대기_상한을_넘기면_보내지_않고_실패한다` 추가 |
+| A12 | 통과 | 1차와 같음 |
+| A13 | 통과 | 1차와 같음 |
+| A14 | 통과 | 이전 실패 해소. `TossTokenClient.java:42, 62` `AUTH_MAX_WAIT` 1초, D-053 ③·결정 로그 D-053행·ADR-003 2.1·명세 요약 4장이 "토큰 재발급의 발급 그룹(`AUTH`) 대기에도 1초 상한"으로 코드와 맞다. QA N1·N2와 risk-ops R7~R10은 ADR-003 토스 연결 PR 전 조건 줄과 Q-042에 기록됐다 |
+| B1 | 통과 | 직접 실행 `BUILD SUCCESSFUL`, 680건 통과 |
+| B6 | 통과 | 새 테스트 2건, 삭제·건너뜀 없음 |
+
+과금 검사: 8.1~8.5 모두 **통과**(1차와 같음). 이번 변경은 발급 그룹 대기에 상한을 더해 호출을 줄이는 쪽이고, 막힌 발급은 HTTP를 보내지 않는다(탐침 P1 `posts=1`, 테스트 `tossHttp.calls` 3건). 실행 중 호출 경로 0은 그대로.
+
+### 이전 발견 처리
+- **F1: 해소.** 위 탐침·변이·문서 대조.
+- **N1(한 시장 묶음 실패 시 전체 결과 버림), N2(재발급 실패 시 유효 토큰 미사용, health OK): 코드는 그대로이고(탐침 P2·P3 결과 같음) 연결 PR 전 조건으로 기록됨.** 미연결 모듈이라 판정 사유 아님.
+
+### 새 권고(판정 사유 아님, 연결 PR 전 조건에 더하길 권함)
+- **N4. 발급 그룹 상한으로 빨리 실패하면 그 뒤 60초 동안 토스 조회가 모두 실패한다.** `[사실]` 로컬 한도 거절(`local-wait-exceeded`, HTTP 미전송)도 `TossApiException`(IOException)이라 발급 실패 60초 하한(`TossRestClient.java:362-366`)이 걸린다. 탐침 P1: 첫 폴링은 0.1초 만에 실패, 61초 뒤에야 회복. `[추론]` 1차 결함(30초를 막혀 기다림)은 "빨리 실패하고 60초 공백"으로 바뀌었다. 빨리 실패해야 다른 보호 소스로 넘어갈 수 있으므로(R9) 방향은 맞지만, 요청을 보내지 않은 로컬 거절에는 60초 하한 대신 발급 그룹이 풀리는 시각을 쓰면 토스 공백이 줄어든다. 공백 처리는 R9·R10과 함께 연결 PR에서 정할 것.
+- **N5. 한 번의 `poll`이 최대로 기다리는 시간은 1초가 아니라 "발급 그룹 1초 + 조회 그룹 1초 + 발급·조회 HTTP 타임아웃"이다.** `[사실]` 토큰을 먼저 꺼낸 뒤(`TossRestClient.java:250`) 조회 그룹을 확인하고(`:251`), 발급 HTTP는 `tokenLock` 안이다(`:261-264`). 문서의 "1초 상한"은 각 그룹 대기에 대한 말로 읽으면 맞다. 연결 PR에서 보호 폴링 전체 시간 예산과 `JdkHttpPort` 타임아웃 값을 함께 정할 것.
+
+### 재검토 판정
+승인
+
+F1(A14)이 코드·테스트·문서로 해소됐고, A 전체·B1·B6·과금 검사에 실패와 확인 못 함이 없다. N1·N2·N4·N5는 이 모듈을 프로세스에 연결하는 PR의 선행 조건이다. 이 PR은 증권사 연동을 건드리므로 지침 10장에 따라 사용자가 직접 확인하고 머지한다.
