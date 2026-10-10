@@ -31,7 +31,7 @@ import java.util.TreeMap;
  * <ol>
  *   <li>거래일이 바뀌면 당일 카운터(진입 수, 연속 손절, 진입 중단)를 비우고 당일 시작 평가금액을 잡는다</li>
  *   <li>종목 상태 갱신 후 {@link #observe} 호출(지표 상태는 항상 갱신)</li>
- *   <li>보유 중이면 청산 조건 확인. 손절 → 익절 → 추적 손절 → 시간 → 로직 청산 → 장 마감 순으로 첫 사유 하나로 전량 시장가 매도</li>
+ *   <li>보유 중이면 청산 조건 확인. 손절 → 익절 → 추적 손절 → 시간 → 최대 보유일 → 로직 청산 → 장 마감 순으로 첫 사유 하나로 전량 시장가 매도</li>
  *   <li>보유가 없으면 주 신호 확인 → 확인 신호를 만료 전까지 기다림 → 한도 확인 → 수량 계산 → 시장가 매수</li>
  * </ol>
  * 주문은 모두 시장가다. 신호(T) 다음 이벤트부터 체결되는 것은 실행기·가상 거래소가 보장한다.
@@ -56,8 +56,12 @@ public abstract class ManagedStrategy implements Strategy {
     private final Map<Symbol, ExitReason> pendingExit = new HashMap<>();
     private final Map<Symbol, Instant> exitSentAt = new HashMap<>();
     private final Map<Symbol, BigDecimal> pendingEntryNotional = new HashMap<>();
+    /** 보유를 처음 본 거래일 번호(최대 보유일 계산, STR-18). */
+    private final Map<Symbol, Integer> openedDay = new HashMap<>();
 
     private LocalDate today;
+    /** 이 전략이 이벤트를 받은 거래일 수 − 1. 리플레이·실시간 모두 거래일마다 이벤트가 오므로 거래일 번호로 쓴다. */
+    private int dayIndex = -1;
     private int entriesToday;
     private int consecutiveStops;
     private boolean haltedToday;
@@ -97,6 +101,7 @@ public abstract class ManagedStrategy implements Strategy {
         Instant now = ctx.now();
         if (!date.equals(today)) {
             today = date;
+            dayIndex++;
             entriesToday = 0;
             consecutiveStops = 0;
             haltedToday = false;
@@ -128,10 +133,12 @@ public abstract class ManagedStrategy implements Strategy {
     private void trackPosition(Symbol symbol, long held, SymbolState s, Instant now) {
         if (held > 0) {
             openedAt.putIfAbsent(symbol, now);
+            openedDay.putIfAbsent(symbol, dayIndex);
             if (s.lastPrice() != null) {
                 peak.merge(symbol, s.lastPrice(), BigDecimal::max);
             }
         } else if (openedAt.remove(symbol) != null) {
+            openedDay.remove(symbol);
             // 포지션이 막 닫혔다: 청산 사유를 연속 손절 계산에 반영
             peak.remove(symbol);
             exitSentAt.remove(symbol);
@@ -175,6 +182,9 @@ public abstract class ManagedStrategy implements Strategy {
         if (reason == null && !rules.timeExit().isZero()
                 && Duration.between(openedAt.get(symbol), now).compareTo(rules.timeExit()) >= 0) {
             reason = ExitReason.TIME_EXIT;
+        }
+        if (reason == null && rules.maxHoldDays() > 0 && dayIndex - openedDay.get(symbol) >= rules.maxHoldDays()) {
+            reason = ExitReason.TIME_EXIT; // 최대 보유일(STR-18): 보유 거래일 수가 상한에 이른 날 첫 이벤트
         }
         if (reason == null && logicExit(s, event, time)) {
             reason = ExitReason.LOGIC_EXIT;
