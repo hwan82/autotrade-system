@@ -21,6 +21,7 @@ include(
     "autotrade-broker-api",
     "autotrade-broker-kiwoom",
     "autotrade-broker-kis",
+    "autotrade-broker-toss",
     "autotrade-config",
     "autotrade-control",
     "autotrade-app-engine",
