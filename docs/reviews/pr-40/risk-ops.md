@@ -37,3 +37,35 @@
 
 ## 판정
 수정 필요(A11: kiwoomDaily의 실전 계좌 키 사용 차단에 실패 경우 테스트 없음, A14: 자율 결정 3건이 결정 로그에 없음·Q-015 미갱신·오류 코드 수 불일치)
+
+## 재검토 2026-10-10
+- 대상: PR #40 / 커밋 48ebd41 / main 대비 diff(`git diff origin/main...48ebd41`). 직전 검토 대상 ba36141 이후 커밋은 d8e99cd(`.gitleaks.toml` 추가), 0c5e557(KiwoomDailyMain 설정·HTTP 주입, 거절 테스트, 예외 메시지 축소), 48ebd41(D-052, Q-015 갱신, 오류 코드 수 정정, 검토 원문 커밋). `git diff ba36141 48ebd41 --stat`: 7개 파일 +160 −15. 48ebd41에 커밋된 이 검토 원문의 앞부분은 직전에 쓴 내용과 같음(`git show 48ebd41:docs/reviews/pr-40/risk-ops.md`와 diff 결과 없음)
+- 점검표: A
+- 직접 실행한 것: 48ebd41을 별도 worktree에 고정해 `./gradlew build --continue --rerun-tasks` → **BUILD SUCCESSFUL**(429 없이 1회). 테스트 결과 XML 집계 전체 590건, 실패 0·오류 0·건너뜀 0(`:autotrade-risk` 55, `:autotrade-architecture-test` 28, `:autotrade-app-engine` 48, `:autotrade-broker-kiwoom` 51, `:autotrade-app-gateway` 36). **변이 확인**: KiwoomDailyMain.java:76의 실전 계좌 거절 조건을 `false &&`로 끄고 `:autotrade-app-gateway:test --tests '*KiwoomDailyMainTest*'`를 돌리자 `키움_실전_계좌가_설정돼_있으면_HTTP_호출_없이_거절한다`가 `AssertionError: HTTP 호출이 있으면 안 된다: https://api.kiwoom.com/oauth2/token`으로 실패함을 확인한 뒤 원복. 명세 JSON에서 0s 215 값 8 = "정규장마감"을 확인(문서 정정과 일치)
+- 함께 본 실전 경로 코드·문서: 직전 검토와 같음. 추가로 `docs/decisions/README.md` D-052·Q-015 행, `.gitleaks.toml`
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard·설정 로딩 변경 없음. RealTradingGuard.java:62 그대로. `:autotrade-risk:test` 55건 통과(--rerun-tasks) |
+| A2 | 통과 | 주문 출구 코드 없음. ArchUnit 규칙 변경 없음, `:autotrade-architecture-test:test` 28건 통과 |
+| A3 | 통과 | 주문 경로 없음. kiwoom 모듈은 게이트웨이만 의존, 실전 엔진은 게이트웨이 프로젝트 금지(app-engine build.gradle.kts:13) 그대로 |
+| A4 | 해당 없음 | 주문 타임아웃·재주문 코드 변경 없음. 조회 TR의 토큰 만료 1회 재호출만 있음(직전과 같음) |
+| A5 | 해당 없음 | 멱등 키 관련 변경 없음 |
+| A6 | 해당 없음 | 주문을 만드는 경로 추가 없음 |
+| A7 | 통과 | 실전 엔진 큐·토큰 버킷 변경 없음. `kiwoomDaily`는 키움 실전 계좌가 설정된 키를 쓰지 않음(KiwoomDailyMain.java:76)이 이제 테스트로 고정됨 |
+| A8 | 통과 | 변경은 게이트웨이 프로세스의 단발 명령과 문서. 실전 엔진 테스트 48건 통과. 실시간 소스 재접속·발급 대기 동작은 직전과 같음 |
+| A9 | 통과 | 실전 보호 시세 경로·서버 측 손절 변경 없음. 9081 필터 판단은 직전과 같음 |
+| A10 | 통과 | 0c5e557에서 `kiwoomDaily`의 예외 출력이 키움 결과 코드 예외(코드·고정 안내)가 아니면 예외 종류만 남기도록 좁혀짐(KiwoomDailyMain.java 예외 처리부, 테스트 `종목별_일봉을_표로_적고_실패한_종목은_그_줄에만_적는다`가 `return_code` 미포함 확인). 새 테스트 픽스처의 키는 `"A"`·`"B"`, 계좌번호 `"1"` 자리표시자. `.gitleaks.toml`은 기본 규칙 유지(`useDefault = true`)에 값 하나(`^abcdef1234567890$`, docs/reviews/pr-39/architect.md의 패턴 시험값)만 정확히 일치 예외로 둬 실제 키를 가릴 범위가 아님 |
+| A11 | 통과 | 직전 실패 해소. `run`이 `ConfigPaths`·`HttpPort`를 주입받게 바뀌었고(KiwoomDailyMain.java `run` 시그니처), `키움_실전_계좌가_설정돼_있으면_HTTP_호출_없이_거절한다`, `키움_키가_없으면_HTTP_호출_없이_거절한다`가 추가됨. 어떤 HTTP 호출이든 `AssertionError`로 만드는 포트를 써서 토큰 발급 전 거절을 보장하며, 위 변이 확인으로 이 검사를 지우면 테스트가 실패함을 직접 확인. 보호 테스트 삭제·약화 없음 |
+| A12 | 통과 | 장애표·장애 테스트 8종·O1~O8 문서와 코드 변경 없음. 토큰 발급 결과 코드 분류(#7 관련)는 D-052 ②로 기록됐고 코드(KiwoomTokenClient.java:56-61: 한도·토큰 계열은 재시도, 1999는 재시도, 그 밖은 거절)와 일치. 7.1 1-0 차단 전제 유지 |
+| A13 | 해당 없음 | 미국 시장 동작 추가 없음(직전과 같음) |
+| A14 | 통과 | 직전 실패 해소. D-052(decisions/README.md 새 행)가 ① 실시간 경로 번갈아 시도·LOGIN 성공 경로 고정 ② 토큰 발급 결과 코드 분류 ③ 조회 호출기 허용 목록과 확장 시 risk-ops 검토 ④ `kiwoomDaily` 실전 계좌 거절·게이트웨이 끈 뒤 실행 안내(강제 안 함)를 "추천안 채택(자율)"로 기록하고 되돌릴 조건을 적음. 내용이 코드와 일치함을 대조(KiwoomStreamProtocol 경로 후보, KiwoomTokenClient 분류, KiwoomRestClient.READ_ONLY_PATHS·TR 정규식, KiwoomDailyMain 거절). Q-015 행에 명세 오류 코드 37개 확인, D-052 분류·LOGIN/REG 응답 형식·실시간 경로 실측 항목 추가. kiwoom-rest-api-spec.md 0장 "37개"로 정정(명세 errorCodeList 37건과 일치) |
+
+## 점검표 밖 발견 (재검토)
+- D-052 ②는 장애표 #7의 DEGRADED 계수 대상을 좁히는 장애 처리 결정이다(지침 8장 2번). 다만 거절 계수에서 빠지는 코드도 소스는 DISCONNECTED가 되어 #1 전환으로 처리되므로 보호가 약해지지 않는다. 이 PR은 지침 10장에 따라 사용자가 직접 확인하고 머지하므로, 머지할 때 D-052가 사용자 확인을 받는다는 점을 PR 본문에 적어 둘 것을 권한다(D-047처럼 "→ 사용자 확정" 표기). 판정에는 넣지 않는다.
+- 직전 검토의 실시간 LOGIN 실패 계수 불일치(StreamingMarketDataSource.java:445-447은 LOGIN 실패를 코드와 상관없이 인증 실패로 셈)는 그대로다. 소스를 빼는 안전한 쪽이고, Q-015 갱신 문구("실시간 LOGIN·REG 응답 형식은 실측")가 후속 확인으로 덮는다. 판정에는 넣지 않는다.
+- `.gitleaks.toml`이 생기면서 `.gitleaksignore`(4d2dcd5에서 추가한 지문)와 함께 쓰인다. 4d2dcd5 지문은 다른 스레드 브랜치 커밋을 가리켜 스쿼시 머지 뒤에도 의미가 남는지는 CI 설정에 달렸다. 비밀값 노출 위험은 없다.
+- 이 세션에서는 GitHub CI 결과를 보지 못했다(`gh pr checks`는 GraphQL 차단). 위 빌드 결과는 검토자가 48ebd41로 직접 돌린 것이다.
+
+## 판정 (재검토)
+승인

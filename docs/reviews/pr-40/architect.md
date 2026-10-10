@@ -30,3 +30,31 @@
 
 ## 판정
 수정 필요(B6: `kiwoomDaily` 실전 계좌·키 미설정 거절 테스트 추가 / B7: 토큰 실패 분류(장애표 7번)·별도 토큰 발급 진입점(D-024·D-036)·게이트웨이 REST 허용 목록에 대한 risk-ops 검토 필요)
+
+## 재검토 2026-10-10
+- 대상: PR #40 / 커밋 `48ebd41`(원격 브랜치 head와 일치 확인) / main 대비 diff 전체(`git diff origin/main...48ebd41`: 21개 파일, +1339 −27). 앞 검토(`ba36141`) 뒤 추가분: `d8e99cd`(.gitleaks.toml), `0c5e557`(KiwoomDailyMain 설정·HTTP 주입, 거절 테스트, 예외 출력), `48ebd41`(D-052, Q-015 갱신, 연구 문서 수정, risk-ops·architect 검토 원문 커밋)
+- 점검표: B
+- 직접 실행한 것:
+  - `48ebd41`을 별도 worktree에 고정해 `./gradlew build --no-daemon --continue --rerun-tasks`: **BUILD SUCCESSFUL**, 테스트 590개 실패 0·건너뜀 0(KiwoomDailyMainTest 4개: `날짜가_없거나_틀리면_종료_코드_2`, `종목별_일봉을_표로_적고_실패한_종목은_그_줄에만_적는다`, `키움_키가_없으면_HTTP_호출_없이_거절한다`, `키움_실전_계좌가_설정돼_있으면_HTTP_호출_없이_거절한다`. ArchitectureTest 15개 통과)
+  - 거절 검사를 끄고 시험이 실패하는지 보는 변이 시험은 이 세션의 권한 분류기가 막아 돌리지 못했다. 대신 코드로 확인: 시험의 `NO_HTTP`는 `AssertionError`(Error)를 던지고, `KiwoomDailyMain`은 `IOException`/`RuntimeException`만 잡으므로(`KiwoomDailyMain.java:101`, `:104`, `:144`) 거절 검사(`:76`)가 빠지면 키가 설정된 이 시험은 토큰 발급 HTTP에서 실패한다 `[추론]`. 시험은 거절 문구 "D-024"도 확인한다
+  - `48ebd41`의 `docs/reviews/pr-40/architect.md` 앞부분이 내가 쓴 원문과 같음을 `diff`로 확인(수정 없음)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 실행: `48ebd41` 빌드 성공, 590개 통과 |
+| B2 | 통과 | ArchitectureTest 15개 통과. 새 의존 `KiwoomDailyMain` → `marketdata.live.HttpPort`(기존 모듈 의존 안). 규칙 변경 없음 |
+| B3 | 통과 | 인터페이스·스키마·설정 키·REST API 변경 없음. 자율 결정은 D-052(`docs/decisions/README.md`)로 기록되고 Q-015에 남은 실측 항목(실시간 경로, 결과 코드 분류의 실제 응답 대조) 반영 |
+| B4 | 통과 | 시스템 시계는 `KiwoomDailyMain.main`에서만 만들고 `run`은 `Clock`을 주입받는다. 시험은 `Clock.fixed` 사용 |
+| B5 | 통과 | 변경 없음(가격 `BigDecimal`) |
+| B6 | 통과 | 앞 검토의 지적 해소: `run(args, out, err, ConfigPaths, Clock, HttpPort)`로 주입 가능해졌고(`KiwoomDailyMain.java` main·run), 실전 계좌 설정 시와 키 미설정 시 종료 코드 2·HTTP 호출 0건 시험 추가(`KiwoomDailyMainTest`). 기존 시험 기대값 변경 1건(`contains("1700")` → `contains("IOException")`)은 예외 출력 정책 변경에 맞춘 것이고 약화가 아니다(일반 `IOException`은 이제 종류만 찍는다) |
+| B7 | 통과(risk-ops 재검토 대기) | A 점검표 검토가 `docs/reviews/pr-40/risk-ops.md`에 있다(대상 `ba36141`, 판정 수정 필요: A11·A14). 그 두 항목은 `0c5e557`(A11 시험)과 `48ebd41`(D-052, Q-015, "37개" 수정)로 고쳐졌다. 다만 risk-ops 원문에 재검토가 아직 없으므로 risk-ops 재검토 "승인" 전에는 머지할 수 없고, 장애표 #7 판정 조건을 바꾸는 PR이라 지침 10장에 따라 사용자 직접 머지 대상이다 |
+| B8 | 통과 | 앞 검토 권고 해소: 전체 실패는 `KiwoomApiException`만 메시지를, 나머지는 클래스 이름만 출력(`:101-106`), 종목별 실패도 같은 방식(`:144-146`). `.gitleaks.toml`은 정확 일치 `^abcdef1234567890$` 한 값만 허용(검토 원문 인용 시험값), `.gitleaksignore`는 자리표시자 지문 1건. 실제 비밀값 없음 |
+
+## 점검표 밖 발견 (재검토)
+1. 앞 검토 발견 6(연구 문서 `0s` 215 "8 정규장")은 "8 정규장마감"으로 고쳐졌다. 오류 코드 수도 37개로 맞춰졌다.
+2. risk-ops가 적은 후속(실시간 LOGIN 응답의 1700·8005도 인증 실패로 세어 DEGRADED가 될 수 있음, `StreamingMarketDataSource` LOGIN_FAILED 처리)에 동의한다. 안전한 쪽이라 이 PR을 막지 않고, D-052 ②와 문구를 맞추는 후속 PR로 남길 것.
+3. 다른 브랜치를 위한 gitleaks 예외(PR #39 관련)가 이 PR에 들어 있다. PR 본문에 그 사실을 적어 둘 것(앞 검토 발견 7 유지).
+4. 이 재검토 뒤 Java 코드가 바뀌면 다시 검토가 필요하다.
+
+## 판정 (재검토)
+승인 (architect 점검표 B 기준. 머지는 risk-ops 재검토 승인과 사용자 직접 확인 뒤)
