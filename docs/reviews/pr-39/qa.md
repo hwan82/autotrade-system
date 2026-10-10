@@ -81,3 +81,54 @@
 
 ## 판정
 수정 필요(F1: 기본 기간·runbook 매일 예약 실행에서 품질 리포트 단계가 2GB 힙에서 항상 `OutOfMemoryError`(실측 약 300만 행부터, 2010년부터 전체 약 1,100만 행)로 종료 코드 1이 되어 그 뒤의 `--keep-snapshots` 정리가 한 번도 돌지 않고, 매일 약 560MB 스냅샷이 쌓여 디스크 여유를 20GB 바닥까지 깎으며 품질 리포트도 만들어지지 않음. F2: 재무 스냅샷은 지우면 같은 ID로 재현할 수 없는데 ADR-008·runbook·`SnapshotRetention` 주석이 "같은 ID로 복원된다"고 안내해, `--keep-snapshots`가 되돌릴 수 없는 재무 스냅샷 삭제를 되돌릴 수 있는 것처럼 만든다)
+
+## 재검토 2026-10-10
+- 대상: PR #39 / 커밋 61ad73e687109fff08777c515b91348a010c68f9 / main(8680fde, #37·#40 머지 뒤) 대비 전체 diff 70개 파일(+5050 −58). 1차 이후 커밋: 8deb727(QA 지적 반영), 2acfd92(개발 쪽 3차 재검토 원문), 61ad73e(main 병합, `docs/adr/README.md`·`docs/decisions/README.md` 목록 충돌 해소). 병합분은 main(#37·#40)과 같은 내용이고 PR 고유 변경은 위 두 커밋뿐임을 `git show --cc 61ad73e`로 확인. 1차 보고서(이 파일 위쪽)는 개발 쪽이 고치지 않았음(`git diff 7f4f44a HEAD -- docs/reviews/pr-39/qa.md` 변경 없음)
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (61ad73e): BUILD SUCCESSFUL(1회째). 테스트 결과 XML 합계 654 tests, 0 failures, 0 errors, 0 skipped. 그중 `autotrade-app-collector` 56 tests, `CollectorScaleTest#전_기간_규모에서도_정리와_품질_리포트가_힙_상한_안에서_끝난다` 통과(11.96초)
+  - PR 체크 런(GitHub, 61ad73e): `Gradle build`, `Secret scan and collector boundary`(새 단계 `check-collector-keys.sh` 포함), `DB schema (PostgreSQL 16)` 모두 success
+  - **F1 재실측**: 새 배포본 lib 클래스패스와 `-Xmx2g`로 수집기가 쓰는 `DailyBarQualityCheck.checkSnapshot(dir, perDate)`를 1차와 같은 합성 스냅샷에 실행
+    - 11,070,000행(2,700종목 × 4,100거래일, 2010년부터 전체 규모): 48.7초에 끝남, 검사한 일봉 11,070,000건, 끝난 뒤 사용 힙 29MB. 1차의 전체 적재 방식은 같은 자료에서 17초 만에 `OutOfMemoryError`였다
+    - 동등성: 이상 자료를 넣은 합성 스냅샷(1,500종목 × 400일, 599,099행: 일봉 누락 0.2%, 2배 가격 점프 0.2%, 거래량 0, 시가 0, 고가<저가, 같은 날 중복 행, 상장 시작 늦음·상장 종료 구간 포함)에서 `checkSnapshot` 발견 9,192건(오류 5,581건)과 `SnapshotDailyBarSource.load(dir).qualityReport()` 발견 9,192건이 `List.equals`로 완전히 같고 검사 일봉 수도 같음
+  - 배포 스크립트로 `krx-daily --max-calls 10001`, `dart-financials --max-calls 20001` 실행: 둘 다 사용법 오류(1 이상 하루 한도 이하)로 거부, 네트워크 호출 없음
+  - `scripts/ci/check-collector-keys.sh`를 저장소에서 실행: 종료 코드 0. 임시 저장소에 가짜 값 `Map.of("AUTH_KEY", "ABCDEF0123456789ABCDEF")`를 넣으면 잡힘(종료 코드 1). 같은 값을 Java 문자열 안의 이스케이프된 JSON(`"{\"krx\":{\"auth-key\":\"ABCDEF…\"}}"`)으로 넣으면 잡히지 않음(아래 R7)
+  - 보호 테스트: `ArchitectureTest.java` +28 −0, `ModuleOwnershipTest.java` +2 −1, Guard·GuardedOrderGateway·장애 테스트 변경 0건(1차와 같음). 추가 줄에 `@Disabled`·`@Ignore`·`assumeTrue` 없음(검토 원문 인용 줄 제외)
+
+### 1차 지적 확인
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| F1 품질 리포트 OOM으로 정리 미동작 | 해결 | ① 정리가 리포트보다 먼저 돈다: `CollectorMain.finishKrxSnapshot`(커밋 직후 `prune` → `DailyBarQualityCheck.checkSnapshot` → 리포트 쓰기). ② 리포트는 `daily_bars.csv`를 한 줄씩 읽는 날짜 순 검사이고 해시·행 수·헤더·날짜 순서를 확인(`DailyBarQualityCheck.checkSnapshot`). 메모리가 행 수와 무관함을 위 재실측(1,107만 행, 29MB)으로 확인, 결과가 전체 적재 검사와 같음을 이상 자료로 확인. ③ 실제 규모 회귀 테스트 `CollectorScaleTest`(힙 128MB 자식 JVM, 120만 행, 옛 스냅샷이 지워지고 리포트가 남는지, 같은 힙에서 예전 방식은 OOM인지 비교)가 빌드에서 통과. ④ 리포트 단계도 날짜마다 `guard::checkSession`을 불러 장 시간 보호 구간에 들어서면 멈춘다(1차 R2의 비보호 구간이 닫힘) |
+| F2 재무 스냅샷 복원 불가 안내 | 해결 | `dartFinancials`에서 `prune` 호출을 없애고 `--keep-snapshots`를 줘도 "재무 스냅샷은 지우면 재현할 수 없어 정리하지 않습니다"만 출력. 테스트 `CollectorMainTest#재무_스냅샷은_keep_snapshots를_줘도_지우지_않는다` 통과. ADR-008 2.7·runbook 5.1·`SnapshotRetention` 주석·D-051 ⑤가 "정리는 일봉만, 재무 스냅샷은 지우면 같은 내용으로 다시 만들 수 없다"로 고쳐짐 |
+| R1 재무 쪽 리포트·정리 순서 | 해결 | 재무는 정리 자체를 하지 않음(F2) |
+| R2 리포트 단계 비보호·우선순위 미강제 | 일부 해결 | 리포트 단계는 날짜마다 보호 구간 확인(F1 ④). OS 낮은 우선순위는 여전히 runbook 안내뿐이고 코드가 강제하지 않음. 단발 명령을 감시 프로세스 정지 순서에 넣는 일은 Q-041(사용자 결정)로 남아 있음. 판정 제외 |
+| R3 KRX 하루 한도 초과로 키 정지 | 해결 | `--max-calls`는 KRX 10,000·OpenDART 20,000 이하만 받음(`CollectorMain.Options.parse`), 호출 기록은 `<설정 폴더>/collector-state/budget/`로 옮겨 `--cache-dir`와 무관하게 합산. 테스트 `CollectorMainTest#호출_상한은_약관_한도를_넘길_수_없고_기록은_캐시_폴더와_무관하게_합산된다` 통과, 배포본 직접 실행으로도 거부 확인 |
+| R4 CI 키 패턴 범위 | 대부분 해결 | `scripts/ci/check-collector-keys.sh`가 `git ls-files` 전체(검토 원문 제외)에 `crtfc_key`·`crtfc-key`·`auth-key`·`AUTH_KEY` 값 패턴을 검사하고 CI 단계로 추가됨. 남은 빈틈은 R7 |
+| R5 코드 재사용 시 수정 계수 오염 | 해결 | 재등장일을 구간 시작으로 두고 구간별로 누적 계수를 따로 계산(`KrxDailySnapshotBuilder`의 `segmentStarts`, `cumulative.floorEntry(d)`). 테스트에 새 회사 분할이 옛 회사 일봉에 곱해지지 않는 경우 추가, 통과 |
+| R6 KRX 캘린더 2026-12-31 만료 | 남음(판정 제외) | `krx.json` `coverageTo` 그대로. 만료되면 수집기가 멈추는 안전 쪽 동작이고 PR 후속 과제에 있음 |
+
+### 점검표 재확인
+1차 점검표 A·B·과금 판정은 새 diff에서도 그대로다. 8deb727은 수집기·`autotrade-marketdata` 읽기 코드·문서·CI만 바꿨고 실전 주문 경로, Guard, 블랙리스트, 리스크 한도, 장애 대응 코드는 바꾸지 않았다. 바뀐 근거만 적는다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A8 | 통과 | 1차 근거에 더해 정리가 기본 배치에서 실제로 돌고(F1), 리포트 단계도 보호 구간을 본다. 디스크 20GB 바닥 거부는 그대로 |
+| A10 | 통과 | 저장소 전체 수집기 키 값 CI 검사 추가(R4), 테스트 값은 자리표시자. 새 테스트·스크립트에 실제 키 없음(`check-collector-keys.sh` 종료 코드 0, CI gitleaks success) |
+| A11 | 통과 | 보호 테스트는 1차와 같이 추가만. F1·F2·R3·R5 각각에 실패 경우를 포함한 테스트 추가(위 표) |
+| A14 | 통과 | D-051 ⑤에 "일봉만, 재무 스냅샷은 대상 아님", "품질 리포트는 날짜 순 스트리밍 검사" 반영. 기획서 v14.10 변경 이력 갱신. main 병합 뒤 D-049·D-050·D-051·D-052 순서와 Q-041 번호 충돌 없음 |
+| B1 | 통과 | 위 직접 실행 결과(BUILD SUCCESSFUL, 654 tests 0 failures), CI `Gradle build` success(61ad73e) |
+| B6 | 통과 | 수집기 테스트 56건(1차 53건 + 재무 정리 제외, 호출 상한 한도·합산, 규모 테스트). 지운 테스트·skip 없음 |
+| 과금 8.1~8.5 | 통과 | 외부 호출 지점은 1차와 같은 KRX Open API·OpenDART 두 곳뿐이고 새 호출 경로 없음. 8.4는 `--max-calls` 약관 한도 제한과 설정 폴더 단위 합산으로 1차보다 강해짐. 주문 경로 없음 |
+
+### 점검표 밖 발견(재검토)
+시나리오 시도:
+1. **기본 매일 예약 실행 → 정리·리포트 완주**: 1차의 1,107만 행 자료로 리포트 단계가 2GB 안에서 끝남을 재실측했고, 정리가 리포트 앞이라 리포트가 어떤 이유로 실패해도 정리는 끝나 있다. 결함 없음.
+2. **리포트 단계 중 보호 구간 진입**: `checkSnapshot`이 날짜마다 `perDate.run()`(= `RunGuard.checkSession`)을 불러 `Refused`(종료 코드 4)로 멈춘다. 스냅샷은 이미 커밋돼 있고 리포트만 빠진다. 결함 없음.
+3. **캐시 폴더를 바꾼 반복 실행·과대 상한**: 둘 다 막힘(R3). 결함 없음.
+4. **잘못된 주문·중복 주문**: 수집기에서 주문 포트·증권사 플러그인·`secrets.json` 로더로 가는 경로가 여전히 컴파일·클래스 수준에서 막혀 있음(1차 시나리오 9와 같음). main에 들어온 #40의 `KiwoomRestClient`는 게이트웨이 쪽이고 수집기 `forbiddenProjects`·ArchUnit 규칙(`com.autotrade.broker..` 참조 금지)에 걸려 수집기에서 쓸 수 없다.
+5. **[R7, 권고] `check-collector-keys.sh`는 Java 문자열 안의 이스케이프된 JSON 키를 잡지 못한다.** 패턴 `"auth-key"\s*:\s*"…"`는 `\"auth-key\":\"…\"` 형태(테스트 코드에서 키 파일 내용을 문자열로 만드는 방식, 예: `CollectorMainTest`의 `writeKeys`)와 맞지 않는다. 가짜 값으로 직접 확인했다. 지금 저장소에 실제 키는 없다. 패턴에 선택적 `\\?`를 넣는 정도로 막을 수 있다.
+6. **[R8, 권고] "지운 일봉 스냅샷은 같은 `--from`·`--to`로 다시 만들면 같은 ID" 주장의 예외.** 최근 7일 안의 빈 평일 응답과 오늘 응답은 캐시하지 않는다(`KrxDailyCollector.collect`). 그래서 `--to`가 오늘이거나 자료 게시 전이던 날을 포함해 만든 스냅샷은, 나중에 같은 기간으로 다시 만들면 그날 자료가 채워져 다른 ID가 될 수 있다 `[추론]`(KRX 당일 자료 게시 시각 18:00은 `[가정]`). 정리는 최근 K개와 실험 폴더가 참조하는 ID를 남기므로 영향은 실험실 DB에만 적힌 옛 스냅샷으로 좁다. runbook 5.1에 이 예외를 한 줄 적어 둘 것을 권한다.
+7. **Q-041 상태**: main에 들어온 ADR-007 선정 일괄 명령은 감시 프로세스의 `stop-request` 파일을 보고 시작을 거부하지만(D-049 ⑨), 수집기는 그 파일을 보지 않는다. 수집기는 시간·힙·디스크로 스스로 물러나고(A8), 단발 명령을 정지 순서에 넣을지는 Q-041 사용자 결정으로 열려 있다. 판정 제외, Q-041 결정 때 수집기도 같은 파일을 보게 할지 함께 정할 것.
+
+## 판정 (재검토)
+승인
