@@ -16,6 +16,7 @@ include(
     "autotrade-domain",
     "autotrade-marketdata",
     "autotrade-strategy",
+    "autotrade-selection",
     "autotrade-risk",
     "autotrade-sim",
     "autotrade-broker-api",

@@ -155,17 +155,17 @@ class SimulationExperimentRunnerTest {
     void 입력이_실험과_맞지_않으면_시작하지_않는다() {
         SimulationExperimentRunner runner = runner(1);
         List<StrategyProfile> ps = List.of(MKT_HOLD);
-        assertThatThrownBy(() -> runner.run(new ExperimentSpec(new ExperimentId("EXP-X"), FROM, TO, 7,
+        assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), FROM, TO, 7,
                 Money.of(10_000_000, Money.KRW), COST.id(), "OTHER-DATA", ClockMode.REPLAY, ps)))
                 .hasMessageContaining("데이터 스냅샷");
-        assertThatThrownBy(() -> runner.run(new ExperimentSpec(new ExperimentId("EXP-X"), FROM, TO, 7,
+        assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), FROM, TO, 7,
                 Money.of(10_000_000, Money.KRW), "KR-DEFAULT-000000000000", DATA.version(), ClockMode.REPLAY, ps)))
                 .hasMessageContaining("비용 모델 ID");
         // 비용 표가 2025-01-01부터라 2024년 데이터 실험은 거부(SIM-07)
-        assertThatThrownBy(() -> runner.run(new ExperimentSpec(new ExperimentId("EXP-X"), LocalDate.of(2024, 12, 30),
+        assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), LocalDate.of(2024, 12, 30),
                 TO, 7, Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY, ps)))
                 .hasMessageContaining("비용 표 밖");
-        assertThatThrownBy(() -> runner.run(new ExperimentSpec(new ExperimentId("EXP-X"), FROM, TO, 7,
+        assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), FROM, TO, 7,
                 Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REALTIME, ps)))
                 .hasMessageContaining("리플레이");
     }
@@ -204,7 +204,7 @@ class SimulationExperimentRunnerTest {
     }
 
     private static ExperimentSpec spec(List<StrategyProfile> profiles) {
-        return new ExperimentSpec(new ExperimentId("EXP-20261008-GOLD"), FROM, TO, 7, Money.of(10_000_000, Money.KRW),
+        return ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD"), FROM, TO, 7, Money.of(10_000_000, Money.KRW),
                 COST.id(), DATA.version(), ClockMode.REPLAY, profiles);
     }
 

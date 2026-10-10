@@ -3,7 +3,9 @@ package com.autotrade.strategy.profile;
 import com.autotrade.domain.market.Market;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.TradingStyle;
+import java.util.Collections;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.TreeMap;
 
 /**
@@ -55,6 +57,26 @@ public final class ProfileYaml {
      * @throws IllegalArgumentException 부분집합을 벗어나거나 필수 필드가 없을 때. 메시지에 줄 번호가 있다
      */
     public static StrategyProfile parse(String text, String source) {
+        Document doc = parseDocument(text, source);
+        String id = doc.require("id");
+        String version = doc.require("version");
+        String market = doc.require("market");
+        String style = doc.require("style");
+        try {
+            return new StrategyProfile(id, Integer.parseInt(version), Market.valueOf(market), TradingStyle.valueOf(style),
+                    doc.parameters());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(source + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 같은 파일 모양을 쓰는 다른 버전 파일(선정 프로필 {@code selections/}, ADR-007 2.1)이 문법 검사를 그대로 쓰도록
+     * 최상위 키와 {@code parameters} 맵만 읽어 돌려준다. 필수 필드 검사와 타입 변환은 부르는 쪽이 한다.
+     *
+     * @throws IllegalArgumentException 부분집합을 벗어날 때. 메시지에 줄 번호가 있다
+     */
+    public static Document parseDocument(String text, String source) {
         TreeMap<String, String> top = new TreeMap<>();
         TreeMap<String, String> params = new TreeMap<>();
         if (text.startsWith("\uFEFF")) {
@@ -122,24 +144,25 @@ public final class ProfileYaml {
         if (expectChild) {
             throw new IllegalArgumentException(source + ": parameters에 하위 키가 없습니다");
         }
-        String id = take(top, "id", source);
-        String version = take(top, "version", source);
-        String market = take(top, "market", source);
-        String style = take(top, "style", source);
-        try {
-            return new StrategyProfile(id, Integer.parseInt(version), Market.valueOf(market), TradingStyle.valueOf(style),
-                    params);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException(source + ": " + e.getMessage(), e);
-        }
+        return new Document(source, Collections.unmodifiableSortedMap(top), Collections.unmodifiableSortedMap(params));
     }
 
-    private static String take(TreeMap<String, String> top, String key, String source) {
-        String v = top.get(key);
-        if (v == null) {
-            throw new IllegalArgumentException(source + ": 필수 필드가 없습니다: " + key);
+    /**
+     * 읽은 파일 한 개.
+     *
+     * @param top 최상위 키 → 값({@code parameters}는 빈 문자열)
+     * @param parameters {@code parameters} 아래 평평한 맵(없으면 빈 맵)
+     */
+    public record Document(String source, SortedMap<String, String> top, SortedMap<String, String> parameters) {
+
+        /** 필수 최상위 필드. 없으면 파일 이름이 든 {@link IllegalArgumentException}. */
+        public String require(String key) {
+            String v = top.get(key);
+            if (v == null) {
+                throw new IllegalArgumentException(source + ": 필수 필드가 없습니다: " + key);
+            }
+            return v;
         }
-        return v;
     }
 
     private static IllegalArgumentException error(String source, int line, String message) {

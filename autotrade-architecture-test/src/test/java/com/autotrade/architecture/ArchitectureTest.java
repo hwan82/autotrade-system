@@ -60,6 +60,7 @@ class ArchitectureTest {
         "com.autotrade.domain..",
         "com.autotrade.marketdata..",
         "com.autotrade.strategy..",
+        "com.autotrade.selection..",
         "com.autotrade.risk..",
         "com.autotrade.sim..",
         "com.autotrade.broker..",
@@ -90,8 +91,9 @@ class ArchitectureTest {
     static final ArchRule DOMAIN_IS_INNERMOST = noClasses()
             .that().resideInAPackage("com.autotrade.domain..")
             .should().dependOnClassesThat().resideInAnyPackage(
-                    "com.autotrade.marketdata..", "com.autotrade.strategy..", "com.autotrade.risk..",
-                    "com.autotrade.sim..", "com.autotrade.broker..", "com.autotrade.config..", "com.autotrade.app..");
+                    "com.autotrade.marketdata..", "com.autotrade.strategy..", "com.autotrade.selection..",
+                    "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..", "com.autotrade.config..",
+                    "com.autotrade.app..");
 
     /** 가상 거래소는 증권사 플러그인을 모른다(주문 출구는 domain의 OrderGateway). */
     static final ArchRule SIM_DOES_NOT_KNOW_BROKERS = noClasses()
@@ -103,7 +105,8 @@ class ArchitectureTest {
             .that().resideInAnyPackage("com.autotrade.notification..", "com.autotrade.monitor..")
             .should().dependOnClassesThat().resideInAnyPackage(
                     "com.autotrade.domain..", "com.autotrade.marketdata..", "com.autotrade.strategy..",
-                    "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..", "com.autotrade.app..")
+                    "com.autotrade.selection..", "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..",
+                    "com.autotrade.app..")
             .allowEmptyShould(true);
 
     /** 시스템 시계를 만들어도 되는 곳: 각 프로세스 진입점(*Main)과 실험실의 CoreConfiguration. */
