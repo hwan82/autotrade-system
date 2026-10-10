@@ -10,6 +10,9 @@ import java.time.ZoneOffset;
 final class MutableClock extends Clock {
 
     private Instant now;
+    /** 시각을 물을 때마다 먼저 부르는 훅(경합 끼워 넣기용). 훅 안에서 다시 물으면 훅을 부르지 않는다. */
+    private Runnable onInstant;
+    private boolean inHook;
 
     MutableClock(Instant start) {
         this.now = start;
@@ -29,8 +32,20 @@ final class MutableClock extends Clock {
         return this;
     }
 
+    void onInstant(Runnable hook) {
+        this.onInstant = hook;
+    }
+
     @Override
     public Instant instant() {
+        if (onInstant != null && !inHook) {
+            inHook = true;
+            try {
+                onInstant.run();
+            } finally {
+                inHook = false;
+            }
+        }
         return now;
     }
 }

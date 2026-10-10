@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.marketdata.live.CredentialsRejectedException;
+import com.autotrade.marketdata.live.HttpPort;
 import com.autotrade.marketdata.live.TokenCache;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
@@ -361,6 +362,83 @@ class TossRestClientTest {
 
         clock.advance(TossRestClient.REVOKED_COOLDOWN);
         assertThat(client.token()).isEqualTo("tok-2"); // 쉬는 시간이 끝나면 받는다
+    }
+
+    /**
+     * 남의 재발급으로 끊긴 토큰을 버리는 동안 시계를 묻는 모든 순간에 다른 요청이 토큰을 꺼내 본다. 쉼을 버리기 전에
+     * 같은 잠금 안에서 걸어야 그 어느 순간에도 새 토큰을 받지 못한다(PR #41 architect F6·F7).
+     */
+    @Test
+    void 토큰을_버리는_어느_순간에_끼어든_요청도_새_토큰을_받지_않는다() throws Exception {
+        http.respond(200, PRICES);
+        client.get("/api/v1/prices", Map.of("symbols", "005930")); // tok-1
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        boolean[] armed = {false};
+        clock.onInstant(() -> {
+            if (!armed[0]) {
+                return;
+            }
+            try {
+                seen.add(client.token());
+            } catch (TossApiException e) {
+                seen.add(e.kind().name());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        HttpPort revokedThenArm = new HttpPort() {
+            @Override
+            public Response post(java.net.URI uri, Map<String, String> headers, String body) {
+                throw new AssertionError("POST 없음");
+            }
+
+            @Override
+            public Response get(java.net.URI uri, Map<String, String> headers) {
+                armed[0] = true; // 응답이 돌아온 뒤부터 시각을 물을 때마다 끼어든다
+                return new Response(401, error("token-revoked"), Map.of());
+            }
+        };
+        // 같은 발급기·시계로 만든 호출기에 응답만 바꿔 끼울 수 없으므로 FakeHttp를 대신해 위임한다
+        http.delegate = revokedThenArm;
+
+        assertThatThrownBy(() -> client.get("/api/v1/prices", Map.of("symbols", "005930")))
+                .isInstanceOfSatisfying(TossApiException.class,
+                        e -> assertThat(e.kind()).isEqualTo(TossApiException.Kind.TOKEN_REVOKED));
+        clock.onInstant(null);
+
+        assertThat(seen).isNotEmpty().allMatch(v -> v.equals("tok-1") || v.equals("TOKEN_REVOKED"));
+        assertThat(fetches).isEqualTo(1);
+    }
+
+    @Test
+    void 쉬는_동안_늦게_도착한_성공이_DEGRADED를_덮지_않는다() throws Exception {
+        http.respond(200, PRICES);
+        client.get("/api/v1/prices", Map.of("symbols", "005930")); // tok-1
+        boolean[] once = {true};
+        http.delegate = new HttpPort() {
+            @Override
+            public Response post(java.net.URI uri, Map<String, String> headers, String body) {
+                throw new AssertionError("POST 없음");
+            }
+
+            @Override
+            public Response get(java.net.URI uri, Map<String, String> headers) {
+                if (once[0]) {
+                    once[0] = false;
+                    // 이 요청이 나가 있는 사이 다른 요청이 남의 재발급으로 끊겨 쉼을 건다
+                    assertThatThrownBy(() -> client.get("/api/v1/prices", Map.of("symbols", "000660")))
+                            .isInstanceOf(TossApiException.class);
+                    return new Response(200, PRICES, Map.of());
+                }
+                return new Response(401, error("token-revoked"), Map.of());
+            }
+        };
+
+        client.get("/api/v1/prices", Map.of("symbols", "005930"));
+
+        assertThat(client.health()).isEqualTo(TossRestClient.Health.DEGRADED);
+        assertThat(TossPlugin.of(client, clock).status()).isEqualTo(com.autotrade.broker.BrokerStatus.DEGRADED);
+        clock.advance(TossRestClient.REVOKED_COOLDOWN);
     }
 
     @Test

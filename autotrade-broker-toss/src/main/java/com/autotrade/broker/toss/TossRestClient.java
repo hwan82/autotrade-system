@@ -106,11 +106,13 @@ public final class TossRestClient {
     private Instant nextAuthAllowed = Instant.MIN;
     private int consecutiveRejections;
     private IOException lastAuthFailure;
-    private Instant revokedUntil;
+    /** 쓰기는 {@link #lock} 안에서, 읽기는 잠금 없이도 한다({@link #health()}가 막히지 않게). */
+    private volatile Instant revokedUntil;
     private volatile Health health = Health.UNKNOWN;
     /**
      * 토큰 꺼내기·발급·버리기를 한 줄로 세우는 잠금. {@link TokenCache} 내부 동기화에 기대지 않으려고 따로 둔다
-     * (PR #41 architect N10). 잠금 순서는 tokenLock → TokenCache → lock 이다.
+     * (PR #41 architect N10). 잠금 순서는 tokenLock → TokenCache → lock, 그리고 쉼을 걸 때
+     * tokenLock → lock 이다. lock을 쥔 채 tokenLock을 잡는 곳은 없다.
      */
     private final Object tokenLock = new Object();
     /** 이 호출기가 마지막으로 받은 토큰 값. {@link #tokenLock} 안에서만 바뀐다. 로그·예외에 넣지 않는다. */
@@ -204,7 +206,10 @@ public final class TossRestClient {
             if (n == null || !n.has("result")) {
                 throw new TossApiException("조회", TossApiException.Kind.OTHER, 200, "", requestId(r, n), null);
             }
-            health = Health.OK;
+            if (!inRevokedCooldown()) {
+                // 쉬는 중에 늦게 도착한 이전 요청의 성공이 DEGRADED를 덮지 않게 한다(PR #41 architect N14)
+                health = Health.OK;
+            }
             return n.get("result");
         }
         throw failure(sent);
@@ -212,7 +217,8 @@ public final class TossRestClient {
 
     /** 플러그인 상태 판단용. 블로킹하지 않는다. */
     public Health health() {
-        return health;
+        // 남의 재발급으로 쉬는 동안은 무엇이 성공으로 기록됐든 DEGRADED다(PR #41 risk-ops 4차 F7)
+        return inRevokedCooldown() ? Health.DEGRADED : health;
     }
 
     /**
@@ -281,9 +287,8 @@ public final class TossRestClient {
     }
 
     private boolean inRevokedCooldown() {
-        synchronized (lock) {
-            return revokedUntil != null && clock.instant().isBefore(revokedUntil);
-        }
+        Instant until = revokedUntil;
+        return until != null && clock.instant().isBefore(until);
     }
 
     /** 다른 곳이 같은 Client ID로 재발급해 우리 토큰이 끊겼다. 10분 쉬고 한 번 다시 받는다. */

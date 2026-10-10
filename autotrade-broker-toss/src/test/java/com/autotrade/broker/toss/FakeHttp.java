@@ -15,6 +15,8 @@ final class FakeHttp implements HttpPort {
 
     final List<Call> calls = new ArrayList<>();
     final Deque<Response> responses = new ArrayDeque<>();
+    /** 있으면 GET을 이쪽으로 넘긴다(요청 기록은 그대로). */
+    HttpPort delegate;
 
     FakeHttp respond(int status, String body) {
         responses.add(new Response(status, body, Map.of()));
@@ -33,8 +35,11 @@ final class FakeHttp implements HttpPort {
     }
 
     @Override
-    public Response get(URI uri, Map<String, String> headers) {
+    public Response get(URI uri, Map<String, String> headers) throws java.io.IOException, InterruptedException {
         calls.add(new Call("GET", uri, headers, ""));
+        if (delegate != null) {
+            return delegate.get(uri, headers);
+        }
         return responses.removeFirst();
     }
 }
