@@ -24,11 +24,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.SortedSet;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 키움 REST API 국내주식 실시간 WebSocket({@code wss://api.kiwoom.com:10000/api/dostk/websocket}).
+ * 키움 REST API 국내주식 실시간 WebSocket.
  *
- * <p>`[사실]` 근거: 키움 공식 저장소 Kiwoom-Securities/Kiwoom-REST-API (2026-10-08 확인)
+ * <p>접속 경로: 사용자 제공 명세 JSON(2026-10-10 수신)의 실시간 항목 31개는 모두 {@code wss://api.kiwoom.com:10000}
+ * + {@code /api/websocket}이다 `[사실]`. 2026-10-08 조사(ADR-003, market-data-limits.md)는 {@code /api/dostk/websocket}이었다.
+ * 어느 쪽이 실서버에서 열리는지 키 없이 확인할 수 없어, 명세 경로를 먼저 쓰고 접속이 실패하면 예전 경로를 번갈아 시도하며,
+ * 한 번 LOGIN이 성공한 경로로 고정한다(추천안 채택(자율), ADR-003 5장. 실측 후 한 경로만 남긴다).
+ *
+ * <p>`[사실]` 근거: 키움 공식 저장소 Kiwoom-Securities/Kiwoom-REST-API (2026-10-08 확인), 사용자 제공 명세 JSON 0B·0D(2026-10-10)
  * <ul>
  *   <li>접속 뒤 {@code {"trnm":"LOGIN","token":…}}를 보내고 LOGIN 응답의 return_code 0을 기다린다.
  *       서버의 PING은 받은 그대로 돌려준다({@code kiwoom/core/ws_client.py}).</li>
@@ -39,22 +45,36 @@ import java.util.SortedSet;
  *       0D 주식호가잔량: 21 호가시간, 41~50 매도호가1~10, 61~70 매도잔량, 51~60 매수호가1~10, 71~80 매수잔량.</li>
  *   <li>한도: 세션당 실시간 200종목(docs/research/market-data-limits.md K1).</li>
  * </ul>
+ * 종목코드는 6자리 그대로 보내 KRX 단독 시세를 받는다(NXT는 {@code _NX}, 통합 SOR은 {@code _AL} 접미사, 명세 0B item).
+ * 0D의 61~80(호가잔량)은 등록한 거래소 기준이고 6044~6087(KRX·NXT별 잔량)은 통합 등록용이라 쓰지 않는다
+ * (명세 0D 예시에서 6자리 등록 시 6044 이후는 0) `[추론]`.
  * `[가정]` 체결·호가를 함께 등록해도 종목 단위로 200을 센다. 한 REG에 담는 종목은 100개씩 나눈다(한도 미공개).
  * 체결시간에는 날짜가 없어 수신 시각의 한국 날짜를 붙인다(정규장은 자정을 넘지 않는다).
  * 부호는 전일 대비 방향이므로 가격·수량은 절댓값을 쓴다.
- * VI 발동·해제(1h)는 VI발동구분 값의 뜻을 실측으로 확인한 뒤 붙인다(ADR-003 5장).
+ * VI 발동·해제(1h)는 명세에 필드(9068 발동구분, 1223 발동시각, 1224 해제시각)가 있지만 발동과 해제 메시지를 가르는 값이 없고
+ * 전 종목 등록({@code "item":[""]})이라 실측으로 메시지 모양을 본 뒤 붙인다(ADR-003 5장, docs/research/kiwoom-rest-api-spec.md 5장).
  */
 final class KiwoomStreamProtocol implements StreamProtocol {
 
-    static final URI ENDPOINT = URI.create("wss://api.kiwoom.com:10000/api/dostk/websocket");
+    /** 명세 경로(우선). */
+    static final URI ENDPOINT = URI.create("wss://api.kiwoom.com:10000/api/websocket");
+    /** 2026-10-08 조사 경로(대체). */
+    static final URI LEGACY_ENDPOINT = URI.create("wss://api.kiwoom.com:10000/api/dostk/websocket");
+    private static final List<URI> CANDIDATES = List.of(ENDPOINT, LEGACY_ENDPOINT);
     static final int MAX_SYMBOLS = 200;
     static final int SYMBOLS_PER_REG = 100;
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter HHMMSS = DateTimeFormatter.ofPattern("HHmmss");
     private static final List<String> TYPES = List.of("0B", "0D");
 
+    private static final System.Logger LOG = System.getLogger(KiwoomStreamProtocol.class.getName());
+
     private final TokenCache tokens;
     private final ObjectMapper mapper = new ObjectMapper();
+    /** 다음 접속 시도 번호. 접속 스레드에서만 바뀐다. */
+    private final AtomicInteger attempts = new AtomicInteger();
+    private volatile URI current;
+    private volatile URI pinned;
 
     KiwoomStreamProtocol(TokenCache tokens) {
         this.tokens = Objects.requireNonNull(tokens, "tokens");
@@ -62,7 +82,18 @@ final class KiwoomStreamProtocol implements StreamProtocol {
 
     @Override
     public URI endpoint() {
-        return ENDPOINT;
+        URI p = pinned;
+        if (p != null) {
+            return p;
+        }
+        URI next = CANDIDATES.get(Math.floorMod(attempts.getAndIncrement(), CANDIDATES.size()));
+        current = next;
+        return next;
+    }
+
+    /** LOGIN이 성공해 고정된 경로. 아직 없으면 빈 값. */
+    java.util.Optional<URI> pinnedEndpoint() {
+        return java.util.Optional.ofNullable(pinned);
     }
 
     @Override
@@ -141,17 +172,26 @@ final class KiwoomStreamProtocol implements StreamProtocol {
             return Decoded.ignored("JSON 객체 아님");
         }
         String trnm = n.path("trnm").asText("").toUpperCase(java.util.Locale.ROOT);
-        int code = n.path("return_code").asInt(0);
-        String detail = "return_code " + code + " " + n.path("return_msg").asText("");
+        KiwoomReturnCode code = KiwoomReturnCode.of(n);
         return switch (trnm) {
             case "PING" -> Decoded.reply(text);
-            case "LOGIN" -> code == 0 ? Decoded.control(Decoded.Control.LOGIN_OK, "")
-                    : Decoded.control(Decoded.Control.LOGIN_FAILED, detail);
-            case "REG", "REMOVE" -> code == 0 ? Decoded.ignored(trnm + " 성공")
-                    : Decoded.control(Decoded.Control.SUBSCRIBE_REJECTED, detail);
+            case "LOGIN" -> login(code);
+            case "REG", "REMOVE" -> code.ok() ? Decoded.ignored(trnm + " 성공")
+                    : Decoded.control(Decoded.Control.SUBSCRIBE_REJECTED, code.describe());
             case "REAL" -> Decoded.quotes(real(n.path("data"), receivedAt));
             default -> Decoded.ignored("trnm " + trnm);
         };
+    }
+
+    private Decoded login(KiwoomReturnCode code) {
+        if (!code.ok()) {
+            return Decoded.control(Decoded.Control.LOGIN_FAILED, code.describe());
+        }
+        if (pinned == null && current != null) {
+            pinned = current;
+            LOG.log(System.Logger.Level.INFO, "키움 실시간 접속 경로 확인: {0}", current); // 경로 실측 기록(ADR-003 5장)
+        }
+        return Decoded.control(Decoded.Control.LOGIN_OK, "");
     }
 
     private List<RawQuote> real(JsonNode data, Instant receivedAt) {
@@ -176,6 +216,10 @@ final class KiwoomStreamProtocol implements StreamProtocol {
     }
 
     private static java.util.Optional<RawQuote> trade(Symbol symbol, JsonNode v, LocalDate today) {
+        String venue = v.path("9081").asText("").strip();
+        if (!venue.isEmpty() && !venue.equals("KRX")) {
+            return java.util.Optional.empty(); // 9081 거래소구분: KRX 단독 시세만 녹화한다(NXT 체결이 섞이지 않게)
+        }
         BigDecimal price = unsigned(v.path("10").asText(""));
         BigDecimal qty = unsigned(v.path("15").asText(""));
         if (price == null || qty == null || price.signum() == 0 || qty.signum() == 0) {
