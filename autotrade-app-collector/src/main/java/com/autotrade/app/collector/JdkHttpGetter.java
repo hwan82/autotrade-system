@@ -14,7 +14,7 @@ final class JdkHttpGetter implements HttpGetter {
 
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER) // 리다이렉트로 키 헤더가 다른 호스트에 가지 않게, 3xx는 오류
             .build();
 
     @Override

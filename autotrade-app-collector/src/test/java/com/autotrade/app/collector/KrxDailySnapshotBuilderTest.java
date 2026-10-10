@@ -83,6 +83,24 @@ class KrxDailySnapshotBuilderTest {
     }
 
     @Test
+    void 오래_비었다가_다시_나온_코드는_옛_종가로_수정_비율을_잡지_않는다() throws IOException {
+        Map<LocalDate, List<KrxDailyRow>> m = new TreeMap<>();
+        LocalDate d = LocalDate.of(2026, 1, 5);
+        m.put(d, List.of(row(d, KrxBoard.KOSPI, "555555", "옛회사", "", "1000", "1000", "1000", "1000", "0", 1, 10)));
+        // 다른 종목만 있는 21거래일 뒤, 같은 코드로 새 회사 상장(기준가 3000)
+        for (int i = 1; i <= KrxDailySnapshotBuilder.REAPPEAR_GAP_DAYS + 1; i++) {
+            LocalDate x = d.plusDays(i);
+            m.put(x, List.of(row(x, KrxBoard.KOSPI, "666666", "다른", "", "10", "10", "10", "10", "0", 1, 1)));
+        }
+        LocalDate back = d.plusDays(KrxDailySnapshotBuilder.REAPPEAR_GAP_DAYS + 2);
+        m.put(back, List.of(row(back, KrxBoard.KOSPI, "555555", "새회사", "", "3100", "3100", "3100", "3100", "100", 1, 20)));
+        Out o = build(m);
+        assertThat(o.stats().adjustmentEvents()).isZero();
+        assertThat(o.stats().reappeared()).isEqualTo(1);
+        assertThat(o.bars()).contains(List.of("KRX", "555555", "2026-01-05", "1000", "1000", "1000", "1000", "1", "1"));
+    }
+
+    @Test
     void 수정_계수는_뒤_이벤트_비율의_곱이다() throws IOException {
         Out o = build(fixture());
         // 111111: D3 이벤트 0.5 → D1·D2 계수 0.5, D3·D4 계수 1

@@ -1,0 +1,53 @@
+# architect 검토: 수집 일괄 명령 autotrade-app-collector(Q-037, D-051, ADR-008): KRX 일봉·상장주식수, OpenDART 재무 증분 수집
+- 대상: PR #39 / 브랜치 claude/project-thread-vip8tu / 커밋 366b771(0720a8f, 26ca46a 포함) / main 대비 diff (`git diff origin/main...HEAD`, 56개 파일, 앱 모듈 신규 1개, marketdata 계약 변경, ArchitectureTest·ModuleOwnershipTest 규칙 추가, 문서 9개)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build`(캐시 사용) → BUILD SUCCESSFUL, EXIT 0.
+  - `./gradlew clean build --no-build-cache`(작업 트리 깨끗한 상태, HEAD 366b771) → BUILD SUCCESSFUL, EXIT 0, 131 tasks. 전체 테스트 결과 XML 합계 tests=584, skipped=0, failures=0, errors=0. 수집기 9개 클래스 31건, ArchitectureTest 16건, ModuleOwnershipTest 13건, SnapshotFinancialsTest 4건, SnapshotDailyBarSourceTest 9건 포함. 검토 중 브랜치에 366b771(테스트 자리표시자 교체, `.gitleaksignore` 1줄)이 올라와서 그 커밋에서 다시 `./gradlew build`를 돌렸고 결과가 같았다(EXIT 0).
+  - 임시 확인 테스트(`ZzReviewProbeTest`, 실행 뒤 지움, 저장소에 남기지 않음)로 아래 F1·F2를 재현했다.
+    - F1: `collect(2026-03-01, 2026-03-31)` 뒤 `collect(2016-01-01, 2026-10-09)` → 두 번째 실행의 첫 `bgn_de=20260401`. 2016-01-01~2026-02-28은 훑지 않았다.
+    - F2: 어제 접수된 원 공시에 주요계정 응답 `status=013` → `pending=0`, `accounts/<접수번호>.json`의 `valuesFor=''`로 영구 기록.
+  - `scripts/ci/check-python-collectors.sh`를 기본 폴더와 임시 폴더에 실행: 기본 EXIT 0. `"x?crtfc_key=abcdef1234567890"`는 잡힘(EXIT 1), `{"crtfc_key": "abcd1234abcd"}`는 안 잡힘(EXIT 0). R4.
+  - `git diff origin/main...HEAD --diff-filter=D` → 지운 파일 없음. 추가 줄에 `@Disabled`·`@Ignore`·`assumeTrue` 없음. 추가 줄에서 32자 이상 영숫자 토큰은 `.gitleaksignore`의 커밋 지문뿐.
+  - gitleaks는 이 환경에 없어 직접 돌리지 못했다(B8은 diff 검사로 판정, CI가 따로 돈다).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 실행 `./gradlew clean build --no-build-cache` EXIT 0, 584건 실패 0·건너뜀 0(HEAD 366b771) |
+| B2 | 통과 | `autotrade-app-collector/build.gradle.kts:13-17` `processIsolation`이 sim·app-lab·ui·risk·strategy·control·broker-api·kiwoom·kis·다른 app-*·Spring을 런타임에서 막음. 의존은 domain·marketdata·config·Jackson뿐(:19-25). ArchUnit: `ArchitectureTest.java` `PLAIN_PROCESSES`에 `com.autotrade.app.collector..` 추가, 새 규칙 `COLLECTOR_READS_ONLY_ITS_SECRETS`(ConfigLoader·RuntimeConfigStore·RuntimeConfigHolder·LoadedConfig·RuntimeConfig·ProcessStartup·`com.autotrade.broker..`·`com.autotrade.domain.order..` 참조 금지)와 위반 고정 예제(`archfixture/LoadsProcessConfig`) 테스트 `수집_일괄_명령은_자기_키_파일만_읽고_증권사_주문을_모른다` 통과. 기존 규칙 삭제·완화 없음(diff는 추가만). `PROCESSES_ARE_INDEPENDENT`가 `com.autotrade.app.(*)..` 슬라이스라 수집기도 자동 포함. `ModuleOwnershipTest.OWNERS`에 `com.autotrade.app.collector` 추가. 규칙 추가 근거 ADR-008 2.2, ADR-001 표 갱신. `ConfigPaths.defaultLocation()`은 경로만 만들고 파일을 열지 않음(`autotrade-config/.../ConfigPaths.java:27-37`) |
+| B3 | 통과 | 계약 변경: `SnapshotManifest`에 `coverage` 구성요소 추가(record 생성자 시그니처 변경, 기존 사용처는 테스트 1곳만 갱신), 새 파일 `listed_shares.csv`·`financial_filings.csv`, 공용 읽기 `SnapshotFiles`·`SnapshotListedShares`·`SnapshotFinancials`, 헤더 상수 공개. 모두 ADR-008 2.3~2.5와 ADR-003 2.6 문구 갱신에 있다. 새 비밀 파일 `collector-secrets.json`은 `docs/config/config-keys.md`(키 2개, 형식·기본값·설명, 자리표시자 예시), `.gitignore`, runbook에 반영. 일반 설정은 설정 키가 아니라 명령줄 옵션으로 둔 이유와 대안이 ADR-008 2.2·3장에 있다. 결정 로그 D-051, Q-037 닫음, 기획서 v14.10(ARC-06·MD-11·배치표 1번) 일치 |
+| B4 | 통과 | 시각은 주입 `Clock`으로만(`CollectorMain.java:50`의 `Clock.systemUTC()`는 진입점, 나머지는 `LocalDate.now(clock…)`·`ZonedDateTime.now(clock…)`). 난수 없음. 순회 순서 명시: KRX 행은 코드·시장 순 정렬(`KrxDailySnapshotBuilder.java:159-169`), 종목 상태 `TreeMap`(:51), 재무는 `SnapshotFinancials.ORDER`, 공시 목록 정렬(`DartFinancialCollector.java:209`). 스냅샷 ID는 내용 해시 기반이고 같은 캐시면 같은 ID(`CollectorMainTest#krx_daily는_일봉_스냅샷과_품질_리포트를_만든다`, `KrxDailySnapshotBuilderTest#같은_입력이면_같은_행이다`). sim 골든 테스트는 바뀌지 않았고 clean build에서 통과 |
+| B5 | 통과 | 가격·금액·계수는 `BigDecimal`(`KrxDailyRow`, `FinancialFiling`, 이벤트 비율 `MathContext.DECIMAL64` `KrxDailySnapshotBuilder.java:36,74,153`), 거래량·상장주식수는 `long`(`longValueExact`). `double`·`float` 없음(grep) |
+| B6 | 통과 | 새 동작마다 테스트가 있다(수집기 31건: 키 파일 거부, 가림, 호출 상한 합산·020 중단, 재시도, 캐시 증분, 주말·오늘 미캐시, 수정 계수 손 계산, 거래정지, 상장폐지·소속부 구간, 상장주식수, 원 공시·정정·값 모름·반영 지연, 명령 전체 왕복과 키 평문 부재). 지우거나 끈 테스트 없음. 다만 아래 F1·F2 경로는 테스트가 없고 실제로 틀린 동작을 한다(점검표 밖 F1·F2) |
+| B7 | risk-ops 검토 필요 | 실전 주문 경로·Guard·블랙리스트·리스크 한도·장애 대응 코드는 건드리지 않는다. 그러나 A 점검표 대상인 **프로세스 격리**(A8)에 새 실행 단위를 더하고 보호 테스트 `ArchitectureTest`의 프로세스 목록(`PLAIN_PROCESSES`)을 바꾼다(추가만, 약화 아님). 같은 PC에서 실전 엔진과 함께 도는 무거운 단발 프로세스가 지침 4장 6번의 자원 부족 시 정지 순서에 없다(점검표 밖 F3). 이 PR에 risk-ops 검토 원문이 없다 |
+| B8 | 통과 | 키는 `Secret`으로만 들고(`CollectorSecrets.java`), URL·예외 메시지는 `Redaction`을 거침(`ApiCaller.java:93,99`, `CollectorMain.java:80`), JDK 예외 원인 메시지를 옮기지 않음, 파서 메시지도 옮기지 않음(`CollectorSecrets.java:41-43`). `CollectorMainTest#assertNoKeyAnywhere`가 캐시·스냅샷·리포트 전체에 키 평문이 없음을 확인. 테스트 픽스처는 자리표시자(`KRXPLACEHOLDERAAAA`, `DARTKEY` 등). 0720a8f의 이전 자리표시자(`dart-placeholder-key-0002`)는 실제 키가 아니며 `.gitleaksignore`에 지문으로 예외 처리됨. `.gitignore`에 `**/collector-secrets.json` |
+
+## 점검표 밖 발견
+
+### F1. (수정 필요) OpenDART 공시 훑기 기준점이 하나뿐이라 `--from`을 앞당기면 그 앞 기간을 조용히 영영 건너뛴다
+- `[사실]` `DartFinancialCollector.java:154-155`: `start = done == null || done.isBefore(from) ? from : done.plusDays(1)`. `state.json`에는 `scannedThrough` 하나만 있고 "어디서부터" 훑었는지는 남지 않는다.
+- `[사실]` runbook이 이 순서를 그대로 지시한다: 2장 첫 실행 `dart-financials --from 2026-03-01 --to 2026-03-31` → 3장 전체 수집 `dart-financials --from 2016-01-01`(`docs/runbooks/collector.md:416,426`). 검토자 재현에서 두 번째 실행의 첫 요청은 `bgn_de=20260401`이었다. 2016-01-01~2026-02-28 사업보고서는 한 건도 받지 않고, 오류나 경고 없이 종료 코드 0으로 스냅샷이 만들어진다.
+- 영향: 배치표 2번 (가) 재무 4조건 선정이 10년 치 재무 없이 돌아간다. 품질 리포트의 "첫 접수일"을 사람이 눈여겨보지 않으면 드러나지 않는다. 같은 방식으로 `done.isBefore(from)`이면 `done+1 ~ from-1` 구간도 기록 없이 비지만, 이건 사용자가 고른 범위라 문제는 덜하다.
+- 고칠 것(하나 고름): (가) 훑은 구간 목록(`[{from,to}]`)을 `state.json`에 두고 요청 범위에서 빠진 구간만 훑는다(추천, KRX 쪽 날짜별 캐시와 같은 성질). (나) 최소한 `from`이 처음 훑은 시작일보다 앞이면 그 앞 구간을 훑거나, 멈추고 안내한다. 어느 쪽이든 "첫 실행 뒤 `--from`을 앞당긴 두 번째 실행이 앞 구간을 훑는다" 테스트를 더한다.
+
+### F2. (수정 필요) 새 공시에 주요계정 응답이 아직 없으면(013) 대기하지 않고 영구 "값 모름"으로 굳는다
+- `[사실]` `DartFinancialCollector.java:230-242`: 대기(`pending`)는 응답 `rcept_no`가 비어 있지 않고 그 공시보다 앞일 때만이다. `status=013`(자료 없음)이면 `answered`가 빈 문자열이라 곧바로 `valuesFor=""`로 `accounts/<접수번호>.json`에 쓰고, 그 파일이 있으면 다시 부르지 않는다(:225). 검토자 재현: 어제 접수된 원 공시 + 013 → `pending=0`, `valuesFor=''`.
+- `[추론]` 회사의 첫 사업보고서이거나 그 사업연도에 앞 공시가 없을 때, 재무 API 반영이 늦으면 응답은 "앞 공시를 가리킴"이 아니라 013이다. ADR-008 2.5가 반영 지연을 14일 다시 부르는 이유가 그대로 적용되는데 이 경우만 빠졌다. 매일 증분 수집으로 원 공시 값을 확보한다는 D-051 ③의 핵심 경로가 반영 지연 한 번에 대체 규칙(편향 표시) 대상으로 떨어진다.
+- 고칠 것: 접수 뒤 `PENDING_DAYS` 안의 013(또는 빈 목록)도 대기로 두고, 기한이 지나면 값 모름으로 기록한다. 테스트를 더하고 ADR-008 2.5 문구에 이 경우를 적는다.
+
+### F3. (risk-ops 확인 필요) 수집기 자원 사용이 실전 엔진 보호 규칙 밖에 있다
+- `[사실]` runbook 3장은 품질 리포트 단계 메모리 부족 시 `JAVA_OPTS=-Xmx6g`를 권하고(`docs/runbooks/collector.md:431`), 4장은 매일 장 마감 뒤 18:30 이후 OS 예약 작업 실행을 권한다(:438-440). ADR-008 4장도 전 기간 스냅샷은 힙 수 GB가 필요할 수 있다고 적는다.
+- `[사실]` 지침 4장 6번은 "실험실·UI·녹화는 자원 부족 시 먼저 멈춘다"고 정하는데, 수집기는 그 목록에도 감시 프로세스의 정지 대상에도 없다. 미국 정규장은 한국 시간 22:30(서머타임)부터라 18:30에 시작한 전체 수집·리포트가 해외 실전 운용 시간과 겹칠 수 있다 `[추론]`.
+- 제안: runbook에 "실전 엔진 운용 중에는 전 기간 리포트 생성을 하지 않는다 / 힙 상한 기본값(예: `-Xmx2g`)과 낮은 OS 우선순위로 실행" 같은 운영 규칙을 두고, risk-ops가 A8 관점에서 수집기를 자원 부족 시 정지 순서에 넣을지 판정한다. 코드 변경이 필요 없을 수도 있지만 판정은 risk-ops 몫이다.
+
+### 권고 (머지를 막지 않음, 후속 과제로 남겨도 됨)
+- **R1. 코드 재사용 때 가짜 수정 이벤트**: `KrxDailySnapshotBuilder.java:67-79`는 종목 코드가 한동안 사라졌다가(상장폐지 뒤 같은 코드로 다른 회사 상장) 다시 나와도 `lastClose`를 이어 써서, 새 회사 첫날 기준가 ÷ 옛 회사 마지막 종가를 수정 비율로 잡고 옛 회사의 과거 일봉 전체에 곱한다. ADR-008 4장은 구간이 갈린다는 것만 적었다. 코드가 N거래일 이상 비었다가 다시 나오면 `lastClose`를 버리고 품질 리포트에 센다.
+- **R2. 평일 빈 응답의 영구 캐시**: `KrxDailyCollector.java:150-155`는 평일 빈 목록을 휴장일로 보고 캐시한다. 자료 게시 전 빈 응답이었다면 그 거래일이 영원히 빠진다. `autotrade-marketdata`의 거래소 캘린더와 대조하거나, 최근 며칠의 빈 응답은 캐시하지 않는다.
+- **R3. 리다이렉트로 키 헤더 전달**: `JdkHttpGetter.java:17` `Redirect.NORMAL`. JDK HttpClient는 리다이렉트 요청에 사용자 헤더를 다시 붙이므로 `AUTH_KEY`가 리다이렉트 대상 호스트로 갈 수 있다 `[추론]`(JDK 동작 원문 미대조). 두 API는 리다이렉트가 필요 없으니 `Redirect.NEVER`로 두고 3xx는 오류로 멈춘다.
+- **R4. CI `crtfc_key` 패턴 누락**: `scripts/ci/check-python-collectors.sh:14` 패턴은 `crtfc_key=값`만 잡고 Python에서 흔한 `{"crtfc_key": "값"}`(따옴표가 `:` 앞에 옴)는 못 잡는다(검토자 실행으로 확인). `crtfc_key["']?\s*[:=]\s*["']?[A-Za-z0-9]{8,}`로 넓힌다.
+- **R5. 호출 기록 동시 실행**: `CallBudget.acquire`(`CallBudget.java:64-73`)는 잠금 없는 읽기-쓰기라 같은 소스 명령을 동시에 두 번 돌리면 합산이 빠져 상한을 넘을 수 있다. 파일 잠금을 두거나 runbook에 "동시에 하나만"을 적는다.
+- **R6. 대체 규칙 묶음 집계**: `DartSnapshotBuilder.java:364-371`은 묶음 첫 행이 정정 공시(원 공시가 `--from` 전에 접수돼 목록에 없음)여도 값이 있으면 대체 규칙 대상으로 세지 않는다. 첫 행이 `correction=Y`인 묶음을 따로 센다.
+- **R7. 기본 주소 덮어쓰기 옵션**: `--krx-base-url`·`--dart-base-url`(`CollectorMain.java:231-232`)은 키를 임의 호스트로 보낼 수 있다. 테스트용이면 `https`만 허용하거나 사용법에서 빼고 패키지 내부 생성자로 넣는다.
+
+## 판정
+수정 필요(F1 공시 훑기 기준점, F2 013 대기 누락, B7 risk-ops 검토 원문 필요(F3 자원 격리))

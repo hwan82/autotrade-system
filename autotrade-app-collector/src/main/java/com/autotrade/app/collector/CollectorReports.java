@@ -25,6 +25,7 @@ final class CollectorReports {
                 + "| 종가가 없어 뺀 행 | " + s.droppedNoClose() + " |\n"
                 + "| 수정 이벤트(기준가 ≠ 전일 종가) | " + s.adjustmentEvents() + " |\n"
                 + "| 전일 대비 칸이 없어 수정 판정 못 한 행 | " + s.missingChange() + " |\n"
+                + "| 20거래일 넘게 비었다가 다시 나온 코드(전일 종가 잇지 않음) | " + s.reappeared() + " |\n"
                 + "| 이번 실행 API 호출 | " + fetched + " (오늘 누적 " + usedToday + ") |\n"
                 + "\n출처 표시: 한국거래소 통계정보(KRX Open API 이용약관 제10조 ③, D-050 ①)\n";
         Files.writeString(report, text, StandardCharsets.UTF_8, StandardOpenOption.APPEND);

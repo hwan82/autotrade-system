@@ -43,7 +43,10 @@ public final class KrxDailySnapshotBuilder {
 
     /** 수집 요약(품질 리포트 "수집 요약" 칸). */
     public record Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose,
-            long adjustmentEvents, long missingChange, LocalDate firstDate, LocalDate lastTradingDate) {}
+            long adjustmentEvents, long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate) {}
+
+    /** 코드가 이 거래일 수보다 오래 비었다가 다시 나오면 다른 회사로 보고 전일 종가를 잇지 않는다(코드 재사용, `[가정]`). */
+    static final int REAPPEAR_GAP_DAYS = 20;
 
     private KrxDailySnapshotBuilder() {}
 
@@ -51,6 +54,8 @@ public final class KrxDailySnapshotBuilder {
         Map<String, SymbolState> states = new TreeMap<>();
         long rows = 0;
         long missingChange = 0;
+        long reappeared = 0;
+        int dayIndex = -1;
         LocalDate first = null;
         LocalDate last = null;
         // 1차: 이벤트·주식수·구간
@@ -61,9 +66,15 @@ public final class KrxDailySnapshotBuilder {
             }
             first = first == null ? d : first;
             last = d;
+            dayIndex++;
             for (KrxDailyRow r : day) {
                 rows++;
                 SymbolState s = states.computeIfAbsent(r.code(), c -> new SymbolState());
+                if (s.lastDayIndex >= 0 && dayIndex - s.lastDayIndex > REAPPEAR_GAP_DAYS) {
+                    s.lastClose = null; // 옛 회사 마지막 종가로 새 회사의 수정 비율을 잡지 않는다
+                    reappeared++;
+                }
+                s.lastDayIndex = dayIndex;
                 BigDecimal close = positive(r.close());
                 if (close != null && s.lastClose != null) {
                     if (r.change() == null) {
@@ -142,7 +153,7 @@ public final class KrxDailySnapshotBuilder {
                 barCount++;
             }
         }
-        return new Stats(rows, barCount, halted, filled, dropped, events, missingChange, first, last);
+        return new Stats(rows, barCount, halted, filled, dropped, events, missingChange, reappeared, first, last);
     }
 
     /** 이벤트 날짜 E → E 이후(E 포함) 이벤트 비율의 곱. 날짜 D의 계수는 D보다 뒤 첫 이벤트 날짜의 값이다. */
@@ -178,6 +189,7 @@ public final class KrxDailySnapshotBuilder {
 
     private static final class SymbolState {
         BigDecimal lastClose;
+        int lastDayIndex = -1;
         long lastShares = -1;
         Period open;
         final List<Period> closed = new ArrayList<>();

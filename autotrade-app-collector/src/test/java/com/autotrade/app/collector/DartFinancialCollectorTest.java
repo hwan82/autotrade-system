@@ -23,6 +23,9 @@ class DartFinancialCollectorTest {
     @TempDir
     Path cache;
 
+    @TempDir
+    Path lateCache;
+
     static final String A = "20260310000001";
     static final String C = "20260311000002";
     static final String C_FIX = "20260315000009";
@@ -140,6 +143,60 @@ class DartFinancialCollectorTest {
         DartFinancialCollector late = collector(new FakeHttp(server(false)), seoulNoon("2026-04-01"), 1000);
         var r = late.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
         assertThat(r.pending()).isZero();
+        assertThat(late.accountsOf(E).path("valuesFor").asText()).isEmpty();
+    }
+
+    @Test
+    void 첫_실행_뒤_from을_앞당기면_앞_구간만_더_훑는다() throws IOException {
+        collector(new FakeHttp(server(false)), seoulNoon("2026-03-20"), 1000)
+                .collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        FakeHttp wider = new FakeHttp(server(false));
+        DartFinancialCollector c = collector(wider, seoulNoon("2026-03-20"), 1000);
+        c.collect(LocalDate.of(2025, 10, 1), LocalDate.of(2026, 3, 19));
+        List<String> listStarts = wider.calls.stream().filter(u -> u.getPath().endsWith("list.json"))
+                .map(u -> FakeHttp.query(u, "bgn_de") + "-" + FakeHttp.query(u, "end_de")).toList();
+        // 2025-10-01~2026-02-28만 3개월 창으로 훑고, 이미 훑은 3월은 다시 부르지 않는다
+        assertThat(listStarts).containsExactly("20251001-20251231", "20260101-20260228");
+        assertThat(c.scannedRanges()).hasSize(1);
+        assertThat(c.scannedRanges().get(0)).containsExactly(LocalDate.of(2025, 10, 1), LocalDate.of(2026, 3, 19));
+    }
+
+    @Test
+    void 훑지_않은_구간은_요청_범위에서_훑은_구간을_뺀_것이다() {
+        List<LocalDate[]> scanned = List.of(
+                new LocalDate[] {LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 31)},
+                new LocalDate[] {LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30)});
+        List<LocalDate[]> gaps = DartFinancialCollector.gaps(scanned, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 7, 10));
+        assertThat(gaps).hasSize(3);
+        assertThat(gaps.get(0)).containsExactly(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 2, 28));
+        assertThat(gaps.get(1)).containsExactly(LocalDate.of(2026, 4, 1), LocalDate.of(2026, 5, 31));
+        assertThat(gaps.get(2)).containsExactly(LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 10));
+        assertThat(DartFinancialCollector.gaps(scanned, LocalDate.of(2026, 3, 5), LocalDate.of(2026, 3, 20))).isEmpty();
+    }
+
+    @Test
+    void 새_공시의_계정이_아직_없으면_013_기한_안에는_대기한다() throws IOException {
+        BiFunction<URI, Integer, HttpGetter.Response> notYet = (u, n) -> u.getPath().endsWith("fnlttSinglAcnt.json")
+                && FakeHttp.query(u, "corp_code").equals("00000003")
+                ? FakeHttp.ok("{\"status\":\"013\",\"message\":\"조회된 데이타가 없습니다.\"}")
+                : server(false).apply(u, n);
+        DartFinancialCollector c1 = collector(new FakeHttp(notYet), seoulNoon("2026-03-20"), 1000);
+        var r1 = c1.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        assertThat(r1.pending()).isEqualTo(1);
+        assertThat(c1.accountsOf(E)).isNull();
+
+        DartFinancialCollector c2 = collector(new FakeHttp(server(true)), seoulNoon("2026-03-25"), 1000);
+        c2.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        assertThat(c2.accountsOf(E).path("valuesFor").asText()).isEqualTo(E);
+
+        // 기한이 지나도 013이면 값 모름으로 기록한다
+        Path other = lateCache;
+        CallBudget budget = new CallBudget(other, "opendart", 1000, seoulNoon("2026-04-10"));
+        ApiCaller caller = new ApiCaller(new FakeHttp(notYet), budget, new Redaction(List.of(Secret.of("DARTKEY"))), ms -> {}, 0);
+        DartFinancialCollector late = new DartFinancialCollector(
+                new OpenDartClient(caller, budget, "https://dart.test/api", "DARTKEY"), other, seoulNoon("2026-04-10"));
+        var r3 = late.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        assertThat(r3.pending()).isZero();
         assertThat(late.accountsOf(E).path("valuesFor").asText()).isEmpty();
     }
 
