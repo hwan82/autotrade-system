@@ -5,3 +5,7 @@
 # 실제 키가 아니며, 다음 커밋에서 규칙에 걸리지 않는 자리표시자로 바꿨다(PR #13).
 7d267d9f592a2a05e9587b0217f2b11e9c97dc9c:autotrade-app-lab/src/test/java/com/autotrade/app/lab/settings/SettingsControllerTest.java:generic-api-key:42
 7d267d9f592a2a05e9587b0217f2b11e9c97dc9c:autotrade-app-lab/src/test/java/com/autotrade/app/lab/settings/SettingsControllerTest.java:generic-api-key:43
+#
+# 0720a8f: 수집기 스레드 브랜치(claude/project-thread-vip8tu)의 테스트 자리표시자("krx-placeholder-key-0001")가
+# generic-api-key 규칙에 걸림. CI가 원격 브랜치 전체 이력을 검사해 다른 PR도 빨갛게 되므로 지문을 올린다(PR #40). 실제 키 아님.
+0720a8f17ad40ca89c880fb91cc1c838a803ac91:autotrade-app-collector/src/test/java/com/autotrade/app/collector/CollectorMainTest.java:generic-api-key:33
