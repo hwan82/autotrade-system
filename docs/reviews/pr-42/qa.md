@@ -2,7 +2,7 @@
 - 대상: PR #42 / 커밋 3b470fc18bdafd38fea3aa5332376fba6931cdf9 / main(b1571f0) 대비 diff(merge-base cf3759a, 22개 파일 +1184 −14)
 - 점검표: A 전체 + B1, B6 + 과금 검사(QA 지침 8장)
 - 직접 실행한 것:
-  - `./gradlew build --no-daemon` (PR 헤드 3b470fc): __BUILD__
+  - `./gradlew build --no-daemon` (PR 헤드 3b470fc): **BUILD SUCCESSFUL**(21회째 시도. 1~20회는 Maven Central 429로 의존성 받기 실패, 빌드 판정 아님). 모듈별 테스트 결과 XML 집계 564개, 실패 0, 건너뜀 0(broker-kis 30, marketdata 73, risk 55, architecture-test 28, app-gateway 32, app-engine 48 등)
   - `git merge-tree --write-tree origin/main origin/pr42`: **충돌** `CONFLICT (content): Merge conflict in docs/decisions/README.md` (main의 D-052 줄(PR #40)과 이 PR의 D-054 줄이 같은 위치). `.gitleaks.toml`은 양쪽이 같은 내용(blob c516265)이라 충돌 없음, `docs/adr/ADR-003-market-data.md`는 자동 병합됨.
   - GitHub check runs(헤드 3b470fc): Gradle build, Secret scan and collector boundary, DB schema(PostgreSQL 16) 모두 success.
   - 호출 지점 검색: `grep -rn "KisRestClient|KisDailyChart|KisTokenClient"` → `autotrade-broker-kis/src` 밖(운영 코드·app 모듈) 0건. 조회 호출기는 어느 프로세스에도 연결돼 있지 않음.
@@ -25,7 +25,7 @@
 | A12 | 통과 | 장애표 #7(토큰 만료·인증 실패) 입력이 바뀜: 401·403이라도 `EGW00133`이면 인증 실패 횟수에 넣지 않음(`KisTokenClient.java:104`). ADR-003 토큰 단락과 D-054 ③이 함께 갱신됨. 발급 실패 후 다음 발급 최소 60초(`StreamingMarketDataSource.java:231,366`)는 원인과 무관하게 유지되어 발급 API 폭주 없음. 장애 테스트 8종 #7(토큰 만료 강제 도래)의 전제(선제 갱신 또는 DEGRADED)는 바뀌지 않음. 장애표 #14 "초과 시 지수 백오프"는 조회 호출기가 호출자에게 넘기기만 하므로 연결 PR에서 충족해야 함 → R2 |
 | A13 | 해당 없음 | 해외 조회 TR 2개(`HHDFS00000300`, `HHDFS76240000`)가 허용 목록에 있으나 호출 코드·시간 계산 코드 없음. `KisDailyChart`는 KRX 전용(비KRX 종목은 `IllegalArgumentException`, 테스트 있음) |
 | A14 | **실패** | ① **main과 충돌**: `docs/decisions/README.md`(main의 D-052 줄과 같은 위치). 이대로는 머지할 수 없고, 해결 뒤 결정 로그에 D-052와 D-054가 모두 남는지 확인이 필요. ② (실패 사유 아님, 기록) D-054는 `[가정]` 코드(`EGW00121`·`EGW00122`·`EGW00133`) 확인을 Q-015로 미루고 Q-015 항목 추가를 "PR #39·#40·#41 머지 뒤"로 미룸. #40은 머지됐고 #39·#41은 열려 있음. 그동안 Q-015 표에는 이 코드들이 없음 |
-| B1 | __B1__ | __B1R__ |
+| B1 | 통과 | PR 헤드 3b470fc에서 `./gradlew build` 직접 실행 BUILD SUCCESSFUL, 테스트 564개 실패·건너뜀 0. main 병합 결과는 충돌 때문에 빌드하지 못함(A14) |
 | B6 | 통과 | A11 근거와 같음. `KisRestClientTest` 14개, `KisStreamProtocolTest` 2개 추가, `StreamingMarketDataSourceTest` 1개 추가. 건너뜀(`@Disabled`) 추가 없음(diff 검색) |
 
 ## 과금 검사 (QA 지침 8장)
@@ -47,7 +47,7 @@
 6. **R1(연결 PR 조건): 실전 계좌 키로 조회 호출기를 만들지 않는 규칙.** `broker-and-fault-design.md:101`(D-024)은 게이트웨이·실험실이 실전 계좌 키로 토큰 발급·REST 호출을 하지 않도록 정함. `KisRestClient.create` javadoc은 "실전 키로 조회 호출기를 만든다"고만 하고 실전 계좌 키 여부를 막지 않음. 한국투자 `tokenP` 재발급 제한(1분당 1회)이 같은 앱키에서 실전 엔진의 토큰 갱신과 겹치면 실전 쪽이 장애표 #7·#17로 이어질 수 있음 `[추론]`. 지금은 미연결이라 막지 않지만, 연결 PR은 실전 관련 PR로 다뤄 키 분리 검사와 테스트를 넣어야 함(risk-ops 후속과 같음).
 
 ## 판정
-수정 필요(A14__B1V__)
+수정 필요(A14)
 
 - A14: main과 `docs/decisions/README.md` 충돌을 해결할 것(D-052·D-054 줄 둘 다 유지). 병합 뒤 `./gradlew build`를 다시 통과해야 함.
 - R1·R2는 조회 호출기를 프로세스에 연결하는 PR의 승인 조건으로 남김. R3·R4는 권고.
