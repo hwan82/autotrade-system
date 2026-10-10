@@ -263,7 +263,7 @@ valid_until: next_13f_season        # 다음 분기 제출 시즌 전까지 후�
 |---|---|---|
 | 1 | data-engineer | 키움·한투 미국 실시간 수신과 녹화(OVS·MD-02), 환율 이력(OVS-08), 미국 일봉·유니버스 |
 | 2 | data-engineer | EDGAR 13F·Form 4 수집기와 ARK 일간 보관(Python 배치, D-019 경계, 스냅샷 파일), CUSIP→티커 매핑, 약관 확인(Q-007 확장) |
-| 3 | architect | 선정 조건에 "공시 보유 신호" 종류 추가, 신호 시각 계약(`edgar_accepted_at`) |
+| 3 | architect | 선정 조건에 "공시 보유 신호" 종류 추가, 신호 시각 계약(`edgar_accepted_date`, 접수일 다음 거래일부터 사용) |
 | 4 | strategy-researcher | 5장 비교 묶음 사전 등록, 미국 유니버스 하드 필터(STR-10 미국판), 실험 |
 | 5 | ui-dev | 미국 화면 필터, USD·KST/ET 병기(UI-07), 후보 근거(어느 기관이 언제 편입) 표시 |
 | 7단계 | risk-ops | 미국 실전은 Q-002·Q-008·Q-010 결정 뒤. 실전 활성화는 사용자 결정 |
