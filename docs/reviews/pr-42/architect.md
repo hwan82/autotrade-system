@@ -34,3 +34,51 @@
 
 - B3·F1: ADR-003 4장과 결정 로그 목록을 코드와 맞춘다.
 - B7: risk-ops A 점검표 검토 원문(`docs/reviews/pr-42/risk-ops.md`)이 있어야 한다. 실전 관련 PR이므로 독립 QA와 사용자 직접 머지 대상이다.
+
+## 재검토 2026-10-10 (대상 커밋 c500eb4)
+- 대상: PR #42 / 커밋 67f30bd, 143c441, cedc46b, c500eb4(HEAD) / `git diff origin/main...HEAD` 전체
+- 143c441 → c500eb4 사이 변경: `.gitleaks.toml`(cedc46b, 위 원문 B8에서 검토), `docs/adr/ADR-003-market-data.md`, `docs/decisions/D-054-…md`, `docs/decisions/README.md`, `docs/reviews/pr-42/architect.md`. Java·빌드 파일 변경 없음(`git diff 143c441 c500eb4 --stat`).
+- 이 검토 원문 파일은 c500eb4의 내용과 이 검토자가 쓴 원문이 같다(`diff` 차이 없음). 메인이 고치지 않았다.
+- 직접 실행한 것: c500eb4에서 `./gradlew build --continue` → BUILD SUCCESSFUL(104 actionable tasks). 코드가 143c441과 같으므로 위 원문의 `--rerun-tasks` 강제 재실행 결과(ArchitectureTest 15, ModuleOwnershipTest 13, KisRestClientTest 13, KisStreamProtocolTest 8, StreamingMarketDataSourceTest 19 등 모두 통과)가 그대로 유효하다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | c500eb4에서 `./gradlew build --continue` BUILD SUCCESSFUL |
+| B2 | 통과 | 코드·빌드 파일 변경 없음. 원문 판단 그대로 |
+| B3 | 통과 | F1 반영 확인. ① ADR-003:28에 `Decoded.pongs`·`WsConnection.sendPong` 계약(125바이트 상한, 기본 구현은 지원 안 함 예외, JDK 전송은 텍스트와 같은 순서, 사용처는 한국투자 PINGPONG뿐)이 들어가 코드(Decoded.java:16, WsConnection.java:12-14, JdkWsTransport.sendPong, StreamingMarketDataSource.sendPongs)와 일치. ② ADR-003:33 토큰 단락에 "한국투자는 401·403이라도 재발급 제한 코드(`EGW00133` `[가정]`)면 자격 증명 거절로 세지 않음(D-054)" 예외가 추가되어 KisTokenClient.issueFailure·KisApprovalClient와 일치. ③ ADR-003:168 5장 확인 항목에 토큰 오류·재발급 제한 코드 `[가정]`과 `ALREADY IN SUBSCRIBE` 처리가 들어감. ④ `docs/decisions/README.md`에 D-054 줄 추가, 내용이 D-054 본문 ①~⑤·143c441의 `EGW00215`와 일치. D-054 "반영" 절도 갱신됨. 남은 미룬 반영(Q-015 항목, `market-data-limits.md` 출처)은 계약이 아닌 조사 기록이라 막지 않는다 |
+| B4 | 통과 | 코드 변경 없음. 원문 판단 그대로 |
+| B5 | 통과 | 코드 변경 없음. 원문 판단 그대로 |
+| B6 | 통과 | 코드·테스트 변경 없음. 원문 판단 그대로 |
+| B7 | 확인 못 함 | 실전 경로(인증 실패 판정 → DEGRADED, REST 허용 목록 = 안전 불변식 8 경계)를 건드림 → **risk-ops 검토 필요**. c500eb4 기준 브랜치(`git ls-tree origin/claude/project-thread-r5reos docs/reviews/pr-42/`)에 `risk-ops.md`가 여전히 없다. 실전 관련 PR이라 risk-ops 승인 뒤 독립 QA와 사용자 직접 머지 대상(지침 10·11장) |
+| B8 | 통과 | 새 문서 변경분 전문 확인. 키·계좌번호·토큰 없음. `.gitleaks.toml` 판단은 원문 B8 그대로 |
+
+## 점검표 밖 발견(재검토)
+- F1 해소. N1~N4는 막지 않는 항목으로 그대로 남는다(연결 PR에서 다룰 것).
+
+## 판정
+수정 필요(B7)
+
+- B7: risk-ops A 점검표 검토 원문(`docs/reviews/pr-42/risk-ops.md`)이 있어야 한다. 그 판정이 "승인"이면 이 검토자의 막는 항목은 없다. 머지는 사용자가 직접 한다.
+
+### 재검토 B7 덧붙임
+위 재검토 절을 쓴 직후 작업 트리에 `docs/reviews/pr-42/risk-ops.md`(아직 커밋 안 됨, 대상 커밋 67f30bd·143c441·cedc46b, 점검표 A, 판정 "승인")가 생긴 것을 확인했다. 위 B7의 "risk-ops.md가 여전히 없다"는 브랜치(c500eb4) 기준으로는 맞지만 작업 트리 기준으로는 아니므로 여기서 바로잡는다. c500eb4가 cedc46b 뒤에 바꾼 것은 ADR-003·결정 로그·검토 원문 문서뿐이고 코드·설정은 그대로라, risk-ops가 본 실전 영향 범위와 같다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B7 | 통과(risk-ops 검토 필요) | 실전 경로(인증 실패 판정, REST 허용 목록)를 건드려 **risk-ops 검토 필요**. A 점검표 원문 `docs/reviews/pr-42/risk-ops.md` 판정 "승인"(:41-42)이 있다. 이 원문은 고치지 않고 그대로 커밋되어야 한다. 실전 관련 PR이라 독립 QA와 사용자 직접 머지가 남는다(지침 10·11장) |
+
+## 판정
+승인
+
+### 재검토 덧붙임: 커밋 616c25c
+c500eb4 뒤에 616c25c가 올라와 대상에 넣는다. 변경은 문서 2개뿐이다(`git diff c500eb4 616c25c --stat`): D-054 "영향과 남은 위험" 첫 줄 보완, `docs/reviews/pr-42/risk-ops.md` 추가. Java·빌드·설정 파일 변경 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 코드 변경 없음. c500eb4의 `./gradlew build --continue` BUILD SUCCESSFUL과 143c441 강제 재실행 결과가 그대로 유효 |
+| B3 | 통과 | D-054 영향 절이 실행 중 동작 변화 세 가지(PINGPONG, `ALREADY IN SUBSCRIBE`, 접속키 발급 401·403 중 `EGW00133` 예외)를 적어 KisApprovalClient.java:44 → KisTokenClient.issueFailure와 ADR-003:33 문구와 일치. 코드가 접근토큰 발급(KisTokenClient)에도 같은 해석을 쓰지만 그 발급기는 아직 어느 프로세스에도 연결되지 않아(D-054 ⑤) "실행 중 동작"에서 뺀 서술이 맞다 |
+| B7 | 통과(risk-ops 검토 필요) | 브랜치에 커밋된 `docs/reviews/pr-42/risk-ops.md`(616c25c)가 앞서 작업 트리에서 본 파일과 글자 단위로 같다(`diff` 차이 없음). 판정 "승인". 그 뒤 변경은 문서뿐. 독립 QA와 사용자 직접 머지가 남는다(지침 10·11장) |
+| B2·B4·B5·B6·B8 | 통과 | 코드 변경 없음. 새 문서 변경분에 비밀값 없음 |
+
+## 판정
+승인

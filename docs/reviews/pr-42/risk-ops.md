@@ -40,3 +40,44 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-10
+- 대상: PR #42 HEAD 616c25c(앞 검토 뒤 c500eb4, 616c25c 추가) / `git diff origin/main...HEAD` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - `git diff --stat 143c441 616c25c -- '*.java' '*.kts' '*.gradle' '*.toml' '*.sql'` → `.gitleaks.toml`만 나옴. 앞 검토 뒤 두 커밋은 문서만 바꿨다(`docs/adr/ADR-003-market-data.md`, `docs/decisions/D-054-…`, `docs/decisions/README.md`, `docs/reviews/pr-42/architect.md`, `docs/reviews/pr-42/risk-ops.md`). 코드와 빌드 파일은 바뀌지 않았다.
+  - 616c25c를 `git archive`로 깨끗한 사본에 풀어 `./gradlew build --continue`를 돌렸다 → BUILD SUCCESSFUL(1m 5s). 실패·오류·건너뜀 0건: `:autotrade-broker-kis` 30, `:autotrade-marketdata` 73, `:autotrade-risk` 55, `:autotrade-architecture-test` 28, `:autotrade-app-engine` 48, `:autotrade-app-gateway` 32.
+  - 616c25c에 커밋된 이 파일의 앞부분을 이 검토자가 쓴 원문과 `diff`로 비교 → 같음(메인이 고치지 않음).
+  - 공유 작업 트리에 `docs/reviews/pr-42/architect.md`의 커밋 안 된 변경이 있다. 이 검토의 판정 대상은 아니다.
+- ADR-003 바뀐 문구를 코드와 대조:
+  - 2.1 토큰 단락: "한국투자는 401·403이라도 본문 결과 코드가 재발급 제한(`EGW00133` `[가정]`)이면 자격 증명 거절로 세지 않고 일반 발급 실패로 둔다". 코드 `KisTokenClient.issueFailure`(재발급 제한 검사가 401·403 검사보다 먼저, `KisTokenClient.java:104-107`)와 일치한다. 이 예외 해석은 REST 토큰과 접속키 발급(`KisApprovalClient.java:45`) 모두에 적용되는데, ADR 문구도 "토큰·접속키 발급"을 같이 다루는 단락 안에 있어 범위가 맞다. 일반 실패여도 다음 발급은 60초 뒤라는 앞 문장이 유지되고, 이는 `StreamingMarketDataSource`의 `issuanceFailed` 처리와 일치한다. 키움의 거절 판정, 연속 3회 DEGRADED, 2분→30분 백오프 문구는 바뀌지 않았다. 인증 실패 판정이 약해진 범위는 `EGW00133` 한 코드뿐이다.
+  - 2.1 공통 엔진 단락의 `Decoded.pongs`·`WsConnection.sendPong` 계약(125바이트 초과는 보내지 않음, 기본 구현은 예외, JDK 전송은 텍스트와 같은 순서): `StreamingMarketDataSource.sendPongs`, `WsConnection.java:12`, `JdkWsTransport.sendPong`과 일치한다.
+  - 5장 확인 항목에 `EGW00121`·`EGW00122`·`EGW00133` `[가정]`과 `ALREADY IN SUBSCRIBE` 처리가 들어갔다. 7단계 전 Q-015 확인 대상으로 남아 있다.
+- 결정 로그 `README.md`의 D-054 줄(①~⑤)은 D-054 본문과 코드(허용 목록 6쌍, `RATE_CODES` 2개, 토큰 만료 시 1회 재시도, 미연결)와 일치하고 "추천안 채택(자율)" 표시가 있다. 앞 검토의 점검표 밖 발견 3이 해소됐다.
+- D-054 "영향과 남은 위험" 절이 실행 중 동작 변화 세 가지를 모두 적었다. 앞 검토의 점검표 밖 발견 2가 해소됐다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드 변경 없음(위 diff). `:autotrade-risk:test` 55건, `:autotrade-app-engine:test` 48건 통과(616c25c 사본). |
+| A2 | 통과 | 주문 출구·ArchUnit 무변경, `:autotrade-architecture-test:test` 28건 통과. `KisRestClient` 허용 목록(`KisRestClient.java:46`, `:119`, `:139`)은 앞 검토 때와 같다. 테스트 `#허용_목록_밖의_경로와_TR은_HTTP_요청_전에_거절한다` 통과. |
+| A3 | 통과 | 주문 라우팅 무변경. 이 PR에 증권사 간 주문 전환 경로가 없다. |
+| A4 | 해당 없음 | 주문 타임아웃·조회 로직 무변경. |
+| A5 | 해당 없음 | 멱등 키 코드 무변경. |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 무변경. |
+| A7 | 통과 | 계좌별 큐·토큰 버킷 무변경(`autotrade-risk`·`autotrade-app-engine` 테스트 통과). `KisRestClient`는 미연결(D-054 ⑤, README D-054 줄 ⑤). |
+| A8 | 통과 | 실전 엔진은 `marketdata.live`·`broker.kis`를 참조하지 않는다(앞 검토 확인, 코드 무변경). ADR-003에 공용 계약 변경이 문서화되었고 하위 호환이다. 엔진 테스트 48건 통과. |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 무변경. PONG 방식 미검증 위험은 D-054 되돌릴 조건과 ADR-003 5장·명세 요약 8장에 남아 있다. |
+| A10 | 통과 | 새 두 커밋의 diff에 키·토큰·계좌번호 리터럴이 없다(문서만 바뀜). `.gitleaks.toml` 예외는 앞 검토 때와 같은 한 값의 완전 일치(`^abcdef1234567890$`)다. 로컬 gitleaks 실행 파일은 없어 CI가 맡는다. |
+| A11 | 통과 | 테스트 파일 무변경. 앞 검토의 새 동작 테스트(재발급 제한, ALREADY IN SUBSCRIBE, PONG 125바이트, 토큰 1회 재시도)와 기존 `KisStreamProtocolTest#접속키_발급이_401_403이면_자격_증명_거절로_알리고_그_밖의_실패는_구분한다`가 616c25c 사본에서 통과. |
+| A12 | 통과 | ADR-003의 바뀐 인증 실패 판정 문구는 코드와 일치하고 예외는 `EGW00133` 한 코드뿐이다. 이 코드 값이 틀리면 기존처럼 자격 거절로 세므로 안전한 쪽으로 틀린다. 일반 실패도 다음 발급은 60초 뒤다. 장애표 #7(실패 시 DEGRADED)의 감지 경로는 진짜 자격 거절(그 밖의 401·403)에 대해 그대로이고, 장애 테스트 7번(토큰 만료 강제 도래 → 선제 갱신 또는 DEGRADED·알림)의 전제를 깨지 않는다. #14 분류(`EGW00201`·`EGW00215`)도 그대로다. |
+| A13 | 통과 | 코드 무변경. 앞 검토 근거 유지: KRX 외 일봉 거절, 토큰 만료 일시는 `Asia/Seoul`, `BigDecimal`, 주입 `Clock`. |
+| A14 | 통과 | 결정 로그 목록에 D-054 줄이 추가됐고(`docs/decisions/README.md`), D-054 반영 절·영향 절과 ADR-003이 코드와 일치한다. 아직 미룬 것은 Q-015 항목 추가와 `market-data-limits.md` 출처다. 둘 다 동작을 바꾸지 않는 근거 문서이며, D-054 "미룬 반영"에 이유(열린 PR #39·#40·#41과 같은 파일)와 함께 기록돼 있다. |
+
+## 점검표 밖 발견(재검토)
+- 앞 검토의 발견 2(D-054 영향 절)와 3(결정 로그 목록 줄)은 해소됐다.
+- 앞 검토의 발견 1(`KisRestClient`를 연결하는 PR의 조건: 실전 계좌 키 사용 차단과 테스트, `rateLimited()` 백오프, risk-ops 검토)은 미연결 상태라 그대로 후속 조건으로 남긴다.
+- 발견 4·5도 그대로 유지한다. 4는 `sendPong`의 실소켓 미시험, 5는 `ALREADY IN SUBSCRIBE`를 문자열 완전 일치로 판정하는 점이다.
+- 남은 미룬 반영(Q-015 항목, `market-data-limits.md` 출처)은 PR #39·#40·#41 머지 뒤 단계 완료 판정(C5)에서 반영 여부를 확인한다.
+
+## 판정(재검토)
+승인
