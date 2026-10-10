@@ -40,3 +40,29 @@
 
 ## 판정
 수정 필요(F1 ArchUnit `PURE`에 `com.autotrade.selection..` 추가, F2 조합 수 상한(SIM-14) 시작 검증 구현 또는 이연 명시)
+
+## 재검토 2026-10-10
+- 대상: PR #44 / head `8747b79` / main(`8680fde`) 대비 `git diff origin/main...HEAD` 전체. 지난 검토(`1977106`) 뒤 바뀐 것은 `8747b79` 한 커밋(`ArchitectureTest.java`, `SimulationExperimentRunner.java`, `SelectionCombinationRunnerTest.java`)이고 이 원문 파일은 그사이 바뀌지 않았다(`git diff 276dd83 8747b79 -- docs/reviews/` 0건).
+- 점검표: B
+- 직접 실행한 것: `./gradlew build --rerun-tasks`(head `8747b79`) **BUILD SUCCESSFUL in 1m 30s, 109 tasks 모두 실행**. 테스트 XML 집계 614개, 실패 0·오류 0·건너뜀 0(autotrade-sim 89, 1개 늘어남 = `조합_수가_상한을_넘으면_시작하지_않는다`, autotrade-architecture-test 28).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 실행 |
+| B2 | 통과 | F1 해소: `ArchitectureTest.java:62` `PURE`에 `com.autotrade.selection..`, `DOMAIN_IS_INNERMOST`(`:92`)·`REUSABLE_JARS_ARE_DOMAIN_FREE`(`:106`) 금지 목록에도 추가. 규칙을 넓히기만 했고 지운 항목 없음. 새 범위로 ArchitectureTest 통과 |
+| B3 | 통과 | F2 해소: `SimulationExperimentRunner.MAX_COMBINATIONS = 128`(`[가정]`, `:92`), `validateAndSlice` 첫 검사에서 초과 시 `IllegalArgumentException`(`:167-170`). 설정 키 이전은 후속으로 코드 문서에 명시(PR #39 config-keys.md 머지 뒤). 설정 키·스키마·REST 변경은 여전히 없음 |
+| B4 | 통과 | 결정론 영향 없음. 상한 검사는 입력 크기만 본다. 기존 골든·조합 결정론 테스트 그대로 통과 |
+| B5 | 통과 | 금액 변경 없음 |
+| B6 | 통과 | `SelectionCombinationRunnerTest#조합_수가_상한을_넘으면_시작하지_않는다`: 129개 거부, 정확히 128개는 시작(경계 양쪽). 삭제·비활성 테스트 없음 |
+| B7 | 해당 없음(알림 1건) | 실전 경로 변경 없음. 단 `ArchitectureTest`(보호 테스트)가 **강화** 방향으로 바뀌었으므로 지침 11장 취지에 따라 PR 본문에 적고 risk-ops에 알릴 것(약화가 아니라 실전 관련 PR 판정 대상은 아님) |
+| B8 | 통과 | 새 문자열에 비밀값 없음 |
+
+### 지난 지적 처리
+- F1: 해소(위 B2).
+- F2: 해소(위 B3). 상한값 128은 `[가정]`이다. 설정 키 `lab.max-combinations`로 옮기는 후속을 PR 본문 후속 과제에 옮겨 적을 것(권고).
+- R1: 반영. `!s.intent().isProtective()`(`SimulationExperimentRunner.java:278`). 기존 `#결과가_없는_날은_신규_진입만_막고_청산은_그대로_한다`가 EXIT 통과를 계속 확인한다.
+- R2: 문서화로 반영(`:67-70`, "그날 = 신호를 낸 이벤트의 거래일"). 기준이 정해졌으니 수용한다. 다만 문서의 "실전 엔진과 같은 기준" 문장은 일봉 스윙에서 실전이 d 종가 판단 주문을 d+1 장전에 내는 경우 d+1 고정 결과로 거를 수 있어 정확히 같지 않을 수 있다 `[추론]`. 실전 엔진 읽기 경로 구현(배치표 5번) 때 risk-ops·sim-engine이 대조할 것(차단 아님).
+- R3~R7: 이 커밋에서 바뀌지 않음. 지난 원문대로 후속 PR 몫(차단 아님).
+
+## 판정 (재검토)
+승인
