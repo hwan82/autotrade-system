@@ -8,6 +8,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class TossRateLimiterTest {
@@ -74,6 +76,47 @@ class TossRateLimiterTest {
         limiter.acquire("AUTH");
 
         assertThat(slept).containsExactly(Duration.ofSeconds(3), Duration.ofSeconds(60), Duration.ofSeconds(1));
+    }
+
+    @Test
+    void 한_그룹이_쉬는_동안_잠금을_쥐지_않아_다른_그룹은_바로_지나간다() throws Exception {
+        CountDownLatch sleeping = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        TossRateLimiter real = new TossRateLimiter(clock, d -> {
+            sleeping.countDown();
+            release.await();
+        });
+        real.onResponse("RANKING", new HttpPort.Response(429, "", Map.of("retry-after", "60")));
+        Thread blocked = new Thread(() -> {
+            try {
+                real.acquire("RANKING");
+            } catch (Exception ignored) {
+                // 테스트 종료
+            }
+        });
+        blocked.start();
+        try {
+            assertThat(sleeping.await(5, TimeUnit.SECONDS)).isTrue();
+            long start = System.nanoTime();
+            real.acquire("MARKET_DATA"); // 잠금을 쥔 채 잤다면 여기서 멈춘다
+            assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(2));
+        } finally {
+            release.countDown();
+            blocked.join(5000);
+        }
+    }
+
+    @Test
+    void 대기_상한을_넘으면_자리를_잡지_않고_바로_실패한다() throws Exception {
+        limiter.onResponse("MARKET_DATA", new HttpPort.Response(429, "", Map.of("retry-after", "3")));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> limiter.acquire("MARKET_DATA", Duration.ofSeconds(1)))
+                .isInstanceOfSatisfying(TossApiException.class,
+                        e -> assertThat(e.kind()).isEqualTo(TossApiException.Kind.RATE_LIMITED));
+        assertThat(slept).isEmpty();
+
+        limiter.acquire("MARKET_DATA", Duration.ofSeconds(5)); // 상한 안이면 기다린다
+        assertThat(slept).containsExactly(Duration.ofSeconds(3));
     }
 
     private static HttpPort.Response ok(Map<String, String> headers) {

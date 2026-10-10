@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
@@ -36,6 +37,11 @@ public final class TossPollingQuoteSource implements PollingQuoteSource {
     public static final String SOURCE_ID = "TOSS-POLL";
     static final int MAX_SYMBOLS = 200;
     static final String PATH = "/api/v1/prices";
+    /**
+     * 그룹 호출 한도 때문에 이보다 오래 기다려야 하면 이번 폴링은 바로 실패로 돌린다. 호출자가 다른 출처로 넘어가거나
+     * 다음 주기에 다시 묻게 한다(장애표 #2·#15, PR #41 risk-ops F1).
+     */
+    static final Duration MAX_RATE_WAIT = Duration.ofSeconds(1);
 
     private final TossRestClient client;
     private final Clock clock;
@@ -80,7 +86,7 @@ public final class TossPollingQuoteSource implements PollingQuoteSource {
             asked.put(s.code(), s);
             codes.add(s.code());
         }
-        JsonNode result = client.get(PATH, Map.of("symbols", codes.toString()));
+        JsonNode result = client.get(PATH, Map.of("symbols", codes.toString()), MAX_RATE_WAIT);
         Instant receivedAt = clock.instant();
         Map<Symbol, LastPrice> out = new TreeMap<>();
         if (!result.isArray()) {

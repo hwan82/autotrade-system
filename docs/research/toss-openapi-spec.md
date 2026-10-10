@@ -1,7 +1,7 @@
 # 토스증권 Open API REST 명세 요약 (2026-10-10 사용자 제공 OpenAPI JSON)
 
 - 작성: architect · 확인일: 2026-10-10 (KST)
-- 입력: 사용자(BAE)가 올린 토스증권 Open API REST 명세(OpenAPI 3.1.0, `info.version` 1.2.24, 약 466KB, 엔드포인트 42개). 원본은 저장소에 넣지 않았다(토스 배포물이고, 같은 내용을 토스 개발자 문서에서 받을 수 있다).
+- 입력: 사용자(BAE)가 올린 토스증권 Open API REST 명세(OpenAPI 3.1.0, `info.version` 1.2.24, 약 466KB, 엔드포인트 41개·경로 38개). 원본은 저장소에 넣지 않았다(토스 배포물이고, 같은 내용을 토스 개발자 문서에서 받을 수 있다).
 - 실시간(WebSocket) 명세는 이 파일에 없다. 명세 머리말이 `wss://openapi-ws.tossinvest.com/ws/v1`과 별도 AsyncAPI 문서(`https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json`)를 실시간의 기준 문서로 지정한다.
 - 보조 입력: 사용자가 안내한 토스 개발자 문서(`https://developers.tossinvest.com/docs`)의 `llms.txt`가 가리키는 개요(`overview.md`), FAQ(`faq.md`), AsyncAPI(`asyncapi.json`, `info.version` 1.2.2)를 2026-10-10에 웹 읽기 도구로 확인했다. 이 도구는 문서를 요약해 돌려주므로, 그 내용은 `[사실·요약]`으로 표시하고 코드로 옮기기 전에 원문 파일로 다시 확인한다(9장). 작업 환경의 셸에서는 토스 도메인 직접 접속이 프록시에 막힌다(HTTP 403).
 - 관련: [ADR-003 시세](../adr/ADR-003-market-data.md) 2.1·4장, [시세 사전 조사](market-data-limits.md) 1·3·5장, [D-039](../decisions/D-039-toss-quotes-free-default-on.md), [D-053](../decisions/D-053-toss-rest-read-only-client.md), 키움 쪽 같은 작업 [키움 명세 요약](kiwoom-rest-api-spec.md)(PR #40)
@@ -99,7 +99,7 @@ REST 명세에는 그룹 이름과 헤더 의미만 있다. FAQ는 "성공 응�
 - 개요 표에는 `MARKET_INDICATOR_PRICE`가 따로 있지만 REST 명세는 `GET /api/v1/market-indicators/prices`를 `MARKET_INDICATOR`로 표기한다. 둘 다 10회라 지금은 영향이 없다.
 - `MARKET_DATA` 15회는 [시세 조사](market-data-limits.md) T1과 같다. 2차 자료의 "약 10회"는 공식 표와 다르므로 공식 표를 따른다(시세 조사 5장의 미확정 항목을 닫는 근거).
 
-`TossRateLimiter` 규칙: 그룹마다 공식 한도와 초당 10회 중 작은 값으로 시작(표에 없는 그룹은 1회) → `X-RateLimit-Limit`이 오면 그 값을 쓰되 공식 한도를 넘지 않음 → `Remaining` 0이면 `Reset`초 쉼 → 429면 `Retry-After`초(없으면 1초, 최대 60초) 쉼. 시세를 10회로 시작하는 것은 PR #29 architect R1 제안을 지킨 것이고, 헤더가 15를 주면 15까지 올라간다.
+`TossRateLimiter` 규칙: 그룹마다 공식 한도와 초당 10회 중 작은 값으로 시작(표에 없는 그룹은 1회) → `X-RateLimit-Limit`이 오면 그 값을 쓰되 공식 한도를 넘지 않음 → `Remaining` 0이면 `Reset`초 쉼 → 429면 `Retry-After`초(없으면 1초, 최대 60초) 쉼. 시세를 10회로 시작하는 것은 PR #29 architect R1 제안을 지킨 것이고, 헤더가 15를 주면 15까지 올라간다. 자리 예약만 잠금 안에서 하고 기다리기는 잠금 밖에서 하므로 그룹끼리 서로 막지 않는다. 현재가 폴링은 대기 상한 1초를 넘으면 보내지 않고 `RATE_LIMITED`로 실패한다(PR #41 검토 반영).
 
 ## 5. 시세·종목 조회 엔드포인트 `[사실]`
 

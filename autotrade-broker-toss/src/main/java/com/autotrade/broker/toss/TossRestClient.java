@@ -51,8 +51,15 @@ public final class TossRestClient {
     /** 토큰 만료 전 재발급 여유. 토큰 수명은 명세 예시 기준 24시간이다. */
     static final Duration REFRESH_MARGIN = Duration.ofMinutes(10);
 
-    /** 경로 한 마디(명세의 심볼 형식). 점만으로 된 마디({@code ..})는 경로를 거슬러 올라가므로 막는다. */
-    private static final String SEG = "(?!\\.+(?:/|$))[A-Za-z0-9.\\-]+";
+    /**
+     * 경로 변수 형식(`[사실]` 명세의 path 파라미터 pattern). 종목 심볼은 점을 허용하므로 점만으로 된 마디({@code ..})는
+     * 경로를 거슬러 올라가지 않게 따로 막는다.
+     */
+    private static final String SYMBOL = "(?!\\.+(?:/|$))[A-Za-z0-9.\\-]+";
+    /** 시장 지표 심볼({@code KOSPI}, {@code KR_BOND_3Y} 등): {@code ^[A-Za-z0-9_]+$}. */
+    private static final String INDICATOR = "[A-Za-z0-9_]+";
+    /** 섹터 ID: {@code ^[A-Za-z0-9_-]{1,40}$}. */
+    private static final String SECTOR_ID = "[A-Za-z0-9_\\-]{1,40}";
 
     /** 허용 경로 → Rate Limits Group(`[사실]` 명세의 엔드포인트별 그룹). */
     private static final List<Map.Entry<Pattern, String>> READ_ONLY_PATHS = List.of(
@@ -63,20 +70,20 @@ public final class TossRestClient {
             route("/api/v1/candles", "MARKET_DATA_CHART"),
             route("/api/v1/stocks", "STOCK"),
             route("/api/v1/stocks/all", "STOCK_ALL"),
-            route("/api/v1/stocks/" + SEG + "/warnings", "STOCK"),
-            route("/api/v1/stocks/" + SEG
+            route("/api/v1/stocks/" + SYMBOL + "/warnings", "STOCK"),
+            route("/api/v1/stocks/" + SYMBOL
                     + "/(investor-trading|program-trades|short-selling|credit-trades|securities-lending)",
                     "STOCK_TRADING_TREND"),
             route("/api/v1/exchange-rate", "MARKET_INFO"),
             route("/api/v1/market-calendar/(KR|US)", "MARKET_INFO"),
             route("/api/v1/rankings", "RANKING"),
             route("/api/v1/market-indicators/prices", "MARKET_INDICATOR"),
-            route("/api/v1/market-indicators/" + SEG + "/candles", "MARKET_INDICATOR_CHART"),
-            route("/api/v1/market-indicators/" + SEG + "/investor-trading", "MARKET_INDICATOR"),
+            route("/api/v1/market-indicators/" + INDICATOR + "/candles", "MARKET_INDICATOR_CHART"),
+            route("/api/v1/market-indicators/" + INDICATOR + "/investor-trading", "MARKET_INDICATOR"),
             route("/api/v1/sectors", "SECTOR"),
             route("/api/v1/sectors/rankings", "SECTOR_RANKING"),
-            route("/api/v1/sectors/" + SEG, "SECTOR"),
-            route("/api/v1/sectors/" + SEG + "/(stocks|etfs)", "SECTOR"));
+            route("/api/v1/sectors/" + SECTOR_ID, "SECTOR"),
+            route("/api/v1/sectors/" + SECTOR_ID + "/(stocks|etfs)", "SECTOR"));
 
     /** 이 호출기 상태(플러그인 상태 판단용). */
     public enum Health {
@@ -94,6 +101,8 @@ public final class TossRestClient {
     private final TossRateLimiter limiter;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /** 아래 상태 필드 보호용. HTTP 호출과 한도 대기는 이 잠금 밖에서 한다(PR #41 architect F2). */
+    private final Object lock = new Object();
     private Instant nextAuthAllowed = Instant.MIN;
     private int consecutiveRejections;
     private IOException lastAuthFailure;
@@ -121,20 +130,32 @@ public final class TossRestClient {
      * 허용된 조회 경로에 GET을 보내고 응답 {@code result}를 돌려준다. 쿼리 값은 UTF-8로 인코딩한다
      * (캔들 {@code before}의 {@code +}는 {@code %2B}가 된다). 다건 조회 구분자 {@code ,}는 명세 예시대로 그대로 둔다.
      */
-    public synchronized JsonNode get(String path, Map<String, String> query) throws IOException, InterruptedException {
+    public JsonNode get(String path, Map<String, String> query) throws IOException, InterruptedException {
+        return get(path, query, null);
+    }
+
+    /**
+     * {@link #get(String, Map)}와 같되, 그룹 호출 한도 때문에 {@code maxWait}보다 오래 기다려야 하면 요청을 보내지 않고
+     * {@link TossApiException.Kind#RATE_LIMITED}로 바로 실패한다(보호 폴링용, PR #41 risk-ops F1).
+     */
+    public JsonNode get(String path, Map<String, String> query, Duration maxWait)
+            throws IOException, InterruptedException {
         Objects.requireNonNull(query, "query");
         String group = requireReadOnly(path);
-        if (revokedUntil != null) {
-            if (clock.instant().isBefore(revokedUntil)) {
-                throw new TossApiException("조회", TossApiException.Kind.TOKEN_REVOKED, 401, "token-revoked", "", null);
+        synchronized (lock) {
+            if (revokedUntil != null) {
+                if (clock.instant().isBefore(revokedUntil)) {
+                    throw new TossApiException("조회", TossApiException.Kind.TOKEN_REVOKED, 401, "token-revoked", "",
+                            null);
+                }
+                revokedUntil = null; // 쉬는 시간이 끝났다. 토큰은 이미 버렸으므로 이번 호출이 한 번 새로 받는다
             }
-            revokedUntil = null; // 쉬는 시간이 끝났다. 토큰은 이미 버렸으므로 이번 호출이 한 번 새로 받는다
         }
         URI uri = BASE.resolve(path + queryString(query));
-        HttpPort.Response r = send(group, uri);
+        HttpPort.Response r = send(group, uri, maxWait);
         if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_INVALID) {
             tokens.invalidate();
-            r = send(group, uri);
+            r = send(group, uri, maxWait);
         }
         if (r.status() == 200) {
             JsonNode n = parse(r);
@@ -152,6 +173,21 @@ public final class TossRestClient {
         return health;
     }
 
+    /**
+     * 수명이 짧은 토큰(재발급 여유 10분의 두 배 미만)은 캐시가 호출마다 다시 받지 않게, 수명의 절반이 지난 뒤에 다시
+     * 받도록 캐시에 넘기는 만료 시각을 늦춘다. 토스는 새 토큰이 이전 토큰을 바로 끊으므로 재발급은 꼭 필요할 때만
+     * 한다(PR #41 risk-ops F2). 늦춘 시각이 실제 만료보다 뒤가 되지는 않는다: 다시 받는 시점은
+     * {@code 발급 + 수명/2}로, 실제 만료 전이다. 실제 토큰 값은 바꾸지 않는다.
+     */
+    static TokenCache.Issued withRefreshAtHalfLife(TokenCache.Issued issued, Instant issuedAt) {
+        Duration life = Duration.between(issuedAt, issued.expiresAt());
+        if (life.compareTo(REFRESH_MARGIN.multipliedBy(2)) >= 0) {
+            return issued;
+        }
+        Duration half = life.isNegative() ? Duration.ZERO : life.dividedBy(2);
+        return new TokenCache.Issued(issued.value(), issuedAt.plus(half).plus(REFRESH_MARGIN));
+    }
+
     static String requireReadOnly(String path) {
         Objects.requireNonNull(path, "path");
         for (Map.Entry<Pattern, String> e : READ_ONLY_PATHS) {
@@ -162,9 +198,9 @@ public final class TossRestClient {
         throw new IllegalArgumentException("조회 전용 호출기가 허용하지 않는 경로: " + path);
     }
 
-    private HttpPort.Response send(String group, URI uri) throws IOException, InterruptedException {
+    private HttpPort.Response send(String group, URI uri, Duration maxWait) throws IOException, InterruptedException {
         String token = tokens.get();
-        limiter.acquire(group);
+        limiter.acquire(group, maxWait);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Accept", "application/json");
         headers.put("Authorization", "Bearer " + token);
@@ -179,7 +215,9 @@ public final class TossRestClient {
         TossApiException.Kind kind = TossApiException.classify(r.status(), code);
         if (kind == TossApiException.Kind.TOKEN_REVOKED) {
             tokens.invalidate();
-            revokedUntil = clock.instant().plus(REVOKED_COOLDOWN);
+            synchronized (lock) {
+                revokedUntil = clock.instant().plus(REVOKED_COOLDOWN);
+            }
             health = Health.DEGRADED;
         }
         return new TossApiException("조회", kind, r.status(), code, requestId(r, n),
@@ -191,32 +229,44 @@ public final class TossRestClient {
         return TossApiException.classify(r.status(), n == null ? "" : n.path("error").path("code").asText(""));
     }
 
-    /** 발급 간격 하한과 거부 백오프를 거는 발급기. {@link #get}이 잡은 잠금 안에서만 불린다. */
+    /**
+     * 발급 간격 하한과 거부 백오프를 거는 발급기. {@link TokenCache}의 잠금 안에서 불려 한 번에 하나만 발급한다.
+     * 토큰 발급이 429여도 다음 발급은 {@code Retry-After}가 아니라 60초 하한을 따른다(ADR-003 4장: 발급 실패는 원인과
+     * 상관없이 60초 뒤. 발급 그룹 한도가 초당 5회라 60초면 충분히 풀린다).
+     */
     private TokenCache.Fetcher guarded(TokenCache.Fetcher fetcher) {
         return () -> {
             Instant now = clock.instant();
-            if (now.isBefore(nextAuthAllowed) && lastAuthFailure != null) {
-                throw lastAuthFailure instanceof CredentialsRejectedException
-                        ? new CredentialsRejectedException("토스 토큰 발급 대기 중: 직전 발급이 거절됨")
-                        : new IOException("토스 토큰 발급 대기 중: 직전 발급 실패");
+            synchronized (lock) {
+                if (now.isBefore(nextAuthAllowed) && lastAuthFailure != null) {
+                    throw lastAuthFailure instanceof CredentialsRejectedException
+                            ? new CredentialsRejectedException("토스 토큰 발급 대기 중: 직전 발급이 거절됨")
+                            : new IOException("토스 토큰 발급 대기 중: 직전 발급 실패");
+                }
             }
             try {
                 TokenCache.Issued issued = fetcher.fetch();
-                consecutiveRejections = 0;
-                lastAuthFailure = null;
-                nextAuthAllowed = Instant.MIN;
-                return issued;
+                synchronized (lock) {
+                    consecutiveRejections = 0;
+                    lastAuthFailure = null;
+                    nextAuthAllowed = Instant.MIN;
+                }
+                return withRefreshAtHalfLife(issued, clock.instant());
             } catch (CredentialsRejectedException e) {
-                consecutiveRejections++;
-                lastAuthFailure = e;
-                nextAuthAllowed = now.plus(rejectedWait(consecutiveRejections));
-                if (consecutiveRejections >= REJECTIONS_BEFORE_DEGRADED) {
-                    health = Health.DEGRADED;
+                synchronized (lock) {
+                    consecutiveRejections++;
+                    lastAuthFailure = e;
+                    nextAuthAllowed = now.plus(rejectedWait(consecutiveRejections));
+                    if (consecutiveRejections >= REJECTIONS_BEFORE_DEGRADED) {
+                        health = Health.DEGRADED;
+                    }
                 }
                 throw e;
             } catch (IOException e) {
-                lastAuthFailure = e;
-                nextAuthAllowed = now.plus(AUTH_RETRY_FLOOR);
+                synchronized (lock) {
+                    lastAuthFailure = e;
+                    nextAuthAllowed = now.plus(AUTH_RETRY_FLOOR);
+                }
                 throw e;
             }
         };

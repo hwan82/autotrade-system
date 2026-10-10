@@ -70,16 +70,36 @@ final class TossRateLimiter {
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
     }
 
-    /** 그룹의 다음 호출 시각까지 기다린 뒤 자리를 잡는다. */
-    synchronized void acquire(String group) throws InterruptedException {
-        Group g = group(group);
-        Instant now = clock.instant();
-        if (now.isBefore(g.next)) {
-            Duration wait = Duration.between(now, g.next);
-            sleeper.sleep(wait);
-            now = g.next;
+    /**
+     * 그룹의 다음 호출 자리를 잡고 그 시각까지 기다린다. 자리 예약만 잠금 안에서 하고 기다리기는 잠금 밖에서 하므로,
+     * 한 그룹이 쉬는 동안(예: 429로 60초) 다른 그룹 호출은 기다리지 않는다(PR #41 architect F2).
+     */
+    void acquire(String group) throws InterruptedException, TossApiException {
+        acquire(group, null);
+    }
+
+    /**
+     * {@link #acquire(String)}와 같되, 기다릴 시간이 {@code maxWait}를 넘으면 자리를 잡지 않고 바로
+     * {@code RATE_LIMITED}로 실패한다. 보호 폴링이 한도 대기로 오래 멈추지 않게 한다(PR #41 risk-ops F1).
+     *
+     * @param maxWait 최대 대기. {@code null}이면 상한 없음
+     */
+    void acquire(String group, Duration maxWait) throws InterruptedException, TossApiException {
+        Duration wait;
+        synchronized (this) {
+            Group g = group(group);
+            Instant now = clock.instant();
+            Instant slot = now.isBefore(g.next) ? g.next : now;
+            wait = Duration.between(now, slot);
+            if (maxWait != null && wait.compareTo(maxWait) > 0) {
+                throw new TossApiException("한도 대기", TossApiException.Kind.RATE_LIMITED, 0, "local-wait-exceeded",
+                        "", wait);
+            }
+            g.next = slot.plus(interval(g.perSecond));
         }
-        g.next = now.plus(interval(g.perSecond));
+        if (!wait.isZero()) {
+            sleeper.sleep(wait);
+        }
     }
 
     /** 응답 헤더로 그룹 한도와 쉬는 시간을 갱신한다. 헤더 이름은 소문자로 온다(JdkHttpPort). */
