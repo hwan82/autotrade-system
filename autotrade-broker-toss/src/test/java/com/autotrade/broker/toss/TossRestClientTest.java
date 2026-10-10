@@ -294,6 +294,59 @@ class TossRestClientTest {
         assertThat(fetches).isEqualTo(2);
     }
 
+    /**
+     * 다른 프로세스가 재발급할 때 tok-1 요청 둘이 진행 중이었다. 먼저 끊긴 쪽이 쉬는 시간을 걸면, 나중에 끊긴 쪽은
+     * 다시 보내지도 새 토큰을 받지도 않아야 한다(맞재발급 방지, PR #41 architect F5).
+     */
+    @Test
+    void 동시에_끊긴_요청_둘은_한_번만_쉬고_쉬는_동안_새_토큰을_받지_않는다() throws Exception {
+        java.util.List<String> sentTokens = new java.util.ArrayList<>();
+        Deque<java.util.concurrent.Callable<com.autotrade.marketdata.live.HttpPort.Response>> script =
+                new ArrayDeque<>();
+        com.autotrade.marketdata.live.HttpPort racing = new com.autotrade.marketdata.live.HttpPort() {
+            @Override
+            public Response post(java.net.URI uri, Map<String, String> headers, String body) {
+                throw new AssertionError("POST 없음");
+            }
+
+            @Override
+            public Response get(java.net.URI uri, Map<String, String> headers) throws IOException {
+                sentTokens.add(headers.get("Authorization"));
+                try {
+                    return script.removeFirst().call();
+                } catch (IOException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        };
+        TossRestClient c = new TossRestClient(racing, fetcher, clock, new TossRateLimiter(clock, clock::advance));
+        com.autotrade.marketdata.live.HttpPort.Response revoked =
+                new com.autotrade.marketdata.live.HttpPort.Response(401, error("token-revoked"), Map.of());
+
+        script.add(() -> {
+            script.addFirst(() -> revoked); // 끼어든 요청 B도 tok-1로 나가 끊긴다
+            assertThatThrownBy(() -> c.get("/api/v1/prices", Map.of("symbols", "000660")))
+                    .isInstanceOf(TossApiException.class);
+            return revoked;
+        });
+
+        assertThatThrownBy(() -> c.get("/api/v1/prices", Map.of("symbols", "005930")))
+                .isInstanceOfSatisfying(TossApiException.class,
+                        e -> assertThat(e.kind()).isEqualTo(TossApiException.Kind.TOKEN_REVOKED));
+
+        assertThat(sentTokens).containsExactly("Bearer tok-1", "Bearer tok-1"); // 다시 보내지 않았다
+        assertThat(fetches).isEqualTo(1); // 쉬는 동안 새로 받지 않았다
+        assertThat(c.health()).isEqualTo(TossRestClient.Health.DEGRADED);
+
+        clock.advance(TossRestClient.REVOKED_COOLDOWN);
+        script.add(() -> new com.autotrade.marketdata.live.HttpPort.Response(200, PRICES, Map.of()));
+        c.get("/api/v1/prices", Map.of("symbols", "005930")); // 쉬는 시간이 끝나면 한 번 새로 받는다
+        assertThat(fetches).isEqualTo(2);
+        assertThat(c.health()).isEqualTo(TossRestClient.Health.OK);
+    }
+
     @Test
     void 새_토큰으로_다시_보낸_요청도_끊기면_남의_재발급으로_보고_쉰다() throws Exception {
         http.respond(200, PRICES);

@@ -108,8 +108,23 @@ public final class TossRestClient {
     private IOException lastAuthFailure;
     private Instant revokedUntil;
     private volatile Health health = Health.UNKNOWN;
-    /** 이 호출기가 마지막으로 받은 토큰 값. {@link #tokens} 잠금 안에서만 바뀐다. 로그·예외에 넣지 않는다. */
+    /**
+     * 토큰 꺼내기·발급·버리기를 한 줄로 세우는 잠금. {@link TokenCache} 내부 동기화에 기대지 않으려고 따로 둔다
+     * (PR #41 architect N10). 잠금 순서는 tokenLock → TokenCache → lock 이다.
+     */
+    private final Object tokenLock = new Object();
+    /** 이 호출기가 마지막으로 받은 토큰 값. {@link #tokenLock} 안에서만 바뀐다. 로그·예외에 넣지 않는다. */
     private volatile String currentToken;
+
+    /** 401을 받은 요청의 토큰이 지금 어떤 상태인지. */
+    private enum SentTokenState {
+        /** 아직 캐시의 토큰이었고 방금 버렸다. */
+        DROPPED,
+        /** 이 호출기가 이미 새 토큰으로 바꿨다. */
+        REPLACED,
+        /** 다른 요청이 이미 버렸고 새 토큰은 아직 없다. */
+        EMPTY
+    }
 
     /** 보낸 요청의 응답과 그 요청에 실은 토큰. */
     private record Sent(HttpPort.Response response, String token) {}
@@ -161,15 +176,25 @@ public final class TossRestClient {
         if (sent.response().status() == 401) {
             TossApiException.Kind kind = kindOf(sent.response());
             if (kind == TossApiException.Kind.TOKEN_INVALID || kind == TossApiException.Kind.TOKEN_REVOKED) {
-                if (!dropIfCurrent(sent.token())) {
+                switch (dropIfCurrent(sent.token())) {
                     // 이 요청이 나간 사이 이 호출기가 이미 새 토큰을 받았다. 이전 토큰이 끊긴 것은 우리 재발급 때문이므로
                     // 남의 재발급으로 보지 않고 새 토큰으로 한 번만 다시 보낸다(PR #41 architect F4).
-                    sent = send(group, uri, maxWait);
-                } else if (kind == TossApiException.Kind.TOKEN_INVALID) {
-                    sent = send(group, uri, maxWait);
-                } else {
-                    startRevokedCooldown();
-                    throw error(sent.response());
+                    case REPLACED -> sent = send(group, uri, maxWait);
+                    case DROPPED -> {
+                        if (kind == TossApiException.Kind.TOKEN_REVOKED) {
+                            startRevokedCooldown();
+                            throw error(sent.response());
+                        }
+                        sent = send(group, uri, maxWait);
+                    }
+                    case EMPTY -> {
+                        // 다른 요청이 같은 토큰을 이미 버렸다. 그 요청이 쉬는 시간을 걸었으면 다시 보내지 않는다(F5).
+                        // 아니면(만료로 버린 경우) 한 번 다시 보낸다. 쉬는 중의 발급은 발급기가 막는다.
+                        if (inRevokedCooldown()) {
+                            throw error(sent.response());
+                        }
+                        sent = send(group, uri, maxWait);
+                    }
                 }
             }
         }
@@ -216,7 +241,10 @@ public final class TossRestClient {
     }
 
     private Sent send(String group, URI uri, Duration maxWait) throws IOException, InterruptedException {
-        String token = tokens.get();
+        String token;
+        synchronized (tokenLock) {
+            token = tokens.get();
+        }
         limiter.acquire(group, maxWait);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Accept", "application/json");
@@ -227,17 +255,26 @@ public final class TossRestClient {
     }
 
     /**
-     * 보낸 토큰이 아직 캐시의 토큰이면 버리고 {@code true}. 이미 이 호출기가 새 토큰을 받았으면 그대로 두고 {@code false}.
-     * 확인과 버리기를 {@link TokenCache} 잠금 안에서 해 그 사이 받은 새 토큰을 버리지 않는다(발급도 그 잠금 안에서 한다).
+     * 보낸 토큰이 아직 캐시의 토큰이면 버리고 {@code DROPPED}. 이미 새 토큰이면 {@code REPLACED}, 이미 비었으면
+     * {@code EMPTY}. 확인과 버리기를 {@link #tokenLock} 안에서 해 그 사이 받은 새 토큰을 버리지 않는다(발급도 그 잠금 안).
      */
-    private boolean dropIfCurrent(String sentToken) {
-        synchronized (tokens) {
+    private SentTokenState dropIfCurrent(String sentToken) {
+        synchronized (tokenLock) {
+            if (currentToken == null) {
+                return SentTokenState.EMPTY;
+            }
             if (!sentToken.equals(currentToken)) {
-                return false;
+                return SentTokenState.REPLACED;
             }
             tokens.invalidate();
             currentToken = null;
-            return true;
+            return SentTokenState.DROPPED;
+        }
+    }
+
+    private boolean inRevokedCooldown() {
+        synchronized (lock) {
+            return revokedUntil != null && clock.instant().isBefore(revokedUntil);
         }
     }
 
@@ -251,7 +288,8 @@ public final class TossRestClient {
 
     private TossApiException failure(Sent sent) {
         HttpPort.Response r = sent.response();
-        if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_REVOKED && dropIfCurrent(sent.token())) {
+        if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_REVOKED
+                && dropIfCurrent(sent.token()) == SentTokenState.DROPPED) {
             startRevokedCooldown(); // 새 토큰으로 다시 보낸 요청도 끊겼다: 이번에는 남의 재발급이다
         }
         return error(r);
@@ -279,6 +317,11 @@ public final class TossRestClient {
         return () -> {
             Instant now = clock.instant();
             synchronized (lock) {
+                if (revokedUntil != null && now.isBefore(revokedUntil)) {
+                    // 남의 재발급으로 끊겨 쉬는 중에는 어떤 경로로도 새로 받지 않는다(맞재발급 방지, PR #41 architect F5)
+                    throw new TossApiException("발급", TossApiException.Kind.TOKEN_REVOKED, 401, "token-revoked", "",
+                            null);
+                }
                 if (now.isBefore(nextAuthAllowed) && lastAuthFailure != null) {
                     throw lastAuthFailure instanceof CredentialsRejectedException
                             ? new CredentialsRejectedException("토스 토큰 발급 대기 중: 직전 발급이 거절됨")
@@ -292,7 +335,7 @@ public final class TossRestClient {
                     lastAuthFailure = null;
                     nextAuthAllowed = Instant.MIN;
                 }
-                currentToken = issued.value(); // TokenCache 잠금 안이다(dropIfCurrent와 같은 잠금)
+                currentToken = issued.value(); // tokenLock 안이다(send가 잡고 tokens.get을 부른다)
                 return withRefreshAtHalfLife(issued, clock.instant());
             } catch (CredentialsRejectedException e) {
                 synchronized (lock) {
