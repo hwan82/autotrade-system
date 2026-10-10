@@ -110,3 +110,44 @@
 
 ### 판정
 수정 필요(G1 스냅샷 보관 규칙이 기본 배치에서 동작하지 않음, B7 risk-ops 재검토 원문 필요)
+
+## 재검토 2026-10-10 (2차)
+- 대상: PR #39 / 브랜치 claude/project-thread-vip8tu / 커밋 7cc5941 / main 대비 diff 전체(`git diff origin/main...HEAD`). 앞 재검토(ab86736, 이 파일의 `## 재검토 2026-10-10` 절과 [architect-2.md](architect-2.md)) 뒤 바뀐 것은 `git diff ab86736..7cc5941`: `CallBudget`, `CollectorMain`, `DartSnapshotBuilder`, `KrxDailyCollector`, `SnapshotRetention`과 테스트 4개, ADR-008, runbook, 검토 원문(architect.md·architect-2.md·risk-ops.md, 추가만).
+- 점검표: B
+- 원문 위치: docs/reviews/README.md 규칙대로 이 파일 아래에 덧붙였다. 앞 내용은 고치지 않았다.
+- 직접 실행한 것:
+  - risk-ops 검토와 겹치지 않게 작업 폴더가 아닌 별도 복제본(`git clone` 뒤 `git checkout 7cc5941`, 스크래치 폴더)에서 `./gradlew build --rerun-tasks --no-daemon --no-parallel --max-workers=1` → **BUILD SUCCESSFUL, EXIT 0**, 112 tasks 모두 실행. 결과 XML 합계 tests=606, failures=0, errors=0, skipped=0. 수집기 53건(새 테스트 `CallBudgetTest#동시에_돌아도_합산이_빠지지_않는다`, `CollectorMainTest#기본_배치에서_keep_snapshots가_옛_스냅샷을_정리한다`, `#스냅샷을_쓰는_중_보호_구간에_들어서면_멈추고_임시_폴더를_남기지_않는다`, `DartFinancialCollectorTest#원_공시가_수집_범위_앞이라_정정만_있으면_대체_규칙_묶음으로_센다`, `SnapshotRetentionTest#품질_리포트는_참조로_보지_않고_실험_폴더가_없으면_지우지_않는다` 포함), ArchitectureTest 16, ModuleOwnershipTest 13, risk 55, sim 75.
+  - 커밋된 검토 원문 확인: 7cc5941의 `architect.md`·`architect-2.md` 재검토 절이 검토자가 쓴 내용과 같고(판정 줄, G1, `data_snapshot_version` 지적 포함), 1차 절은 바뀌지 않았다.
+  - G1 수정은 새 왕복 테스트 `CollectorMainTest#기본_배치에서_keep_snapshots가_옛_스냅샷을_정리한다`를 읽어 확인했다. 품질 리포트를 기본 자리(`<experiments>/_data-quality`)에 두고 `--keep-snapshots 1`로 세 번 돌린다. 그 결과 실험이 참조한 10-06과 최근 10-08만 남고 10-07이 지워지며, 품질 리포트 3개는 남는다. 앞 재검토의 재현 조건(품질 리포트가 모든 스냅샷을 참조로 만드는 배치)과 같은 조건이고 통과했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 별도 복제본에서 직접 실행 `./gradlew build --rerun-tasks --no-parallel --max-workers=1` EXIT 0, 606건 실패 0·건너뜀 0(7cc5941) |
+| B2 | 통과 | 앞 재검토 근거 유지. 이번 변경에 모듈 의존·ArchUnit·`processIsolation` 변경 없음 |
+| B3 | 통과 | 새 명령줄 옵션 `--experiments-dir`(기본 `experiments`)과 보관 규칙 변경(품질 리포트 폴더 제외, 실험 폴더 없으면 정리 안 함, DB 참조 미확인 한계), 최근 7일 평일 빈 응답 미캐시가 ADR-008 2.3·2.7과 runbook 4·5.1장에 반영. 설정 파일 키·스키마·외부 계약 변경 없음 |
+| B4 | 통과 | 새 판정은 모두 주입 `Clock`·명시 정렬 위에서 돈다(`KrxDailyCollector`의 `today`는 `clock` 기준, `SnapshotRetention` 정렬 규칙 그대로). 최근 빈 응답을 캐시하지 않아도 스냅샷 입력은 그 실행의 응답(`uncached`)을 쓰므로 같은 응답이면 같은 결과다. 골든 테스트 변경 없음, 통과 |
+| B5 | 통과 | 금액 계산 변경 없음 |
+| B6 | 통과 | G1·H1·H3(R2·R6)·R5 각각에 실패 경우를 포함한 테스트가 붙었다(위 목록). 지우거나 끈 테스트 없음 |
+| B7 | risk-ops 검토 필요 | 이 PR은 실전 엔진·게이트웨이·감시의 빌드 격리 설정과 자원 보호(A8·A12, Q-041)를 건드린다. risk-ops 원문: ab86736 재검토 판정 **승인**은 7cc5941에 커밋되어 있다. 7cc5941 대상 2차 재검토(판정 **승인**)는 이 검토를 쓰는 동안 작업 트리의 [risk-ops.md](risk-ops.md)에 덧붙어 있고 아직 커밋 전이다(검토자가 `git diff`로 확인). 그 절이 커밋되어야 7cc5941 기준 A 점검표 검토가 갖춰진다. 지침 10장에 따라 머지는 사용자가 한다 |
+| B8 | 통과 | 새 출력 메시지(`CollectorMain.prune`의 실험 폴더 안내)에 키 없음. 앞 재검토 근거 유지 |
+
+### 앞 재검토 지적 처리
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| G1 보관 규칙이 기본 배치에서 동작 안 함 | 해결 | `SnapshotRetention.referencedIds`가 `reportDir` 아래 파일을 참조에서 뺌(정규화한 절대 경로 `startsWith`). 실험 폴더는 `reportDir` 상위를 추정하지 않고 `--experiments-dir`(기본 `experiments`)로 정하며, 없으면 정리하지 않음(`CollectorMain.prune`, `SnapshotRetention.prune` 첫 줄). 왕복 테스트로 확인 |
+| G1 곁가지: 저장소 밖 `--report-dir`이면 드라이브 루트를 읽음 | 해결 | 실험 폴더를 따로 받으므로 더 이상 `reportDir` 상위를 읽지 않음 |
+| G1 곁가지: 실험실 DB 참조 | 문서로 처리 | 코드로 막지 않고 ADR-008 2.7·runbook 5.1에 한계와 운영 규칙("실험은 `experiments/<실험ID>/`에 ID를 남긴다")을 적음. 아래 I1 |
+| H1 스냅샷 단계 중 보호 구간 | 해결(일봉 쓰기 단계) | `CollectorMain.guarded`가 두 번 훑기의 하루마다 `checkSession`, 걸리면 `SnapshotWriter.close()`가 임시 폴더를 지움. 품질 리포트 단계는 그대로이고 ADR-008 2.7에 한계로 적음 |
+| H2 훑은 구간 빈틈 표시 | 미반영 | 권고로 남김 |
+| H3 R2 평일 빈 응답 | 반영 | 최근 7일 안 평일 빈 응답은 캐시하지 않음(`KrxDailyCollector.RECENT_EMPTY_DAYS`, `[가정]`) |
+| H3 R6 대체 규칙 묶음 | 반영 | 묶음 첫 행이 정정 공시면 대체 규칙 대상으로 셈(`DartSnapshotBuilder`), 테스트 |
+| H4 캘린더 수록 범위 | 그대로 | 안전한 쪽 실패, runbook·ADR에 적힘. 후속 과제 권고 유지 |
+| R5 동시 실행 | 강화 | 같은 JVM 안 스레드는 `synchronized`로, 프로세스 사이는 파일 잠금으로 맞춤. 동시 실행 테스트 추가 |
+
+### 점검표 밖 발견 (모두 권고, 머지를 막지 않음)
+- **I1. 실험실이 지금은 `experiments/`에 스냅샷 ID를 남기지 않는다.** `[사실]` 실험실 운영 코드에서 `experiments/` 아래로 파일을 쓰는 곳을 찾지 못했다(`autotrade-app-lab/src/main` grep). 실험의 스냅샷 ID는 DB `experiment.data_snapshot_version`(`V1__lab_baseline.sql:27`)에만 있다. 그래서 runbook 4장이 권하는 매일 `--keep-snapshots 3`을 그대로 쓰면, 사람이 손으로 ID를 적지 않은 실험의 스냅샷은 사흘 뒤 지워진다. 같은 `--from`·`--to`로 다시 만들면 같은 ID로 복원되고(내용 해시), 문서에 한계가 적혀 있어 막지 않는다. 다만 복원하려면 그 범위의 원문 캐시가 남아 있어야 한다. 배치표 2·3번(sim-engine)에서 실험 실행 때 `experiments/<실험ID>/`에 입력 스냅샷 ID를 남기게 하는 것을 변경 제안으로 권한다. 그 전까지는 runbook의 매일 권고에 "실험실 실험을 돌리는 동안은 `--keep-snapshots`를 빼거나 ID를 적는다"를 덧붙이기를 권한다.
+- **I2. `--report-dir`과 `--experiments-dir`이 같으면 모든 실험 기록이 참조에서 빠진다.** `referencedIds`가 `reportDir` 아래를 모두 빼기 때문이다. 두 옵션이 같거나 `experimentsDir`이 `reportDir` 안이면 사용법 오류(종료 코드 2)로 막기를 권한다.
+- **I3. 앞 재검토 H2(훑은 구간 빈틈 표시)와 H4(캘린더 갱신 후속 과제)는 그대로다.**
+
+### 판정
+승인

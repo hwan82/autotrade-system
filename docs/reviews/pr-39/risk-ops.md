@@ -81,3 +81,38 @@
 승인
 
 참고: 이 PR은 프로세스 격리와 자원 정지 순서(장애 대응)에 걸리는 실전 관련 PR이다. 지침 10장에 따라 사용자가 직접 확인하고 머지하며, 머지 전에 독립 QA를 받아야 한다(지침 11장). Q-041은 사용자 결정 대기다.
+
+## 재검토 2026-10-10 (2차)
+- 대상: PR #39 / 커밋 7cc5941 / main(cf3759a) 대비 `git diff origin/main...HEAD` 전체. 앞 재검토(ab86736) 뒤 바뀐 것은 `git diff ab86736..7cc5941`이다. 코드는 `CallBudget`, `CollectorMain`, `DartSnapshotBuilder`, `KrxDailyCollector`, `SnapshotRetention`과 그 테스트 4개가 바뀌었고, 문서는 ADR-008, runbook, architect 원문 2개, 이 파일(앞 재검토 절, 추가만)이 바뀌었다.
+- 점검표: A
+- 직접 실행한 것:
+  - architect 검토와 겹치지 않도록 7cc5941을 스크래치 폴더에 따로 복제해 `./gradlew build --no-parallel --max-workers=1 --no-build-cache`를 돌렸다. BUILD SUCCESSFUL in 1m 44s, 112개 작업 모두 실행, EXIT 0. 모듈별 결과(tests/failures/errors/skipped): `:autotrade-risk:test` 55/0/0/0(`RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8), `:autotrade-architecture-test:test` 29/0/0/0(`ArchitectureTest` 16), `:autotrade-app-engine:test` 48/0/0/0(`RealOrderGatewaysTest` 4), `:autotrade-app-collector:test` 53/0/0/0(`CollectorMainTest` 11, `SnapshotRetentionTest` 3, `CallBudgetTest` 3, `RunGuardTest` 6). 다른 모듈도 실패 0·건너뜀 0.
+  - main 대비 실전 쪽 모듈에서 바뀐 것은 engine·gateway·watchdog의 `build.gradle.kts`(수집기를 빌드 격리 목록에 추가)뿐이다. 지운 파일은 없고, 추가 줄의 `@Disabled`·`@Ignore`·`assumeTrue`는 검토 원문 인용에만 있다.
+  - 이 파일의 앞 내용(1~83행)은 커밋 과정에서 바뀌지 않았다(`git diff ab86736..7cc5941`에 이 파일의 삭제 줄 없음).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 이번 변경은 수집기 안에서만 일어났다. Guard 코드·설정·테스트 변경 없음, `RealTradingGuardTest` 31건 통과, `COLLECTOR_READS_ONLY_ITS_SECRETS` 유지 |
+| A2 | 통과 | ArchitectureTest 변경 없음(16건 통과). `GuardedOrderGatewayTest` 8건, `RealOrderGatewaysTest` 4건 통과. 수집기 의존과 세 실전 프로세스의 빌드 격리 목록은 앞 재검토 그대로다 |
+| A3 | 통과 | 주문 라우팅 변경 없음. 주소 옵션 https 제한도 그대로다 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 경로 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 통과 | 계좌 큐·버킷·킬스위치 변경 없음. `CallBudget`은 파일 잠금 위에 같은 프로세스 안의 스레드끼리도 순서를 맞추는 잠금(`IN_PROCESS`)을 더했다(`CallBudgetTest#동시에_돌아도_합산이_빠지지_않는다`). KRX·OpenDART 몫이라 증권사 버킷과 무관하다 |
+| A8 | 통과 | 자원 보호가 강화됐다. 앞 재검토 R1의 앞부분(스냅샷 쓰기 단계는 도중에 멈추지 않음)을 반영했다. 일봉 스냅샷을 쓰는 동안 하루 읽을 때마다 보호 구간을 확인하고(`CollectorMain.guarded`, `KrxDaySource.rows`에서 `guard.checkSession()`), 걸리면 `RunGuard.Refused`를 던진다. 그러면 `SnapshotWriter.close()`가 임시 폴더를 지우고 종료 코드 4로 끝난다(`CollectorMainTest#스냅샷을_쓰는_중_보호_구간에_들어서면_멈추고_임시_폴더를_남기지_않는다`). 품질 리포트 단계(전 기간 읽기)는 여전히 도중에 멈추지 않지만 ADR-008 2.7에 한계로 적혀 있고, 2GB 힙과 낮은 우선순위가 영향을 묶는다. `KrxDailyCollector`의 최근 7일 평일 빈 응답 재호출은 호출 수만 조금 늘린다(하루 상한 안, 디스크·메모리 영향 미미). 보관 규칙은 더 보수적으로 바뀌었다. 실험 폴더가 없으면 아무것도 지우지 않고(`SnapshotRetention.prune` 첫 줄, `CollectorMain.prune`), 품질 리포트는 참조로 세지 않는다(`SnapshotRetentionTest#품질_리포트는_참조로_보지_않고_실험_폴더가_없으면_지우지_않는다`, `CollectorMainTest#기본_배치에서_keep_snapshots가_옛_스냅샷을_정리한다`). 그래서 F2(디스크 증가)에 대한 정리가 실제 예약 실행에서 동작한다 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. A8대로 수집기가 실전 자원을 먼저 내주는 전제가 유지된다 |
+| A10 | 통과 | 새 테스트 픽스처에 실제 키 없음(diff 확인). 키 가림·주소 제한·리다이렉트 끔은 그대로다 |
+| A11 | 통과 | 지운 테스트·건너뛰는 테스트 없음. 바뀐 기대값 하나를 확인했다: `CollectorMainTest#krx_daily는_일봉_스냅샷과_품질_리포트를_만든다`의 재실행 호출 수가 `hasSize(3)`에서 `hasSize(3 + 6)`이 됐다. 최근 평일 빈 응답을 캐시하지 않는 새 동작(`KrxDailyCollector.RECENT_EMPTY_DAYS`)의 직접 결과이고, 같은 스냅샷 ID 확인은 남아 있어 약화가 아니다. 새 동작마다 테스트가 있다(위 A7·A8, `DartFinancialCollectorTest#원_공시가_수집_범위_앞이라_정정만_있으면_대체_규칙_묶음으로_센다`) |
+| A12 | 통과 | 장애표·5.2·장애 테스트 변경 없음. 전제(실전 외 작업이 먼저 물러남)는 수집기 자체 보호로 유지되고, 표 반영은 Q-041 사용자 결정 대기다(`docs/decisions/README.md` Q-041 행) |
+| A13 | 해당 없음 | 미국 주문 경로 변경 없음. 보호 구간 계산은 앞 재검토와 같다 |
+| A14 | 통과 | ADR-008 2.3(최근 7일 빈 응답 재호출 `[가정]`)·2.7(쓰기 중 확인, 보관 규칙의 실험 폴더·품질 리포트·DB 한계)과 runbook 4·5.1장이 코드와 일치한다 |
+
+### 남은 위험 (판정에 영향 없음)
+- 앞 재검토 R1의 뒷부분: 품질 리포트 단계는 도중에 멈추지 않고, 디스크 여유는 시작할 때와 스냅샷 전에만 본다. 그대로 남아 있다.
+- 앞 재검토 R2: KRX 캘린더가 2026-12-31까지다. 그대로 남아 있고 runbook에 적혀 있다.
+- 앞 재검토 R3: 실험실 DB에만 적힌 참조는 보관 규칙이 보지 못한다. 이번에 ADR-008 2.7과 runbook 5.1에 한계와 운영 규칙("실험은 `experiments/<실험ID>/`에 ID를 남긴다")으로 적혔다. 코드로 막지는 않았다. 실전 주문 안전과는 무관하다(architect·sim-engine 참고).
+
+## 판정 (2차 재검토)
+승인
+
+참고: 실전 관련 PR(프로세스 격리, 자원 정지 순서)이다. 지침 10·11장에 따라 독립 QA를 받은 뒤 사용자가 직접 확인하고 머지한다. Q-041은 사용자 결정 대기다.
