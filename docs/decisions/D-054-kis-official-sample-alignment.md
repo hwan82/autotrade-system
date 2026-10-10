@@ -28,6 +28,12 @@
 - 한국투자 실서버로 검증하지 못했다(이 개발 환경에서 서버·포털 접속 불가). 첫 녹화에서 확인할 항목은 명세 요약 8장.
 - 되돌릴 조건: 첫 녹화에서 무응답 끊김(`무응답 90초`)이 반복되면 ①-C로 바꾼다. 오류 코드 값이 포털 표와 다르면 `KisErrorCode`를 고친다.
 
+## 조회 호출기 연결 PR 승인 조건
+`KisRestClient`·`KisTokenClient`를 어느 프로세스에든 연결하는 PR은 실전 관련 PR로 다루고(risk-ops 검토, 독립 QA, 사용자 머지), 아래를 모두 갖춰야 승인한다. 근거는 [독립 QA 보고서](../reviews/pr-42/qa.md) R1·R2와 [risk-ops 검토](../reviews/pr-42/risk-ops.md) 후속 조건.
+- **R1 실전 계좌 키 분리.** 계좌번호까지 설정된 실전 계좌가 있는 한국투자 키로는 조회 호출기를 만들지 않는다(D-024, [장애 설계](../team/broker-and-fault-design.md) 키 분리, ADR-003 `GatewayMain.reservedForRealTrading`과 같은 규칙). 같은 앱키의 `tokenP` 재발급(1분당 1회)이 실전 엔진의 토큰 갱신과 겹치지 않게 하기 위해서다. 이 검사가 막는 것을 확인하는 테스트를 함께 넣는다.
+- **R2 호출 한도·재발급 하한.** 한도 초과(`KisApiException.rateLimited()`)면 호출자가 지수 백오프한다(장애표 #14). 토큰 만료·무효 응답이 이어져도 조회 호출기의 토큰 재발급은 실시간 엔진처럼 실패 뒤 최소 60초 간격을 지켜, 재발급 제한 응답과 발급 알림이 쌓이지 않게 한다. 두 동작 모두 테스트로 확인한다.
+- 권고(막지 않음): QA R3 PONG 125바이트 초과 횟수를 통계에 남기거나 첫 녹화 확인 항목에 넣는다. QA R4 Q-015 실측 때 `EGW00133` 응답이 연속 N회 이어지면 ERROR를 남기는 상한을 검토한다.
+
 ## 반영
 - 코드: `autotrade-marketdata`(`Decoded`, `WsConnection`, `JdkWsTransport`, `StreamingMarketDataSource`), `autotrade-broker-kis`(`KisStreamProtocol`, `KisApprovalClient`, `KisErrorCode`, `KisTokenClient`, `KisRestClient`, `KisDailyChart`)
 - 문서: [한국투자 명세 요약](../research/kis-open-api-spec.md), 결정 로그 목록 한 줄, [ADR-003](../adr/ADR-003-market-data.md) 2.1(`Decoded.pongs`·`WsConnection.sendPong` 계약)·토큰 단락(재발급 제한 예외)·5장 한국투자 확인 항목(architect 검토 B3·F1)
