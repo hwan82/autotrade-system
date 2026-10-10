@@ -347,6 +347,22 @@ class TossRestClientTest {
         assertThat(c.health()).isEqualTo(TossRestClient.Health.OK);
     }
 
+    /** 쉬는 동안 호출 입구 검사를 지난 요청이 토큰을 꺼내더라도 발급기가 새로 받지 않는다(PR #41 architect F6·B6). */
+    @Test
+    void 쉬는_동안에는_발급기가_새_토큰을_받지_않는다() throws Exception {
+        http.respond(401, error("token-revoked"));
+        assertThatThrownBy(() -> client.get("/api/v1/prices", Map.of("symbols", "005930")))
+                .isInstanceOf(TossApiException.class);
+        assertThat(fetches).isEqualTo(1);
+
+        assertThatThrownBy(client::token).isInstanceOfSatisfying(TossApiException.class,
+                e -> assertThat(e.kind()).isEqualTo(TossApiException.Kind.TOKEN_REVOKED));
+        assertThat(fetches).isEqualTo(1); // 입구 검사를 지나도 발급은 없다
+
+        clock.advance(TossRestClient.REVOKED_COOLDOWN);
+        assertThat(client.token()).isEqualTo("tok-2"); // 쉬는 시간이 끝나면 받는다
+    }
+
     @Test
     void 새_토큰으로_다시_보낸_요청도_끊기면_남의_재발급으로_보고_쉰다() throws Exception {
         http.respond(200, PRICES);

@@ -176,20 +176,20 @@ public final class TossRestClient {
         if (sent.response().status() == 401) {
             TossApiException.Kind kind = kindOf(sent.response());
             if (kind == TossApiException.Kind.TOKEN_INVALID || kind == TossApiException.Kind.TOKEN_REVOKED) {
-                switch (dropIfCurrent(sent.token())) {
+                switch (dropIfCurrent(sent.token(), kind == TossApiException.Kind.TOKEN_REVOKED)) {
                     // 이 요청이 나간 사이 이 호출기가 이미 새 토큰을 받았다. 이전 토큰이 끊긴 것은 우리 재발급 때문이므로
                     // 남의 재발급으로 보지 않고 새 토큰으로 한 번만 다시 보낸다(PR #41 architect F4).
                     case REPLACED -> sent = send(group, uri, maxWait);
                     case DROPPED -> {
                         if (kind == TossApiException.Kind.TOKEN_REVOKED) {
-                            startRevokedCooldown();
-                            throw error(sent.response());
+                            throw error(sent.response()); // 쉬는 시간은 dropIfCurrent가 버리기 전에 걸었다
                         }
                         sent = send(group, uri, maxWait);
                     }
                     case EMPTY -> {
-                        // 다른 요청이 같은 토큰을 이미 버렸다. 그 요청이 쉬는 시간을 걸었으면 다시 보내지 않는다(F5).
-                        // 아니면(만료로 버린 경우) 한 번 다시 보낸다. 쉬는 중의 발급은 발급기가 막는다.
+                        // 같은 토큰으로 나간 다른 요청이 먼저 401을 받아 이미 버렸다. 그 요청이 남의 재발급으로 보고
+                        // 쉬는 시간을 걸었으면 이 요청도 다시 보내지 않는다(F5). 만료로 버린 경우라면 그 요청이 새 토큰을
+                        // 받는 중이거나 받을 것이므로 한 번 다시 보내 그 토큰을 쓴다. 쉬는 중의 발급은 발급기가 막는다.
                         if (inRevokedCooldown()) {
                             throw error(sent.response());
                         }
@@ -241,10 +241,7 @@ public final class TossRestClient {
     }
 
     private Sent send(String group, URI uri, Duration maxWait) throws IOException, InterruptedException {
-        String token;
-        synchronized (tokenLock) {
-            token = tokens.get();
-        }
+        String token = token();
         limiter.acquire(group, maxWait);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Accept", "application/json");
@@ -254,17 +251,28 @@ public final class TossRestClient {
         return new Sent(r, token);
     }
 
+    /** 캐시의 토큰을 꺼내고, 없거나 재발급 때가 되면 받는다. 쉬는 중이면 발급기가 {@code TOKEN_REVOKED}로 막는다. */
+    String token() throws IOException, InterruptedException {
+        synchronized (tokenLock) {
+            return tokens.get();
+        }
+    }
+
     /**
-     * 보낸 토큰이 아직 캐시의 토큰이면 버리고 {@code DROPPED}. 이미 새 토큰이면 {@code REPLACED}, 이미 비었으면
+     * 보낸 토큰이 아직 캐시의 토큰이면 버리고 {@code DROPPED}. {@code revoked}면 버리기 전에 같은 잠금 안에서 쉬는 시간을
+     * 먼저 건다. 그래야 버린 뒤 쉼이 걸리기 전 틈에 다른 요청이 새 토큰을 받지 못한다(PR #41 architect F6). 이미 새 토큰이면 {@code REPLACED}, 이미 비었으면
      * {@code EMPTY}. 확인과 버리기를 {@link #tokenLock} 안에서 해 그 사이 받은 새 토큰을 버리지 않는다(발급도 그 잠금 안).
      */
-    private SentTokenState dropIfCurrent(String sentToken) {
+    private SentTokenState dropIfCurrent(String sentToken, boolean revoked) {
         synchronized (tokenLock) {
             if (currentToken == null) {
                 return SentTokenState.EMPTY;
             }
             if (!sentToken.equals(currentToken)) {
                 return SentTokenState.REPLACED;
+            }
+            if (revoked) {
+                startRevokedCooldown();
             }
             tokens.invalidate();
             currentToken = null;
@@ -288,9 +296,8 @@ public final class TossRestClient {
 
     private TossApiException failure(Sent sent) {
         HttpPort.Response r = sent.response();
-        if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_REVOKED
-                && dropIfCurrent(sent.token()) == SentTokenState.DROPPED) {
-            startRevokedCooldown(); // 새 토큰으로 다시 보낸 요청도 끊겼다: 이번에는 남의 재발급이다
+        if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_REVOKED) {
+            dropIfCurrent(sent.token(), true); // 새 토큰으로 다시 보낸 요청도 끊겼다: 이번에는 남의 재발급이다
         }
         return error(r);
     }
