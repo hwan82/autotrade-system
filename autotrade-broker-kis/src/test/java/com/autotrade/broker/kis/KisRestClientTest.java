@@ -205,6 +205,8 @@ class KisRestClientTest {
                 .isEqualTo(KisErrorCode.Kind.TOKEN_EXPIRED);
         assertThat(KisErrorCode.of(m.readTree("{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00201\"}")).kind())
                 .isEqualTo(KisErrorCode.Kind.RATE_LIMITED);
+        assertThat(KisErrorCode.of(m.readTree("{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00215\"}")).kind())
+                .isEqualTo(KisErrorCode.Kind.RATE_LIMITED);
         assertThat(KisErrorCode.of(m.readTree("{\"error_code\":\"EGW00133\"}")).kind())
                 .isEqualTo(KisErrorCode.Kind.ISSUE_THROTTLED);
         assertThat(KisErrorCode.of(m.readTree("{\"rt_cd\":\"1\",\"msg_cd\":\"APBK0919\"}")).kind())
