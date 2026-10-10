@@ -72,6 +72,7 @@ public final class KrxDailySnapshotBuilder {
                 SymbolState s = states.computeIfAbsent(r.code(), c -> new SymbolState());
                 if (s.lastDayIndex >= 0 && dayIndex - s.lastDayIndex > REAPPEAR_GAP_DAYS) {
                     s.lastClose = null; // 옛 회사 마지막 종가로 새 회사의 수정 비율을 잡지 않는다
+                    s.segmentStarts.add(d); // 새 회사 이벤트를 옛 회사 일봉에 곱하지 않는다(QA PR #39 R5)
                     reappeared++;
                 }
                 s.lastDayIndex = dayIndex;
@@ -114,7 +115,13 @@ public final class KrxDailySnapshotBuilder {
                 history.write(List.of(Market.KRX.name(), e.getKey(), p.name, InstrumentKind.STOCK.name(), p.board,
                         p.from.toString(), to));
             }
-            s.cumulative = cumulative(s.events);
+            s.cumulative = new TreeMap<>();
+            LocalDate segStart = LocalDate.MIN;
+            for (LocalDate next : s.segmentStarts) {
+                s.cumulative.put(segStart, cumulative(s.events.subMap(segStart, true, next, false)));
+                segStart = next;
+            }
+            s.cumulative.put(segStart, cumulative(s.events.tailMap(segStart, true)));
         }
         // 2차: 일봉
         long barCount = 0;
@@ -146,7 +153,7 @@ public final class KrxDailySnapshotBuilder {
                     high = high == null ? close : high;
                     low = low == null ? close : low;
                 }
-                Map.Entry<LocalDate, BigDecimal> f = states.get(r.code()).cumulative.higherEntry(d);
+                Map.Entry<LocalDate, BigDecimal> f = states.get(r.code()).cumulative.floorEntry(d).getValue().higherEntry(d);
                 BigDecimal factor = f == null ? BigDecimal.ONE : f.getValue();
                 bars.write(List.of(Market.KRX.name(), r.code(), d.toString(), plain(open), plain(high), plain(low),
                         plain(close), Long.toString(r.volume()), plain(factor)));
@@ -194,7 +201,9 @@ public final class KrxDailySnapshotBuilder {
         Period open;
         final List<Period> closed = new ArrayList<>();
         final NavigableMap<LocalDate, BigDecimal> events = new TreeMap<>();
-        NavigableMap<LocalDate, BigDecimal> cumulative = new TreeMap<>();
+        final java.util.NavigableSet<LocalDate> segmentStarts = new java.util.TreeSet<>();
+        /** 구간 시작일(첫 구간은 {@link LocalDate#MIN}) → 그 구간 이벤트만의 누적 계수. */
+        NavigableMap<LocalDate, NavigableMap<LocalDate, BigDecimal>> cumulative = new TreeMap<>();
     }
 
     private static final class Period {

@@ -16,7 +16,8 @@ import java.time.ZoneId;
 
 /**
  * 소스별 하루 호출 상한(MD-11 "일일 상한 초과 0건", D-050 ① KRX 하루 10,000회). 하루는 Asia/Seoul 날짜다.
- * 호출 수를 {@code <cache>/budget/<source>-<날짜>.json}에 호출마다 기록해 같은 날 여러 번 실행해도 합산한다.
+ * 호출 수를 {@code <설정 폴더>/collector-state/budget/<source>-<날짜>.json}에 호출마다 기록해 같은 날 여러 번 실행해도
+ * (캐시 폴더를 바꿔도) 합산한다.
  * 한도 초과 응답(OpenDART 020)을 받으면 {@link #stopForToday()}로 그날 남은 실행을 모두 막는다.
  */
 public final class CallBudget {

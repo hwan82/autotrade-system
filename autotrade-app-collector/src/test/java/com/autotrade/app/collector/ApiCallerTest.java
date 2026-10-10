@@ -22,11 +22,11 @@ class ApiCallerTest {
     Path dir;
 
     private final List<Long> slept = new ArrayList<>();
-    private static final URI URL = URI.create("https://opendart.fss.or.kr/api/list.json?crtfc_key=SECRETKEY&page_no=1");
+    private static final URI URL = URI.create("https://opendart.fss.or.kr/api/list.json?crtfc_key=TESTKEY&page_no=1");
 
     private ApiCaller caller(FakeHttp http, int cap) {
         CallBudget budget = new CallBudget(dir, "t", cap, Clock.fixed(Instant.parse("2026-10-10T01:00:00Z"), ZoneOffset.UTC));
-        return new ApiCaller(http, budget, new Redaction(List.of(Secret.of("SECRETKEY"))), slept::add, 200);
+        return new ApiCaller(http, budget, new Redaction(List.of(Secret.of("TESTKEY"))), slept::add, 200);
     }
 
     @Test
@@ -42,9 +42,9 @@ class ApiCallerTest {
 
     @Test
     void 인증_오류는_다시_부르지_않고_메시지에_키가_없다() {
-        FakeHttp http = new FakeHttp((u, n) -> new HttpGetter.Response(401, "bad key SECRETKEY"));
+        FakeHttp http = new FakeHttp((u, n) -> new HttpGetter.Response(401, "bad key TESTKEY"));
         assertThatThrownBy(() -> caller(http, 10).get(URL, Map.of()))
-                .hasMessageContaining("HTTP 401").hasMessageContaining("crtfc_key=****").hasMessageNotContaining("SECRETKEY");
+                .hasMessageContaining("HTTP 401").hasMessageContaining("crtfc_key=****").hasMessageNotContaining("TESTKEY");
         assertThat(http.calls).hasSize(1);
     }
 
@@ -55,6 +55,6 @@ class ApiCallerTest {
         assertThat(http.calls).hasSize(2);
         FakeHttp down = new FakeHttp((u, n) -> null);
         assertThatThrownBy(() -> caller(down, 100).get(URL, Map.of()))
-                .isInstanceOf(IOException.class).hasMessageNotContaining("SECRETKEY");
+                .isInstanceOf(IOException.class).hasMessageNotContaining("TESTKEY");
     }
 }

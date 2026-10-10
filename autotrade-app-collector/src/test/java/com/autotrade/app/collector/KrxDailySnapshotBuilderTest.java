@@ -94,10 +94,16 @@ class KrxDailySnapshotBuilderTest {
         }
         LocalDate back = d.plusDays(KrxDailySnapshotBuilder.REAPPEAR_GAP_DAYS + 2);
         m.put(back, List.of(row(back, KrxBoard.KOSPI, "555555", "새회사", "", "3100", "3100", "3100", "3100", "100", 1, 20)));
+        // 새 회사가 다음 날 2:1 분할(전일 종가 3100, 기준가 1550 → 종가 1600, 전일 대비 +50)
+        LocalDate split = back.plusDays(1);
+        m.put(split, List.of(row(split, KrxBoard.KOSPI, "555555", "새회사", "", "1550", "1600", "1550", "1600", "50", 1, 40)));
         Out o = build(m);
-        assertThat(o.stats().adjustmentEvents()).isZero();
+        assertThat(o.stats().adjustmentEvents()).isEqualTo(1);
         assertThat(o.stats().reappeared()).isEqualTo(1);
-        assertThat(o.bars()).contains(List.of("KRX", "555555", "2026-01-05", "1000", "1000", "1000", "1000", "1", "1"));
+        // 옛 회사 일봉에는 새 회사 분할 계수를 곱하지 않는다. 새 회사 분할 전 일봉만 0.5
+        assertThat(o.bars()).contains(List.of("KRX", "555555", "2026-01-05", "1000", "1000", "1000", "1000", "1", "1"),
+                List.of("KRX", "555555", back.toString(), "3100", "3100", "3100", "3100", "1", "0.5"),
+                List.of("KRX", "555555", split.toString(), "1550", "1600", "1550", "1600", "1", "1"));
     }
 
     @Test

@@ -60,16 +60,9 @@ public final class SnapshotDailyBarSource implements DailyBarSource {
             List<List<String>> histRows = SnapshotFiles.readVerified(dir, manifest, SnapshotManifest.INSTRUMENT_HISTORY, HISTORY_HEADER);
             List<DailyBar> allBars = new ArrayList<>(barRows.size());
             for (List<String> r : barRows) {
-                allBars.add(new DailyBar(new Symbol(Market.valueOf(r.get(0)), r.get(1)), LocalDate.parse(r.get(2)),
-                        new BigDecimal(r.get(3)), new BigDecimal(r.get(4)), new BigDecimal(r.get(5)), new BigDecimal(r.get(6)),
-                        Long.parseLong(r.get(7)), new BigDecimal(r.get(8))));
+                allBars.add(bar(r));
             }
-            List<InstrumentPeriod> periods = new ArrayList<>(histRows.size());
-            for (List<String> r : histRows) {
-                periods.add(new InstrumentPeriod(new Symbol(Market.valueOf(r.get(0)), r.get(1)), r.get(2),
-                        InstrumentKind.valueOf(r.get(3)), r.get(4), LocalDate.parse(r.get(5)),
-                        r.get(6).isEmpty() ? Optional.empty() : Optional.of(LocalDate.parse(r.get(6)))));
-            }
+            List<InstrumentPeriod> periods = periods(histRows);
             QualityReport report = DailyBarQualityCheck.check(manifest, allBars, periods);
             Set<String> rejected = new HashSet<>();
             for (Finding f : report.findings()) {
@@ -97,6 +90,24 @@ public final class SnapshotDailyBarSource implements DailyBarSource {
         } catch (IOException e) {
             throw new UncheckedIOException("스냅샷을 읽을 수 없습니다: " + dir, e);
         }
+    }
+
+    /** {@code daily_bars.csv} 한 행. */
+    static DailyBar bar(List<String> r) {
+        return new DailyBar(new Symbol(Market.valueOf(r.get(0)), r.get(1)), LocalDate.parse(r.get(2)),
+                new BigDecimal(r.get(3)), new BigDecimal(r.get(4)), new BigDecimal(r.get(5)), new BigDecimal(r.get(6)),
+                Long.parseLong(r.get(7)), new BigDecimal(r.get(8)));
+    }
+
+    /** {@code instrument_history.csv} 행들. */
+    static List<InstrumentPeriod> periods(List<List<String>> histRows) {
+        List<InstrumentPeriod> periods = new ArrayList<>(histRows.size());
+        for (List<String> r : histRows) {
+            periods.add(new InstrumentPeriod(new Symbol(Market.valueOf(r.get(0)), r.get(1)), r.get(2),
+                    InstrumentKind.valueOf(r.get(3)), r.get(4), LocalDate.parse(r.get(5)),
+                    r.get(6).isEmpty() ? Optional.empty() : Optional.of(LocalDate.parse(r.get(6)))));
+        }
+        return periods;
     }
 
     @Override

@@ -71,6 +71,121 @@ public final class DailyBarQualityCheck {
         return new QualityReport(manifest, bars.size(), findings);
     }
 
+    /**
+     * 스냅샷 폴더의 일봉을 메모리에 다 올리지 않고 같은 규칙으로 검사한다(수집기 품질 리포트, QA PR #39 F1).
+     * {@link #check}와 같은 결과를 낸다. 대신 {@code daily_bars.csv}가 날짜 오름차순이어야 한다(수집기가 쓰는 순서).
+     * 해시·행 수는 {@link SnapshotFiles#readVerified}와 같이 확인한다. 메모리는 종목 수·발견 수에 비례하고 행 수와 무관하다.
+     *
+     * @param perDate 날짜 하나를 읽을 때마다 부른다(수집기의 장 시간 보호 구간 확인). 예외를 던지면 검사를 멈춘다
+     */
+    public static QualityReport checkSnapshot(java.nio.file.Path dir, Runnable perDate) throws java.io.IOException {
+        SnapshotManifest manifest = SnapshotFiles.readManifest(dir);
+        List<InstrumentPeriod> history = SnapshotDailyBarSource.periods(
+                SnapshotFiles.readVerified(dir, manifest, SnapshotManifest.INSTRUMENT_HISTORY, SnapshotDailyBarSource.HISTORY_HEADER));
+        SnapshotManifest.FileEntry entry = manifest.files().stream()
+                .filter(f -> f.name().equals(SnapshotManifest.DAILY_BARS)).findFirst()
+                .orElseThrow(() -> new IllegalStateException("manifest에 " + SnapshotManifest.DAILY_BARS + " 항목이 없습니다"));
+        java.nio.file.Path file = dir.resolve(SnapshotManifest.DAILY_BARS);
+        if (!java.nio.file.Files.exists(file)) {
+            throw new IllegalStateException("스냅샷 파일이 없습니다: " + SnapshotManifest.DAILY_BARS);
+        }
+        if (!com.autotrade.marketdata.recording.Sha256.ofFile(file).equalsIgnoreCase(entry.sha256())) {
+            throw new IllegalStateException(SnapshotManifest.DAILY_BARS + " SHA-256이 manifest와 다릅니다");
+        }
+        java.time.Instant createdAt = java.time.Instant.parse(manifest.createdAt());
+        Map<Market, LocalDate> snapshotDates = new java.util.EnumMap<>(Market.class);
+        Map<Symbol, List<InstrumentPeriod>> periods = new TreeMap<>();
+        for (InstrumentPeriod p : history) {
+            periods.computeIfAbsent(p.symbol(), x -> new ArrayList<>()).add(p);
+        }
+        List<Finding> findings = new ArrayList<>();
+        Map<Symbol, DailyBar> prevBar = new java.util.HashMap<>();
+        Map<Symbol, List<Finding>> missing = new TreeMap<>();
+        java.util.Set<Symbol> seenEver = new java.util.HashSet<>();
+        long rows = 0;
+        try (java.io.BufferedReader r = java.nio.file.Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8)) {
+            String header = r.readLine();
+            if (header == null) {
+                throw new IllegalArgumentException(SnapshotManifest.DAILY_BARS + "이 비어 있습니다");
+            }
+            if (header.startsWith("\uFEFF")) {
+                header = header.substring(1);
+            }
+            if (!Csv.split(header).equals(SnapshotDailyBarSource.BAR_HEADER)) {
+                throw new IllegalArgumentException(SnapshotManifest.DAILY_BARS + " 헤더가 스키마와 다릅니다: " + header);
+            }
+            LocalDate day = null;
+            Map<Symbol, DailyBar> today = new java.util.LinkedHashMap<>();
+            String line;
+            int n = 1;
+            while ((line = r.readLine()) != null) {
+                n++;
+                if (line.isEmpty()) {
+                    continue;
+                }
+                List<String> f = Csv.split(line);
+                if (f.size() != SnapshotDailyBarSource.BAR_HEADER.size()) {
+                    throw new IllegalArgumentException(SnapshotManifest.DAILY_BARS + " " + n + "번째 줄 열 수가 다릅니다");
+                }
+                DailyBar b = SnapshotDailyBarSource.bar(f);
+                rows++;
+                if (day == null || !b.date().equals(day)) {
+                    if (day != null && b.date().isBefore(day)) {
+                        throw new IllegalStateException(SnapshotManifest.DAILY_BARS + "가 날짜 순이 아닙니다(" + n + "번째 줄)");
+                    }
+                    if (day != null) {
+                        endOfDay(day, today, periods, missing);
+                    }
+                    day = b.date();
+                    today.clear();
+                    perDate.run();
+                }
+                Symbol sym = b.symbol();
+                if (today.containsKey(sym)) {
+                    findings.add(new Finding(Rule.DUPLICATE_BAR, sym, b.date(), "같은 날짜 행이 둘 이상"));
+                    continue;
+                }
+                today.put(sym, b);
+                seenEver.add(sym);
+                checkRow(b, periods.getOrDefault(sym, List.of()),
+                        snapshotDates.computeIfAbsent(sym.market(), m -> localDate(createdAt, m)), findings);
+                DailyBar prev = prevBar.put(sym, b);
+                if (prev != null && valid(prev) && valid(b)) {
+                    checkJump(prev, b, findings);
+                }
+            }
+            if (day != null) {
+                endOfDay(day, today, periods, missing);
+            }
+        }
+        if (rows != entry.rows()) {
+            throw new IllegalStateException(SnapshotManifest.DAILY_BARS + " 행 수가 manifest와 다릅니다: " + rows + " != " + entry.rows());
+        }
+        missing.forEach((sym, list) -> {
+            if (seenEver.contains(sym)) {
+                findings.addAll(list);
+            }
+        });
+        findings.sort(Comparator.comparing((Finding f) -> f.symbol()).thenComparing(Finding::date)
+                .thenComparing(f -> f.rule().ordinal()));
+        return new QualityReport(manifest, rows, findings);
+    }
+
+    /** 그날 일봉이 하나라도 있는 시장의, 상장 기간인데 그날 일봉이 없는 종목(MISSING_BAR 후보). */
+    private static void endOfDay(LocalDate day, Map<Symbol, DailyBar> today, Map<Symbol, List<InstrumentPeriod>> periods,
+            Map<Symbol, List<Finding>> missing) {
+        java.util.Set<Market> markets = java.util.EnumSet.noneOf(Market.class);
+        for (Symbol s : today.keySet()) {
+            markets.add(s.market());
+        }
+        for (Map.Entry<Symbol, List<InstrumentPeriod>> e : periods.entrySet()) {
+            Symbol s = e.getKey();
+            if (markets.contains(s.market()) && !today.containsKey(s) && e.getValue().stream().anyMatch(p -> p.covers(day))) {
+                missing.computeIfAbsent(s, x -> new ArrayList<>()).add(new Finding(Rule.MISSING_BAR, s, day, "시장 거래일인데 일봉 없음"));
+            }
+        }
+    }
+
     private static LocalDate localDate(java.time.Instant t, Market market) {
         return t.atZone(com.autotrade.marketdata.calendar.ExchangeCalendar.bundled(market).zone()).toLocalDate();
     }

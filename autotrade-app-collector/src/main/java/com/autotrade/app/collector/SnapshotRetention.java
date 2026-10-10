@@ -19,8 +19,9 @@ import java.util.stream.Stream;
  * 한 소스 폴더에서 manifest의 생성 시각 기준 최근 K개와 방금 만든 스냅샷, 그리고 실험 폴더({@code experiments/}) 아래
  * 파일에 ID를 적은 스냅샷은 남기고 나머지를 지운다. 수집기가 스냅샷마다 쓰는 품질 리포트 폴더는 참조로 보지 않는다
  * (모든 스냅샷이 자기 리포트 때문에 남는 것을 막음). 실험 폴더가 없으면 참조를 확인할 수 없어 아무것도 지우지 않는다.
- * 실험실 DB({@code experiment.data_snapshot_version})에만 적힌 참조는 보지 못한다(수집기는 DB를 읽지 않는다, runbook 5.1). 지운 스냅샷은 캐시가 남아 있으면 같은 기간으로 다시 만들 수 있다
- * (ID가 내용 해시라 같은 ID가 나온다). 캐시는 지우지 않는다.
+ * 실험실 DB({@code experiment.data_snapshot_version})에만 적힌 참조는 보지 못한다(수집기는 DB를 읽지 않는다, runbook 5.1).
+ * 일봉 스냅샷에만 쓴다: 지운 일봉 스냅샷은 원문 캐시가 남아 있으면 같은 기간으로 다시 만들어 같은 ID가 나온다. 재무 스냅샷은
+ * 지우면 재현할 수 없어 대상이 아니다(QA PR #39 F2, {@link CollectorMain}). 캐시는 지우지 않는다.
  */
 final class SnapshotRetention {
 

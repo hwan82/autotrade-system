@@ -313,6 +313,42 @@ class CollectorMainTest {
     }
 
     @Test
+    void 재무_스냅샷은_keep_snapshots를_줘도_지우지_않는다() throws IOException {
+        writeKeys();
+        Path experiments = Files.createDirectories(reports.resolve("experiments"));
+        Path root = Files.createDirectories(config.resolve("snapshots").resolve("dart-financials"));
+        Path old = Files.createDirectories(root.resolve("dart-financials-2026-03-01-aaaaaaaa"));
+        Files.writeString(old.resolve("manifest.json"), "{\"snapshotId\":\"dart-financials-2026-03-01-aaaaaaaa\",\"schemaVersion\":1,"
+                + "\"createdAt\":\"2026-03-02T10:00:00Z\",\"scriptVersion\":\"0.1.0\",\"sources\":[],\"files\":[]}");
+        Clock clock = Clock.fixed(Instant.parse("2026-03-20T10:00:00Z"), ZoneOffset.UTC);
+        String[] a = {"dart-financials", "--from", "2026-03-01", "--dart-base-url", "https://dart.test/api", "--config-dir",
+            config.toString(), "--report-dir", experiments.resolve("_data-quality").toString(), "--experiments-dir",
+            experiments.toString(), "--keep-snapshots", "1"};
+        assertThat(CollectorMain.run(a, clock, new FakeHttp(DartFinancialCollectorTest.server(false)), ms -> {}, PLENTY)).isZero();
+        assertThat(old).exists();
+        try (Stream<Path> s = Files.list(root)) {
+            assertThat(s.filter(p -> !p.getFileName().toString().startsWith(".")).count()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void 호출_상한은_약관_한도를_넘길_수_없고_기록은_캐시_폴더와_무관하게_합산된다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = krxServer();
+        assertThat(CollectorMain.run(args("krx-daily", "--max-calls", "10001"), clock, http, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(CollectorMain.run(args("dart-financials", "--max-calls", "20001"), clock, http, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(http.calls).isEmpty();
+        // 캐시 폴더를 바꿔 두 번 돌려도 같은 하루 상한(3회)을 나눠 쓴다
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-05", "--boards", "KOSPI,KOSDAQ",
+                "--max-calls", "3", "--cache-dir", reports.resolve("c1").toString(), "--no-snapshot"), clock, krxServer(), ms -> {},
+                PLENTY)).isZero();
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-05", "--boards", "KOSPI,KOSDAQ",
+                "--max-calls", "3", "--cache-dir", reports.resolve("c2").toString(), "--no-snapshot"), clock, krxServer(), ms -> {},
+                PLENTY)).isEqualTo(3);
+    }
+
+    @Test
     void 주소는_https만_받는다() throws IOException {
         writeKeys();
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);

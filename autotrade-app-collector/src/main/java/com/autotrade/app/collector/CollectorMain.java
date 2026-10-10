@@ -3,6 +3,7 @@ package com.autotrade.app.collector;
 import com.autotrade.config.ConfigPaths;
 import com.autotrade.domain.market.Market;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
+import com.autotrade.marketdata.daily.DailyBarQualityCheck;
 import com.autotrade.marketdata.daily.QualityReport;
 import com.autotrade.marketdata.daily.SnapshotDailyBarSource;
 import com.autotrade.marketdata.daily.SnapshotManifest;
@@ -38,6 +39,10 @@ import java.util.Set;
 public final class CollectorMain {
 
     static final String VERSION = "0.1.0";
+    /** KRX Open API 이용약관 제8조 ④ 키당 하루 10,000회(D-050). */
+    static final int KRX_TERMS_DAILY_LIMIT = 10_000;
+    /** OpenDART 개발가이드 "일반적으로 20,000건" `[가정]`(D-050). */
+    static final int DART_DAILY_LIMIT = 20_000;
     /** KRX 당일 자료를 받기 시작하는 서울 시각 `[가정]`: 그 전에는 기본 --to가 어제. */
     static final LocalTime KRX_SAME_DAY_FROM = LocalTime.of(18, 0);
 
@@ -103,7 +108,7 @@ public final class CollectorMain {
         LocalDate to = o.to != null ? o.to
                 : now.toLocalTime().isBefore(KRX_SAME_DAY_FROM) ? now.toLocalDate().minusDays(1) : now.toLocalDate();
         LocalDate from = o.from != null ? o.from : LocalDate.of(2010, 1, 4);
-        CallBudget budget = new CallBudget(o.cacheDir, "krx", o.maxCalls(9000), clock);
+        CallBudget budget = new CallBudget(o.budgetDir(), "krx", o.maxCalls(9000), clock);
         Redaction redaction = new Redaction(List.of(secrets.krxAuthKey()));
         KrxOpenApiClient client = new KrxOpenApiClient(
                 new ApiCaller(http, budget, redaction, sleeper, o.intervalMs, guard::checkSession), o.krxBase,
@@ -135,12 +140,23 @@ public final class CollectorMain {
                     List.of(new SnapshotManifest.Source(KRX_SOURCE, "https://openapi.krx.co.kr", KRX_LICENSE, created)),
                     new SnapshotManifest.Coverage(stats.firstDate().toString(), last, last, created));
         }
-        QualityReport report = SnapshotDailyBarSource.load(dir).qualityReport();
-        Path reportFile = report.writeTo(o.reportDir);
-        CollectorReports.appendDailySummary(reportFile, stats, r.fetched(), budget.usedToday());
-        System.out.println("스냅샷: " + dir + "\n품질 리포트: " + reportFile + " (오류 " + report.errorCount() + "건)");
-        prune(o, root, "krx-daily", dir);
+        finishKrxSnapshot(o, root, dir, guard, stats, r.fetched(), budget.usedToday());
         return 0;
+    }
+
+    /**
+     * 커밋한 일봉 스냅샷의 뒷단계: 옛 스냅샷 정리를 먼저 하고(리포트 단계가 실패해도 정리는 끝나 있게, QA PR #39 F1),
+     * 품질 리포트는 일봉을 메모리에 다 올리지 않는 날짜 순 검사로 만든다(전 기간 약 1,100만 행도 2GB 힙 안에서).
+     */
+    static Path finishKrxSnapshot(Options o, Path root, Path dir, RunGuard guard, KrxDailySnapshotBuilder.Stats stats,
+            int fetched, int usedToday) throws IOException {
+        System.out.println("스냅샷: " + dir);
+        prune(o, root, "krx-daily", dir);
+        QualityReport report = DailyBarQualityCheck.checkSnapshot(dir, guard::checkSession);
+        Path reportFile = report.writeTo(o.reportDir);
+        CollectorReports.appendDailySummary(reportFile, stats, fetched, usedToday);
+        System.out.println("품질 리포트: " + reportFile + " (오류 " + report.errorCount() + "건)");
+        return reportFile;
     }
 
     static int dartFinancials(Options o, CollectorSecrets secrets, Clock clock, HttpGetter http, ApiCaller.Sleeper sleeper,
@@ -148,7 +164,7 @@ public final class CollectorMain {
         LocalDate yesterday = LocalDate.now(clock.withZone(CallBudget.SEOUL)).minusDays(1);
         LocalDate to = o.to != null ? o.to : yesterday;
         LocalDate from = o.from != null ? o.from : LocalDate.of(2016, 1, 1);
-        CallBudget budget = new CallBudget(o.cacheDir, "opendart", o.maxCalls(10000), clock);
+        CallBudget budget = new CallBudget(o.budgetDir(), "opendart", o.maxCalls(10000), clock);
         Redaction redaction = new Redaction(List.of(secrets.openDartKey()));
         OpenDartClient client = new OpenDartClient(new ApiCaller(http, budget, redaction, sleeper, o.intervalMs, guard::checkSession), budget,
                 o.dartBase, secrets.openDartKey().reveal());
@@ -185,7 +201,10 @@ public final class CollectorMain {
         SnapshotFinancials check = SnapshotFinancials.load(dir); // 읽는 쪽 검사(접수일·해시)를 그대로 통과하는지
         Path reportFile = CollectorReports.writeFinancial(o.reportDir, check.manifest(), built.stats(), r, budget.usedToday());
         System.out.println("스냅샷: " + dir + "\n품질 리포트: " + reportFile);
-        prune(o, root, "dart-financials", dir);
+        if (o.keepSnapshots != null) {
+            // 재무 스냅샷은 그때까지의 공시·대기 확정 상태로 만들어져, 지우면 같은 내용(같은 ID)으로 다시 만들 수 없다(QA PR #39 F2)
+            System.out.println("재무 스냅샷은 지우면 재현할 수 없어 --keep-snapshots로 정리하지 않습니다");
+        }
         return 0;
     }
 
@@ -205,7 +224,7 @@ public final class CollectorMain {
         };
     }
 
-    /** {@code --keep-snapshots}를 줬을 때만 옛 스냅샷을 정리한다. 실험 기록이 참조하는 ID는 남긴다({@link SnapshotRetention}). */
+    /** {@code --keep-snapshots}를 줬을 때만 옛 일봉 스냅샷을 정리한다(재무 스냅샷은 대상 아님). 실험 기록이 참조하는 ID는 남긴다({@link SnapshotRetention}). */
     private static void prune(Options o, Path root, String prefix, Path current) throws IOException {
         if (o.keepSnapshots == null) {
             return;
@@ -248,6 +267,14 @@ public final class CollectorMain {
 
         int maxCalls(int defaultCap) {
             return maxCalls == null ? defaultCap : maxCalls;
+        }
+
+        /**
+         * 호출 기록 위치. 캐시 폴더가 아니라 설정 폴더 기준이라 {@code --cache-dir}를 바꿔 돌려도 같은 키의 하루 호출이 합산된다
+         * (QA PR #39 R3).
+         */
+        Path budgetDir() {
+            return configDir.resolve("collector-state");
         }
 
         static Options parse(String[] args) {
@@ -298,6 +325,11 @@ public final class CollectorMain {
                 }
             } catch (RuntimeException e) {
                 throw new IllegalArgumentException("옵션 값이 틀렸습니다: " + e.getMessage(), e);
+            }
+            int limit = o.command.equals("krx-daily") ? KRX_TERMS_DAILY_LIMIT : DART_DAILY_LIMIT;
+            if (o.maxCalls != null && (o.maxCalls < 1 || o.maxCalls > limit)) {
+                // 약관 한도를 넘기면 키가 정지될 수 있다(QA PR #39 R3)
+                throw new IllegalArgumentException("--max-calls는 1 이상 하루 한도 " + limit + " 이하여야 합니다");
             }
             if (o.from != null && o.to != null && o.to.isBefore(o.from)) {
                 throw new IllegalArgumentException("--to가 --from보다 앞입니다");
