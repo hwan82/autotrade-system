@@ -4,9 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -38,19 +41,39 @@ public final class CallBudget {
 
     /** 호출 한 번을 쓴다. 상한에 닿았거나 그날 멈춤이 기록돼 있으면 {@link BudgetExhausted}. */
     public void acquire() {
-        State s = read();
-        if (s.stopped) {
-            throw new BudgetExhausted(source + ": 오늘은 한도 초과 응답을 받아 수집을 멈췄습니다");
-        }
-        if (s.calls >= dailyCap) {
-            throw new BudgetExhausted(source + ": 하루 호출 상한 " + dailyCap + "회에 닿았습니다");
-        }
-        write(new State(s.calls + 1, false));
+        locked(() -> {
+            State s = read();
+            if (s.stopped) {
+                throw new BudgetExhausted(source + ": 오늘은 한도 초과 응답을 받아 수집을 멈췄습니다");
+            }
+            if (s.calls >= dailyCap) {
+                throw new BudgetExhausted(source + ": 하루 호출 상한 " + dailyCap + "회에 닿았습니다");
+            }
+            write(new State(s.calls + 1, false));
+        });
     }
 
     /** 한도 초과 응답을 받았을 때. 그날 이 소스 호출을 더 하지 않는다. */
     public void stopForToday() {
-        write(new State(read().calls, true));
+        locked(() -> write(new State(read().calls, true)));
+    }
+
+    /** 같은 소스 명령을 동시에 돌려도 읽기-쓰기 사이에 합산이 빠지지 않게 파일 잠금 안에서 한다. */
+    private void locked(Runnable action) {
+        try {
+            Files.createDirectories(dir);
+            try (FileChannel ch = FileChannel.open(dir.resolve(source + ".lock"), StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE)) {
+                FileLock lock = ch.lock();
+                try {
+                    action.run();
+                } finally {
+                    lock.release();
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("호출 기록 잠금을 얻을 수 없습니다", e);
+        }
     }
 
     public int usedToday() {

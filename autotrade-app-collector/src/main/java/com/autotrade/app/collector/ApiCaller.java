@@ -23,9 +23,17 @@ public final class ApiCaller {
     private final Redaction redaction;
     private final Sleeper sleeper;
     private final long minIntervalMillis;
+    private final Runnable beforeCall;
     private boolean first = true;
 
     public ApiCaller(HttpGetter http, CallBudget budget, Redaction redaction, Sleeper sleeper, long minIntervalMillis) {
+        this(http, budget, redaction, sleeper, minIntervalMillis, () -> {});
+    }
+
+    /** {@code beforeCall}은 매 호출 전에 돈다(장 시간 보호 구간에 들어서면 예외로 멈춤, {@link RunGuard}). */
+    public ApiCaller(HttpGetter http, CallBudget budget, Redaction redaction, Sleeper sleeper, long minIntervalMillis,
+            Runnable beforeCall) {
+        this.beforeCall = beforeCall;
         this.http = http;
         this.budget = budget;
         this.redaction = redaction;
@@ -38,6 +46,7 @@ public final class ApiCaller {
         IOException last = null;
         for (int attempt = 0; attempt <= RETRIES; attempt++) {
             pause(attempt);
+            beforeCall.run();
             budget.acquire();
             HttpGetter.Response r;
             try {

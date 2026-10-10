@@ -30,6 +30,9 @@ class CollectorMainTest {
     @TempDir
     Path reports;
 
+    /** 디스크 여유는 고정값으로(CI 러너 디스크와 무관하게). */
+    static final RunGuard.FreeSpace PLENTY = dir -> 1L << 40;
+
     private static final String KRX_KEY = "KRXPLACEHOLDERAAAA";
     private static final String DART_KEY = "DARTPLACEHOLDERBBBB";
 
@@ -64,7 +67,7 @@ class CollectorMainTest {
         // 서울 2026-10-08 19:00
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
         FakeHttp http = krxServer();
-        int code = CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, http, ms -> {});
+        int code = CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, http, ms -> {}, PLENTY);
         assertThat(code).isZero();
         assertThat(http.calls).hasSize(12);
 
@@ -96,7 +99,7 @@ class CollectorMainTest {
 
         // 같은 날 다시 돌리면 오늘(10-08)만 다시 받고 같은 스냅샷 ID가 나온다
         FakeHttp again = krxServer();
-        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, again, ms -> {}))
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, again, ms -> {}, PLENTY))
                 .isZero();
         assertThat(again.calls).hasSize(3);
         try (Stream<Path> st = Files.list(root)) {
@@ -109,9 +112,10 @@ class CollectorMainTest {
     void dart_financials는_재무_스냅샷과_품질_리포트를_만든다() throws IOException {
         writeKeys();
         FakeHttp http = new FakeHttp(DartFinancialCollectorTest.server(false));
-        Clock clock = Clock.fixed(Instant.parse("2026-03-20T03:00:00Z"), ZoneOffset.UTC);
+        // 서울 2026-03-20 19:00(장 시간 보호 구간 밖)
+        Clock clock = Clock.fixed(Instant.parse("2026-03-20T10:00:00Z"), ZoneOffset.UTC);
         int code = CollectorMain.run(args("dart-financials", "--from", "2026-03-01", "--dart-base-url", "https://dart.test/api"),
-                clock, http, ms -> {});
+                clock, http, ms -> {}, PLENTY);
         assertThat(code).isZero();
         Path root = config.resolve("snapshots").resolve("dart-financials");
         Path dir;
@@ -120,7 +124,7 @@ class CollectorMainTest {
         }
         SnapshotFinancials f = SnapshotFinancials.load(dir);
         assertThat(f.filings()).hasSize(3); // 대기 1건은 뺀다
-        assertThat(f.manifest().coverage().lastCollectedAt()).isEqualTo("2026-03-20T03:00:00Z");
+        assertThat(f.manifest().coverage().lastCollectedAt()).isEqualTo("2026-03-20T10:00:00Z");
         assertThat(f.manifest().snapshotId()).startsWith("dart-financials-2026-03-19-");
         String report = Files.readString(reports.resolve(f.manifest().snapshotId() + ".md"));
         assertThat(report).contains("대체 규칙 대상 묶음", "| 계정 응답 대기(반영 지연, 스냅샷에서 뺌) | 1 |");
@@ -131,9 +135,9 @@ class CollectorMainTest {
     void 키가_없거나_사용법이_틀리면_멈춘다() {
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
         FakeHttp http = krxServer();
-        assertThat(CollectorMain.run(args("krx-daily"), clock, http, ms -> {})).isEqualTo(1);
-        assertThat(CollectorMain.run(new String[] {"recordings"}, clock, http, ms -> {})).isEqualTo(2);
-        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-09", "--to", "2026-10-01"), clock, http, ms -> {}))
+        assertThat(CollectorMain.run(args("krx-daily"), clock, http, ms -> {}, PLENTY)).isEqualTo(1);
+        assertThat(CollectorMain.run(new String[] {"recordings"}, clock, http, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-09", "--to", "2026-10-01"), clock, http, ms -> {}, PLENTY))
                 .isEqualTo(2);
         assertThat(http.calls).isEmpty();
     }
@@ -143,7 +147,91 @@ class CollectorMainTest {
         writeKeys();
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
         assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08", "--max-calls", "2"),
-                clock, krxServer(), ms -> {})).isEqualTo(3);
+                clock, krxServer(), ms -> {}, PLENTY)).isEqualTo(3);
+    }
+
+    @Test
+    void 국내_장_시간에는_시작하지_않고_종료_코드_4() throws IOException {
+        writeKeys();
+        // 서울 2026-10-08(목) 08:30: 개장 60분 전부터 보호 구간
+        Clock clock = Clock.fixed(Instant.parse("2026-10-07T23:30:00Z"), ZoneOffset.UTC);
+        FakeHttp http = krxServer();
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-07"), clock, http, ms -> {}, PLENTY))
+                .isEqualTo(4);
+        assertThat(http.calls).isEmpty();
+        // 실전 엔진을 끈 날에만 명시 옵션으로 푼다
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-07", "--allow-during-session",
+                "--no-snapshot"), clock, http, ms -> {}, PLENTY)).isZero();
+        assertThat(http.calls).isNotEmpty();
+    }
+
+    @Test
+    void 미국_장_시간에는_시작하지_않는다() throws IOException {
+        writeKeys();
+        // 뉴욕 2026-10-08(목) 10:00 EDT = 14:00Z = 서울 23:00
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T14:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = krxServer();
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, http, ms -> {}, PLENTY))
+                .isEqualTo(4);
+        assertThat(http.calls).isEmpty();
+    }
+
+    @Test
+    void 실행_중_보호_구간에_들어서면_다음_호출_전에_멈춘다() throws IOException {
+        writeKeys();
+        // 첫 호출은 서울 07:59(구간 밖), 그 뒤 시각이 08:00(개장 60분 전)으로 넘어간다
+        Instant before = Instant.parse("2026-10-07T22:59:00Z");
+        Instant inside = Instant.parse("2026-10-07T23:00:00Z");
+        java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
+        Clock clock = new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return Clock.fixed(instant(), zone);
+            }
+
+            @Override
+            public Instant instant() {
+                return reads.get() == 0 ? before : inside;
+            }
+        };
+        FakeHttp http = new FakeHttp((u, n) -> {
+            reads.incrementAndGet();
+            return FakeHttp.ok("{\"OutBlock_1\":[]}");
+        });
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-06"), clock, http, ms -> {}, PLENTY))
+                .isEqualTo(4);
+        assertThat(http.calls).hasSize(1);
+        assertThat(config.resolve("snapshots")).doesNotExist();
+    }
+
+    @Test
+    void 디스크_여유가_기준_미만이면_시작하지_않는다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = krxServer();
+        RunGuard.FreeSpace nineteenGb = dir -> 19L * 1024 * 1024 * 1024;
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, http, ms -> {},
+                nineteenGb)).isEqualTo(4);
+        assertThat(http.calls).isEmpty();
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08", "--min-free-gb", "10"),
+                clock, http, ms -> {}, nineteenGb)).isZero();
+    }
+
+    @Test
+    void 주소는_https만_받는다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = krxServer();
+        assertThat(CollectorMain.run(args("krx-daily", "--krx-base-url", "http://example.test"), clock, http, ms -> {}, PLENTY))
+                .isEqualTo(2);
+        assertThat(CollectorMain.run(args("dart-financials", "--dart-base-url", "ftp://x"), clock, http, ms -> {}, PLENTY))
+                .isEqualTo(2);
+        assertThat(http.calls).isEmpty();
     }
 
     /** 캐시·스냅샷·리포트 어디에도 키 평문이 없다(MD-11). 키 파일 자체만 예외. */

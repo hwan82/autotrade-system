@@ -8,6 +8,9 @@ plugins {
 application {
     mainClass.set("com.autotrade.app.collector.CollectorMain")
     applicationName = "autotrade-collector"
+    // 실전 엔진과 같은 PC에서 돈다: 힙 상한 고정(broker-and-fault-design 5.1, risk-ops 검토 PR #39 F1). 메모리가 모자라면
+    // 상한을 올리지 말고 --from으로 기간을 줄인다(runbook 3장)
+    applicationDefaultJvmArgs = listOf("-Xmx2g")
 }
 
 processIsolation {
@@ -27,5 +30,6 @@ dependencies {
 }
 
 tasks.named<JavaExec>("run") {
+    maxHeapSize = "2g"
     workingDir = rootProject.projectDir // 품질 리포트 기본 경로(experiments/_data-quality)는 저장소 루트 기준
 }
