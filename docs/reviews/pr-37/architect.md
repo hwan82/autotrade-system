@@ -30,3 +30,55 @@
 
 ## 판정
 수정 필요(F1 재무 신선도 기준점을 기획서 STR-19와 맞추기, F2 `PRODUCER_FAILED` 완화 해석을 기획서대로 고치거나 risk-ops 검토·사용자 확인으로 분리, B7 risk-ops 검토)
+
+## 재검토 2026-10-10 (ae20d16)
+- 대상: PR #37 / 커밋 ae20d1680c42511a65d7d6453448d687ed1dac50 / main 대비 diff 전체(`git diff origin/main...HEAD`, 7개 파일: 앞의 5개 + `docs/reviews/pr-37/architect.md`, `docs/reviews/pr-37/risk-ops.md`). d33be88 대비 바뀐 것은 `ADR-007`(+55/-13), `docs/adr/README.md`(상태 표기), 검토 원문 2개뿐이고 SQL·스모크·Java·Gradle 변경 0건(`git diff d33be88 HEAD --stat -- . ':!docs'` 빈 결과).
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks`: **BUILD SUCCESSFUL**(1m 54s, 104 tasks 모두 실행). 테스트 결과 XML 548건, 실패·오류·건너뜀 0.
+  - PostgreSQL 16.15(`/var/tmp/pgreview37`): 빈 DB에 V1 → V2 적용 성공, `schema-smoke.sql` 종료 코드 0, `ok` NOTICE 10건.
+  - 첫 검토 원문이 바뀌지 않았는지: `git show HEAD:docs/reviews/pr-37/architect.md`와 작업 트리 파일이 같음(덧붙이기 전 `diff` 결과 동일).
+  - ADR 변경분 전체를 읽고 기획서 STR-19(`docs/spec/autotrade-spec.md:168`), broker-and-fault-design.md 5.2(`:144-152`), D-049 행(`docs/decisions/README.md:54`), `autotrade-app-watchdog`·`autotrade-monitor-agent-jar`(PID·`ProcessHandle` 사용 코드 0건)와 대조.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F1 재무 신선도 기준점 | 해결 | ADR-007 2.6 "재무 지연 = `lastTradingDayOnOrBefore(수집 현지 날짜)`부터 `apply_from`까지 거래일 수(앞 제외, `apply_from` 포함)". 수집이 `apply_from` 5거래일 전이면 5(통과), 6거래일 전이면 6(`STALE_INPUT`)으로 STR-19 "선정 기준일보다 5거래일 넘게 이름"과 같다 |
+| F2 `PRODUCER_FAILED` 우선순위 | 해결(남은 공백은 F5) | 판정 순서 0번에 `PRODUCER_FAILED`, "그 거래일을 대상으로 한 가장 늦은 상태 기록이 FAILED·ABORTED면 유효해 보이는 파일이 있어도 차단", 상태 파일 읽기 실패는 닫힘. STR-19의 독립 차단 조건과 맞음 |
+| F3 `run_selection_day` 범위 | 해결 | ADR 4장에 "범위 검사는 Java에만" 명시 |
+| F4 타입 혼용 | 해당 없음(유지) | 동작 정상, 변경 불필요 |
+| B7 | 반영 진행 중 | ADR 상태를 "제안(사용자 직접 머지)"로 바꾸고 risk-ops 원문(`docs/reviews/pr-37/risk-ops.md`)이 생김. 그 원문 판정은 d33be88 기준 "수정 필요"이고 ae20d16 재검토 기록은 아직 없음 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` 성공, 548건 실패 0. 마이그레이션·스모크 직접 실행 통과 |
+| B2 | 통과 | Java·Gradle·ArchUnit 변경 0건. ADR 2.7에 `verifyProcessIsolation` 금지 목록 추가 계획(감시·게이트웨이에 `:autotrade-selection`)이 더해졌고, 지금 감시가 `:autotrade-strategy`를 이미 금지(`autotrade-app-watchdog/build.gradle.kts:12`)하므로 selection → strategy 의존과도 맞음 |
+| B3 | 통과 | 계약 변경(V2 스키마, 판정 순서, 상태 파일 형식, 새 설정 키 후보 `max-result-bytes` 등)이 ADR-007에 있음. 설정 키 문서는 구현 PR로 미룸(코드 없음). 다만 D-049 행이 갱신되지 않음(아래 F7) |
+| B4 | 통과 | Java 변경 없음, 골든·결정론 테스트 재실행 통과. 시드·조합 해시 계약은 d33be88과 같음(첫 검토에서 독립 계산 일치 확인) |
+| B5 | 해당 없음 | 새 금액 열·계산 없음 |
+| B6 | 통과 | 스키마 스모크 변경 없음(직접 실행 통과). 테스트 삭제·건너뜀 없음. ADR 새 동작(닫힌 쪽 기본값, 읽기 견고성, `secrets.json` 미로딩)에 구현 PR 실패 테스트를 인수 조건으로 적음 |
+| B7 | risk-ops 검토 필요 | 실전 엔진 읽기 경로·판정·고정, 감시 프로세스의 프로세스 종료 권한, 5.2 정지 순서 변경 제안을 정하는 PR이다. risk-ops 원문의 최신 판정이 "수정 필요"(d33be88)이고 ae20d16 재검토가 없다. 지침 10장 실전 항목이라 사용자 직접 머지 |
+| B8 | 통과 | 바뀐 문서에 키·계좌번호·토큰 없음. 일괄 명령 `secrets.json` 미로딩이 계약으로 들어감 |
+
+### 점검표 밖 발견 (새 커밋에서 생긴 것)
+- **F5 (수정 필요) 상태 `running`이 남은 경우가 판정 규칙에 없다.** ADR 2.7은 실행 시작 때 상태를 `running`으로 쓰고 끝날 때 바꾼다고 했고, 2.6의 0번 판정은 가장 늦은 기록이 `FAILED`·`ABORTED`일 때만 `PRODUCER_FAILED`다. 그런데 일괄 명령이 OS 강제 종료·크래시·PC 재부팅·OOM으로 끝나면 상태를 바꿀 주체가 없어 `running`이 남는다. 또 "감시가 종료한 실행은 `ABORTED`"라고 했지만, 종료당한 프로세스는 상태를 쓸 수 없고 감시는 "상태 파일만 본다"고 되어 있어 누가 `ABORTED`를 쓰는지 정해져 있지 않다. 결과적으로 그런 실행은 `running`으로 남고, 지금 규칙으로는 "실패 아님 → 파일로만 판정"이 되어 앞서 만든 유효 파일로 진입이 열린다. STR-19의 "생산 작업이 실패하면 신규 진입만 막음"(F2의 취지)과 어긋난다. 고칠 것:
+  1. 고정 시점에 그 거래일을 대상으로 한 가장 늦은 기록이 `running`이거나 알 수 없는 값이면 `PRODUCER_FAILED`(닫힌 쪽)로 본다.
+  2. `ABORTED`는 누가 쓰는지 정한다. 감시가 종료 뒤 상태 파일을 원자적으로 고쳐 쓰는 방식이면 2.7의 "감시는 상태 파일만 본다"를 고친다. 1번을 두면 `ABORTED` 기록 없이도 닫히므로 1번만으로도 충분하다.
+  3. "가장 늦은 기록"의 순서 키를 정한다. 예: (상태 파일 이름의 실행 시작 현지 날짜, `POST_CLOSE` < 다음 날 `PRE_OPEN`), 같은 이름은 원자적 교체라 마지막이 이긴다. 지금은 순서 기준이 적혀 있지 않다.
+- **F6 (수정 필요) 감시가 PID 파일로 프로세스를 종료하는 경로에 PID 재사용 방어가 없다.** ADR 2.7 자원 상한 항목은 감시가 `_status/<MARKET>/running.pid`에 적힌 PID를 종료한다고 정한다. 일괄 명령이 크래시하거나 강제 종료되면 `running.pid`가 남고, OS가 그 PID를 다른 프로세스에 다시 줄 수 있다. 그 프로세스가 **실전 엔진이나 게이트웨이**면, 자원 부족 순간 감시가 실전 엔진을 죽이는 경로가 된다. 이는 지침 4장 6번과 5.2 "실전 보유 종목 보호는 끝까지 남김"에 어긋난다. 지금 저장소에는 PID 기반 종료 코드가 없어(감시·monitor-agent에서 `ProcessHandle`·pid 사용 0건) 새로 생기는 메커니즘이다. 고칠 것: ADR에 다음을 요구사항으로 적고 구현 PR의 실패 테스트(오래된 PID 파일 + 다른 프로세스가 그 PID일 때 종료 0건·알림)로 고정한다.
+  1. 종료 전 그 PID의 시작 시각과 명령줄(`ProcessHandle.Info`의 `startInstant`, 진입점 `SelectionBatchMain`)이 PID 파일에 기록된 값과 같은지 확인한다.
+  2. 맞지 않거나 확인할 수 없으면 종료하지 않고 알림만 보낸다.
+  3. 감시가 종료할 수 있는 대상은 일괄 명령뿐이라고 명시한다.
+  
+  risk-ops R1이 제시한 다른 방법(일괄 명령이 스스로 임계치를 확인해 종료)을 택하면 이 위험이 없다. 어느 쪽인지 ADR에 정한다.
+- **F7 (수정 필요, 문서 일치) D-049와 ADR 10장 9번이 새 2.7과 어긋난다.**
+  - `docs/decisions/README.md:54` D-049 행은 이번 커밋에서 바뀌지 않았다. 행 ⑨는 여전히 "감시는 상태 파일 확인만"이고, ⑧에는 생산 실패 우선·닫힌 쪽·읽기 상한 같은 새 자율 채택 내용이 없다.
+  - ADR 10장 9번도 "감시는 상태 파일 확인만"이라 2.7 자원 상한 항목(감시가 일괄 명령 종료)과 충돌한다.
+  - 사용자가 결정 로그 한 줄로 자율 결정을 검토하는 구조(지침 8장)라, D-049 행을 ADR 10장과 같게 고치고 "감시가 일괄 명령을 종료할 수 있음"을 드러내야 한다.
+- 확인한 좋은 점:
+  - PRE_OPEN_DAILY를 전날 장 마감 뒤에 만드는 것을 기본으로 바꿨다. 그래도 `selection_result` CHECK(`bars_last_trading_date < apply_from`)와 STALE 판정(`previousTradingDay(apply_from)` 이상)과 맞는다. 전날 장 마감 뒤 생산이면 일봉 마지막 거래일 = `apply_from`의 직전 거래일이다.
+  - 고정 기록이 없을 때 닫힌 쪽으로 가는 규칙은 재기동 경로에서 장 중에 선정을 바꾸는 일을 막는다.
+  - 파일을 이름의 `apply_from`으로 거르게 해서 읽기량이 쌓이지 않게 한 것은 risk-ops R2의 지적에 맞다.
+
+### 판정
+수정 필요(F5 `running`·순서 키를 판정 규칙에 넣기, F6 PID 재사용 방어 또는 자기 종료 방식 확정, F7 D-049·ADR 10장 문구 일치, B7 risk-ops 재검토 필요)
