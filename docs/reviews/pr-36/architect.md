@@ -49,3 +49,41 @@
 
 ## 판정
 수정 필요(B1 빌드 직접 통과 확인 — 환경 회복 뒤 재실행, B3·발견 1 수집기 비밀값을 `secrets.json`에 등록하라는 지시 철회와 위치 결정을 architect ADR 과제로, 발견 2 D-038 되돌릴 조건 평가 기록, 발견 3 D-019 전제 변화 평가 기록, 발견 4 2차 사본 근거 `[가정]` 표기)
+
+## 재검토 2026-10-10
+- 대상: PR #36 / 커밋 ebd2ce5(85d187a 위 수정 커밋) / main(f2e39b3) 대비 diff (`git diff origin/main...HEAD`: 7개 파일. 앞 검토의 3개에 `autotrade-marketdata/.../SnapshotManifest.java`(주석 1줄), `collectors/python/README.md`, `docs/adr/ADR-003-market-data.md`, `docs/reviews/pr-36/architect.md`(앞 검토 원문)가 더해짐)
+- 점검표: B
+- 직접 실행한 것:
+  - 앞 검토 원문 보존 확인: `git show HEAD:docs/reviews/pr-36/architect.md`와 검토자가 쓴 파일의 md5가 같다(ff6739f7…). 메인이 원문을 고치지 않았다.
+  - `git diff 85d187a HEAD --word-diff`로 수정 커밋의 바뀐 줄 전부 대조. 남은 `secrets.json` 언급을 `grep -n "secrets.json"`으로 확인.
+  - 원격 브랜치 전체에서 D-050·Q-036·Q-037 사용처 대조: 이 브랜치만 쓴다(충돌 없음).
+  - `./gradlew build` 1회(ebd2ce5) → EXIT 1, 앞 검토와 같은 Maven Central 429(`kotlin-compiler-embeddable:2.0.21` POM). 외부 init 스크립트로 Maven Central 미러를 쓰는 빌드를 시도했으나 1회는 Gradle 설정 충돌로 즉시 실패했고, 고친 시도는 이 세션의 권한 정책이 막았다. 빌드는 끝내 직접 통과시키지 못했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 확인 못 함 | ebd2ce5에서 `./gradlew build` EXIT 1(Maven Central 429, `:build-logic` 구성 단계). 이번 diff에는 Java 파일 1개(SnapshotManifest.java:32 Javadoc 주석 한 줄)가 들어와 코드 변경이 생겼다. 주석만 바뀌어 빌드 결과가 바뀔 가능성은 낮지만 `[추론]`, 직접 통과를 확인하지 못했다. CI 결과는 검토자가 직접 실행한 것이 아니라 판정 근거로 쓰지 않는다 |
+| B2 | 통과 | 의존·패키지 변경 없음. SnapshotManifest.java 변경은 주석뿐(`git diff 85d187a HEAD -- autotrade-marketdata`: 32행 Javadoc만) |
+| B3 | 통과(후속 과제 있음) | 수집기 키를 `secrets.json`에 넣으라는 지시를 철회했다: spec:322 배치표 1번("키는 `secrets.json`에 넣지 않음, D-050 ⑤"), MD-11("수집기 전용 비밀 파일, `secrets.json` 아님"), 조사 문서 3장 조건 1·5장 사용자 작업·6장, D-050 ⑤. 전용 파일의 위치·형식은 Q-037과 함께 배치표 1번 시작 전 architect ADR 과제로 올렸다(docs/decisions/README.md Q-037, spec 15장). 이 PR은 설정 계약을 바꾸지 않는다. 다만 아래 점검표 밖 R1의 남은 한 줄은 고쳐야 한다 |
+| B4 | 해당 없음 | 결정론 관련 코드·규칙 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 해당 없음 | 동작 변경 없음(주석·문서). 테스트 삭제·건너뛰기 없음 |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·한도·장애 대응 변경 없음 |
+| B8 | 통과 | diff에 키·계좌번호·토큰 없음 |
+
+### 앞 검토 지적 처리
+| 앞 지적 | 처리 | 판단 |
+|---|---|---|
+| 발견 1 `secrets.json` 등록 지시 | D-050 ⑤, 조사 7.1장, 배치표 1번, MD-11, 영향 역할 표(architect 과제) 수정 | 해결. 단 R1의 남은 한 줄 |
+| 발견 2 D-038 되돌릴 조건 | D-050 ⑥, 조사 7.3장: 조건은 걸리지만 2단계에 넣지 않음, 이유(키 발급·승인·Q-037 선행, 결과는 6단계 전에만 필요), 버린 대안, 되돌릴 조건(2단계 QA 재판정이 일봉 실데이터를 요구하면) | 해결. D-038을 그대로 따르지 않는 결정을 D-050 안에 명시했고 "추천안 채택(자율)" 표시가 붙어 있다 |
+| 발견 3 D-019 전제 변화 | 조사 7.2장 대안 A/B 비교, data-engineer 추천 B(Java 일괄 명령), Q-037로 architect ADR 과제 | 해결(미확정으로 남김, Q 번호 있음) |
+| 발견 4 2차 사본 `[사실]` | 조사 :71·:107·:108 `[가정]`으로, 3장 판단에 "1차 출처인 OpenDART 약관만으로도 결론이 선다", D-050 ③에 "법 조문은 2차 사본만 봐서 `[가정]`", manifest `license` 예시에서 법 조문 제거 | 해결 |
+| 권고 5 잔존 참조 | SnapshotManifest.java:32, collectors/python/README.md:9, ADR-003:104·169 갱신 | 해결. D-041:47·85는 확정 결정 원문이라 D-050 ⑤가 대체를 명시한 것으로 충분 |
+| 권고 6 호출량 | 조사 :38 API별 재계산(약 23,000회, 하루 8,000회면 사흘) | 해결 |
+
+### 점검표 밖 발견
+- R1 (수정 필요) 조사 문서 docs/research/q-007-q-026-collector-licenses.md:100(OpenDART 약관 제19조 ② 행)이 여전히 "키는 `secrets.json`만"이라고 쓴다. 같은 문서 3장 조건 1·7.1장, D-050 ⑤와 정반대다. data-engineer가 수집기를 구현할 때 이 표를 보면 앞 검토 발견 1의 실패(모르는 키로 4개 프로세스가 `secrets.json` 없이 기동, 증권사 키가 Python에 노출)가 다시 생길 수 있다. "키는 수집기 전용 비밀 파일만(7.1장)"으로 고친다.
+- R2 (참고) ADR-003은 architect 소유 문서인데 이 PR이 직접 고쳤다(:104, :169, "Q-007 이후" → "D-050·Q-037 뒤"). 문구만 바꿨고 내용은 앞 검토가 요청한 갱신과 같아 architect로서 받아들인다. 계약 변경은 없다.
+- R3 (참고) Q-037 추천(Java 일괄 명령)으로 가면, 일괄 명령이 Java 설정 로더로 `secrets.json`을 읽을지가 다시 문제가 된다. 실전 엔진과 같은 비밀값 파일을 읽는 별도 프로세스를 하나 더 만드는 셈이기 때문이다. ADR에서 "수집기 전용 비밀 파일 + 증권사 키 비로딩"을 언어와 관계없이 지키는 쪽으로 정할 예정이다. 이 PR의 판정과는 관계없다.
+
+### 판정
+수정 필요(B1 빌드 직접 통과 확인 — Maven Central 429가 풀린 뒤 검토자 재실행, R1 조사 문서 :100의 "키는 `secrets.json`만" 문구 수정)
