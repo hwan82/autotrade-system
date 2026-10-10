@@ -51,3 +51,25 @@
 
 - A14: main과 `docs/decisions/README.md` 충돌을 해결할 것(D-052·D-054 줄 둘 다 유지). 병합 뒤 `./gradlew build`를 다시 통과해야 함.
 - R1·R2는 조회 호출기를 프로세스에 연결하는 PR의 승인 조건으로 남김. R3·R4는 권고.
+
+## 재검토 2026-10-10
+- 대상: PR #42 / 커밋 e4ebd95824382eab35f22a76adc38f8c8d229f0e(1차 검토 3b470fc 이후 보고서 커밋 7d589e8·05a01f5 위에 `Merge origin/main` e4ebd95) / main(8680fde) 대비 diff
+- 점검표: A 전체 + B1, B6 + 과금 검사(1차 판정을 새 헤드에서 다시 확인)
+- 직접 실행한 것:
+  - `git merge-tree --write-tree origin/main origin/pr42`: 충돌 없음(트리 571a70d).
+  - `git diff --stat 3b470fc origin/pr42 -- autotrade-broker-kis autotrade-marketdata .gitleaks.toml`: 변경 0줄. 1차 검토한 코드와 같음. main 대비 diff도 1차와 같은 22개 파일(코드·테스트 같음, 문서는 D-054 +6줄과 이 보고서).
+  - `git diff 05a01f5 origin/pr42 -- docs/reviews/pr-42/`: 변경 없음(검토 원문·이 보고서 보존).
+  - `./gradlew build --no-daemon`(e4ebd95, main 병합 결과): **BUILD SUCCESSFUL**(1회째). 테스트 결과 XML 집계 606개, 실패·오류·건너뜀 0(broker-kis 30, broker-kiwoom 51, marketdata 73, risk 55, architecture-test 28, app-gateway 36, app-engine 48).
+  - GitHub check runs(e4ebd95, 14:01Z 시작): Gradle build, Secret scan and collector boundary, DB schema(PostgreSQL 16) 모두 success.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A14 | 통과 | main 충돌 해결됨. `docs/decisions/README.md`에 D-049·D-052(main)와 D-054(이 PR) 줄이 모두 있음. D-054에 "조회 호출기 연결 PR 승인 조건" 절이 추가되어 QA R1(실전 계좌 키 분리, 테스트 포함)·R2(한도 초과 지수 백오프, 토큰 재발급 실패 뒤 최소 60초, 테스트 포함)를 연결 PR의 승인 조건으로, R3·R4를 권고로 기록(`docs/decisions/D-054-kis-official-sample-alignment.md` 31~35행). 바뀐 동작과 결정 로그가 일치 |
+| B1 | 통과 | 위 빌드. main 병합 결과에서 직접 실행 성공, 테스트 606개 실패 0 |
+| A1~A13, B6, 과금 8.1~8.5 | 1차와 같음 | 코드·테스트 변경 없음(위 diff 0줄). 병합으로 들어온 main 변경(#37 ADR-007 문서·스키마 smoke, #40 키움)은 이 PR diff 밖이고 PR 코드와 충돌·컴파일 영향 없음(빌드 성공). 운영 코드에서 `KisRestClient`·`KisTokenClient`·`KisDailyChart` 호출 지점 0건 다시 확인 |
+
+### 점검표 밖
+- 1차 R1~R4는 이 PR에서 고칠 대상이 아니며(조회 호출기 미연결), D-054에 연결 PR 조건으로 기록됨. 연결 PR 검토 때 이 조건을 확인한다.
+
+### 판정
+승인
