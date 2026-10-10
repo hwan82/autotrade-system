@@ -118,7 +118,8 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.app.engine", "autotrade-app-engine"),
             Map.entry("com.autotrade.app.gateway", "autotrade-app-gateway"),
             Map.entry("com.autotrade.app.lab", "autotrade-app-lab"),
-            Map.entry("com.autotrade.app.watchdog", "autotrade-app-watchdog"));
+            Map.entry("com.autotrade.app.watchdog", "autotrade-app-watchdog"),
+            Map.entry("com.autotrade.app.collector", "autotrade-app-collector"));
 
     /**
      * 표에는 있지만 아직 클래스 파일이 없는 자리 모듈({@code package-info.java}만 있어 컴파일 결과가 없다). 클래스가 생기면

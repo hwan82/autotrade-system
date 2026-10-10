@@ -11,6 +11,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.autotrade.app.collector.archfixture.LoadsProcessConfig;
 import com.autotrade.app.engine.command.ForgedConfirmation;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
@@ -69,6 +70,7 @@ class ArchitectureTest {
     // 실험실(Spring)을 뺀 프로세스 진입점도 Spring을 쓰지 않는다
     private static final String[] PLAIN_PROCESSES = {
         "com.autotrade.app.engine..", "com.autotrade.app.gateway..", "com.autotrade.app.watchdog..",
+        "com.autotrade.app.collector..",
     };
 
     // 검사 범위: 우리 프로젝트(settings의 모든 Java 모듈)의 운영 클래스 전체(패키지 필터 없음) + 클래스패스의 com.autotrade
@@ -216,6 +218,21 @@ class ArchitectureTest {
             .should().dependOnClassesThat().areAssignableTo(ControlClient.class)
             .because("실전 제어 명령은 사람이 UI에서 2차 확인을 거쳐 보낸다. 게이트웨이·감시·엔진은 보내지 않는다(ADR-006)");
 
+    /**
+     * 수집 일괄 명령은 4개 프로세스의 설정 로더({@code runtime-config.json}·{@code secrets.json})를 쓰지 않고 수집기 전용 키
+     * 파일만 읽는다(D-050 ⑤, D-051, ADR-008 2.2). 증권사 플러그인·주문 포트도 모른다(D-019 경계를 언어와 관계없이 유지).
+     */
+    static final ArchRule COLLECTOR_READS_ONLY_ITS_SECRETS = noClasses()
+            .that().resideInAPackage("com.autotrade.app.collector..")
+            .should().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ConfigLoader")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigStore")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigHolder")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.LoadedConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ProcessStartup")
+            .orShould().dependOnClassesThat().resideInAnyPackage("com.autotrade.broker..", "com.autotrade.domain.order..")
+            .because("수집기는 증권사 키·계좌·주문을 다루지 않는다(D-019 3장, D-051)");
+
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
@@ -293,6 +310,17 @@ class ArchitectureTest {
     void 명령_채널_서버는_엔진만_열고_클라이언트는_실험실만_쓴다() {
         ONLY_ENGINE_OPENS_CONTROL_SERVER.check(PRODUCTION);
         ONLY_LAB_SENDS_CONTROL_COMMANDS.check(PRODUCTION);
+    }
+
+    @Test
+    void 수집_일괄_명령은_자기_키_파일만_읽고_증권사_주문을_모른다() {
+        COLLECTOR_READS_ONLY_ITS_SECRETS.check(PRODUCTION);
+        // 위반 고정 예제: 설정 로더 생성·load 호출, 반환 타입 LoadedConfig, 주문 포트 참조
+        EvaluationResult r = COLLECTOR_READS_ONLY_ITS_SECRETS.evaluate(
+                new ClassFileImporter().importClasses(LoadsProcessConfig.class));
+        assertThat(r.hasViolation()).isTrue();
+        assertThat(String.join("\n", r.getFailureReport().getDetails()))
+                .contains("ConfigLoader", "LoadedConfig", "OrderGateway");
     }
 
     @Test

@@ -28,6 +28,7 @@ include(
     "autotrade-app-gateway",
     "autotrade-app-lab",
     "autotrade-app-watchdog",
+    "autotrade-app-collector",
     "autotrade-architecture-test",
     "autotrade-ui",
     "autotrade-notification-jar",
