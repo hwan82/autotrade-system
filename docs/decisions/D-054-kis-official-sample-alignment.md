@@ -30,5 +30,5 @@
 
 ## 반영
 - 코드: `autotrade-marketdata`(`Decoded`, `WsConnection`, `JdkWsTransport`, `StreamingMarketDataSource`), `autotrade-broker-kis`(`KisStreamProtocol`, `KisApprovalClient`, `KisErrorCode`, `KisTokenClient`, `KisRestClient`, `KisDailyChart`)
-- 문서: [한국투자 명세 요약](../research/kis-open-api-spec.md)
-- 미룬 반영(열린 PR #39·#40·#41과 같은 파일): 결정 로그 목록 한 줄, Q-015 항목 추가, ADR-003 4장 한국투자 줄, `market-data-limits.md` 출처. 세 PR 머지 뒤 반영한다.
+- 문서: [한국투자 명세 요약](../research/kis-open-api-spec.md), 결정 로그 목록 한 줄, [ADR-003](../adr/ADR-003-market-data.md) 2.1(`Decoded.pongs`·`WsConnection.sendPong` 계약)·토큰 단락(재발급 제한 예외)·5장 한국투자 확인 항목(architect 검토 B3·F1)
+- 미룬 반영(열린 PR #39·#40·#41과 같은 파일): Q-015 항목 추가, `market-data-limits.md` 출처. 세 PR 머지 뒤 반영한다.
