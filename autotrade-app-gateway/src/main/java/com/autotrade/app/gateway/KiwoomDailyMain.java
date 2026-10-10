@@ -10,6 +10,7 @@ import com.autotrade.domain.account.BrokerId;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.daily.DailyBar;
+import com.autotrade.marketdata.live.HttpPort;
 import com.autotrade.marketdata.live.JdkHttpPort;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
 import com.autotrade.marketdata.symbols.SymbolNames;
@@ -45,10 +46,14 @@ public final class KiwoomDailyMain {
     private KiwoomDailyMain() {}
 
     public static void main(String[] args) throws InterruptedException {
-        System.exit(run(args, System.out, System.err, Clock.systemUTC()));
+        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        System.exit(run(args, System.out, System.err, ConfigPaths.defaultLocation(), Clock.systemUTC(),
+                new JdkHttpPort(http, Duration.ofSeconds(10))));
     }
 
-    static int run(String[] args, PrintStream out, PrintStream err, Clock clock) throws InterruptedException {
+    /** 설정을 읽고 거절 조건(실전 계좌, 키 없음)을 HTTP 호출 전에 확인한 뒤 표를 만든다. */
+    static int run(String[] args, PrintStream out, PrintStream err, ConfigPaths paths, Clock clock, HttpPort httpPort)
+            throws InterruptedException {
         if (args.length < 1) {
             err.println("사용법: kiwoomDaily <yyyy-MM-dd> [보고서 파일(.md)] [종목코드…]");
             return 2;
@@ -66,7 +71,6 @@ public final class KiwoomDailyMain {
             report = Optional.of(Path.of(args[1]));
             next = 2;
         }
-        ConfigPaths paths = ConfigPaths.defaultLocation();
         Path dir = paths.runtimeFile().toAbsolutePath().getParent();
         RuntimeConfig config = new ConfigLoader().load(paths).config();
         if (GatewayMain.reservedForRealTrading(config.realTrading()).contains(BrokerId.KIWOOM)) {
@@ -84,10 +88,8 @@ public final class KiwoomDailyMain {
                 err.println("조회할 종목이 없습니다(인자나 watchlist.json에 국내 종목을 넣어 주세요)");
                 return 2;
             }
-            HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
             KiwoomRestClient client = KiwoomRestClient.create(
-                    new BrokerCredentials(keys.appKey().reveal(), keys.appSecret().reveal()),
-                    new JdkHttpPort(http, Duration.ofSeconds(10)), clock);
+                    new BrokerCredentials(keys.appKey().reveal(), keys.appSecret().reveal()), httpPort, clock);
             SymbolNameFiles.Loaded names = SymbolNameFiles.load(dir);
             names.warnings().forEach(err::println);
             String text = table(date, symbols, new KiwoomDailyChart(client)::regularSession, names.names(), err);
@@ -96,8 +98,12 @@ public final class KiwoomDailyMain {
                 Files.writeString(report.get(), text, StandardCharsets.UTF_8);
             }
             return 0;
+        } catch (KiwoomRestClient.KiwoomApiException e) {
+            err.println(e.getMessage()); // 결과 코드와 고정 안내만 담는다
+            return 2;
         } catch (IOException | RuntimeException e) {
-            err.println("키움 일봉 조회 실패: " + e.getMessage());
+            // 그 밖의 예외 메시지에는 무엇이 섞일지 몰라 종류만 남긴다(게이트웨이와 같은 방식)
+            err.println("키움 일봉 조회 실패: " + e.getClass().getSimpleName());
             return 2;
         }
     }
@@ -136,7 +142,8 @@ public final class KiwoomDailyMain {
                     sb.append("| ").append(s.code()).append(" | ").append(name).append(" | 거래 없음 |  |  |  |  |\n");
                 }
             } catch (IOException e) {
-                err.println(s.code() + ": " + e.getMessage());
+                err.println(s.code() + ": " + (e instanceof KiwoomRestClient.KiwoomApiException
+                        ? e.getMessage() : e.getClass().getSimpleName()));
                 sb.append("| ").append(s.code()).append(" | ").append(name).append(" | 조회 실패 |  |  |  |  |\n");
             }
         }
