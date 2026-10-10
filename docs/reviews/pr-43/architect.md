@@ -31,3 +31,41 @@
 
 ## 판정
 수정 필요(F1 기획서 배치표 5번·STR-19에 D-055 선행 조건 반영, F2 D-055 문구를 사용자 선택지 1 원문에 맞춤 / F3 사용자 카드 기록 대조는 머지 전 메인·QA 확인)
+
+## 재검토 2026-10-10
+- 대상: PR #43 / 커밋 91ffdae7c3e1ee8942f3c25520110ce6d5613989 (5d82ca1 + b75560d + 91ffdae) / `git diff origin/main...HEAD` 전체 (origin/main = cf3759a)
+- 변경 파일: 1차와 같은 4개 + `docs/reviews/pr-43/architect.md`(1차 검토 원문). 91ffdae의 원문 외 변경은 `docs/decisions/README.md` D-055 한 행, `docs/spec/autotrade-spec.md` 변경 이력 v14.11 행·STR-19·배치표 5번 선행·15장 닫은 항목
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build` (HEAD 91ffdae): BUILD SUCCESSFUL, 104 actionable tasks (15 executed, 89 up-to-date). 91ffdae도 Gradle 입력 변경 없음
+  - gitleaks 8.21.2, CI와 같은 명령(`gitleaks git --redact --exit-code 1 .`): no leaks, EXIT 0. 기본 규칙만으로는 2건이고 둘 다 같은 가짜 값 `abcdef1234567890`(`docs/reviews/pr-39/architect.md`, 89fae05와 이 원문 파일, 91ffdae). 이 원문이 그 값을 인용했기 때문이며 `.gitleaks.toml`의 정확 일치 예외로 처리됨
+  - `git diff --word-diff b75560d 91ffdae -- . ':!docs/reviews'`로 수정 내용 확인
+  - 1차 원문 무결성: 91ffdae에 들어간 `docs/reviews/pr-43/architect.md`는 이 검토자가 쓴 1차 내용(33줄, F1~F5, 판정 줄)과 같음. 메인이 고친 흔적 없음
+  - F3 대조: 지시에 따라 읽기 도구만 사용(`list_thread_sessions`, `fetch_project_timeline`, `fetch_thread` 스레드 cmsg_01Du6VLttqgn6f15sF8UYTuUNX33euHDFz6RDC3rZhkw75 "수집기 라이선스·약관 확인")
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | HEAD 91ffdae `./gradlew build` BUILD SUCCESSFUL |
+| B2 | 해당 없음 | 코드·빌드 스크립트·ArchUnit 변경 없음 |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST 변경 없음(`.gitleaks.toml`은 CI 설정) |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 코드 없음, 테스트 파일 변경 없음 |
+| B7 | 해당 없음 | 코드상 실전 경로 변경 없음. 91ffdae가 STR-19(`docs/spec/autotrade-spec.md:170`)와 배치표 5번 선행(`:327`)에 실전용 선정 입력의 출처 조건을 넣었으나 안전 규칙(Guard·주문·블랙리스트·한도·장애 대응)을 약화하지 않고 실전 작업에 선행 조건만 더함. risk-ops가 같은 PR을 검토 중이라는 스레드 상태(13:30:08Z)는 메인 주장이며 이 판정의 근거로 쓰지 않음 |
+| B8 | 통과 | diff 전문에 키·계좌번호·토큰 없음. gitleaks EXIT 0 |
+
+### 1차 지적 처리
+- **F1 해소**: STR-19 끝에 "실전용 선정 결과의 입력 데이터(D-055)" 문단 추가(`docs/spec/autotrade-spec.md:170`): 한국거래소 답(비상업 목적 해당)이 먼저 있어야 하고, 부정적이면 실전용 입력만 공공데이터포털로 바꾸며 같은 품질 검사(MD-09) 통과. 배치표 5번 선행 칸이 "0, 1, D-055(KRX Open API 실전 이용에 대한 한국거래소 답, 사용자 문의)"로 바뀜(`:327`). 변경 이력 v14.11 영향 칸에 "14장 배치표 5번" 추가(`:20`).
+- **F2 해소**: D-055(`docs/decisions/README.md:55`)에서 "(또는 증권사 일봉)" 삭제, "그 실전용 스냅샷도 같은 품질 검사(MD-09)를 통과해야 한다" 추가, 출처에 "조사 4장 선택지 1, 추천안" 명시. 기획서 변경 이력·15장 닫은 항목의 "대체 소스로"도 "공공데이터포털로"로 맞춤.
+- **F3 해소(대조 완료)**: 스레드 기록 [사실]
+  - 08:14:55Z 메시지 cmsg_01Du6VLttqgn6f15sF8UYTuU1rgVcJYrcdoz1qH27LQFAG(`ask_decision`): 선택지 0 "7단계 전 문의", 결과 "실험실은 지금 진행하고, 7단계 전에 직접 한국거래소에 묻습니다. 답이 부정적이면 실전용 입력만 공공데이터포털 시세로 바꿉니다.", 추천 0.
+  - 13:23:12Z 메시지 cmsg_01Du6VLttqgn6f15sF8UYTuU6PJmDVptpp2jVQBbM3fDCa(`decide`): `decision_id`가 위 카드, `option_index: 0`, `chosen_by: user_01Vc7USeKzFq1SwmNQt6Je3E`. 같은 author_id의 사용자 메시지(13:20:38Z)에 author_name "BAE".
+  - D-055의 시각·사용자·선택지와 일치. 카드 문구에 "증권사 일봉"은 없었으므로 F2 수정이 맞다. 카드 context는 "(Q-035)"로 적혀 있으나, 08:15:46Z 상태 메시지("다른 스레드와 겹친 번호를 D-050·Q-036으로 조정")와 08:45:24Z 안내("카드에는 Q-035로 적혀 있습니다")로 같은 질문의 번호 조정임이 기록돼 있음.
+  - 카드 결과 문구에는 품질 검사 조건이 없다. D-055의 MD-09 품질 검사는 조사 문서 선택지 1 원문(`docs/research/q-007-q-026-collector-licenses.md:127`)에 있던 조건이고, 이미 실험 데이터에 적용되는 MD-09를 실전용 스냅샷에도 적용하는 것이라 사용자 선택을 넘어서는 새 결정으로 보지 않음 `[추론]`.
+
+### 점검표 밖 발견(재검토)
+1. 참고(수정 불필요): STR-19 문단은 "답이 부정적이면"만 규정하고 "7단계까지 답이 오지 않은 경우"는 따로 쓰지 않았다. 배치표 5번 선행에 D-055 답이 들어가 있어 답이 없으면 5번이 시작되지 않으므로 안전 쪽으로 막힌다. 배치표 5번 착수 때 무응답 시 대체 소스로 갈지 사용자에게 물을 항목으로 남기면 충분.
+2. 참고: 1차 원문 4번(브랜치마다 `.gitleaks.toml` 복사 대신 스캔 범위 조정 ADR) 권고는 그대로 유효. 이번 원문 파일 자체도 같은 가짜 값을 인용해 예외에 기대고 있다.
+
+### 판정
+승인
