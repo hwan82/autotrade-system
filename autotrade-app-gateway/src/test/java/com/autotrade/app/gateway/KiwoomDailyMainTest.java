@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-class KiwoomDailyCheckTest {
+class KiwoomDailyMainTest {
 
     private static final LocalDate DAY = LocalDate.of(2026, 10, 1);
 
@@ -24,7 +24,7 @@ class KiwoomDailyCheckTest {
         Symbol samsung = Symbol.krx("005930");
         Symbol hynix = Symbol.krx("000660");
         Symbol halted = Symbol.krx("035420");
-        KiwoomDailyCheck.Chart chart = (s, d) -> {
+        KiwoomDailyMain.Chart chart = (s, d) -> {
             if (s.equals(hynix)) {
                 throw new IOException("키움 ka11081 실패: return_code 1700 호출 한도 초과");
             }
@@ -35,7 +35,7 @@ class KiwoomDailyCheckTest {
                     new BigDecimal("176000"), new BigDecimal("230500"), 48733, BigDecimal.ONE));
         };
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
-        String text = KiwoomDailyCheck.table(DAY, List.of(hynix, samsung, halted), chart, SymbolNames.empty(),
+        String text = KiwoomDailyMain.table(DAY, List.of(hynix, samsung, halted), chart, SymbolNames.empty(),
                 new PrintStream(errBytes, true, StandardCharsets.UTF_8));
 
         assertThat(text).contains("| 005930 | – | 177000 | 280000 | 176000 | 230500 | 48733 |")
@@ -48,7 +48,7 @@ class KiwoomDailyCheckTest {
     @Test
     void 날짜가_없거나_틀리면_종료_코드_2() throws Exception {
         PrintStream sink = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
-        assertThat(KiwoomDailyCheck.run(new String[0], sink, sink)).isEqualTo(2);
-        assertThat(KiwoomDailyCheck.run(new String[] {"2026/10/01"}, sink, sink)).isEqualTo(2);
+        assertThat(KiwoomDailyMain.run(new String[0], sink, sink, java.time.Clock.systemUTC())).isEqualTo(2);
+        assertThat(KiwoomDailyMain.run(new String[] {"2026/10/01"}, sink, sink, java.time.Clock.systemUTC())).isEqualTo(2);
     }
 }

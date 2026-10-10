@@ -50,6 +50,6 @@ tasks.register<JavaExec>("kiwoomDaily") {
     group = "verification"
     description = "키움 REST(ka11081)로 녹화 종목의 KRX 정규장 일봉을 받아 ReplayCheck 대조용 표를 만든다"
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("com.autotrade.app.gateway.KiwoomDailyCheck")
+    mainClass.set("com.autotrade.app.gateway.KiwoomDailyMain")
     workingDir = rootProject.projectDir
 }

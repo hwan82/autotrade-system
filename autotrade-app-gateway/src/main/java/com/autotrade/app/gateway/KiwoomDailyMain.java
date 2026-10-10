@@ -38,16 +38,17 @@ import java.util.TreeSet;
  * <p>사용: {@code ./gradlew :autotrade-app-gateway:kiwoomDaily --args="2026-10-12 [보고서 파일] [종목코드…]"}.
  * 종목을 주지 않으면 설정 폴더의 {@code watchlist.json} 국내 종목(녹화 대상)을 쓴다.
  * 종료 코드 0: 표 작성, 2: 설정·인자 오류나 조회 실패.
+ * 이름이 {@code *Main}인 것은 프로세스 진입점이라 시스템 시계를 만들 수 있기 때문이다(ArchitectureTest NO_SYSTEM_TIME).
  */
-public final class KiwoomDailyCheck {
+public final class KiwoomDailyMain {
 
-    private KiwoomDailyCheck() {}
+    private KiwoomDailyMain() {}
 
     public static void main(String[] args) throws InterruptedException {
-        System.exit(run(args, System.out, System.err));
+        System.exit(run(args, System.out, System.err, Clock.systemUTC()));
     }
 
-    static int run(String[] args, PrintStream out, PrintStream err) throws InterruptedException {
+    static int run(String[] args, PrintStream out, PrintStream err, Clock clock) throws InterruptedException {
         if (args.length < 1) {
             err.println("사용법: kiwoomDaily <yyyy-MM-dd> [보고서 파일(.md)] [종목코드…]");
             return 2;
@@ -86,7 +87,7 @@ public final class KiwoomDailyCheck {
             HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
             KiwoomRestClient client = KiwoomRestClient.create(
                     new BrokerCredentials(keys.appKey().reveal(), keys.appSecret().reveal()),
-                    new JdkHttpPort(http, Duration.ofSeconds(10)), Clock.systemUTC());
+                    new JdkHttpPort(http, Duration.ofSeconds(10)), clock);
             SymbolNameFiles.Loaded names = SymbolNameFiles.load(dir);
             names.warnings().forEach(err::println);
             String text = table(date, symbols, new KiwoomDailyChart(client)::regularSession, names.names(), err);
