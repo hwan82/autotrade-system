@@ -14,7 +14,7 @@
 
 | 항목 | 키움 (REST API) | 한국투자 (KIS Developers) | 토스증권 (Open API) |
 |---|---|---|---|
-| 실시간 방식 | WebSocket (`/api/dostk/websocket`, 미국은 `/api/us/websocket`) | WebSocket | **WebSocket** (`wss://openapi-ws.tossinvest.com/ws/v1`) + REST |
+| 실시간 방식 | WebSocket (`/api/dostk/websocket`, 미국은 `/api/us/websocket`. 2026-10-10 사용자 제공 명세는 국내·미국 모두 `/api/websocket`: [키움 명세 요약](kiwoom-rest-api-spec.md) 4.1) | WebSocket | **WebSocket** (`wss://openapi-ws.tossinvest.com/ws/v1`) + REST |
 | 동시 연결 | 계좌별(토큰별) 세션 1개 `[사실]` K1 | appkey 단위 `[가정]` 1세션 | 계정당 2개. 3번째 연결 시 가장 오래된 연결이 서버에서 끊김 `[사실]` T2 |
 | 실시간 등록 한도 | 세션당 실시간 시세 **200종목** `[사실]` K1 | appkey당 **41건** (공식 샘플 코드는 40건 초과 시 예외) `[사실]` H1, H2 | 연결당 **100건**(`codes` 합산), 계정 합계 200건 `[사실]` T2 |
 | 구독 요청 빈도 | 수치 미공개. 초과 시 `1702`(그룹 요청 개수 초과) `[사실]` K2 | 수치 미공개 | 구독 선언 초당 5회, 초과 시 `rate-limit-exceeded` 프레임 `[사실]` T2 |
