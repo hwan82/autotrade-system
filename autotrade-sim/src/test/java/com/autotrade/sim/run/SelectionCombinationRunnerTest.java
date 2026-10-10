@@ -167,6 +167,20 @@ class SelectionCombinationRunnerTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("선정 결과 공급자");
     }
 
+    @Test
+    void 조합_수가_상한을_넘으면_시작하지_않는다() {
+        List<Combination> many = new ArrayList<>();
+        for (int i = 0; i <= SimulationExperimentRunner.MAX_COMBINATIONS; i++) {
+            many.add(Combination.of(profile("p" + i, "symbol", "005930", "qty", "1")));
+        }
+        CountingSource source = new CountingSource();
+        assertThatThrownBy(() -> runner(1, source).runDetailed(spec(many)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("조합 수");
+        // 상한 정확히는 시작한다(모르는 프로필이라 Run은 실패로 끝남)
+        SimulationReport ok = runner(4, source).runDetailed(spec(many.subList(0, SimulationExperimentRunner.MAX_COMBINATIONS)));
+        assertThat(ok.runs()).hasSize(SimulationExperimentRunner.MAX_COMBINATIONS);
+    }
+
     // ---- 도우미 ----
 
     /** 체결을 계좌와 무관한 값(키·의도·수량·가격·이벤트 순번)으로 비교한다. 로트 ID에는 계좌 번호가 들어간다. */

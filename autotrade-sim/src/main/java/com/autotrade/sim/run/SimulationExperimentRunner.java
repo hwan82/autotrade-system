@@ -64,8 +64,10 @@ import java.util.concurrent.Future;
  *   <li>시계를 이벤트 수신 시각으로 옮김</li>
  *   <li>가상 거래소가 이 이벤트로 기존 주문을 체결(신호를 낸 이벤트로는 체결하지 않음)</li>
  *   <li>전략이 이 이벤트까지 본 상태로 신호를 냄</li>
- *   <li>선정 있는 조합이면 신규 진입({@code ENTRY}) 신호 중 그날 선정 결과 밖 종목, 또는 그날 결과가 없을 때의 신호를 버림
- *       (청산·손절은 그대로. STR-17·19, ADR-007 2.6 "선정 결과는 후보일 뿐")</li>
+ *   <li>선정 있는 조합이면 보호 주문이 아닌 신호(신규 진입, {@link OrderIntent#isProtective()} 허용 목록 밖) 중 그날
+ *       선정 결과 밖 종목, 또는 그날 결과가 없을 때의 신호를 버림(청산·손절은 그대로. STR-17·19, ADR-007 2.6 "선정 결과는
+ *       후보일 뿐"). "그날"은 <b>신호를 낸 이벤트의 거래일</b>이다. 장 마감 직전 신호가 다음 거래일에 체결돼도 신호일의
+ *       선정으로 거른다. 실전 엔진이 거래일마다 장전에 결과를 고정하고 그날 신호에 쓰는 것(ADR-007 2.6)과 같은 기준이다</li>
  *   <li>신호마다 멱등 키 발급 → 리스크 검증({@link RiskChain}: 블랙리스트·수동 보유 → 진입 규칙, 실전과 같은 코드) → 거래소 접수</li>
  * </ol>
  */
@@ -81,6 +83,13 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final int parallelism;
     private final Symbol benchmark;
     private final SelectionSource selections;
+
+    /**
+     * 실험 하나의 조합 수 상한(SIM-14 실험실 자원 상한, STR-17 "조합 수가 상한을 넘으면 시작 거부") `[가정]`. 조합마다 계좌·
+     * 거래소·전략 상태를 따로 두므로 메모리가 조합 수에 비례한다. 설정 키({@code lab.max-combinations})로 옮기는 것은 후속
+     * (config-keys.md를 고치는 열린 PR #39 머지 뒤).
+     */
+    public static final int MAX_COMBINATIONS = 128;
 
     /**
      * @param risk 모의 주문이 통과할 검증 체인. 실전과 같은 {@link RiskChain}만 받는다(SIM-12). 승인만 하는 정책이나
@@ -155,6 +164,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     }
 
     private List<MarketEvent> validateAndSlice(ExperimentSpec spec) {
+        if (spec.combinations().size() > MAX_COMBINATIONS) {
+            throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size()
+                    + " > " + MAX_COMBINATIONS);
+        }
         if (spec.hasSelections() && selections == null) {
             throw new IllegalArgumentException("선정 있는 조합이 있는데 선정 결과 공급자가 없습니다: " + spec.id());
         }
@@ -262,7 +275,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 AccountSnapshot snapshot = account.snapshot(now);
                 List<TradeSignal> signals = strategy.onEvent(e, new Context(now, snapshot, exchange));
                 for (TradeSignal s : signals) {
-                    if (state.selectionDay != null && s.intent() == OrderIntent.ENTRY
+                    if (state.selectionDay != null && !s.intent().isProtective()
                             && !state.selectionDay.allowsEntry(s.symbol())) {
                         // 선정 밖 신규 진입은 주문을 만들지 않는다(멱등 키도 쓰지 않음). 건수만 그날 기록에 남긴다
                         state.blockedToday++;
