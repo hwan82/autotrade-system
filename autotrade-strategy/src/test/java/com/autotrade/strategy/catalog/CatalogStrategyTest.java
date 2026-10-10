@@ -231,6 +231,103 @@ class CatalogStrategyTest {
                 .hasMessageContaining("시장");
     }
 
+    @Test
+    void 중기_프로필은_CARRY와_20에서_120거래일_최대_보유일을_요구한다() {
+        assertThat(FACTORY.create(position(Map.of()), 1L)).isNotNull();
+        Map<String, String> flatten = new TreeMap<>(positionParams(Map.of("exit.eod", "FLATTEN")));
+        flatten.put("exit.eod-time", "15:10");
+        assertThatThrownBy(() -> create(profile("pos", TradingStyle.POSITION, flatten))).hasMessageContaining("CARRY");
+        Map<String, String> noHold = new TreeMap<>(positionParams(Map.of()));
+        noHold.remove("exit.max-hold-days");
+        assertThatThrownBy(() -> create(profile("pos", TradingStyle.POSITION, noHold)))
+                .hasMessageContaining("exit.max-hold-days");
+        assertThatThrownBy(() -> create(position(Map.of("exit.max-hold-days", "19")))).hasMessageContaining("20");
+        assertThatThrownBy(() -> create(position(Map.of("exit.max-hold-days", "121")))).hasMessageContaining("120");
+        assertThat(create(position(Map.of("exit.max-hold-days", "20")))).isNotNull();
+        assertThat(create(position(Map.of("exit.max-hold-days", "120")))).isNotNull();
+    }
+
+    @Test
+    void 스윙_최대_보유일은_선택이고_있으면_2에서_20거래일이며_단타는_받지_않는다() {
+        Map<String, String> swing = new TreeMap<>(positionParams(Map.of()));
+        swing.remove("exit.max-hold-days");
+        assertThat(create(profile("sw", TradingStyle.SWING, swing))).as("기존 v1 스윙 프로필 호환").isNotNull();
+        swing.put("exit.max-hold-days", "1");
+        assertThatThrownBy(() -> create(profile("sw", TradingStyle.SWING, swing))).hasMessageContaining("2");
+        swing.put("exit.max-hold-days", "21");
+        assertThatThrownBy(() -> create(profile("sw", TradingStyle.SWING, swing))).hasMessageContaining("20");
+        swing.put("exit.max-hold-days", "20");
+        assertThat(create(profile("sw", TradingStyle.SWING, swing))).isNotNull();
+        assertThatThrownBy(() -> create(orb(Map.of("exit.max-hold-days", "5")))).hasMessageContaining("exit.max-hold-days");
+    }
+
+    @Test
+    void 최대_보유일에_이른_거래일_첫_체결에서_시간_청산한다() {
+        Tape tape = new Tape(create(position(Map.of("exit.max-hold-days", "20", "exit.stop-loss-pct", "50"))));
+        LocalDate d = LocalDate.of(2026, 3, 2);
+        tape.hold(A, 10, 10000);
+        assertThat(tape.day(d).trade("09:10:00", 10000, 100)).as("진입한 거래일 = 0일째").isEmpty();
+        for (int i = 1; i < 20; i++) {
+            d = d.plusDays(1);
+            assertThat(tape.day(d).trade("09:10:00", 10000, 100)).as("보유 %d거래일째", i).isEmpty();
+        }
+        assertThat(tape.day(d.plusDays(1)).trade("09:10:00", 10000, 100))
+                .as("보유 20거래일째 첫 체결").containsExactly(TradeSignal.marketSell(A, OrderIntent.EXIT, 10));
+    }
+
+    @Test
+    void 일봉_무작위_대조군은_하루_한_번_뽑고_스윙과_중기만_받는다() {
+        Map<String, String> p = new TreeMap<>(positionParams(Map.of("logic", "random-daily", "signal.per-mille", "500")));
+        p.remove("signal.fast-days");
+        p.remove("signal.slow-days");
+        StrategyProfile pos = profile("rnd-pos", TradingStyle.POSITION, p);
+        assertThat(dailySignals(FACTORY.create(pos, 7L))).isEqualTo(dailySignals(FACTORY.create(pos, 7L)));
+        assertThat(dailySignals(FACTORY.create(pos, 7L))).isNotEqualTo(dailySignals(FACTORY.create(pos, 8L)));
+        Map<String, String> swing = new TreeMap<>(p);
+        swing.put("exit.max-hold-days", "10");
+        assertThat(FACTORY.create(profile("rnd-sw", TradingStyle.SWING, swing), 1L)).isNotNull();
+        Map<String, String> intraday = new TreeMap<>(common());
+        intraday.put("logic", "random-daily");
+        intraday.put("signal.per-mille", "500");
+        assertThatThrownBy(() -> create(profile("rnd-in", TradingStyle.INTRADAY, intraday)))
+                .hasMessageContaining("SWING 또는 POSITION");
+    }
+
+    /** 40거래일 동안 매일 체결 3개. 보유는 만들지 않아(신호만 봄) 매일 진입 여부가 그날 뽑기만으로 정해진다. */
+    private static List<String> dailySignals(Strategy s) {
+        Tape tape = new Tape(s);
+        List<String> out = new ArrayList<>();
+        LocalDate d = LocalDate.of(2026, 3, 2);
+        for (int i = 0; i < 40; i++) {
+            tape.day(d.plusDays(i));
+            int day = i;
+            for (String t : List.of("09:10:00", "09:20:00", "09:30:00")) {
+                tape.trade(t, 10000, 100).forEach(sig -> out.add(day + "@" + t));
+            }
+        }
+        assertThat(out.stream().map(x -> x.split("@")[0]).distinct().count())
+                .as("하루 한 번만 신호").isEqualTo(out.size());
+        return out;
+    }
+
+    @Test
+    void 이동평균_추세는_중기_프로필도_받는다() {
+        assertThat(create(position(Map.of()))).isNotNull();
+    }
+
+    private static StrategyProfile position(Map<String, String> extra) {
+        return profile("pos", TradingStyle.POSITION, positionParams(extra));
+    }
+
+    private static Map<String, String> positionParams(Map<String, String> extra) {
+        Map<String, String> p = new TreeMap<>(common());
+        p.remove("exit.eod-time");
+        p.putAll(Map.of("logic", "ma-trend", "signal.fast-days", "20", "signal.slow-days", "60", "exit.eod", "CARRY",
+                "exit.stop-loss-pct", "10", "exit.max-hold-days", "60"));
+        p.putAll(extra);
+        return p;
+    }
+
     private static Strategy create(StrategyProfile p) {
         return FACTORY.create(p, 42L);
     }

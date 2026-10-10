@@ -28,6 +28,8 @@ import java.time.LocalTime;
  * @param takeProfit 익절폭. 0이면 없음
  * @param trailing 보유 중 최고가 대비 추적 손절폭. 0이면 없음
  * @param timeExit 진입 후 이 시간이 지나면 청산. 0이면 없음
+ * @param maxHoldDays 최대 보유 거래일(STR-18). 진입한 거래일이 0일째이고, 보유 거래일 수가 이 값에 이른 날 첫 이벤트에서
+ *     시간 청산한다. 0이면 없음. 단타는 쓰지 않고, 스윙은 선택(2~20), 중기는 필수(20~120)
  */
 public record TradingRules(
         LocalTime entryStart,
@@ -48,6 +50,7 @@ public record TradingRules(
         BigDecimal takeProfit,
         BigDecimal trailing,
         Duration timeExit,
+        int maxHoldDays,
         EodPolicy eod,
         LocalTime eodTime) {
 
@@ -65,6 +68,14 @@ public record TradingRules(
         if (style == TradingStyle.INTRADAY && eod != EodPolicy.FLATTEN) {
             throw p.fail("exit.eod", "장중 프로필은 FLATTEN이어야 합니다(STR-09)");
         }
+        if (style == TradingStyle.POSITION && eod != EodPolicy.CARRY) {
+            throw p.fail("exit.eod", "중기 프로필은 CARRY여야 합니다(STR-18)");
+        }
+        int maxHoldDays = switch (style) {
+            case INTRADAY -> 0;
+            case SWING -> p.count("exit.max-hold-days", 2, 20, 0);
+            case POSITION -> p.count("exit.max-hold-days", 20, 120);
+        };
         LocalTime eodTime = eod == EodPolicy.FLATTEN ? p.time("exit.eod-time") : LocalTime.MAX;
         if (end.isAfter(eodTime)) {
             throw p.fail("exit.eod-time", "진입 허용 끝보다 앞설 수 없습니다");
@@ -88,6 +99,7 @@ public record TradingRules(
                 p.percent("exit.take-profit-pct", "0", "100", "0"),
                 p.percent("exit.trailing-pct", "0", "50", "0"),
                 Duration.ofMinutes(p.count("exit.time-exit-minutes", 0, 100_000, 0)),
+                maxHoldDays,
                 eod,
                 eodTime);
     }
