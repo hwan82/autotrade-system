@@ -34,6 +34,12 @@ final class TossTokenClient implements TokenCache.Fetcher {
 
     static final URI TOKEN_URI = URI.create("https://openapi.tossinvest.com/oauth2/token");
     static final String GROUP = "AUTH";
+    /**
+     * 발급 그룹 한도 대기 상한. 발급은 토큰 잠금 안에서 일어나 모든 조회(보호 폴링 포함)가 그동안 기다리므로, 발급 그룹이
+     * 이보다 오래 막혀 있으면 기다리지 않고 {@code RATE_LIMITED}로 바로 실패한다. 다음 발급은 발급 실패 60초 하한을
+     * 따른다(PR #41 독립 QA F1, 보호 폴링 1초 상한과 맞춤).
+     */
+    static final Duration AUTH_MAX_WAIT = Duration.ofSeconds(1);
 
     private final HttpPort http;
     private final BrokerCredentials credentials;
@@ -53,7 +59,7 @@ final class TossTokenClient implements TokenCache.Fetcher {
         String body = "grant_type=client_credentials"
                 + "&client_id=" + form(credentials.appKey())
                 + "&client_secret=" + form(credentials.appSecret());
-        limiter.acquire(GROUP);
+        limiter.acquire(GROUP, AUTH_MAX_WAIT);
         HttpPort.Response r = http.post(TOKEN_URI,
                 Map.of("Content-Type", "application/x-www-form-urlencoded", "Accept", "application/json"), body);
         limiter.onResponse(GROUP, r);

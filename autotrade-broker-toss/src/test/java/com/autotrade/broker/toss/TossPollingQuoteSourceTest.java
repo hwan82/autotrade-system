@@ -86,6 +86,46 @@ class TossPollingQuoteSourceTest {
         assertThat(http.calls).isEmpty();
     }
 
+    /**
+     * 발급 응답이 발급 그룹을 30초 막은 뒤(Remaining 0, Reset 30) 조회가 401 만료를 받아 다시 발급해야 하는 경우에도
+     * 폴링은 30초를 기다리지 않고 1초 안에 실패한다(PR #41 독립 QA F1).
+     */
+    @Test
+    void 토큰_재발급이_발급_한도에_막혀도_폴링은_기다리지_않고_실패한다() throws Exception {
+        FakeHttp tossHttp = new FakeHttp();
+        TossRateLimiter limiter = new TossRateLimiter(clock, clock::advance);
+        TossRestClient real = new TossRestClient(tossHttp,
+                new TossTokenClient(tossHttp, new com.autotrade.broker.BrokerCredentials("id-placeholder",
+                        "secret-placeholder"), clock, limiter), clock, limiter);
+        TossPollingQuoteSource poller = new TossPollingQuoteSource(real, clock);
+        tossHttp.respond(200, "{\"access_token\":\"tok-1\",\"expires_in\":86400}",
+                Map.of("x-ratelimit-remaining", "0", "x-ratelimit-reset", "30"));
+        tossHttp.respond(200, "{\"result\":[{\"symbol\":\"005930\",\"timestamp\":\"2026-10-10T09:29:58+09:00\","
+                + "\"lastPrice\":\"71000\",\"currency\":\"KRW\"}]}");
+        assertThat(poller.poll(set(Symbol.krx("005930")))).hasSize(1);
+
+        tossHttp.respond(401, "{\"error\":{\"code\":\"expired-token\"}}");
+        Instant before = clock.instant();
+        assertThatThrownBy(() -> poller.poll(set(Symbol.krx("005930")))).isInstanceOf(IOException.class);
+
+        assertThat(Duration.between(before, clock.instant())).isLessThanOrEqualTo(TossPollingQuoteSource.MAX_RATE_WAIT);
+        assertThat(tossHttp.calls).hasSize(3); // 발급, 조회, 만료된 조회. 막힌 발급은 보내지 않았다
+        assertThat(tossHttp.responses).isEmpty();
+    }
+
+    @Test
+    void 폴링은_조회_한도_대기_상한을_넘기면_보내지_않고_실패한다() throws Exception {
+        http.respond(429, "{\"error\":{\"code\":\"rate-limited\"}}", Map.of("retry-after", "5"));
+        assertThatThrownBy(() -> source.poll(set(Symbol.krx("005930")))).isInstanceOf(IOException.class);
+        Instant before = clock.instant();
+
+        assertThatThrownBy(() -> source.poll(set(Symbol.krx("005930"))))
+                .isInstanceOfSatisfying(TossApiException.class,
+                        e -> assertThat(e.kind()).isEqualTo(TossApiException.Kind.RATE_LIMITED));
+        assertThat(clock.instant()).isEqualTo(before);
+        assertThat(http.calls).hasSize(1);
+    }
+
     private static SortedSet<Symbol> set(Symbol... symbols) {
         return new TreeSet<>(java.util.List.of(symbols));
     }
