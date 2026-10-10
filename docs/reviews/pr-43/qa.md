@@ -56,3 +56,25 @@
 
 ## 판정
 수정 필요(A14: main과 `docs/decisions/README.md` 충돌 해소 후 재검토, D-052·D-055 두 행 보존 확인. D-055 출처는 사용자 본인 확인으로 닫음)
+
+## 재검토 2026-10-10
+- 대상: PR #43 / 커밋 6b67a22 (main 8680fde 병합 커밋) / main 대비 diff
+- 직접 실행한 것:
+  - `git merge-tree --write-tree origin/main pr-43` → 충돌 없음. main 대비 diff는 `docs/decisions/README.md`(D-055 행 추가, 미확정 Q-036 제거, 닫은 항목 Q-036 추가 3줄), 기획서, 조사 4장, `docs/reviews/pr-43/` 원문만 남음. `.gitleaks.toml`은 main(#37)에 같은 내용이 들어가 diff에서 빠짐
+  - 결정 표 순서: D-049, D-050, D-052(main #40), D-055 모두 보존, 번호 순서 유지(`docs/decisions/README.md:55-57`)
+  - 1차 검토 대상(dbc8cf6)의 기획서·조사·검토 원문 변경 줄과 6b67a22의 main 대비 변경 줄을 비교 → 같음(병합이 PR 내용을 바꾸지 않음)
+  - `./gradlew build` (6b67a22): BUILD SUCCESSFUL, 테스트 결과 XML 합계 590개, skipped 0, failures 0, errors 0
+  - gitleaks 8.21.2 전체 이력(원격 브랜치 전체 포함, 223 commits) → no leaks found
+  - D-055 출처: 2026-10-10T14:17:20Z 이 QA 스레드 확인 카드에서 사용자 BAE가 "맞다"(D-055를 직접 골랐음)를 선택
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A14 | 통과 | ① main 충돌 해소(위 merge-tree, D-052·D-055 보존). ② 결정 로그·기획서 v14.11·조사 4장 내용 일치(1차 검토 ② 그대로, 변경 줄 동일 확인). ③ D-055 사용자 결정은 사용자 본인 확인으로 닫음 |
+| A10 | 통과 | 위 gitleaks 재스캔 |
+| B1 | 통과 | 위 `./gradlew build` |
+| 과금 8.1~8.5 | 통과 | 1차와 같음. 병합으로 이 PR의 main 대비 diff에 코드가 들어오지 않음 |
+
+나머지 A 항목과 B6은 1차 판정(해당 없음·통과) 그대로. 1차의 R1(실전·검증 선정 입력 출처 갈림), R2(무응답·모호 답 미정의), R3(점검표 D에 D-055 확인 항목 없음)는 권고로 남는다(배치표 5번 설계와 점검표 별도 PR에서 다룰 것).
+
+### 판정
+승인
