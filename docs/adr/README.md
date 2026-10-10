@@ -10,3 +10,4 @@
 | [ADR-004](ADR-004-simulation-engine.md) | 시뮬레이션 엔진: 전략 실행 계약, 호가 기반 가상 체결, 비용 모델, 실험 실행기, 성과 지표 | 제안 |
 | [ADR-005](ADR-005-ui-dashboard.md) | 로컬 웹 대시보드 1차: 프런트 방식, 웹 보안, REST 계약, 전략 프로필 저장 | 제안 |
 | [ADR-006](ADR-006-real-control-channel.md) | 실전 제어 명령 채널(로컬 소켓)과 운영 화면 1차: 실전 활성화 2차 확인, PANIC SELL | 제안(사용자 직접 머지) |
+| [ADR-007](ADR-007-selection-combination.md) | 선정 프로필과 조합: 형식·해시, `combination_hash`, `POSITION`, 선정 결과 파일, 실험 계약 변경, 실전용 선정 결과 생산자 | 제안(사용자 직접 머지) |

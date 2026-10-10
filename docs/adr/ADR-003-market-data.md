@@ -34,7 +34,7 @@
 
 | 항목 | 키움 | 한국투자 | 토스(참고, 이 PR에 클라이언트 없음) |
 |---|---|---|---|
-| 방식 | WebSocket `wss://api.kiwoom.com:10000/api/dostk/websocket` | WebSocket `ws://ops.koreainvestment.com:21000/tryitout` | REST 폴링 `GET /api/v1/prices` |
+| 방식 | WebSocket `wss://api.kiwoom.com:10000/api/websocket`(명세 2026-10-10), 접속 안 되면 `/api/dostk/websocket`과 번갈아 시도 후 LOGIN 성공 경로 고정([키움 명세 요약](../research/kiwoom-rest-api-spec.md) 4.1) | WebSocket `ws://ops.koreainvestment.com:21000/tryitout` | REST 폴링 `GET /api/v1/prices` |
 | 인증 | 접근 토큰(`au10001`) → `LOGIN` 응답 대기 | 접속키(`/oauth2/Approval`, 24시간) → 구독 메시지 헤더 | 접근 토큰(client credentials) |
 | 실시간 항목 | `0B` 체결, `0D` 호가 | `H0STCNT0` 체결, `H0STASP0` 호가 | 현재가 |
 | 소스 한도 | 200종목 (그룹 등록 1회 100종목씩) | 20종목 (41건, 종목당 체결+호가 2건) | 호출당 200종목, 초당 15회 |
@@ -153,9 +153,10 @@
 |---|---|---|
 | 종목명 표(`symbols/KRX.csv`): 한국투자 공개 종목 마스터 파일 형식(cp949, 고정 폭 꼬리 코스피 228·코스닥 222) | 공식 예제 기준 구현 `[가정]`, 합성 줄 테스트만. `symbolMaster` 태스크 | 사용자 PC에서 한 번 실행해 건수와 표본(005930·000660·035420) 확인. 검증 실패 1% 초과면 파일을 쓰지 않음. 형식은 맞고 단축코드만 6자리가 아닌 줄(ETN의 Q 코드 등 `[가정]`)은 검증 실패가 아니라 제외로 따로 세고 1% 판정에 넣지 않음 (ui-dev) |
 | 키움·한투 실제 접속, 필드 번호, 실제 하루 녹화 두 번 리플레이(2단계 완료 기준) | 공식 명세 기준 구현, 확인 도구 `ReplayCheck`(`replayCheck` 태스크) | 키 등록 후 KRX 하루 녹화, 두 번 리플레이와 HTS 일봉 대조: [실녹화 확인 절차](../runbooks/stage-2-real-recording.md) (사용자 녹화, data-engineer 기록) |
+| 키움 실시간 경로(`/api/websocket` vs `/api/dostk/websocket`) | 2026-10-10 명세와 2026-10-08 조사가 다름. 둘 다 시도하고 LOGIN 성공 경로 고정(추천안 채택(자율), [키움 명세 요약](../research/kiwoom-rest-api-spec.md) 4.1) | 첫 실접속 로그 "키움 실시간 접속 경로 확인" 줄로 확정 후 한 경로만 남김 |
 | 키움 PING 주기, 무응답 판단 시간 | 90초 `[가정]` | 실제 접속 로그로 PING 간격 측정 후 조정 |
-| 키움 VI 발동(`1h`) → `InstrumentStatusChanged` | 미구현 | 실제 메시지 확인 후 추가 |
-| 미국 실시간(키움 `/api/us/websocket`, 한투 `HDFSCNT0`) | 미구현. US 캘린더·규칙만 있음 | 시간 필드 의미(현지/한국) 확인 후 추가 (OVS-07) |
+| 키움 VI 발동(`1h`) → `InstrumentStatusChanged` | 미구현. 명세에 필드(9068 발동구분, 1223 발동·1224 해제 시각)는 있으나 발동·해제 메시지 구분과 전 종목 등록 방식 확인 필요([키움 명세 요약](../research/kiwoom-rest-api-spec.md) 4.2) | 실제 메시지 확인 후 추가 |
+| 미국 실시간(키움 `FE`·`FT`, 명세상 국내와 같은 `/api/websocket`; 한투 `HDFSCNT0`) | 미구현. US 캘린더·규칙만 있음. 키움 `FE` 시각은 명세상 미국시간(ET) HHmmss + 체결일자 YYYYMMDD | 실측으로 시간대 재확인 후 추가 (OVS-07) |
 | KRX 2027 캘린더, 과거 연도 캘린더 | 2026만 | 2026-12 KRX 공지 후 추가, 과거는 수집기 데이터로 |
 | KRX 2026 휴장일 원문 대조, 수능일 개장 시각 | `verified:false` | KRX 공지 원문 확인 |
 | SEC Rule 612 개정 시행일 | 현행 기준 | SEC 공식 공지 확인 후 `UsMarketRules` 날짜 분기 |
