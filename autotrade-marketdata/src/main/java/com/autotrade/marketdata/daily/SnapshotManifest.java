@@ -29,7 +29,7 @@ public record SnapshotManifest(
         files = List.copyOf(files);
     }
 
-    /** 데이터 출처. 라이선스는 Q-007에서 소스별로 확인한다. */
+    /** 데이터 출처. 소스별 라이선스·약관은 D-050(docs/research/q-007-q-026-collector-licenses.md)을 따른다. */
     public record Source(String name, String url, String license, String collectedAt) {}
 
     public record FileEntry(String name, String sha256, long rows) {}
