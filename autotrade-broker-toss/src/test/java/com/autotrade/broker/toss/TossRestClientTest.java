@@ -237,6 +237,80 @@ class TossRestClientTest {
         assertThat(client.health()).isEqualTo(TossRestClient.Health.OK);
     }
 
+    /**
+     * 요청 A가 tok-1로 나간 사이 같은 호출기의 다른 요청 B가 만료를 보고 tok-2를 받았다. 그래서 A가 받은
+     * {@code token-revoked}는 우리 재발급 탓이다. 쉬지 않고 tok-2로 한 번만 다시 보내야 한다(PR #41 architect F4).
+     */
+    @Test
+    void 자기_재발급으로_끊긴_이전_토큰_요청은_새_토큰으로_다시_보내고_쉬지_않는다() throws Exception {
+        java.util.List<String> sentTokens = new java.util.ArrayList<>();
+        Deque<java.util.concurrent.Callable<com.autotrade.marketdata.live.HttpPort.Response>> script =
+                new ArrayDeque<>();
+        com.autotrade.marketdata.live.HttpPort racing = new com.autotrade.marketdata.live.HttpPort() {
+            @Override
+            public Response post(java.net.URI uri, Map<String, String> headers, String body) {
+                throw new AssertionError("POST 없음");
+            }
+
+            @Override
+            public Response get(java.net.URI uri, Map<String, String> headers) throws IOException {
+                sentTokens.add(headers.get("Authorization"));
+                try {
+                    return script.removeFirst().call();
+                } catch (IOException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        };
+        TossRestClient c = new TossRestClient(racing, fetcher, clock, new TossRateLimiter(clock, clock::advance));
+        com.autotrade.marketdata.live.HttpPort.Response ok =
+                new com.autotrade.marketdata.live.HttpPort.Response(200, PRICES, Map.of());
+        com.autotrade.marketdata.live.HttpPort.Response revoked =
+                new com.autotrade.marketdata.live.HttpPort.Response(401, error("token-revoked"), Map.of());
+        com.autotrade.marketdata.live.HttpPort.Response expired =
+                new com.autotrade.marketdata.live.HttpPort.Response(401, error("expired-token"), Map.of());
+
+        // A(tok-1) 진행 중에 B가 끼어든다: B(tok-1) 만료 → B가 tok-2를 받아 성공 → A는 token-revoked → A가 tok-2로 성공
+        script.add(() -> {
+            script.addFirst(() -> expired);
+            script.add(() -> ok);
+            c.get("/api/v1/prices", Map.of("symbols", "000660"));
+            return revoked;
+        });
+        script.add(() -> ok);
+
+        JsonNode result = c.get("/api/v1/prices", Map.of("symbols", "005930"));
+
+        assertThat(result.isArray()).isTrue();
+        assertThat(sentTokens).containsExactly("Bearer tok-1", "Bearer tok-1", "Bearer tok-2", "Bearer tok-2");
+        assertThat(fetches).isEqualTo(2); // 끊긴 요청 때문에 또 받지 않았다
+        assertThat(c.health()).isEqualTo(TossRestClient.Health.OK);
+
+        script.add(() -> ok);
+        c.get("/api/v1/prices", Map.of("symbols", "005930")); // 쉬는 시간 없이 바로 이어진다
+        assertThat(sentTokens).last().isEqualTo("Bearer tok-2");
+        assertThat(fetches).isEqualTo(2);
+    }
+
+    @Test
+    void 새_토큰으로_다시_보낸_요청도_끊기면_남의_재발급으로_보고_쉰다() throws Exception {
+        http.respond(200, PRICES);
+        client.get("/api/v1/prices", Map.of("symbols", "005930")); // tok-1
+        http.respond(401, error("expired-token"));
+        http.respond(401, error("token-revoked"));
+
+        assertThatThrownBy(() -> client.get("/api/v1/prices", Map.of("symbols", "005930")))
+                .isInstanceOfSatisfying(TossApiException.class,
+                        e -> assertThat(e.kind()).isEqualTo(TossApiException.Kind.TOKEN_REVOKED));
+        assertThat(fetches).isEqualTo(2);
+        assertThat(client.health()).isEqualTo(TossRestClient.Health.DEGRADED);
+        assertThatThrownBy(() -> client.get("/api/v1/prices", Map.of("symbols", "005930")))
+                .isInstanceOf(TossApiException.class);
+        assertThat(http.calls).hasSize(3); // 쉬는 동안 보내지 않는다
+    }
+
     @Test
     void 자격_증명_거절은_60초_하한을_지키고_3회_이어지면_DEGRADED다() throws Exception {
         for (int i = 0; i < 3; i++) {

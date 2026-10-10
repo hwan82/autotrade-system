@@ -108,6 +108,11 @@ public final class TossRestClient {
     private IOException lastAuthFailure;
     private Instant revokedUntil;
     private volatile Health health = Health.UNKNOWN;
+    /** 이 호출기가 마지막으로 받은 토큰 값. {@link #tokens} 잠금 안에서만 바뀐다. 로그·예외에 넣지 않는다. */
+    private volatile String currentToken;
+
+    /** 보낸 요청의 응답과 그 요청에 실은 토큰. */
+    private record Sent(HttpPort.Response response, String token) {}
 
     TossRestClient(HttpPort http, TokenCache.Fetcher fetcher, Clock clock, TossRateLimiter limiter) {
         this.http = Objects.requireNonNull(http, "http");
@@ -152,11 +157,23 @@ public final class TossRestClient {
             }
         }
         URI uri = BASE.resolve(path + queryString(query));
-        HttpPort.Response r = send(group, uri, maxWait);
-        if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_INVALID) {
-            tokens.invalidate();
-            r = send(group, uri, maxWait);
+        Sent sent = send(group, uri, maxWait);
+        if (sent.response().status() == 401) {
+            TossApiException.Kind kind = kindOf(sent.response());
+            if (kind == TossApiException.Kind.TOKEN_INVALID || kind == TossApiException.Kind.TOKEN_REVOKED) {
+                if (!dropIfCurrent(sent.token())) {
+                    // 이 요청이 나간 사이 이 호출기가 이미 새 토큰을 받았다. 이전 토큰이 끊긴 것은 우리 재발급 때문이므로
+                    // 남의 재발급으로 보지 않고 새 토큰으로 한 번만 다시 보낸다(PR #41 architect F4).
+                    sent = send(group, uri, maxWait);
+                } else if (kind == TossApiException.Kind.TOKEN_INVALID) {
+                    sent = send(group, uri, maxWait);
+                } else {
+                    startRevokedCooldown();
+                    throw error(sent.response());
+                }
+            }
         }
+        HttpPort.Response r = sent.response();
         if (r.status() == 200) {
             JsonNode n = parse(r);
             if (n == null || !n.has("result")) {
@@ -165,7 +182,7 @@ public final class TossRestClient {
             health = Health.OK;
             return n.get("result");
         }
-        throw failure(r);
+        throw failure(sent);
     }
 
     /** 플러그인 상태 판단용. 블로킹하지 않는다. */
@@ -176,8 +193,8 @@ public final class TossRestClient {
     /**
      * 수명이 짧은 토큰(재발급 여유 10분의 두 배 미만)은 캐시가 호출마다 다시 받지 않게, 수명의 절반이 지난 뒤에 다시
      * 받도록 캐시에 넘기는 만료 시각을 늦춘다. 토스는 새 토큰이 이전 토큰을 바로 끊으므로 재발급은 꼭 필요할 때만
-     * 한다(PR #41 risk-ops F2). 늦춘 시각이 실제 만료보다 뒤가 되지는 않는다: 다시 받는 시점은
-     * {@code 발급 + 수명/2}로, 실제 만료 전이다. 실제 토큰 값은 바꾸지 않는다.
+     * 한다(PR #41 risk-ops F2). 캐시에 넘기는 만료 시각은 실제보다 늦을 수 있지만, 캐시가 다시 받는
+     * 시점({@code 발급 + 수명/2})은 실제 만료보다 앞선다. 실제 토큰 값은 바꾸지 않는다.
      */
     static TokenCache.Issued withRefreshAtHalfLife(TokenCache.Issued issued, Instant issuedAt) {
         Duration life = Duration.between(issuedAt, issued.expiresAt());
@@ -198,7 +215,7 @@ public final class TossRestClient {
         throw new IllegalArgumentException("조회 전용 호출기가 허용하지 않는 경로: " + path);
     }
 
-    private HttpPort.Response send(String group, URI uri, Duration maxWait) throws IOException, InterruptedException {
+    private Sent send(String group, URI uri, Duration maxWait) throws IOException, InterruptedException {
         String token = tokens.get();
         limiter.acquire(group, maxWait);
         Map<String, String> headers = new LinkedHashMap<>();
@@ -206,20 +223,44 @@ public final class TossRestClient {
         headers.put("Authorization", "Bearer " + token);
         HttpPort.Response r = http.get(uri, headers);
         limiter.onResponse(group, r);
-        return r;
+        return new Sent(r, token);
     }
 
-    private TossApiException failure(HttpPort.Response r) {
+    /**
+     * 보낸 토큰이 아직 캐시의 토큰이면 버리고 {@code true}. 이미 이 호출기가 새 토큰을 받았으면 그대로 두고 {@code false}.
+     * 확인과 버리기를 {@link TokenCache} 잠금 안에서 해 그 사이 받은 새 토큰을 버리지 않는다(발급도 그 잠금 안에서 한다).
+     */
+    private boolean dropIfCurrent(String sentToken) {
+        synchronized (tokens) {
+            if (!sentToken.equals(currentToken)) {
+                return false;
+            }
+            tokens.invalidate();
+            currentToken = null;
+            return true;
+        }
+    }
+
+    /** 다른 곳이 같은 Client ID로 재발급해 우리 토큰이 끊겼다. 10분 쉬고 한 번 다시 받는다. */
+    private void startRevokedCooldown() {
+        synchronized (lock) {
+            revokedUntil = clock.instant().plus(REVOKED_COOLDOWN);
+        }
+        health = Health.DEGRADED;
+    }
+
+    private TossApiException failure(Sent sent) {
+        HttpPort.Response r = sent.response();
+        if (r.status() == 401 && kindOf(r) == TossApiException.Kind.TOKEN_REVOKED && dropIfCurrent(sent.token())) {
+            startRevokedCooldown(); // 새 토큰으로 다시 보낸 요청도 끊겼다: 이번에는 남의 재발급이다
+        }
+        return error(r);
+    }
+
+    private TossApiException error(HttpPort.Response r) {
         JsonNode n = parse(r);
         String code = n == null ? "" : n.path("error").path("code").asText("");
         TossApiException.Kind kind = TossApiException.classify(r.status(), code);
-        if (kind == TossApiException.Kind.TOKEN_REVOKED) {
-            tokens.invalidate();
-            synchronized (lock) {
-                revokedUntil = clock.instant().plus(REVOKED_COOLDOWN);
-            }
-            health = Health.DEGRADED;
-        }
         return new TossApiException("조회", kind, r.status(), code, requestId(r, n),
                 kind == TossApiException.Kind.RATE_LIMITED ? TossRateLimiter.retryAfter(r) : null);
     }
@@ -251,6 +292,7 @@ public final class TossRestClient {
                     lastAuthFailure = null;
                     nextAuthAllowed = Instant.MIN;
                 }
+                currentToken = issued.value(); // TokenCache 잠금 안이다(dropIfCurrent와 같은 잠금)
                 return withRefreshAtHalfLife(issued, clock.instant());
             } catch (CredentialsRejectedException e) {
                 synchronized (lock) {
