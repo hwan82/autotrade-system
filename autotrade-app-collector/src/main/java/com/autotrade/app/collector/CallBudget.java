@@ -58,8 +58,17 @@ public final class CallBudget {
         locked(() -> write(new State(read().calls, true)));
     }
 
+    /** 파일 잠금은 프로세스 단위라 같은 JVM 안의 스레드끼리는 이 잠금으로 순서를 맞춘다. */
+    private static final Object IN_PROCESS = new Object();
+
     /** 같은 소스 명령을 동시에 돌려도 읽기-쓰기 사이에 합산이 빠지지 않게 파일 잠금 안에서 한다. */
     private void locked(Runnable action) {
+        synchronized (IN_PROCESS) {
+            lockedFile(action);
+        }
+    }
+
+    private void lockedFile(Runnable action) {
         try {
             Files.createDirectories(dir);
             try (FileChannel ch = FileChannel.open(dir.resolve(source + ".lock"), StandardOpenOption.CREATE,

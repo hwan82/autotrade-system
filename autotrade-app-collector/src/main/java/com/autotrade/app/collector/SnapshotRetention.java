@@ -16,8 +16,10 @@ import java.util.stream.Stream;
 
 /**
  * 스냅샷 보관 규칙(risk-ops 검토 PR #39 F2, ADR-008 2.4). {@code --keep-snapshots K}를 줬을 때만 돈다.
- * 한 소스 폴더에서 manifest의 생성 시각 기준 최근 K개와 방금 만든 스냅샷, 그리고 {@code experiments/} 아래 어떤 파일이든
- * ID를 적은 스냅샷은 남기고 나머지를 지운다. 지운 스냅샷은 캐시가 남아 있으면 같은 기간으로 다시 만들 수 있다
+ * 한 소스 폴더에서 manifest의 생성 시각 기준 최근 K개와 방금 만든 스냅샷, 그리고 실험 폴더({@code experiments/}) 아래
+ * 파일에 ID를 적은 스냅샷은 남기고 나머지를 지운다. 수집기가 스냅샷마다 쓰는 품질 리포트 폴더는 참조로 보지 않는다
+ * (모든 스냅샷이 자기 리포트 때문에 남는 것을 막음). 실험 폴더가 없으면 참조를 확인할 수 없어 아무것도 지우지 않는다.
+ * 실험실 DB({@code experiment.data_snapshot_version})에만 적힌 참조는 보지 못한다(수집기는 DB를 읽지 않는다, runbook 5.1). 지운 스냅샷은 캐시가 남아 있으면 같은 기간으로 다시 만들 수 있다
  * (ID가 내용 해시라 같은 ID가 나온다). 캐시는 지우지 않는다.
  */
 final class SnapshotRetention {
@@ -36,7 +38,11 @@ final class SnapshotRetention {
     }
 
     /** @return 지운 폴더 */
-    static List<Path> prune(Path root, String prefix, int keep, Path current, Path experimentsDir) throws IOException {
+    static List<Path> prune(Path root, String prefix, int keep, Path current, Path experimentsDir, Path reportDir)
+            throws IOException {
+        if (experimentsDir == null || !Files.isDirectory(experimentsDir)) {
+            return List.of();
+        }
         List<Path> snapshots = new ArrayList<>();
         try (Stream<Path> s = Files.list(root)) {
             for (Path p : s.filter(Files::isDirectory).toList()) {
@@ -49,7 +55,7 @@ final class SnapshotRetention {
         // 최근 순: manifest 생성 시각, 같으면 이름
         snapshots.sort(Comparator.comparing((Path p) -> createdAt(p)).thenComparing(p -> p.getFileName().toString())
                 .reversed());
-        Set<String> referenced = referencedIds(experimentsDir, snapshots);
+        Set<String> referenced = referencedIds(experimentsDir, reportDir, snapshots);
         List<Path> removed = new ArrayList<>();
         for (int i = keep; i < snapshots.size(); i++) {
             Path p = snapshots.get(i);
@@ -71,14 +77,13 @@ final class SnapshotRetention {
     }
 
     /** 실험 기록(텍스트 파일) 안에 이름이 나오는 스냅샷 ID. */
-    private static Set<String> referencedIds(Path experimentsDir, List<Path> snapshots) throws IOException {
+    private static Set<String> referencedIds(Path experimentsDir, Path reportDir, List<Path> snapshots) throws IOException {
         Set<String> found = new HashSet<>();
-        if (experimentsDir == null || !Files.isDirectory(experimentsDir)) {
-            return found;
-        }
+        Path reports = reportDir == null ? null : reportDir.toAbsolutePath().normalize();
         List<Path> files;
         try (Stream<Path> s = Files.walk(experimentsDir, 4)) {
-            files = s.filter(Files::isRegularFile).filter(f -> size(f) <= MAX_SCAN_BYTES).toList();
+            files = s.filter(Files::isRegularFile).filter(f -> size(f) <= MAX_SCAN_BYTES)
+                    .filter(f -> reports == null || !f.toAbsolutePath().normalize().startsWith(reports)).toList();
         }
         for (Path f : files) {
             String text;

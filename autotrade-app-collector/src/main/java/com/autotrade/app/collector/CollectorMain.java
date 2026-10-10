@@ -28,7 +28,7 @@ import java.util.Set;
  * autotrade-collector krx-daily       [--from 2010-01-04] [--to yyyy-MM-dd] [--boards KOSPI,KOSDAQ,KONEX] [--max-calls 9000]
  * autotrade-collector dart-financials [--from 2016-01-01] [--to yyyy-MM-dd] [--max-calls 10000]
  * 공통: [--config-dir 경로] [--cache-dir 경로] [--snapshot-dir 경로] [--report-dir experiments/_data-quality]
- *       [--interval-ms 200] [--no-snapshot] [--min-free-gb 20] [--keep-snapshots K] [--allow-during-session]
+ *       [--interval-ms 200] [--no-snapshot] [--min-free-gb 20] [--keep-snapshots K] [--experiments-dir experiments] [--allow-during-session]
  * </pre>
  *
  * 종료 코드: 0 완료, 1 오류, 2 사용법 오류, 3 호출 상한·한도 초과로 멈춤(받은 것은 캐시에 남고 다음 날 이어 받음),
@@ -116,7 +116,7 @@ public final class CollectorMain {
         }
         guard.checkSession(); // 스냅샷·품질 리포트는 전 기간을 메모리에 올린다
         guard.checkDisk(List.of(o.snapshotDir));
-        KrxDaySource source = collector.source(from, to, o.boards, r.uncached());
+        KrxDaySource source = guarded(collector.source(from, to, o.boards, r.uncached()), guard);
         Path root = o.snapshotDir.resolve("krx-daily");
         Path dir;
         KrxDailySnapshotBuilder.Stats stats;
@@ -189,13 +189,33 @@ public final class CollectorMain {
         return 0;
     }
 
+    /** 스냅샷을 쓰는 동안에도 하루 읽을 때마다 장 시간 보호 구간을 본다(들어서면 쓰던 임시 폴더를 지우고 멈춤). */
+    static KrxDaySource guarded(KrxDaySource source, RunGuard guard) {
+        return new KrxDaySource() {
+            @Override
+            public List<LocalDate> dates() {
+                return source.dates();
+            }
+
+            @Override
+            public List<KrxDailyRow> rows(LocalDate date) throws IOException {
+                guard.checkSession();
+                return source.rows(date);
+            }
+        };
+    }
+
     /** {@code --keep-snapshots}를 줬을 때만 옛 스냅샷을 정리한다. 실험 기록이 참조하는 ID는 남긴다({@link SnapshotRetention}). */
     private static void prune(Options o, Path root, String prefix, Path current) throws IOException {
         if (o.keepSnapshots == null) {
             return;
         }
-        Path experiments = o.reportDir.toAbsolutePath().getParent();
-        List<Path> removed = SnapshotRetention.prune(root, prefix, o.keepSnapshots, current, experiments);
+        if (!java.nio.file.Files.isDirectory(o.experimentsDir)) {
+            System.out.println("실험 폴더 " + o.experimentsDir.toAbsolutePath() + "가 없어 참조를 확인할 수 없으므로 스냅샷을 정리하지 않습니다"
+                    + " (--experiments-dir로 지정)");
+            return;
+        }
+        List<Path> removed = SnapshotRetention.prune(root, prefix, o.keepSnapshots, current, o.experimentsDir, o.reportDir);
         System.out.println("옛 스냅샷 " + removed.size() + "개 정리(최근 " + o.keepSnapshots + "개와 실험 기록이 참조하는 것은 남김)");
     }
 
@@ -203,7 +223,7 @@ public final class CollectorMain {
             사용법: autotrade-collector <krx-daily|dart-financials> [옵션]
               --from yyyy-MM-dd   --to yyyy-MM-dd   --boards KOSPI,KOSDAQ,KONEX   --max-calls N   --interval-ms N
               --config-dir 경로   --cache-dir 경로   --snapshot-dir 경로   --report-dir 경로   --no-snapshot
-              --min-free-gb N(기본 20)   --keep-snapshots K(주면 최근 K개만 남김)   --allow-during-session(실전 엔진을 끈 날만)
+              --min-free-gb N(기본 20)   --keep-snapshots K(주면 최근 K개만 남김)   --experiments-dir experiments   --allow-during-session(실전 엔진을 끈 날만)
               --krx-base-url https://...  --dart-base-url https://...""";
 
     /** 명령줄 옵션. 설정 파일을 쓰지 않는다(ADR-008 2.2). */
@@ -218,6 +238,7 @@ public final class CollectorMain {
         Path cacheDir;
         Path snapshotDir;
         Path reportDir = Path.of("experiments", "_data-quality");
+        Path experimentsDir = Path.of("experiments");
         boolean noSnapshot;
         boolean allowDuringSession;
         long minFreeGb = RunGuard.DEFAULT_MIN_FREE_GB;
@@ -267,6 +288,7 @@ public final class CollectorMain {
                         case "--cache-dir" -> o.cacheDir = Path.of(v);
                         case "--snapshot-dir" -> o.snapshotDir = Path.of(v);
                         case "--report-dir" -> o.reportDir = Path.of(v);
+                        case "--experiments-dir" -> o.experimentsDir = Path.of(v);
                         case "--krx-base-url" -> o.krxBase = https(v);
                         case "--dart-base-url" -> o.dartBase = https(v);
                         case "--min-free-gb" -> o.minFreeGb = positive(Long.parseLong(v));

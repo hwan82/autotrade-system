@@ -37,6 +37,30 @@ class CallBudgetTest {
     }
 
     @Test
+    void 동시에_돌아도_합산이_빠지지_않는다() throws Exception {
+        int threads = 4;
+        int each = 25;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        try {
+            java.util.List<java.util.concurrent.Future<?>> fs = new java.util.ArrayList<>();
+            for (int t = 0; t < threads; t++) {
+                CallBudget b = new CallBudget(dir, "krx", 1000, at("2026-10-10T01:00:00Z"));
+                fs.add(pool.submit(() -> {
+                    for (int i = 0; i < each; i++) {
+                        b.acquire();
+                    }
+                }));
+            }
+            for (var f : fs) {
+                f.get();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(new CallBudget(dir, "krx", 1000, at("2026-10-10T01:00:00Z")).usedToday()).isEqualTo(threads * each);
+    }
+
+    @Test
     void 한도_초과_응답_뒤에는_그날_더_부르지_않는다() {
         CallBudget a = new CallBudget(dir, "opendart", 100, at("2026-10-10T01:00:00Z"));
         a.acquire();

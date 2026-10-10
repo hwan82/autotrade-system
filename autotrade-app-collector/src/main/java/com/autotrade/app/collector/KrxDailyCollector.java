@@ -35,6 +35,9 @@ public final class KrxDailyCollector {
     /** 결과: 새로 부른 횟수와, 캐시에 두지 않은 오늘 응답. */
     public record Result(int fetched, Map<String, String> uncached) {}
 
+    /** 이 날수 안의 평일 빈 응답은 캐시하지 않는다 `[가정]`. */
+    static final int RECENT_EMPTY_DAYS = 7;
+
     /**
      * {@code from}~{@code to}의 빠진 날을 받는다. 호출 상한에 닿으면 {@link CallBudget.BudgetExhausted}가 그대로 나가고,
      * 그때까지 받은 날은 캐시에 남아 다음 실행이 이어 받는다.
@@ -56,9 +59,11 @@ public final class KrxDailyCollector {
                     continue;
                 }
                 String body = client.fetchRaw(b, d);
-                KrxOpenApiClient.parse(b, d, body); // 모양이 틀린 응답은 캐시에 넣지 않는다
+                boolean empty = KrxOpenApiClient.parse(b, d, body).isEmpty(); // 모양이 틀린 응답은 캐시에 넣지 않는다
                 fetched++;
-                if (d.isBefore(today)) {
+                // 최근 평일 빈 응답은 자료 게시 전일 수 있어 캐시하지 않고 다음 실행에서 다시 부른다(오래된 빈 날은 휴장일)
+                boolean maybeNotPublished = empty && d.isAfter(today.minusDays(RECENT_EMPTY_DAYS));
+                if (d.isBefore(today) && !maybeNotPublished) {
                     write(f, body);
                 } else {
                     uncached.put(key(b, d), body);

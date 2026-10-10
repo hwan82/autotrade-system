@@ -62,8 +62,8 @@
 - `krx-daily`는 기본 `--to`가 서울 18:00 전이면 어제, 뒤면 오늘이다. 18:30 이후, 미국 장 보호 구간 전에 돌린다(3.5).
 - `dart-financials`는 어제까지 접수된 공시를 훑는다. **매일 돌려야** 정정 공시가 나오기 전에 원 공시 값을 받아 둔다(MD-10 기본 규칙). 건너뛴 날의 공시는 다음 실행에서 받지만, 그 사이 정정이 나오면 원 공시 값은 "값 모름"(대체 규칙 대상)이 된다.
 - 예약 작업은 설치본을 **낮은 우선순위로** 돌린다. `./gradlew :autotrade-app-collector:installDist` 뒤:
-  - Windows 작업 스케줄러: 동작에 `cmd /c start "" /low /wait <저장소>\autotrade-app-collector\build\install\autotrade-collector\bin\autotrade-collector.bat krx-daily --report-dir <저장소>\experiments\_data-quality --keep-snapshots 3`. 작업 설정의 우선순위도 낮게(기본 7) 둔다.
-  - Linux·macOS: `nice -n 19 <저장소>/autotrade-app-collector/build/install/autotrade-collector/bin/autotrade-collector krx-daily --report-dir <저장소>/experiments/_data-quality --keep-snapshots 3`
+  - Windows 작업 스케줄러: 동작에 `cmd /c start "" /low /wait <저장소>\autotrade-app-collector\build\install\autotrade-collector\bin\autotrade-collector.bat krx-daily --report-dir <저장소>\experiments\_data-quality --experiments-dir <저장소>\experiments --keep-snapshots 3`. 작업 설정의 우선순위도 낮게(기본 7) 둔다.
+  - Linux·macOS: `nice -n 19 <저장소>/autotrade-app-collector/build/install/autotrade-collector/bin/autotrade-collector krx-daily --report-dir <저장소>/experiments/_data-quality --experiments-dir <저장소>/experiments --keep-snapshots 3`
   - 힙 상한(2GB)은 설치본 실행 스크립트에 들어 있다. `JAVA_OPTS`로 올리지 않는다.
 - 종료 코드: 0 완료, 1 오류(키·형식·네트워크), 2 사용법 오류, 3 호출 상한·한도 초과(다음 날 이어 받음), 4 실전 PC 자원 보호로 멈춤(장 시간 보호 구간, 디스크 여유 부족. 구간이 끝나거나 공간을 비운 뒤 다시 돌리면 이어 받음).
 
@@ -80,7 +80,7 @@
 
 - 추정 `[추론]`: 2010년부터 전체 일봉 스냅샷 하나 약 1,100만 행, 수백 MB. 원문 캐시(KRX 날짜·시장별 응답)는 수 GB. 재무 스냅샷·캐시는 수십~수백 MB. 매일 새 스냅샷을 만들면 정리하지 않을 때 한 달에 수 GB~수십 GB가 쌓인다.
 - 시작할 때와 스냅샷을 쓰기 전에 캐시·스냅샷 폴더 디스크 여유가 20GB(`--min-free-gb`로 바꿈) 미만이면 멈춘다. 실전 엔진의 상태 기록·DB가 같은 디스크를 쓸 수 있기 때문이다.
-- `--keep-snapshots K`를 주면 소스별 최근 K개, 방금 만든 것, `experiments/` 아래 파일에 ID가 적힌 것만 남기고 옛 스냅샷 폴더를 지운다. 주지 않으면 지우지 않는다. 지운 스냅샷은 캐시로 같은 기간을 다시 만들면 같은 ID로 복원된다. 원문 캐시는 지우지 않는다(다시 받으려면 호출 한도를 다시 써야 한다).
+- `--keep-snapshots K`를 주면 소스별 최근 K개, 방금 만든 것, `experiments/`(`--experiments-dir`) 아래 파일에 ID가 적힌 것만 남기고 옛 스냅샷 폴더를 지운다. 품질 리포트(`_data-quality`)는 참조로 치지 않는다. 실험 폴더를 못 찾으면 지우지 않는다. **실험실 DB에만 적힌 스냅샷 참조는 보지 못한다**: 실험을 돌리면 `experiments/<실험ID>/`에 쓴 스냅샷 ID를 꼭 남긴다. 주지 않으면 지우지 않는다. 지운 스냅샷은 캐시로 같은 기간을 다시 만들면 같은 ID로 복원된다. 원문 캐시는 지우지 않는다(다시 받으려면 호출 한도를 다시 써야 한다).
 - 실험에 쓴 스냅샷은 실험 설정(`experiments/<실험ID>/`)에 스냅샷 ID를 적어 두어야 정리 대상에서 빠진다.
 - 같은 하위 명령을 동시에 두 개 돌려도 호출 기록은 잠금으로 합산된다. 그래도 같은 캐시를 함께 쓰므로 한 번에 하나만 돌린다.
 

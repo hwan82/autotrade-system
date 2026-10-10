@@ -45,3 +45,39 @@
 
 ## 판정
 수정 필요(A8, A12: F1 실행 시간대 제한·힙 상한·낮은 우선순위와 미확정 항목 등록, F2 디스크 여유 확인·스냅샷 보관 규칙. 각 거부 동작에 실패 경우 테스트 포함)
+
+## 재검토 2026-10-10
+- 대상: PR #39 / 커밋 ab86736 / main(cf3759a) 대비 `git diff origin/main...HEAD` 전체. 앞 검토 뒤 바뀐 것은 `git diff ecd2af6..ab86736`(16개 파일: `RunGuard`·`SnapshotRetention` 신규, `CollectorMain`·`ApiCaller`·`CallBudget`·collector `build.gradle.kts`, engine·gateway·watchdog `build.gradle.kts`, ADR-008 2.7, runbook, 결정 로그 Q-041, 테스트 3개).
+- 점검표: A
+- 위치: 재검토 원문을 새 파일(`risk-ops-2.md`)로 쓰라는 요청을 받았다. 그러나 `docs/reviews/README.md`가 재검토는 같은 파일 아래 `## 재검토 <날짜>`로 덧붙이라고 정하고 있어 그 규칙을 따랐다. 앞 내용(1~47행, ab86736에 커밋된 원문)은 고치지 않았다.
+- 직접 실행한 것:
+  - 공유 작업 트리(`/home/claude/autotrade-system`)에서 `./gradlew build --rerun-tasks --no-parallel --max-workers=1`를 두 번 돌렸고 두 번 다 EXIT 1이었다. 첫 번째는 `RealOrderGatewaysTest` 4건이 `NoClassDefFoundError: RealOrderGateways`로 실패했고 `output.bin.idx` 파일이 없었다. 두 번째는 `MarketRulesImplTest` 컴파일 오류가 났고, 로그에 다른 빌드의 "BUILD SUCCESSFUL"이 섞여 있었다. 같은 트리에서 다른 Gradle 빌드가 함께 돌았다(`ps`로 확인). 그래서 코드 결함이 아니라 빌드 간섭으로 판단했고, 판정 근거로 쓰지 않았다.
+  - 간섭을 없애려고 ab86736을 스크래치 폴더에 따로 복제해 `./gradlew build --no-parallel --max-workers=1 --no-build-cache`를 돌렸다. BUILD SUCCESSFUL in 2m 11s, 112개 작업 모두 실행, EXIT 0. 모듈별 결과(tests/failures/errors/skipped): `:autotrade-risk:test` 55/0/0/0(`RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8), `:autotrade-architecture-test:test` 29/0/0/0(`ArchitectureTest` 16), `:autotrade-app-engine:test` 48/0/0/0(`RealOrderGatewaysTest` 4), `:autotrade-app-collector:test` 48/0/0/0(`RunGuardTest` 6, `SnapshotRetentionTest` 2, `CollectorMainTest` 9, `CallBudgetTest` 2), 나머지 모듈도 실패 0·건너뜀 0. `verifyProcessIsolation`은 engine·gateway·watchdog·collector 4개 모두 통과.
+  - 실전 프로세스 운영 코드 변경은 이번에도 없다. engine·gateway·watchdog은 `build.gradle.kts`의 `forbiddenProjects`에 `:autotrade-app-collector`를 더한 것뿐이라 격리가 강화됐다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 앞 검토와 같다(Guard 코드·설정·테스트 변경 없음, `RealTradingGuardTest` 31건 통과, `COLLECTOR_READS_ONLY_ITS_SECRETS` 유지). 새 `RunGuard`는 Guard 상태를 읽지 않고 시간·디스크만 본다(`RunGuard.java` 클래스 주석) |
+| A2 | 통과 | ArchitectureTest 변경 없음(16건 통과). `GuardedOrderGatewayTest` 8건, `RealOrderGatewaysTest` 4건 통과. 수집기 의존은 그대로이고, 세 실전 프로세스의 빌드 격리 목록에 수집기를 더해 반대 방향도 막았다(`autotrade-app-engine/build.gradle.kts:13`, gateway·watchdog 같은 줄) |
+| A3 | 통과 | 주문 라우팅 변경 없음. 수집기 주소 옵션은 이제 `https://`만 받는다(`CollectorMain.Options.https`, `CollectorMainTest#주소는_https만_받는다`) |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 경로 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음(`BlacklistSnapshotTest` 통과) |
+| A7 | 통과 | 계좌 큐·토큰 버킷·킬스위치 변경 없음(engine 48건 통과). `CallBudget`은 이제 파일 잠금 안에서 읽고 쓴다(`CallBudget.locked`). KRX·OpenDART 몫이라 증권사 버킷과 무관하다 |
+| A8 | 통과 | 앞 검토 F1·F2를 반영했다. ① 장 시간 보호 구간 거부(`RunGuard.checkSession`): 국내·미국 정규장 개장 60분 전부터 폐장 30분 뒤까지는 시작할 때(`CollectorMain.java:68`), API 호출마다(`ApiCaller.java:49`, `beforeCall` → `guard::checkSession`, `CollectorMain.java:109,153`), 스냅샷 쓰기 전에(`:117,162`) 확인한다. 캘린더로 서머타임·휴장일을 처리하고, 캘린더 수록 범위 밖이면 막는다(실패 쪽으로 닫힘). 테스트: `RunGuardTest#국내_정규장_앞뒤_보호_구간은_막는다`(07:59 통과, 08:00 거부, 15:59 거부, 16:00 통과 경계), `#미국_정규장은_서머타임을_따라_막는다`(EDT·EST 경계), `#휴장일과_주말은_막지_않는다`, `#캘린더_수록_범위_밖이면_판단할_수_없어_막는다`, `#명시_옵션이면_장_시간에도_통과한다`, `CollectorMainTest#국내_장_시간에는_시작하지_않고_종료_코드_4`, `#미국_장_시간에는_시작하지_않는다`, `#실행_중_보호_구간에_들어서면_다음_호출_전에_멈춘다`. 이 범위는 기획서 시장 범위(정규장만, 프리·애프터 제외, `docs/spec/autotrade-spec.md:59`, overseas-design OV2)와 맞다. ② 힙 상한 2GB 고정(`autotrade-app-collector/build.gradle.kts:13` 설치본, `:33` `run`), runbook에서 `-Xmx6g` 권고를 지웠다. ③ 낮은 OS 우선순위 실행 절차(runbook 4장, Windows `start /low`, `nice -n 19`). ④ 디스크 여유 확인(`RunGuard.checkDisk`, 기본 20GB `[가정]`, 시작할 때와 스냅샷 쓰기 전): `RunGuardTest#디스크_여유가_기준_미만이면_막고_없는_폴더는_있는_상위_폴더로_본다`, `CollectorMainTest#디스크_여유가_기준_미만이면_시작하지_않는다`. ⑤ runbook 첫 문단의 "서로 영향이 없다"를 "CPU·메모리·디스크를 나눠 쓴다"로 고쳤다. 남은 위험은 아래 R1·R2 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. 자원 보호가 위 A8대로 생겨서, 자원 고갈 시 보유 종목 보호를 끝까지 남긴다는 전제가 수집기 때문에 약해지지 않는다 |
+| A10 | 통과 | 앞 검토 근거가 그대로 유효하다. 새 테스트 픽스처에도 실제 키가 없다(diff 확인). 주소 옵션이 https만 받게 되어 키가 평문으로 나갈 경로가 닫혔다(N1 반영) |
+| A11 | 통과 | 지운 테스트·`@Disabled` 없음. `CollectorMainTest`의 기존 시계 값을 `2026-03-20T03:00:00Z`에서 `10:00:00Z`로 바꿨다. 03:00Z는 서울 12:00이라 새 보호 구간에 걸리기 때문이고, 그 테스트가 원래 검증하던 내용은 줄지 않았다(diff 확인). 새 거부 동작마다 실패 경우 테스트가 있다(A8 목록) |
+| A12 | 통과 | 장애표 #10·5.2의 전제(실전 외 작업이 실전 자원을 먼저 내준다)는 수집기가 스스로 물러나는 방식으로 지켰다(ADR-008 2.7). 표 자체를 바꾸는 일은 장애 대응 규칙 변경이라 Q-041로 사용자 결정 대기다(`docs/decisions/README.md:71`). 표와 장애 테스트를 바꾸지 않은 상태에서 전제가 깨지지 않으므로 통과로 본다 |
+| A13 | 해당 없음 | 미국 주문 경로 변경 없음. 참고: 미국 보호 구간은 `America/New_York` 캘린더 세션으로 계산하고, 서머타임 경계를 테스트로 확인했다(A8) |
+| A14 | 통과 | ADR-008 2.7·4장, runbook 3.5·4·5.1장, 결정 로그 Q-041이 코드와 일치한다(보호 구간 60/30분, 2GB, 20GB, 종료 코드 4, `--keep-snapshots` 기본 꺼짐). ADR-008 상태 줄도 "risk-ops 검토 후 사용자 머지 대상"으로 고쳤다(N4 반영) |
+
+### 남은 위험 (판정에 영향 없음, 후속 권고)
+- **R1 스냅샷·품질 리포트 단계는 도중에 멈추지 않는다.** 보호 구간 확인은 그 단계를 시작하기 전에만 한다(`CollectorMain.java:117,162`). 보호 구간 직전에 시작하면 2GB 힙 안에서 전 기간 읽기가 구간 안까지 이어질 수 있다 `[추론]`. 앞쪽 60분 여유, 힙 상한, 낮은 우선순위로 영향은 제한된다. 단계 시작 전에 "남은 여유 시간이 예상 소요보다 짧으면 거부"를 넣는 것을 권한다. 또 디스크 여유는 시작할 때와 스냅샷 전에만 보므로, 한 번 실행이 캐시로 수 GB를 쓰면 여유가 20GB 아래로 내려갈 수 있다 `[추론]`. 호출 N회마다 다시 확인하는 것을 권한다.
+- **R2 KRX 캘린더 수록 범위가 2026-12-31까지다.** 2027-01-01부터 수집기는 모든 시각에 종료 코드 4로 멈춘다(실패 쪽으로 닫혀 안전하다). 같은 캘린더를 쓰는 실전·실험실 쪽 영향도 함께 보고 연말 전에 갱신해야 한다(data-engineer). runbook 3.5에 적혀 있다.
+- **R3 (risk-ops 영역 밖, architect·sim-engine 참고) 스냅샷 보관 규칙이 실험실 DB의 참조를 보지 않는다.** `SnapshotRetention`은 `experiments/` 아래 텍스트 파일만 훑는다. 실험실 DB는 실험이 쓴 데이터 스냅샷 ID를 `data_snapshot_version` 칸에 둔다(`autotrade-app-lab/src/main/resources/db/migration/V1__lab_baseline.sql:27`). runbook이 매일 예약 실행에 `--keep-snapshots 3`을 권하므로, DB에만 기록된 실험의 스냅샷이 지워질 수 있다. 캐시로 같은 기간을 다시 만들면 복원되지만, 결정론 재현과 나중에 ADR-007 실전용 선정 결과의 입력 추적에 영향이 있다. 실전 주문 안전과는 무관해서 이 판정에는 넣지 않는다.
+
+## 판정 (재검토)
+승인
+
+참고: 이 PR은 프로세스 격리와 자원 정지 순서(장애 대응)에 걸리는 실전 관련 PR이다. 지침 10장에 따라 사용자가 직접 확인하고 머지하며, 머지 전에 독립 QA를 받아야 한다(지침 11장). Q-041은 사용자 결정 대기다.

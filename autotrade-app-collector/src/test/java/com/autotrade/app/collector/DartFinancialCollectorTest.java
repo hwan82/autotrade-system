@@ -201,6 +201,16 @@ class DartFinancialCollectorTest {
     }
 
     @Test
+    void 원_공시가_수집_범위_앞이라_정정만_있으면_대체_규칙_묶음으로_센다() throws IOException {
+        DartFinancialCollector c = collector(new FakeHttp(server(true)), seoulNoon("2026-04-02"), 1000);
+        c.collect(LocalDate.of(2026, 3, 20), LocalDate.of(2026, 4, 1));
+        DartSnapshotBuilder.Result built = DartSnapshotBuilder.build(inputs(c));
+        assertThat(built.filings()).extracting(FinancialFiling::receiptNo).containsExactly(A_FIX);
+        assertThat(built.filings().get(0).valuesKnown()).isTrue();
+        assertThat(built.stats().fallbackGroups()).isEqualTo(1);
+    }
+
+    @Test
     void 요청_제한_020이면_그날_멈추고_키는_어디에도_남지_않는다() {
         FakeHttp limited = new FakeHttp((u, n) -> FakeHttp.ok("{\"status\":\"020\",\"message\":\"사용한도를 초과하였습니다.\"}"));
         DartFinancialCollector c = collector(limited, seoulNoon("2026-03-20"), 1000);

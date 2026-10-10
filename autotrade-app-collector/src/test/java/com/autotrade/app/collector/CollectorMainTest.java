@@ -97,11 +97,12 @@ class CollectorMainTest {
         Path report = reports.resolve(m.snapshotId() + ".md");
         assertThat(Files.readString(report)).contains("## 수집 요약", "| 수정 이벤트(기준가 ≠ 전일 종가) | 1 |");
 
-        // 같은 날 다시 돌리면 오늘(10-08)만 다시 받고 같은 스냅샷 ID가 나온다
+        // 같은 날 다시 돌리면 오늘(10-08)과 최근 평일 빈 응답(코스닥·코넥스 10-05~10-07, 게시 전일 수 있음)만 다시 받고
+        // 같은 스냅샷 ID가 나온다
         FakeHttp again = krxServer();
         assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"), clock, again, ms -> {}, PLENTY))
                 .isZero();
-        assertThat(again.calls).hasSize(3);
+        assertThat(again.calls).hasSize(3 + 6);
         try (Stream<Path> st = Files.list(root)) {
             assertThat(st.toList()).hasSize(1);
         }
@@ -220,6 +221,95 @@ class CollectorMainTest {
         assertThat(http.calls).isEmpty();
         assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08", "--min-free-gb", "10"),
                 clock, http, ms -> {}, nineteenGb)).isZero();
+    }
+
+    @Test
+    void 기본_배치에서_keep_snapshots가_옛_스냅샷을_정리한다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        Path experiments = reports.resolve("experiments");
+        Path quality = experiments.resolve("_data-quality");
+        Files.createDirectories(experiments.resolve("EXP-001"));
+        for (String to : List.of("2026-10-06", "2026-10-07", "2026-10-08")) {
+            String[] a = {"krx-daily", "--from", "2026-10-05", "--to", to, "--boards", "KOSPI", "--config-dir", config.toString(),
+                "--report-dir", quality.toString(), "--experiments-dir", experiments.toString(), "--keep-snapshots", "1"};
+            assertThat(CollectorMain.run(a, clock, krxServer(), ms -> {}, PLENTY)).isZero();
+            if (to.equals("2026-10-06")) {
+                // 첫 스냅샷은 실험이 참조한다
+                try (Stream<Path> s = Files.list(config.resolve("snapshots").resolve("krx-daily"))) {
+                    String id = s.findFirst().orElseThrow().getFileName().toString();
+                    Files.writeString(experiments.resolve("EXP-001").resolve("config.yaml"), "snapshot: " + id + "\n");
+                }
+            }
+        }
+        List<String> left;
+        try (Stream<Path> s = Files.list(config.resolve("snapshots").resolve("krx-daily"))) {
+            left = s.map(p -> p.getFileName().toString()).filter(n -> !n.startsWith(".")).sorted().toList();
+        }
+        // 10-07 스냅샷만 지워진다: 10-06은 실험 참조, 10-08은 최근 1개. 품질 리포트는 셋 다 남는다
+        assertThat(left).hasSize(2);
+        assertThat(left.get(0)).startsWith("krx-daily-2026-10-06-");
+        assertThat(left.get(1)).startsWith("krx-daily-2026-10-08-");
+        try (Stream<Path> s = Files.list(quality)) {
+            assertThat(s.count()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    void 스냅샷을_쓰는_중_보호_구간에_들어서면_멈추고_임시_폴더를_남기지_않는다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        // 캐시를 먼저 채운다
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-07", "--no-snapshot"), clock,
+                krxServer(), ms -> {}, PLENTY)).isZero();
+        // 서울 2026-10-08 07:59에서 시작해, 이틀 치를 읽은 뒤 08:00(국내 개장 60분 전)으로 넘어간다
+        java.util.concurrent.atomic.AtomicReference<Instant> now =
+                new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-10-07T22:59:00Z"));
+        Clock moving = new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return Clock.fixed(now.get(), zone);
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        RunGuard guard = new RunGuard(moving, List.of(com.autotrade.marketdata.calendar.ExchangeCalendar.bundled(Market.KRX)),
+                false, PLENTY, 20);
+        int[] reads = {0};
+        KrxDaySource src = CollectorMain.guarded(new KrxDaySource() {
+            @Override
+            public List<LocalDate> dates() {
+                return List.of(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 6), LocalDate.of(2026, 10, 7));
+            }
+
+            @Override
+            public List<KrxDailyRow> rows(LocalDate date) {
+                if (++reads[0] == 2) {
+                    now.set(Instant.parse("2026-10-07T23:00:00Z"));
+                }
+                return List.of();
+            }
+        }, guard);
+        Path root = config.resolve("snapshots").resolve("krx-daily");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> {
+            try (SnapshotWriter w = new SnapshotWriter(root, "krx-daily")) {
+                SnapshotWriter.Sink bars = w.open(SnapshotManifest.DAILY_BARS, SnapshotDailyBarSource.BAR_HEADER);
+                SnapshotWriter.Sink hist = w.open(SnapshotManifest.INSTRUMENT_HISTORY, SnapshotDailyBarSource.HISTORY_HEADER);
+                SnapshotWriter.Sink sh = w.open(SnapshotManifest.LISTED_SHARES, SnapshotDailyBarSource.SHARES_HEADER);
+                KrxDailySnapshotBuilder.build(src, bars::write, hist::write, sh::write);
+            }
+        }).isInstanceOf(RunGuard.Refused.class);
+        try (Stream<Path> s = Files.list(root)) {
+            assertThat(s.toList()).isEmpty();
+        }
     }
 
     @Test

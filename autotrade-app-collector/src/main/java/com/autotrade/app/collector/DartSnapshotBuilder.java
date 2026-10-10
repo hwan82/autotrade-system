@@ -108,8 +108,8 @@ public final class DartSnapshotBuilder {
             boolean anyKnown = g.stream().anyMatch(FinancialFiling::valuesKnown);
             if (!anyKnown) {
                 noValue++;
-            } else if (!g.get(0).valuesKnown()) {
-                fallback++; // 원 공시 값이 없고 뒤 정정 값만 있다: MD-10 대체 규칙
+            } else if (!g.get(0).valuesKnown() || g.get(0).correction()) {
+                fallback++; // 원 공시 값이 없고(또는 원 공시가 수집 범위 앞이라 목록에 없고) 뒤 정정 값만 있다: MD-10 대체 규칙
             }
         }
         long corrections = out.stream().filter(FinancialFiling::correction).count();
