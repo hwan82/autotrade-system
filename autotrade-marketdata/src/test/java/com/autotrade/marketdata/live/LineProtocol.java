@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 
 /**
  * 테스트용 간단한 프로토콜. 서버 메시지: {@code LOGIN OK}, {@code LOGIN FAIL}, {@code REJECT x},
- * {@code T <code> <price> <qty> <epochSec>}, {@code B <code> <ask> <bid> <epochSec>}, {@code PING}.
+ * {@code T <code> <price> <qty> <epochSec>}, {@code B <code> <ask> <bid> <epochSec>}, {@code PING}, {@code HEARTBEAT <내용>}(PONG 프레임으로 되돌림).
  */
 final class LineProtocol implements StreamProtocol {
 
@@ -84,6 +84,7 @@ final class LineProtocol implements StreamProtocol {
                     : Decoded.control(Decoded.Control.LOGIN_FAILED, "8005");
             case "REJECT" -> Decoded.control(Decoded.Control.SUBSCRIBE_REJECTED, p[1]);
             case "PING" -> Decoded.reply("PONG");
+            case "HEARTBEAT" -> Decoded.pong(text);
             case "T" -> Decoded.quotes(List.of(new RawQuote.Trade(Symbol.krx(p[1]), Instant.ofEpochSecond(Long.parseLong(p[4])),
                     new BigDecimal(p[2]), Long.parseLong(p[3]))));
             case "B" -> Decoded.quotes(List.of(new RawQuote.Book(Symbol.krx(p[1]), Instant.ofEpochSecond(Long.parseLong(p[4])),
