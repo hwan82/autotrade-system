@@ -1,6 +1,6 @@
 # ADR-007 선정 프로필과 조합: 형식·해시, `combination_hash`, `POSITION`, 선정 결과 파일, 실험 계약 변경, 실전용 선정 결과 생산자
 
-- 상태: 제안 (architect). 교차 검토: architect(계약·모듈 경계), risk-ops(실전 엔진 읽기 경로·생산자 배치)
+- 상태: 제안(사용자 직접 머지). 실전 엔진의 선정 결과 읽기·신규 진입 차단 판정을 계약으로 정하므로 지침 10장 실전 항목으로 다룬다(PR #37 risk-ops G4). 교차 검토: architect(계약·모듈 경계), risk-ops(실전 엔진 읽기 경로·생산자 배치). 검토 원문 [architect](../reviews/pr-37/architect.md), [risk-ops](../reviews/pr-37/risk-ops.md)
 - 날짜: 2026-10-10
 - 단계: 4단계 확장, 기획서 14장 "선정 조건 × 매매지표 조합 배치" 0번 행
 - 기획서: [v14.8](../spec/autotrade-spec.md) STR-01·02·15·17·18·19, SIM-09·10·14, MD-07·10·11, RSK-11
@@ -169,7 +169,7 @@ parameters:
 
   | `refresh` | 생산 시점 | `apply_from` | `apply_to` |
   |---|---|---|---|
-  | `PRE_OPEN_DAILY` | 거래일 D 장전, 장전 계산 마감(RSK-11) 전 | D | D |
+  | `PRE_OPEN_DAILY` | 기본: D의 직전 거래일 장 마감 뒤. 선택: D 장전, 장전 계산 마감(RSK-11) 전(2.7 실행 시점) | D | D |
   | `POST_CLOSE_DAILY` | 거래일 D 장 마감 뒤(일봉 수집 뒤) | D의 다음 거래일 | `apply_from` |
   | `POST_CLOSE_WEEKLY` | 그 주(거래소 현지 ISO 주) 마지막 거래일 장 마감 뒤 | 다음 거래일 | `apply_from`이 속한 ISO 주의 마지막 거래일 |
 
@@ -181,16 +181,28 @@ parameters:
 
 | 순서 | 사유 | 조건 |
 |---|---|---|
+| 0 | `PRODUCER_FAILED` | 그 거래일을 대상으로 한 가장 늦은 상태 기록이 그 선정의 실패(아래 "생산 실패는 파일 판정보다 앞선다") |
 | 1 | `MALFORMED` | 스키마·필수 필드 위반, `content_hash` 재계산 불일치 |
 | 2 | `HASH_MISMATCH` | `selection.hash`가 계좌 조합의 선정 해시와 다름 |
 | 3 | `NOT_YET` | `tradingDate < apply_from` |
 | 4 | `EXPIRED` | `tradingDate > apply_to` |
 | 5 | `STALE_INPUT` | `bars.last_trading_date` 또는 `shares.as_of_date`가 `previousTradingDay(apply_from)`보다 이름. 재무를 쓰면(`financials` ≠ null) 아래 지연이 상한 초과 |
 
-- 재무 지연 = `previousTradingDay(apply_from)`과 `lastTradingDayOnOrBefore(수집 시각의 거래소 현지 날짜)` 사이의 거래일 수. 상한은 설정값 `autotrade.selection.max-financial-lag-trading-days`, 기본 **5** `[가정]`(STR-19 문구 그대로, 값 확정은 7단계에서 risk-ops·data-engineer). 시각은 `ExchangeCalendar.zone()`으로 현지 날짜로 바꾼 뒤 센다.
-- 파일이 하나도 없으면 `MISSING`, 생산 일괄 명령의 상태 파일(2.7)이 그 선정의 실패를 적었으면 `PRODUCER_FAILED`(파일 판정보다 앞서지 않는다. 유효한 파일이 있으면 그 파일을 쓴다).
+- 재무 지연 = `lastTradingDayOnOrBefore(수집 시각의 거래소 현지 날짜)`부터 **선정 기준일 `apply_from`** 까지의 거래일 수(앞 날짜 제외, `apply_from` 포함. 같은 날이면 0). STR-19 "선정 기준일보다 상한 넘게 이름"과 같은 기준이다(PR #37 architect F1). 상한은 설정값 `autotrade.selection.max-financial-lag-trading-days`, 기본 **5** `[가정]`(STR-19 문구 그대로, 값 확정은 7단계에서 risk-ops·data-engineer). 시각은 `ExchangeCalendar.zone()`으로 현지 날짜로 바꾼 뒤 센다.
+- **생산 실패는 파일 판정보다 앞선다**(STR-19 "생산 작업이 실패하면 신규 진입만 막음", PR #37 architect F2). 상태 파일(2.7)마다 선정별로 대상 거래일(`apply_from`)과 결과를 적는다. 고정 시점에 그 거래일을 대상으로 한 **가장 늦은 상태 기록**이 그 선정의 `FAILED`·`ABORTED`면, 유효해 보이는 결과 파일이 있어도 `PRODUCER_FAILED`다. 같은 거래일을 대상으로 다시 실행해 `OK`가 더 늦게 기록되면 그 기록이 이긴다. 그 거래일을 대상으로 한 상태 기록이 하나도 없으면 판정은 파일로만 하고(손으로 돌린 명령도 상태 파일을 쓴다), 감시 알림(2.7)이 따로 울린다. 상태 파일을 읽지 못하면(파싱·I/O 오류) 그 선정은 `PRODUCER_FAILED`로 본다(닫힌 쪽).
+- 결과 파일이 하나도 없으면 `MISSING`.
 
 **읽는 쪽 선택 규칙**: 그 선정의 폴더에서 `VALID`인 파일 중 입력 기준일(일봉 → 상장주식수 → 재무 수집 시각 순)이 가장 늦은 것, 같으면 `content_hash` 사전순 첫 파일. 실전 엔진은 계좌별로 **장전 계산 마감 시각(RSK-11)에 한 번 고정(pin)** 하고 그 거래일 동안 바꾸지 않는다. 고정 기록(계좌, 거래일, 결과 해시 또는 사유)은 엔진 상태에 영속해 재기동 뒤 같은 결과를 쓴다(장애표 #8 복구 범위에 넣는 것은 배치표 5번). 고정 시점에 `VALID`가 없으면 그 계좌는 그날 신규 진입 0건이고 보유 관리·손절·서버 측 손절은 그대로다(STR-19, 7·8장 공통 원칙 1). 늦게 도착한 파일로 당일 재개할지는 장애표 새 행의 재개 조건으로 risk-ops가 정한다.
+
+**고정 기록이 없을 때는 닫힌 쪽**(PR #37 risk-ops R3): 그 거래일의 고정 기록이 없는 상태로 장전 계산 마감 뒤에 엔진이 처음 기동했거나, 기록을 남기기 전에 크래시했거나, 재기동 복구에서 기록을 되살리지 못하면, 그날 그 계좌는 `MISSING`과 같이 다룬다(신규 진입 0건, 보유 관리·손절·서버 측 손절 계속, 알림). 마감 뒤 새로 고정하지 않는다.
+
+**엔진 읽기의 견고성**(PR #37 risk-ops R2):
+- 결과 파일 크기 상한(설정 `autotrade.selection.max-result-bytes`, 기본 16 MiB `[가정]`)을 넘으면 열지 않고 `MALFORMED`.
+- 파싱·I/O·해시 계산 예외는 **그 계좌의 그 선정 판정**에서 잡아 `MALFORMED`(상태 파일은 위 규칙대로 `PRODUCER_FAILED`)로만 끝낸다. 엔진 프로세스, 다른 계좌의 고정, 보유 종목 보호 경로로 번지지 않는다(구현 PR 테스트: 깨진 파일·거대 파일·읽기 권한 없음 주입 시 다른 계좌 고정과 손절 정상).
+- 고정은 장전 계산 마감 **전에** 시작해 마감까지 끝낸다. 한 선정 폴더에서 보는 파일은 이름의 `apply_from`이 대상 거래일인 것만(그 밖은 열지 않음)이라 파일이 쌓여도 읽는 양이 늘지 않는다. 고정 작업 전체에 시간 상한(설정, 기본 30초 `[가정]`)을 두고 넘으면 남은 계좌는 `MISSING`과 같이 닫는다.
+- 고정과 파일 읽기는 계좌 직렬 큐·주문 경로와 다른 스레드에서 하고, 결과(해시 또는 사유)만 계좌 상태에 넘긴다.
+
+**선정 결과는 후보일 뿐이다**(PR #37 risk-ops G1): 고정된 결과에 든 종목도 신규 진입 전에 전략 프로필의 진입 판단, `RiskChain`(블랙리스트·수동 보유 차단이 모든 주문에 먼저 적용, `RiskChain.java:53`, D-032·D-035), RealTradingGuard, 계좌 한도를 그대로 거친다. 이 ADR은 그 순서를 바꾸지 않는다.
 
 ### 2.7 실전용 선정 결과 생산자 배치 (D-042 7번, D-041 3.5)
 
@@ -198,14 +210,16 @@ parameters:
 
 - **부트 모듈** `autotrade-app-selection`, 진입점 `SelectionBatchMain`, 순수 Java, `installDist`. D-013의 상주 프로세스 4개에 더하지 않는 **단발 일괄 명령**이다(Python 수집기, `:autotrade-app-gateway:symbolMaster`와 같은 위치). 실행이 끝나면 종료한다.
 - **런타임 금지**(`verifyProcessIsolation`에 추가): sim, app-lab, app-engine, app-gateway, app-watchdog, ui, control, broker-*, Spring. 의존: domain, marketdata(스냅샷·캘린더 읽기), strategy, selection, config.
-- **하는 일**: `selections/` 아래 선정 프로필 버전 중 설정 목록 `autotrade.selection.batch.selections`(기본: 전부)에 든 것마다, 지정 시장의 다음 적용 거래일 결과를 `SelectionCalculator`로 계산해 2.6 형식으로 쓴다. 선정 하나의 실패는 그 선정만 실패로 남기고 다른 선정은 계속한다(Run 실패 격리와 같은 원칙). 끝나면 `<results-dir>/_status/<MARKET>/<실행 시작 현지 날짜>-<PRE_OPEN|POST_CLOSE>.json`에 선정별 결과(`OK` + 내용 해시, `FAILED` + 사유)를 쓰고, 하나라도 실패하면 종료 코드 1.
-- **입력**: D-019 스냅샷(일봉·상장주식수·재무)과 거래소 캘린더를 **읽기만** 한다. 증권사 API·실시간 시세·키를 쓰지 않는다(재무 키는 수집기가 쓰고 이 명령은 스냅샷만 읽는다).
-- **실행 시점**: 장 마감 뒤(스윙·중기, `POST_CLOSE`, 일봉 수집기가 끝난 뒤)와 장전(단타, `PRE_OPEN`, 장전 계산 마감 전 여유를 두고). 실행 수단은 **OS 예약 작업**(Windows 작업 스케줄러 등, 우선순위 "보통 이하")으로 하고 실행 절차는 구현 PR의 runbook에 둔다. 사용자가 손으로 돌릴 수도 있다(같은 명령).
-- **실패 감시**: 감시 프로세스(watchdog)는 일괄 명령을 **띄우지 않고** 상태 파일만 본다. 정해진 마감(장전 계산 마감 − 설정 여유)까지 그 날짜 상태 파일이 없거나 `FAILED`가 있으면 알림. 감시는 selection 모듈에 의존하지 않고 상태 파일 JSON(config 모듈의 Jackson)만 읽는다.
+- **하는 일**: `selections/` 아래 선정 프로필 버전 중 설정 목록 `autotrade.selection.batch.selections`(기본: 전부)에 든 것마다, 지정 시장의 다음 적용 거래일 결과를 `SelectionCalculator`로 계산해 2.6 형식으로 쓴다. 선정 하나의 실패는 그 선정만 실패로 남기고 다른 선정은 계속한다(Run 실패 격리와 같은 원칙). 끝나면 `<results-dir>/_status/<MARKET>/<실행 시작 현지 날짜>-<PRE_OPEN|POST_CLOSE>.json`에 선정별 결과(대상 거래일 `apply_from`, `OK` + 내용 해시 또는 `FAILED` + 사유)를 쓰고, 하나라도 실패하면 종료 코드 1. 실행 시작 때 `running` 상태로 먼저 쓰고 끝날 때 바꾼다. 감시가 종료한 실행은 `ABORTED`다(자원 상한 항목). 상태 파일도 임시 파일 + `ATOMIC_MOVE`로 쓴다.
+- **입력**: D-019 스냅샷(일봉·상장주식수·재무)과 거래소 캘린더를 **읽기만** 한다. 증권사 API·실시간 시세·키를 쓰지 않는다(재무 키는 수집기가 쓰고 이 명령은 스냅샷만 읽는다). `runtime-config.json`만 읽고 **`secrets.json`은 로딩하지 않는다**(구현 PR 테스트: 비밀값 파일이 없어도 정상 실행, risk-ops G2).
+- **실행 시점**: 장 마감 뒤(스윙·중기, `POST_CLOSE`, 일봉 수집기가 끝난 뒤). 단타 `PRE_OPEN_DAILY`도 입력이 전날까지의 데이터뿐이므로 **기본은 전날 장 마감 뒤 같은 실행에서 미리 만든다**(파일 `apply_from`은 다음 거래일). 장전 실행은 그날 장전 정보가 필요한 선정 조건이 카탈로그에 생길 때만 켜는 선택 경로이고, 켜더라도 시작 하한(설정, 기본 거래소 현지 07:30 `[가정]`)과 장전 계산 마감 − 여유 사이에서만 시작한다(PR #37 risk-ops R1). 실행 수단은 **OS 예약 작업**(Windows 작업 스케줄러 등)으로 하고 실행 절차는 구현 PR의 runbook에 둔다. 사용자가 손으로 돌릴 수도 있다(같은 명령).
+- **자원 상한**(PR #37 risk-ops R1, 지침 4장 6번, SIM-14와 같은 급): 같은 PC에서 도는 새 부하원이므로 실험실과 같이 다룬다. 고정 힙(`-Xmx`, 기본 512 MiB `[가정]`)과 계산 스레드 상한(기본 1 `[가정]`), OS 낮은 우선순위(Windows "낮음", POSIX `nice 10` 이상)로 시작한다. 시작 스크립트(`installDist` 산출물)가 이 값을 넣고, 예약 작업 runbook도 같은 우선순위를 쓴다. broker-and-fault-design.md 5.2 자원 부족 정지 순서에서 **1단계(실험실 일시정지)와 같은 급으로 먼저 멈춘다.** 멈추는 방법: 감시 프로세스가 자원 임계치에서 실행 중인 일괄 명령 프로세스(상태 파일 옆 `_status/<MARKET>/running.pid`)를 종료하고, 그 실행은 상태 파일에 `ABORTED`로 남는다(→ 그 대상 거래일 `PRODUCER_FAILED`, 신규 진입만 막힘). 정지 순서 문서에 행을 더하는 것은 risk-ops 변경 제안(5장). 구현 PR 테스트 후보: 일괄 명령 실행 중 실전 엔진의 시세→판단 지연이 기준 안에 머무는지(TST-03 부하 시험에 추가).
+- **실패 감시**: 감시 프로세스(watchdog)는 일괄 명령을 **띄우지 않고** 상태 파일만 본다(자원 부족 시 종료는 위 자원 상한 항목). 정해진 마감(장전 계산 마감 − 설정 여유)까지 그 날짜 상태 파일이 없거나 `FAILED`가 있으면 알림. 감시는 selection 모듈에 의존하지 않고 상태 파일 JSON(config 모듈의 Jackson)만 읽는다.
 - **실전 엔진 읽기 경로**: 엔진은 결과 폴더를 **읽기 전용**으로 열고 `selection.result`(코덱·판정)만 쓴다. 계좌 조합의 선정 프로필 파일도 읽어 해시를 다시 계산해 맞춰 본다(불변 버전, STR-19의 전략 프로필 파일과 같은 처리). 엔진은 일괄 명령의 실행 여부를 기다리는 코드 경로를 두지 않는다. 판정은 파일만으로 한다.
 - **ArchUnit 규칙 추가**(구현 PR, 보호 테스트 추가라 risk-ops 검토):
   - `ENGINE_DOES_NOT_COMPUTE_SELECTIONS`: `com.autotrade.app.engine..`은 `com.autotrade.selection.calc..`에 접근하지 않는다.
   - `ONLY_SELECTION_BATCH_WRITES_RESULTS`: `SelectionResultCodec`의 쓰기 메서드는 `com.autotrade.app.selection..`(생산 일괄 명령)과 테스트에서만 부른다. 실험실의 리플레이 실험은 결과를 메모리에서 쓰고 DB `selection_result`에 메타만 남긴다.
+  - 감시·게이트웨이 프로세스의 `forbiddenProjects`(`verifyProcessIsolation`)에 `:autotrade-selection`을 넣는다(risk-ops G3). 실험실·실전 엔진·일괄 명령만 쓴다.
   - `ModuleOwnershipTest.OWNERS`에 `autotrade-selection` → `com.autotrade.selection`, `autotrade-app-selection` → `com.autotrade.app.selection`.
 - **실험실 쪽**: 리플레이·백테스트 실험은 같은 `SelectionCalculator`를 실험실 프로세스 안에서 날짜마다 선정 해시별 한 번 돌려 같은 선정을 쓰는 계좌가 공유한다(STR-17, 배치표 3번). **실시간 모의 계좌(6단계)는 실전과 같은 일괄 명령 결과 파일을 같은 판정으로 읽는다.** 그래야 8주 모의와 실전의 선정 입력이 같다(D-044). 실험실이 멈춰도 일괄 명령과 실전 엔진은 영향받지 않는다(지침 4장 6번, 장애표 #9 전제 유지).
 
@@ -253,11 +267,14 @@ parameters:
 
 ## 4. 위험과 한계
 - **OS 예약 작업 누락**: 저장소 밖 설정이라 테스트로 지킬 수 없다. 엔진 `MISSING` 판정(신규 진입 중단)과 감시 알림으로 덮지만, 예약 작업이 아예 없으면 실전 계좌가 매일 신규 진입을 못 한다(안전 위반은 아니고 기회 손실). 7단계 활성화 점검에 "예약 작업 등록·최근 상태 파일 OK" 항목을 넣는 것은 배치표 5번 제안.
-- **장전 생산 지연**: 단타 `PRE_OPEN_DAILY`는 장전 계산 마감(국내 기본 08:50 `[가정]`, RSK-11) 전에 끝나야 한다. 입력은 전날 데이터뿐이라 전날 장 마감 뒤에 미리 계산해 둘 수도 있지만, 그날 장전 정보(예: 거래정지 공지)를 하드 필터에 쓰려면 장전 실행이 필요하다. 어느 쪽인지는 선정 조건 카탈로그(배치표 2)가 정하고, 이 ADR은 `PRE_OPEN_DAILY`의 생산 창만 정한다.
+- **장전 생산 지연**: 단타 `PRE_OPEN_DAILY`는 기본으로 전날 장 마감 뒤에 만들어 장전 부하와 지연 위험을 없앤다. 그날 장전 정보(예: 거래정지 공지)를 하드 필터에 쓰는 조건이 카탈로그(배치표 2)에 생기면 장전 실행을 켜야 하고, 그때는 장전 계산 마감(국내 기본 08:50 `[가정]`, RSK-11) 전에 끝나야 한다. 장전 하드 필터는 어차피 실전 경로의 거래정지·블랙리스트 검사(`RiskChain`)가 주문 직전에 다시 본다.
 - **입력 스냅샷 교체**: 같은 `apply_from`에 다른 내용 파일이 둘 이상 생길 수 있다(수집 재실행). 선택 규칙이 결정적이고 엔진이 장전에 고정하므로 하루 안에서 흔들리지 않지만, 실험실 리플레이는 실험 시점의 스냅샷 ID를 써서 다시 계산하므로 실시간 모의와 리플레이의 선정이 다를 수 있다. `run_selection_day`에 쓴 결과 해시를 남겨 비교한다.
 - **파일 누적**: 결과 파일을 지우지 않아 쌓인다. 정리 정책은 7장 후속.
 - **DB 함수 의존**: `combination_hash_v1`은 PostgreSQL `sha256()`(11 이상)에 기대고 CI는 16에서 확인한다. Java 쪽 유도식과 어긋나면 DB CHECK가 실험 저장을 거부하므로 조용한 불일치는 없다(골든 값 양쪽 테스트).
 - **`ExperimentSpec` 계약 변경 범위**: `profiles()`를 쓰는 호출부(실험실 REST, `StudyMain` 등)가 모두 바뀐다. 호환 팩토리로 동작은 같게 두지만 화면·보고서의 "프로필" 열은 "조합"으로 바뀌어야 한다(배치표 3·4).
+- **결과 폴더에 출처 인증이 없다**(risk-ops G5): 내용 해시는 손상을 잡지만, 같은 PC 사용자 권한으로 폴더에 쓴 위조 파일(해시를 맞춘 것)은 막지 못한다. 위협 모델이 개인 PC 단일 사용자라 서명은 두지 않고, 폴더 권한(설정 폴더와 같은 700)으로만 막는다. 영향은 신규 진입 후보가 바뀌는 것이고 블랙리스트·Guard·한도는 그대로 적용된다(2.6 "후보일 뿐").
+- **가정값**(risk-ops G6): 재무 신선도 상한 5거래일, 장전 계산 마감 08:50(RSK-11), 결과 파일 크기 상한 16 MiB, 고정 시간 상한 30초, 일괄 명령 힙 512 MiB·스레드 1·장전 시작 하한 07:30은 `[가정]`이다. 7단계 실전 활성화 전에 risk-ops·data-engineer가 확정한다.
+- **`run_selection_day`의 범위 검사는 Java에만 있다**(architect F3): DB는 결과 해시와 선정의 짝, `VALID` ⇔ 해시 있음만 막고, 그 날짜가 결과의 적용 거래일 범위 안인지는 막지 않는다(범위 밖 날짜의 `VALID` 행이 들어가는 것을 검토에서 확인). 판정의 단일 원본을 `SelectionValidity`로 두는 설계라 트리거를 두지 않는다.
 - **DB 고유 제약은 같은 조합을 막을 뿐**, 시장·스타일 일치(STR-02)는 Java 검사에만 있다. 트리거를 두지 않은 이유: 스키마를 쓰는 코드가 아직 없고, 검사의 단일 원본을 `Combination` 생성자로 둔다.
 
 ## 5. 변경 제안 (다른 역할 산출물, 직접 고치지 않음)
@@ -267,7 +284,7 @@ parameters:
 | sim-engine (배치표 3) | `ExperimentSpec`(조합 목록, 2.4), `RunSeeds`(v1/v2, 골든 값), 날짜별 선정 공유 실행, `run_selection_day` 기록, 리포트에 `selection_hash`·`combination_hash`(선정 없음은 지금 보고서 그대로) |
 | data-engineer (배치표 1) | 일봉·상장주식수·재무 스냅샷 manifest에 2.6 `inputs`가 요구하는 기준일 필드(일봉 마지막 거래일, 상장주식수 기준일, 재무 마지막 수집 시각)를 명시. 일괄 명령 `POST_CLOSE` 실행이 수집기 뒤에 오도록 runbook 순서 |
 | ui-dev (배치표 4) | `format.js` `STYLE` 맵에 `POSITION: '중기'`. 조합 표시는 선정 ID·버전(없으면 "선정 없음") + 전략 ID·버전 |
-| risk-ops (배치표 5) | 장애표 새 행의 감지 항목을 2.6 판정 사유(`MISSING`, `NOT_YET`, `EXPIRED`, `HASH_MISMATCH`, `STALE_INPUT`, `MALFORMED`, `PRODUCER_FAILED`)와 대응시키고 재개 조건(늦게 도착한 파일로 당일 재개 여부)을 정함. 장전 고정 기록을 장애표 #8 복구 범위에 포함. 7단계 활성화 점검에 예약 작업 등록 확인 |
+| risk-ops (배치표 5) | broker-and-fault-design.md 5.2 자원 부족 정지 순서에 "선정 결과 일괄 명령 종료(1단계와 같은 급)" 행 추가. 장애표 새 행의 감지 항목을 2.6 판정 사유(`MISSING`, `NOT_YET`, `EXPIRED`, `HASH_MISMATCH`, `STALE_INPUT`, `MALFORMED`, `PRODUCER_FAILED`)와 대응시키고 재개 조건(늦게 도착한 파일로 당일 재개 여부)을 정함. 장전 고정 기록을 장애표 #8 복구 범위에 포함. 7단계 활성화 점검에 예약 작업 등록 확인 |
 | architect (구현 PR) | `autotrade-selection`·`autotrade-app-selection` 모듈, `verifyProcessIsolation` 표, ArchUnit 규칙 2개(2.7), `ModuleOwnershipTest.OWNERS`, config-keys.md(`autotrade.selection.*` 3개) |
 
 ## 6. 되돌릴 조건
@@ -299,5 +316,19 @@ parameters:
 5. `ExperimentSpec`은 조합 목록·조합 단위 중복 판정, 호환 팩토리(2.4).
 6. Run 시드: 선정 없음 v1 유지, 선정 있음 v2(`combination_hash`)(3.3 C).
 7. DB V2: 조합 표, 생성 열 외래키, 시드 방식 CHECK, `selection_result`·`run_selection_day`(2.5).
-8. 선정 결과 파일: JSON 한 파일, 내용 해시 이름, 덮어쓰기 금지, 적용 거래일 범위 표, 유효성 판정 순서, 장전 고정(2.6, 3.5 A).
-9. 실전용 생산자: 실험실 밖 단발 일괄 명령 `autotrade-app-selection`, OS 예약 작업 실행, 감시는 상태 파일만 확인, 실시간 모의도 같은 파일 사용(2.7, 3.2 B).
+8. 선정 결과 파일: JSON 한 파일, 내용 해시 이름, 덮어쓰기 금지, 적용 거래일 범위 표, 유효성 판정 순서(생산 실패 우선, 재무 지연은 선정 기준일 기준), 장전 고정과 고정 기록이 없을 때 닫힘, 읽기 견고성 상한(2.6, 3.5 A).
+9. 실전용 생산자: 실험실 밖 단발 일괄 명령 `autotrade-app-selection`, OS 예약 작업 실행, 전날 장 마감 뒤 생산 기본, 자원 상한과 자원 부족 시 1단계 급 정지, `secrets.json` 미로딩, 감시는 상태 파일 확인만, 실시간 모의도 같은 파일 사용(2.7, 3.2 B).
+
+## 11. 검토 지적 반영 (PR #37)
+| 지적 | 반영 |
+|---|---|
+| architect F1 재무 지연 기준일 | 2.6 재무 지연을 선정 기준일 `apply_from` 기준으로 |
+| architect F2 생산 실패 처리 | 2.6 판정 0번 `PRODUCER_FAILED`, 상태 기록 규칙(가장 늦은 기록, 읽기 실패는 닫힘) |
+| architect F3 `run_selection_day` 범위 | 4장에 "Java 검사뿐" 명시 |
+| architect F4 VARCHAR/CHAR 혼용 | 동작 정상(검토 확인), 바꾸지 않음 |
+| risk-ops R1 일괄 명령 자원 | 2.7 자원 상한, 정지 순서 1단계 급과 `ABORTED`, 전날 장 마감 뒤 생산 기본, 장전 시작 하한, 5장 risk-ops 행 |
+| risk-ops R2 엔진 읽기 견고성 | 2.6 크기 상한, 예외를 그 계좌 판정에 가둠, 대상 거래일 파일만 열기, 고정 시간 상한, 별도 스레드 |
+| risk-ops R3 고정 기록 없음 | 2.6 "고정 기록이 없을 때는 닫힌 쪽" |
+| risk-ops G1·G5·G6 | 2.6 "후보일 뿐", 4장 출처 인증·가정값 |
+| risk-ops G2·G3 | 2.7 `secrets.json` 미로딩, 감시·게이트웨이 `forbiddenProjects` |
+| risk-ops G4 | 상태 "제안(사용자 직접 머지)", ADR 목록 표기. 기획서 14장 배치표 0번에 ADR-007·D-049 링크를 다는 것은 다음 기획서 판에서 pm-lead(이 PR은 기획서를 고치지 않음, 다른 스레드가 v14.9 작업 중) |
