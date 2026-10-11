@@ -33,7 +33,7 @@ import java.util.Set;
  * </pre>
  *
  * 종료 코드: 0 완료, 1 오류, 2 사용법 오류, 3 호출 상한·한도 초과로 멈춤(받은 것은 캐시에 남고 다음 날 이어 받음),
- * 4 실전 PC 자원 보호로 멈춤(장 시간 보호 구간, 디스크 여유 부족. {@link RunGuard}).
+ * 4 실전 PC 자원 보호로 멈춤(감시의 정지 요청, 장 시간 보호 구간, 디스크 여유 부족. {@link RunGuard}).
  * {@code runtime-config.json}·{@code secrets.json}을 읽지 않는다. 키는 {@code collector-secrets.json}에서만 읽는다.
  */
 public final class CollectorMain {
@@ -69,6 +69,8 @@ public final class CollectorMain {
         }
         RunGuard guard = new RunGuard(clock, List.of(ExchangeCalendar.bundled(Market.KRX), ExchangeCalendar.bundled(Market.US)),
                 o.allowDuringSession, freeSpace, o.minFreeGb, o.stopRequest());
+        // 감시와 다른 설정 폴더로 돌리면 정지 요청을 보지 못하므로 어디를 보는지 남긴다(PR #46 risk-ops N1)
+        System.out.println("감시 정지 요청 확인 위치: " + o.stopRequest());
         try {
             guard.checkSession();
             guard.checkDisk(List.of(o.cacheDir, o.snapshotDir));

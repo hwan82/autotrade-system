@@ -235,11 +235,12 @@ class ArchitectureTest {
             .because("수집기는 증권사 키·계좌·주문을 다루지 않는다(D-019 3장, D-051)");
 
     /**
-     * 감시 프로세스는 어떤 프로세스도 죽이지 않는다. 자원 부족 때 단발 일괄 명령에는 정지 요청 파일만 만든다(D-058, broker-and-fault-design
+     * 감시 프로세스(진입점과 {@code autotrade-monitor-agent-jar})는 어떤 프로세스도 죽이지 않는다. 자원 부족 때 단발 일괄 명령에는 정지 요청 파일만 만든다(D-058, broker-and-fault-design
      * 5.2 0번, ADR-007 2.7). PID로 고른 프로세스를 죽이면 PID 재사용 때 실전 엔진을 죽일 수 있다.
      */
     static final ArchRule WATCHDOG_KILLS_NO_PROCESS = noClasses()
-            .that().resideInAPackage("com.autotrade.app.watchdog..")
+            // 감시 진입점과 감시만 쓰는 자원 감시 라이브러리(monitor-agent-jar, 장애표 #10 감지) 모두(PR #46 risk-ops F2)
+            .that().resideInAnyPackage("com.autotrade.app.watchdog..", "com.autotrade.monitor..")
             // 호출뿐 아니라 메서드 참조(ProcessHandle::destroyForcibly)도 막는다(callMethod는 참조를 보지 않음)
             .should().accessTargetWhere(DescribedPredicate.describe("Process·ProcessHandle의 destroy*",
                     a -> a.getName().startsWith("destroy")

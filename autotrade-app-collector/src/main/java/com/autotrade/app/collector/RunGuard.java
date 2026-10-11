@@ -50,11 +50,7 @@ final class RunGuard {
     private final long minFreeBytes;
     private final Path stopRequest;
 
-    RunGuard(Clock clock, List<ExchangeCalendar> calendars, boolean allowDuringSession, FreeSpace freeSpace, long minFreeGb) {
-        this(clock, calendars, allowDuringSession, freeSpace, minFreeGb, null);
-    }
-
-    /** {@code stopRequest}가 null이면 정지 요청을 보지 않는다(테스트 전용). */
+    /** {@code stopRequest}가 null이면 정지 요청을 보지 않는다(테스트 전용, 운영 경로는 {@link CollectorMain}이 항상 넘긴다). */
     RunGuard(Clock clock, List<ExchangeCalendar> calendars, boolean allowDuringSession, FreeSpace freeSpace, long minFreeGb,
             Path stopRequest) {
         this.stopRequest = stopRequest;
@@ -67,9 +63,10 @@ final class RunGuard {
 
     /** 정지 요청 파일이 있거나 지금 어느 시장 세션 보호 구간이면 {@link Refused}. 실행 중 반복해서 부른다. */
     void checkSession() {
-        if (stopRequest != null && Files.exists(stopRequest)) {
-            throw new Refused("감시 프로세스가 자원 부족으로 정지를 요청해 멈춥니다(" + stopRequest + ")."
-                    + " 받은 자료는 캐시에 남았고, 자원이 회복돼 감시가 요청을 거두면 다시 실행할 수 있습니다. 이 파일은 직접 지우지 마세요");
+        if (stopRequest != null && !Files.notExists(stopRequest)) { // 있는지 판단할 수 없으면(권한 오류 등) 멈추는 쪽
+            throw new Refused("감시 프로세스가 자원 부족으로 정지를 요청해 멈춥니다(" + stopRequest + ", 만든 시각 " + modified(stopRequest)
+                    + "). 받은 자료는 캐시에 남았고, 자원이 회복돼 감시가 요청을 거두면 다시 실행할 수 있습니다."
+                    + " 오래 남아 있으면 감시 프로세스가 살아 있는지 먼저 확인하세요(runbook 3.5)");
         }
         if (allowDuringSession) {
             return;
@@ -95,6 +92,14 @@ final class RunGuard {
                     }
                 }
             }
+        }
+    }
+
+    private static String modified(Path p) {
+        try {
+            return Files.getLastModifiedTime(p).toInstant().toString();
+        } catch (IOException e) {
+            return "알 수 없음";
         }
     }
 

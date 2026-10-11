@@ -21,7 +21,7 @@ class RunGuardTest {
 
     private static RunGuard at(String instant, boolean allow) {
         return new RunGuard(Clock.fixed(Instant.parse(instant), ZoneOffset.UTC),
-                List.of(ExchangeCalendar.bundled(Market.KRX), ExchangeCalendar.bundled(Market.US)), allow, d -> 1L << 40, 20);
+                List.of(ExchangeCalendar.bundled(Market.KRX), ExchangeCalendar.bundled(Market.US)), allow, d -> 1L << 40, 20, null);
     }
 
     @Test
@@ -64,10 +64,10 @@ class RunGuardTest {
 
     @Test
     void 디스크_여유가_기준_미만이면_막고_없는_폴더는_있는_상위_폴더로_본다() {
-        RunGuard low = new RunGuard(Clock.systemUTC(), List.of(), false, d -> 5L * 1024 * 1024 * 1024, 20);
+        RunGuard low = new RunGuard(Clock.systemUTC(), List.of(), false, d -> 5L * 1024 * 1024 * 1024, 20, null);
         assertThatThrownBy(() -> low.checkDisk(List.of(dir.resolve("a").resolve("b")))).isInstanceOf(RunGuard.Refused.class)
                 .hasMessageContaining("5GB");
-        RunGuard ok = new RunGuard(Clock.systemUTC(), List.of(), false, d -> 21L * 1024 * 1024 * 1024, 20);
+        RunGuard ok = new RunGuard(Clock.systemUTC(), List.of(), false, d -> 21L * 1024 * 1024 * 1024, 20, null);
         assertThatCode(() -> ok.checkDisk(List.of(dir.resolve("a")))).doesNotThrowAnyException();
     }
 

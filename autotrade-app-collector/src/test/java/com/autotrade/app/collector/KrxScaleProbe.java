@@ -54,7 +54,7 @@ public final class KrxScaleProbe {
         CollectorMain.Options o = CollectorMain.Options.parse(new String[] {"krx-daily", "--config-dir", config.toString(),
             "--report-dir", experiments.resolve("_data-quality").toString(), "--experiments-dir", experiments.toString(),
             "--keep-snapshots", "1"});
-        RunGuard guard = new RunGuard(Clock.systemUTC(), List.of(), true, RunGuard.FILE_STORE, 1);
+        RunGuard guard = new RunGuard(Clock.systemUTC(), List.of(), true, RunGuard.FILE_STORE, 1, null);
         KrxDailySnapshotBuilder.Stats stats = new KrxDailySnapshotBuilder.Stats((long) codes * days, (long) codes * days, 0, 0, 0,
                 0, 0, 0, first, first.plusDays(days - 1L));
         Path report = CollectorMain.finishKrxSnapshot(o, root, dir, guard, stats, 0, 0);
