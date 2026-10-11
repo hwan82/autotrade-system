@@ -173,3 +173,42 @@
 
 ## 판정 (재검토 3)
 수정 필요(F3: `-PallowDuringSession` 값 검사 테스트가 고친 결함의 재발을 잡도록 고침. 변이 `startsWith`로 실패 확인)
+
+## 재검토 4 2026-10-11
+- 대상: PR #52 / 커밋 `8d256a681db43387396dcd808997699e783918ff` / `git diff 79269ae 8d256a6`(운영 코드 변경 없음, `ExperimentGateTest.java`·`SelectionCombinationRunnerTest.java` 테스트만, 그리고 검토 원문)와 `git diff origin/main...HEAD` 전체 현재 상태
+- 점검표: A
+- 스크래치 폴더에 새로 clone한 곳(`<scratchpad>/r4`, `git checkout 8d256a6`)에서만 빌드하고 테스트했다. 커밋에 들어간 이 파일의 앞부분은 검토자 원문과 바이트가 같다.
+- 직접 실행한 것(clone 안에서):
+  - `./gradlew --no-daemon build`: BUILD SUCCESSFUL.
+  - 강제 재실행 `:autotrade-{risk,architecture-test,app-engine,app-experiment,sim,app-collector,marketdata}:test --rerun`: BUILD SUCCESSFUL. 실패 0, 건너뜀 0. 건수는 risk 55, architecture-test 31, app-engine 48, app-experiment 11, sim 115, app-collector 60, marketdata 80.
+  - **변이 확인 2 다시 시행**: `ExperimentMain.java:42` 허용 조건을 `a.startsWith("--allow-during-session")`(어떤 값이든 해제)로 바꾸고 `:autotrade-app-experiment:test --rerun`을 돌렸다. **"11 tests completed, 1 failed"로 잡혔다.** 실패 테스트는 `ExperimentGateTest#장_시간_보호_해제는_값이_없거나_true일_때만이고_그_밖의_값은_입력_오류다`, 메시지는 `[--allow-during-session=false] expected: 1 but was: 4`(`ExperimentGateTest.java:144`)이다. 되돌렸다.
+  - 변이 확인 1 다시 시행(QA F1, 테스트 파일이 바뀌었으므로): `SelectionSchedule.java:96`의 `checkpoint.run()`을 막자 `SelectionCombinationRunnerTest`가 "8 tests completed, 1 failed"로 잡았다. 되돌렸다.
+  - clone의 `git status`는 깨끗하다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 운영 코드 변경 없음. risk 55건 통과 |
+| A2 | 통과 | 변경 없음(재검토 3 근거 그대로). ArchitectureTest 31건 통과 |
+| A3 | 해당 없음 | 변경 없음 |
+| A4 | 해당 없음 | 변경 없음 |
+| A5 | 해당 없음 | 변경 없음 |
+| A6 | 해당 없음 | 변경 없음 |
+| A7 | 해당 없음 | 변경 없음 |
+| A8 | 통과 | 운영 코드는 재검토 3과 같다(`79269ae`). 근거도 재검토 3 그대로다 |
+| A9 | 통과 | 변경 없음 |
+| A10 | 통과 | 테스트 diff에 비밀값 없음(직접 확인) |
+| A11 | 통과 | F3 해결. 정지 요청 파일을 둔 상태에서 받아들인 해제 값은 4, 나쁜 값은 1이어야 하도록 테스트가 두 경우를 가른다(`ExperimentGateTest.java` 둘째 단계). 그래서 고친 결함(어떤 값이든 해제)이 되살아나면 실패한다(변이 확인 2). 기존 단언(옵션 없으면 4, 결과 파일 1개만)은 그대로 남았고 느슨해진 곳이 없다. `SelectionCombinationRunnerTest` 변경은 import 정리와 주석 위치 바로잡기뿐이다(재검토 3 기록 항목 해결) |
+| A12 | 통과 | 변경 없음 |
+| A13 | 통과 | 변경 없음 |
+| A14 | 통과 | 운영 동작 변경이 없어 결정 로그와 기획서는 재검토 3 상태 그대로 맞다 |
+
+### 지적 처리
+- F3: 해결(변이 확인 2에서 실패함을 확인).
+- 재검토 3 기록(주석 위치): 해결.
+- 첫 검토 F1, 재검토 1 F2, 독립 QA F1·F2·Q1·Q2: 해결 상태 유지.
+- N2~N5: 후속 과제로 유지. 이 PR을 막지 않는다.
+  - N2(감시와 실험 명령의 설정 폴더 일치), N5(감시 쪽 파일 생성·해제): D-058 ④ 감시 구현 작업의 시험 항목.
+  - N3(해제 옵션을 쓰는 날 실전 엔진 꺼짐 확인), N4(힙 6g·4g): 7단계 운영 절차서.
+
+## 판정 (재검토 4)
+승인. 장애 대응표(#10, 정지 순서 0번)를 바꾸는 실전 관련 PR이라 지침 10장에 따라 사용자가 직접 확인하고 머지한다. 독립 QA 판정(`docs/reviews/pr-52/qa.md`)은 이 커밋 기준으로 따로 다시 받아야 한다.
