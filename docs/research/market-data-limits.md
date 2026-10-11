@@ -1,6 +1,7 @@
 # 시세 사전 조사: 실시간 구독 한도·레이트리밋(Q-001)과 미국 시세 조건(Q-003)
 
 - 작성: data-engineer · 확인일: 2026-10-08 (KST)
+- 갱신: 2026-10-11 data-engineer. 한국투자 출처를 [D-054](../decisions/D-054-kis-official-sample-alignment.md) 대조 결과(공식 저장소 같은 커밋 재확인, 사용자 제공 포털 API 문서)로 보강했다(1장 한국투자 칸, 6장 H7·H8). 수치는 바뀌지 않았다.
 - 입력: [broker-and-fault-design.md](../team/broker-and-fault-design.md) 2·4장, [overseas-design.md](../team/overseas-design.md) 2·6장, 결정 로그 D-008
 - 표기: `[사실]`(공식 출처 있음), `[추론]`, `[가정]`(확인 방법 함께 적음)
 
@@ -20,9 +21,9 @@
 | 구독 요청 빈도 | 수치 미공개. 초과 시 `1702`(그룹 요청 개수 초과) `[사실]` K2 | 수치 미공개 | 구독 선언 초당 5회, 초과 시 `rate-limit-exceeded` 프레임 `[사실]` T2 |
 | REST 호출 한도(실전) | 국내 조회·주문 TR 각각 계좌별(토큰별) 초당 5회 `[사실]` K1 | 초당 20건 (공식 샘플 주석 "REST: 1초당 20건 제한", 호출 간격 0.05초) `[사실]` H3, H1 | 그룹별: MARKET_DATA 15, MARKET_DATA_CHART 20, ORDER 10, ORDER_INFO 6(09:00~09:10에는 3), ACCOUNT 1 등 `[사실]` T1 |
 | REST 호출 한도(모의) | TR당 초당 1회 `[사실]` K1 | 호출 간격 0.5초(초당 2건) `[사실]` H1. 우리는 모의 API를 쓰지 않음(D-003) | 모의 도메인 확인 안 됨 |
-| 한도 초과 응답 | `1700`(API별), `1701`(전체), `1702`(그룹) `[사실]` K2 | `EGW00201` `[사실]` H4 | HTTP `429` + `Retry-After`, 현재 한도는 `X-RateLimit-*` 헤더 `[사실]` T1 |
-| 연결 유지 | PING 응답, 재접속 후 LOGIN·REG 재등록 (기존 설계 문서) | PINGPONG 응답, 재등록 (기존 설계 문서) | 클라이언트 수신이 180초 없으면 서버가 끊음. 60초 간격 `PING` 권장. 시세 채널은 LOSSY(유실 가능) `[사실]` T1 |
-| 기타 | 실시간 조건검색 세션당 국내 10건·미국 10건. 3개월간 실서버 미접속 시 자동 해지 `[사실]` K1 | 토큰 재발급 1분당 1회 `[사실]` H4 | 구독은 선언형: 보낼 때마다 전체 목록이 기존 구독을 대체 `[사실]` T1 |
+| 한도 초과 응답 | `1700`(API별), `1701`(전체), `1702`(그룹) `[사실]` K2 | `EGW00201` `[사실]` H4. 일부 TR은 개인 유량과 무관한 TR 전체 초당 120건 한도가 있고 넘으면 `EGW00215` `[사실]` H8 | HTTP `429` + `Retry-After`, 현재 한도는 `X-RateLimit-*` 헤더 `[사실]` T1 |
+| 연결 유지 | PING 응답, 재접속 후 LOGIN·REG 재등록 (기존 설계 문서) | 서버 `PINGPONG`을 받은 내용 그대로 WebSocket PONG 제어 프레임으로 돌려줌 `[사실]` H7(D-054 ①), 재등록. `PINGPONG` 주기는 공식 자료에 없고, 무응답 판단 90초는 `[가정]`(Q-015) | 클라이언트 수신이 180초 없으면 서버가 끊음. 60초 간격 `PING` 권장. 시세 채널은 LOSSY(유실 가능) `[사실]` T1 |
+| 기타 | 실시간 조건검색 세션당 국내 10건·미국 10건. 3개월간 실서버 미접속 시 자동 해지 `[사실]` K1 | 토큰 재발급 1분당 1회 `[사실]` H4. 접근토큰 유효 24시간, 6시간 안에 다시 신청하면 직전 토큰을 돌려줌 `[사실]` H8. 접속키 재발급에도 1분 제한이 걸리는지는 `[가정]`(Q-015) | 구독은 선언형: 보낼 때마다 전체 목록이 기존 구독을 대체 `[사실]` T1 |
 
 해석 `[추론]`
 - 단위가 서로 다르다. 키움은 "종목", 한국투자와 토스는 "건(등록 항목)"이다. 한국투자는 체결(H0STCNT0)과 호가(H0STASP0)를 같은 종목에 걸면 2건으로 센다(공식 샘플이 `tr_id`·종목 쌍으로 등록 목록을 관리). 토스도 `trade`와 `orderbook`을 따로 세는지 확인이 필요하다 `[가정]`.
@@ -153,7 +154,7 @@ data-engineer는 결정 로그와 다른 역할 문서를 직접 고치지 않�
 
 ## 6. 출처
 
-확인일은 모두 2026-10-08. 근거 등급: K1·T1~T3은 증권사 공식 포털 문서, K2·K3·H1~H6은 증권사 공식 GitHub 저장소의 명세·샘플 코드(포털 원문은 아님).
+확인일은 H7·H8을 빼고 모두 2026-10-08. 근거 등급: K1·T1~T3·H8은 증권사 공식 포털 문서, K2·K3·H1~H7은 증권사 공식 GitHub 저장소의 명세·샘플 코드(포털 원문은 아님). H1~H7의 한국투자 저장소 커밋 `2082791`은 2026-10-10 D-054 작업에서 다시 내려받아 대조했다([한국투자 명세 요약](kis-open-api-spec.md) 2장 S1). 같은 커밋이라 H1~H6 문구는 그대로다.
 
 - K1. 키움 REST API 소개(유량·세션·실시간 한도): https://openapi.kiwoom.com/intro
 - K2. 키움 공식 저장소 오류 코드표 `kiwoom/_data/kiwoom_api_spec.json` (`error_codes`, 1700·1701·1702): https://github.com/Kiwoom-Securities/Kiwoom-REST-API (커밋 `953e5db`, 2026-09-15)
@@ -164,6 +165,8 @@ data-engineer는 결정 로그와 다른 역할 문서를 직접 고치지 않�
 - H4. 같은 저장소 `README.md` ("초당 거래건수 초과 (`EGW00201`)", 토큰 1분당 1회)
 - H5. 같은 저장소 `examples_llm/overseas_stock/delayed_ccnl/delayed_ccnl.py` (해외주식 실시간지연체결가 HDFSCNT0: "미국 - 실시간무료(0분지연)")
 - H6. 같은 저장소 `examples_llm/overseas_stock/asking_price/asking_price.py` (해외주식 실시간호가: "미국시세 실시간 1호가 무료, 미국은 유료시세 제공 X")
+- H7. 같은 저장소(커밋 `2082791`) `examples_user/kis_auth.py`와 `legacy/websocket/python/*.py`의 `PINGPONG` 처리 `websocket.pong(data)`(4곳), `ALREADY IN SUBSCRIBE`를 오류로 보지 않는 legacy 샘플. 확인일 2026-10-10. 명세 요약 S2·S5
+- H8. 사용자 BAE가 2026-10-10 프로젝트 스레드에 올린 "한국투자증권 오픈API 전체문서"(KIS Developers 포털 API 문서 338건 xlsx 내보내기, 2026-10-10 03:00). "접근토큰발급(P)" 개요(유효 24시간, 갱신 발급 주기 6시간), "주식잔고조회" 개요(TR 전체 초당 120건, `EGW00215`). 오류 코드표와 PINGPONG 규칙은 이 문서에 없다. 원본 파일은 저장소에 없다. 명세 요약 S8
 - T1. 토스증권 Open API 개요(Rate Limits 표, WebSocket 운영): https://openapi.tossinvest.com/openapi-docs/overview.md
 - T2. 토스증권 AsyncAPI 명세 v1.2.2(연결 2개, 연결당 100건, 선언 5회/초, 채널 목록): https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json
 - T3. 토스증권 Open API FAQ("일부 미국 거래소 기준, NBBO 아님", 이용 조건): https://openapi.tossinvest.com/openapi-docs/faq.md
