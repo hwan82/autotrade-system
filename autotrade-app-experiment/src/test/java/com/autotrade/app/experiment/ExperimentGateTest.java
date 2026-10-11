@@ -48,6 +48,14 @@ class ExperimentGateTest {
     }
 
     @Test
+    void 정지_요청이_있는지_판단할_수_없으면_해제_옵션과_상관없이_멈춘다() throws IOException {
+        // 부모가 일반 파일이라 exists·notExists 둘 다 false: 확인 실패는 요청 있음으로 본다(PR #52 risk-ops F1)
+        Files.writeString(config.resolve("experiment-state"), "file");
+
+        assertThat(gate(WEEKEND, true).stopReason()).get().asString().contains("정지를 요청");
+    }
+
+    @Test
     void 국내_장_시간_보호_구간은_멈추고_해제_옵션으로만_푼다() {
         // 서울 08:00 ~ 16:00 보호(수집기와 같은 구간)
         assertThat(gate("2026-10-07T22:59:00Z", false).stopReason()).isEmpty(); // 07:59

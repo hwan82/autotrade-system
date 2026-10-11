@@ -80,6 +80,19 @@ class RunGateTest {
         assertThat(asked.get()).isEqualTo(3);
     }
 
+    @Test
+    void 병렬로_돌던_Run도_다음_거래일에_끝나고_결과_없이_멈춘다() {
+        AtomicInteger asked = new AtomicInteger();
+        // 처음 세 번(실험 시작 + 확인 2번)은 통과하고 그 뒤로는 멈춘다
+        RunGate closesLater = () -> asked.incrementAndGet() > 3 ? Optional.of("정지 요청 파일") : Optional.empty();
+
+        assertThatThrownBy(() -> runner(2, closesLater).runDetailed(spec()))
+                .isInstanceOf(ExperimentStoppedException.class).hasMessage("정지 요청 파일");
+        // 병렬 2라 두 Run이 함께 돈다. 이미 돌던 Run도 거래일 경계에서 끝나고(예외가 결과 대신 올라옴), 먼저 멈춘 Run이 남긴
+        // 표시를 본 Run은 문을 다시 묻지 않는다. 스레드 순서에 따라 네 번째나 다섯 번째 확인에서 끝난다
+        assertThat(asked.get()).isBetween(4, 5);
+    }
+
     private static SimulationExperimentRunner runner(int parallelism, RunGate gate) {
         return new SimulationExperimentRunner(DATA, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
                 RiskChain.builder(BlacklistSnapshot.EMPTY).build(), ExecutionSettings.defaults(),

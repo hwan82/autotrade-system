@@ -12,6 +12,7 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.app.collector.archfixture.LoadsProcessConfig;
+import com.autotrade.app.experiment.archfixture.RunsWithoutGate;
 import com.autotrade.app.watchdog.archfixture.KillsBatchProcess;
 import com.autotrade.app.engine.command.ForgedConfirmation;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
@@ -28,9 +29,14 @@ import com.autotrade.control.ControlServer;
 import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskPolicy;
 import com.autotrade.risk.archfixture.SplitPackageApproveAll;
+import com.autotrade.sim.combo.CombinationExperiment;
+import com.autotrade.sim.run.RunGate;
+import com.autotrade.sim.run.SimulationExperimentRunner;
+import com.autotrade.sim.study.StrategyStudy;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.AccessTarget;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -235,6 +241,40 @@ class ArchitectureTest {
             .because("수집기는 증권사 키·계좌·주문을 다루지 않는다(D-019 3장, D-051)");
 
     /**
+     * 실험 실행 명령(D-063)은 정지 확인({@link RunGate}) 없는 실행 입구를 부르지 않는다. 게이트 없는 오버로드는 순수 모듈 안
+     * 테스트·호환용으로만 남는다. 프로세스 진입점이 이것을 부르면 장 시간 보호와 감시의 정지 요청 파일(5.2 0번)을 건너뛴다.
+     */
+    static final ArchRule APPS_RUN_EXPERIMENTS_THROUGH_GATE = noClasses()
+            .that().resideInAPackage("com.autotrade.app..")
+            .should().accessTargetWhere(DescribedPredicate.describe("RunGate 인자가 없는 실험 실행 입구",
+                    a -> ungatedExperimentEntry(a.getTarget())))
+            .because("실험 실행은 장 시간 보호·정지 요청 파일 확인을 거친다(D-063, broker-and-fault-design 5.2 0번)");
+
+    private static boolean ungatedExperimentEntry(AccessTarget t) {
+        if (!(t instanceof AccessTarget.CodeUnitAccessTarget c)) {
+            return false;
+        }
+        String owner = c.getOwner().getName();
+        boolean entry = owner.equals(SimulationExperimentRunner.class.getName()) && c.getName().equals("<init>")
+                || owner.equals(StrategyStudy.class.getName()) && c.getName().equals("<init>")
+                || owner.equals(CombinationExperiment.class.getName())
+                        && (c.getName().equals("run") || c.getName().equals("runAndWrite"));
+        return entry && c.getRawParameterTypes().stream().noneMatch(p -> p.isEquivalentTo(RunGate.class));
+    }
+
+    /** 실험 실행 명령은 프로세스 설정 로더(secrets.json 포함)와 증권사·주문 포트를 모른다(D-063, 수집기 규칙과 같은 경계). */
+    static final ArchRule EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG = noClasses()
+            .that().resideInAPackage("com.autotrade.app.experiment..")
+            .should().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ConfigLoader")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigStore")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigHolder")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.LoadedConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ProcessStartup")
+            .orShould().dependOnClassesThat().resideInAnyPackage("com.autotrade.broker..", "com.autotrade.domain.order..")
+            .because("실험 실행 명령은 설정 폴더 위치만 쓰고 증권사 키·계좌·주문을 다루지 않는다(D-063)");
+
+    /**
      * 감시 프로세스(진입점과 {@code autotrade-monitor-agent-jar})는 어떤 프로세스도 죽이지 않는다. 자원 부족 때 단발 일괄 명령에는 정지 요청 파일만 만든다(D-058, broker-and-fault-design
      * 5.2 0번, ADR-007 2.7). PID로 고른 프로세스를 죽이면 PID 재사용 때 실전 엔진을 죽일 수 있다.
      */
@@ -334,6 +374,20 @@ class ArchitectureTest {
                 new ClassFileImporter().importClasses(LoadsProcessConfig.class));
         assertThat(r.hasViolation()).isTrue();
         assertThat(String.join("\n", r.getFailureReport().getDetails()))
+                .contains("ConfigLoader", "LoadedConfig", "OrderGateway");
+    }
+
+    @Test
+    void 실험_실행_명령은_정지_확인을_거치고_프로세스_설정을_모른다() {
+        APPS_RUN_EXPERIMENTS_THROUGH_GATE.check(PRODUCTION);
+        EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG.check(PRODUCTION);
+        // 위반 고정 예제: 게이트 없는 실행기·연구·조합 실험 입구, 설정 로더, 주문 포트
+        JavaClasses fixture = new ClassFileImporter().importClasses(RunsWithoutGate.class);
+        EvaluationResult gate = APPS_RUN_EXPERIMENTS_THROUGH_GATE.evaluate(fixture);
+        assertThat(gate.hasViolation()).isTrue();
+        assertThat(gate.getFailureReport().getDetails()).hasSize(3);
+        EvaluationResult config = EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG.evaluate(fixture);
+        assertThat(String.join("\n", config.getFailureReport().getDetails()))
                 .contains("ConfigLoader", "LoadedConfig", "OrderGateway");
     }
 
