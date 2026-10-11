@@ -168,7 +168,7 @@ public final class StrategyStudy {
 
     private ExperimentSpec spec(
             StudyConfig config, String id, LocalDate from, LocalDate to, long seed, List<StrategyProfile> profiles) {
-        return new ExperimentSpec(new ExperimentId(id), from, to, seed, config.seedCapital(), cost.id(), data.version(),
+        return ExperimentSpec.ofProfiles(new ExperimentId(id), from, to, seed, config.seedCapital(), cost.id(), data.version(),
                 ClockMode.REPLAY, profiles);
     }
 

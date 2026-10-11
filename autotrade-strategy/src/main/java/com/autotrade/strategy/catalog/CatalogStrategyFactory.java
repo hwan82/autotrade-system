@@ -20,7 +20,7 @@ public final class CatalogStrategyFactory implements StrategyFactory {
     /** 지원하는 logic 값. */
     public static final List<String> LOGICS = List.of(
             "buy-and-hold", "orb", "vwap-reclaim", "prior-day-high", "volume-surge", "book-imbalance", "pullback",
-            "ma-trend", "random");
+            "ma-trend", "random", "random-daily");
 
     private final MarketRules market;
 
@@ -52,10 +52,8 @@ public final class CatalogStrategyFactory implements StrategyFactory {
             case "book-imbalance" -> new BookImbalance(intraday(p), market, p);
             case "pullback" -> new Pullback(intraday(p), market, p);
             case "random" -> new RandomEntry(intraday(p), market, p, runSeed);
-            case "ma-trend" -> {
-                requireStyle(p, TradingStyle.SWING);
-                yield new MovingAverageTrend(TradingRules.from(p), market, p);
-            }
+            case "ma-trend" -> new MovingAverageTrend(daily(p), market, p);
+            case "random-daily" -> new RandomDailyEntry(daily(p), market, p, runSeed);
             default -> throw p.fail("logic", "모르는 로직입니다. 지원: " + LOGICS);
         };
         p.requireAllUsed();
@@ -69,6 +67,15 @@ public final class CatalogStrategyFactory implements StrategyFactory {
 
     private static TradingRules intraday(ProfileParams p) {
         requireStyle(p, TradingStyle.INTRADAY);
+        return TradingRules.from(p);
+    }
+
+    /** 일봉 판단 로직(스윙·중기, STR-18). */
+    private static TradingRules daily(ProfileParams p) {
+        TradingStyle style = p.profile().style();
+        if (style != TradingStyle.SWING && style != TradingStyle.POSITION) {
+            throw p.fail("style", "이 로직은 SWING 또는 POSITION 프로필이어야 합니다(STR-02 스타일 혼합 금지)");
+        }
         return TradingRules.from(p);
     }
 

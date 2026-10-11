@@ -7,6 +7,7 @@ import com.autotrade.sim.account.RoundTrip;
 import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.RunMetrics;
+import com.autotrade.sim.selection.SelectionDay;
 import java.math.BigDecimal;
 
 /**
@@ -31,7 +32,14 @@ public final class ReportWriter {
                     .append(" status=").append(s.status())
                     .append(" profile=").append(run.profile().id()).append('@').append(run.profile().version())
                     .append(" hash=").append(s.profileHash())
-                    .append(" seed=").append(s.runSeed()).append('\n');
+                    .append(" seed=").append(s.runSeed());
+            // 선정 없는 조합은 조합 도입 전과 같은 줄을 쓴다(ADR-007 5장 sim-engine 행: 기존 보고서·골든 그대로)
+            run.combination().selection().ifPresent(sel -> sb
+                    .append(" selection=").append(sel.key())
+                    .append(" selection-hash=").append(s.selectionHash())
+                    .append(" combination=").append(s.combinationHash())
+                    .append(" seed-scheme=").append(s.runSeedScheme()));
+            sb.append('\n');
             if (!s.failureReason().isEmpty()) {
                 sb.append("  failure ").append(s.failureReason()).append('\n');
             }
@@ -64,6 +72,14 @@ public final class ReportWriter {
             for (OrderRejection j : run.rejections()) {
                 sb.append("  rejected ").append(j.key()).append(" seq=").append(j.eventSeq())
                         .append(' ').append(j.stage()).append(':').append(j.code()).append('\n');
+            }
+            for (RunSelectionDay day : run.selectionDays()) {
+                SelectionDay d = day.selection();
+                sb.append("  selection-day ").append(d.date()).append(' ').append(d.validity());
+                if (d.isValid()) {
+                    sb.append(" result=").append(d.resultHash()).append(" symbols=").append(d.symbols().size());
+                }
+                sb.append(" blocked-entries=").append(day.blockedEntries()).append('\n');
             }
         }
         return sb.toString();
