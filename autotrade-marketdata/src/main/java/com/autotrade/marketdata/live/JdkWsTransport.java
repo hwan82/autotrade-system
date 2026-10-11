@@ -54,6 +54,18 @@ public final class JdkWsTransport implements WsTransport {
         }
 
         @Override
+        public synchronized void sendPong(String payload) {
+            java.nio.ByteBuffer data = java.nio.ByteBuffer.wrap(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            chain = chain.handle((ok, err) -> null)
+                    .thenCompose(ignored -> socket.sendPong(data))
+                    .whenComplete((ok, err) -> {
+                        if (err != null) {
+                            handler.onError(err);
+                        }
+                    });
+        }
+
+        @Override
         public void close() {
             if (!socket.isOutputClosed()) {
                 socket.sendClose(WebSocket.NORMAL_CLOSURE, "bye");

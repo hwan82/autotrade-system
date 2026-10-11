@@ -33,6 +33,8 @@ final class FakeTransport implements WsTransport {
     static final class Conn implements WsConnection {
         final WsHandler handler;
         final List<String> sent = new ArrayList<>();
+        /** PONG 제어 프레임으로 보낸 내용. */
+        final List<String> pongs = new ArrayList<>();
         boolean closed;
         /** true면 보내기가 실패하고, JDK의 이미 실패한 전송처럼 {@code send}를 부른 스레드에서 바로 오류를 알린다. */
         boolean failSends;
@@ -48,6 +50,11 @@ final class FakeTransport implements WsTransport {
                 return;
             }
             sent.add(text);
+        }
+
+        @Override
+        public void sendPong(String payload) {
+            pongs.add(payload);
         }
 
         @Override

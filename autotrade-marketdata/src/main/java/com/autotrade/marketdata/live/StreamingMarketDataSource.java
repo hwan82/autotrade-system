@@ -41,6 +41,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class StreamingMarketDataSource implements LiveMarketDataSource {
 
     private static final Logger LOG = System.getLogger(StreamingMarketDataSource.class.getName());
+    /** WebSocket 제어 프레임 내용 상한(RFC 6455 5.5). */
+    static final int MAX_PONG_BYTES = 125;
 
     /** 인증 실패 뒤 다음 접속(자격 증명 재발급)까지 최소 간격. 발급 API를 두드리지 않게 한다(risk-ops 검토 N1). */
     static final Duration AUTH_RETRY_MIN = Duration.ofSeconds(60);
@@ -436,6 +438,7 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
                 return;
             }
             sendAll(d.replies());
+            sendPongs(d.pongs());
             switch (d.control()) {
                 case LOGIN_OK -> {
                     if (awaitingLogin) {
@@ -524,6 +527,21 @@ public final class StreamingMarketDataSource implements LiveMarketDataSource {
         }
         for (String m : messages) {
             connection.send(m);
+        }
+    }
+
+    /** PONG 제어 프레임은 내용이 125바이트를 넘을 수 없다(RFC 6455 5.5). 넘으면 보내지 않고 경고만 남긴다. */
+    private void sendPongs(List<String> payloads) {
+        if (connection == null) {
+            return;
+        }
+        for (String p : payloads) {
+            int bytes = p.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            if (bytes > MAX_PONG_BYTES) {
+                LOG.log(Level.WARNING, "{0} PONG 내용이 {1}바이트라 보내지 않음", new Object[] {sourceId, bytes});
+                continue;
+            }
+            connection.sendPong(p);
         }
     }
 

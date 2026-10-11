@@ -33,7 +33,10 @@ import java.util.SortedSet;
  *   <li>구독 {@code {"header":{"approval_key":…,"custtype":"P","tr_type":"1","content-type":"utf-8"},
  *       "body":{"input":{"tr_id":"H0STCNT0","tr_key":"005930"}}}}. 해지는 tr_type "2"(kis_auth.py).</li>
  *   <li>시세 프레임 {@code 0|H0STCNT0|003|필드^필드^…}: 암호화 여부|TR|건수|데이터. 건수만큼 레코드가 이어 붙는다.
- *       제어 프레임은 JSON이며 {@code header.tr_id == "PINGPONG"}이면 받은 그대로 돌려준다.</li>
+ *       제어 프레임은 JSON이며 {@code header.tr_id == "PINGPONG"}이면 받은 내용을 WebSocket PONG 제어 프레임으로
+ *       돌려준다(공식 예제 4곳 모두 {@code websocket.pong(data)}, 텍스트 메시지로 되보내지 않음. 2026-10-10 확인).</li>
+ *   <li>구독 응답 {@code body.msg1}: 성공 "SUBSCRIBE SUCCESS", 해지 "UNSUBSCRIBE …", 이미 등록된 종목은 rt_cd가 0이 아니어도
+ *       "ALREADY IN SUBSCRIBE"이고 공식 legacy 샘플은 이를 오류로 보지 않는다(ws_domestic+overseas_stock.py).</li>
  *   <li>H0STCNT0 체결: 0 종목코드, 1 체결시각(HHmmss), 2 현재가, 12 체결량, 33 영업일자(yyyyMMdd).
  *       H0STASP0 호가: 0 종목코드, 1 영업시각, 3~12 매도호가1~10, 13~22 매수호가1~10, 23~32 매도잔량, 33~42 매수잔량.</li>
  *   <li>한도: appkey당 41건, 체결과 호가를 따로 센다(docs/research/market-data-limits.md H1·H2). 그래서 20종목.</li>
@@ -44,6 +47,7 @@ import java.util.SortedSet;
 final class KisStreamProtocol implements StreamProtocol {
 
     static final java.util.Set<String> AUTH_FAILURE_CODES = java.util.Set.of("OPSP0011");
+    static final String ALREADY_SUBSCRIBED = "ALREADY IN SUBSCRIBE";
     static final URI ENDPOINT = URI.create("ws://ops.koreainvestment.com:21000/tryitout");
     static final int MAX_ENTRIES = 41;
     static final int MAX_SYMBOLS = MAX_ENTRIES / 2;
@@ -151,10 +155,13 @@ final class KisStreamProtocol implements StreamProtocol {
         }
         String trId = n.path("header").path("tr_id").asText("");
         if (trId.equals("PINGPONG")) {
-            return Decoded.reply(text);
+            return Decoded.pong(text);
         }
         JsonNode body = n.path("body");
         String rt = body.path("rt_cd").asText("0");
+        if (!rt.equals("0") && body.path("msg1").asText("").strip().equals(ALREADY_SUBSCRIBED)) {
+            return Decoded.ignored(trId + " " + ALREADY_SUBSCRIBED); // 등록은 살아 있다
+        }
         if (!rt.equals("0")) {
             String msgCd = body.path("msg_cd").asText("");
             if (isAuthFailure(msgCd, body.path("msg1").asText(""))) {
