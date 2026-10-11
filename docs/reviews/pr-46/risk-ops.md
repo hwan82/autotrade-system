@@ -75,3 +75,40 @@
 
 ### 판정
 수정 필요(A12: R1 #10 감지 칸의 없는 감지 경로를 사실대로 고치고 감시 생존 감지를 후속 과제로 등록 / A14: R2 사람이 지우는 예외를 D-058·5.2 0번·ADR-008 2.7에 반영하고 사용자 확인 항목으로 표시). 둘 다 문서 수정이며 코드 변경은 필요 없다.
+
+## 재검토 2 2026-10-11
+
+- 대상: PR #46 / 커밋 3cbb3e2(앞 재검토 4e69072 뒤 반영 커밋 하나) / main(9100cb3) 대비 `git diff origin/main...HEAD` 전체(병합 기준 51eb6ef, 15개 파일, +305 −21. 검토 원문 포함)
+- 점검표: A
+- 직접 실행한 것:
+  - GitHub에서 새로 받은 복제본 `/tmp/claude-0/review-riskops-46c`에서 3cbb3e2 체크아웃 후 `./gradlew build --no-daemon` → BUILD SUCCESSFUL in 2m 56s, EXIT 0. 결과 XML 합계 805/0/0/0. 모듈별: `:autotrade-risk:test` 55/0/0/0, `:autotrade-architecture-test:test` 30/0/0/0, `:autotrade-app-engine:test` 48/0/0/0, `:autotrade-app-collector:test` 60/0/0/0, `:autotrade-app-watchdog:test` 1/0/0/0.
+  - 정지 요청 테스트 4건(새 `RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다` 포함)과 `ArchitectureTest#감시는_프로세스를_죽이지_않는다`가 통과했다(XML 확인).
+  - 변이 확인: `RunGuard.java:65`의 `!Files.notExists(stopRequest)`를 `Files.exists(stopRequest)`로 바꾸면 `RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다`만 실패했다(8건 중 1건 실패). 확인 후 원복했고 작업 트리 변경은 0건이다. 새 테스트가 확인 실패 시 멈추는 동작을 실제로 지킨다.
+  - 현재 main(9100cb3)에 3cbb3e2를 `merge --no-commit` → 충돌 없음. 병합본에서 `:autotrade-app-collector:test :autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test` → EXIT 0.
+  - 커밋 안의 이 원문은 작업 폴더 파일과 같다(diff 없음). 운영 코드 변경은 여전히 `CollectorMain.java`·`RunGuard.java`뿐이다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·설정·테스트 변경 없음. `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | Guard 출구 규칙 그대로. 이번 커밋은 ArchitectureTest를 건드리지 않았다. `GuardedOrderGatewayTest` 8건 통과 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트 코드 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·버킷·킬스위치 변경 없음(engine 48건 통과) |
+| A8 | 통과 | 정지 요청을 끄는 길이 없어졌다. 생성자가 `null`을 거부하고(`RunGuard.java:55` `Objects.requireNonNull`), 검사에 `null` 분기가 없다(`:65`). 운영 생성 지점은 `CollectorMain.java:70` 하나다(grep 확인). 테스트는 없는 경로 `NO_STOP`(`RunGuardTest.java:20`)을 넘긴다. 확인 실패는 멈춤 쪽이다(`:65`, 변이 확인). `WATCHDOG_KILLS_NO_PROCESS` 범위(watchdog과 monitor) 그대로 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. 5.2 6번 그대로 |
+| A10 | 통과 | 새 테스트 값은 `"file"`과 시각 문자열뿐(`RunGuardTest.java:90-96`). 비밀값 없음 |
+| A11 | 통과 | 지운 테스트 없음. 바뀐 테스트 줄은 생성자 인자를 `null`에서 `NO_STOP`·없는 경로로 바꾼 것뿐이고 단언은 그대로다. 새 실패 경우 테스트 1건 추가(`RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다`). 이 테스트는 "부모가 일반 파일"로 확인 실패를 만든다. Linux에서는 `ENOTDIR`이라 `exists`·`notExists`가 모두 false가 되고, CI도 `ubuntu-latest`다(`.github/workflows/ci.yml:18`). Windows에서는 같은 결과가 보장되지 않을 수 있다(아래 N5) |
+| A12 | 통과 | R1 해소. #10 감지 칸(`broker-and-fault-design.md:169`)에서 없는 감지 경로("#9 감지와 같은 경로")를 뺐다. 지금 있는 감지(거부 메시지의 파일 시각, 종료 코드 수집기 4·선정 2, 사용자가 예약 작업 결과로 확인)와 "감시 자신의 생존을 보는 주체는 아직 없음(D-058 ④ 후속 과제)"을 사실대로 적었다. D-058 ④에도 MON-02와 함께 후속 과제로 등록됐다(`docs/decisions/README.md:61`) |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 통과 | R2 해소. 사람이 지우는 예외를 runbook에서 없애(`docs/runbooks/collector.md:59` ③ "파일은 감시만 지운다(D-058). 사람이 지우는 예외는 두지 않는다") 사용자 결정 D-058 ①, 5.2 0번(`broker-and-fault-design.md:144`), ADR-008 2.7(`ADR-008-collector.md:81`)과 같은 문구가 됐다. 사용자 결정 문구는 바뀌지 않았으므로 따로 사용자 확인 항목이 필요 없다. 앞 검토에서 risk-ops는 예외를 추천했지만, 감시를 고칠 때까지 수집을 쉬는 쪽은 닫힌 쪽(일봉이 늦어지고 선정이 신규 진입을 막는 방향)이라 계좌 보호에서 더 보수적이다. 받아들인다 |
+
+### 재검토 2 발견
+- **N5 (권고, 판정 무관)** `정지_요청이_있는지_판단할_수_없으면_멈춘다`는 Linux에서 "부모가 일반 파일이면 확인 실패" 동작에 기댄다. Windows에서는 같은 경우를 "없음"으로 볼 수 있어, 사용자가 Windows에서 `./gradlew build`를 돌리면 이 테스트가 실패할 수 있다(확인 못 했음, 이 환경은 Linux). 운영 코드의 판단(`!Files.notExists`)은 맞다. 필요하면 테스트에 `@EnabledOnOs({LINUX, MAC})`를 붙이고 주석에 이유를 적기를 권한다.
+- **N6 (권고)** 테스트 상수 `NO_STOP`이 작업 폴더 기준 상대 경로 `build/no-such-dir/stop-request`다. 누군가 그 경로를 만들면 테스트가 엉뚱하게 멈춘다. `@TempDir` 아래 경로를 쓰면 더 단단하다.
+- 앞 검토 F1·F2, 재검토 R1·R2와 권고 N1~N4는 모두 해소됐다.
+- 운영상 남는 위험(판정 무관, 기록용): 감시 쪽 구현(임계치 감시, 파일 생성·해제, 감시 생존 감지)은 아직 없다. 이 PR이 머지돼도 정지 순서 0번은 수집기 쪽 장치만 있고, 실제 동작은 감시 구현 PR에서 생긴다(D-058 ④). 그때 risk-ops 검토가 필요하다.
+
+### 판정
+승인

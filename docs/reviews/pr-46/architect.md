@@ -68,3 +68,37 @@
 
 ### 재검토 판정
 수정 필요(B7: risk-ops 재검토 원문 필요. architect가 요구하는 코드·문서 수정은 없다. R1·R2는 권고다. risk-ops 재검토가 "승인"이면 architect 쪽 막는 항목은 없다. 머지는 지침 10장에 따라 사용자가 한다)
+
+## 재검토 2026-10-11 (2)
+- 대상: PR #46 / 커밋 3cbb3e2 / `git diff origin/main...HEAD` 전체(병합 기준 51eb6ef). 4e69072 → 3cbb3e2 변경은 `RunGuard.java`, 테스트 3개, D-058 ④, runbook 3.5, 장애표 #10, 검토 원문 2개(pr-46/architect.md, risk-ops.md)
+- 점검표: B
+- 직접 실행한 것 (새 복제본 `/tmp/claude-0/review-architect-46-r3`, 3cbb3e2 체크아웃):
+  - `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**(122 tasks 모두 실행). 결과 XML 합계 805/0/0/0(tests/failures/errors/skipped). 새 테스트 `RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다` 포함 정지 요청 관련 5건과 `ArchitectureTest#감시는_프로세스를_죽이지_않는다` 통과.
+  - 변이 확인: `RunGuard.checkSession`의 `!Files.notExists(stopRequest)`를 `Files.exists(stopRequest)`로 되돌리고 `:autotrade-app-collector:test --tests '*RunGuardTest'` → `정지_요청이_있는지_판단할_수_없으면_멈춘다` 실패. 새 테스트가 판단 못 하면 멈추는 동작을 실제로 고정한다. 원복 후 작업 트리 깨끗.
+  - main이 9100cb3(#42)으로 앞서 있어 복제본에서 `origin/main`을 병합(충돌 없음, `docs/decisions/README.md` 자동 병합)하고 `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**.
+  - 브랜치에 커밋된 `docs/reviews/pr-46/architect.md`가 앞 재검토까지의 원문과 같음을 `diff`로 확인.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 직접 실행, 브랜치 단독과 main 병합본 모두 BUILD SUCCESSFUL |
+| B2 | 통과 | 이번 커밋에 의존·ArchUnit 규칙 변경 없음. 앞 재검토 근거 유지(`WATCHDOG_KILLS_NO_PROCESS` 대상 watchdog·monitor) |
+| B3 | 통과 | 운영 절차 계약 변경: runbook 3.5 ③에서 "사람이 파일을 지우는 예외"를 없애 D-058 ①·5.2 0번·ADR-008 2.7의 "파일은 감시만 지운다"와 문서가 다시 일치한다(`docs/runbooks/collector.md:59`, `docs/decisions/README.md:59`, `broker-and-fault-design.md:144`, ADR-008 2.7). 사용자 결정 문구를 바꾸지 않고 절차를 결정에 맞춘 쪽이라 새 결정 번호가 필요 없다. 장애표 #10 감지 칸은 실제 감지 수단(일괄 명령 거부 메시지·종료 코드, 사용자가 예약 작업 결과로 확인)만 적고 감시 생존 감지가 없음을 명시하며 D-058 ④ 후속 과제(기획서 MON-02, `autotrade-spec.md:262`)로 넘겼다. 설정 키·스키마·REST 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 앞 재검토 R1 반영: 판단 불가 시 멈춤 회귀 테스트 추가(`RunGuardTest.java:89-96`, 부모가 일반 파일), 위 변이 확인으로 효력 확인. 테스트 삭제·`@Disabled` 없음. `null` 대신 없는 경로 `RunGuardTest.NO_STOP`(`build/no-such-dir/stop-request`, Gradle 테스트 작업 폴더 기준 상대 경로)을 넘겨 정지 요청 확인을 끄지 않고 "요청 없음"으로 돈다 |
+| B7 | 통과(risk-ops 재검토 진행 중) | 장애 대응 규칙 변경이므로 A 점검표 대상. `docs/reviews/pr-46/risk-ops.md`의 4e69072 재검토 판정은 수정 필요(R1 #10 감지 칸, R2 사람이 지우는 예외)이고, 3cbb3e2가 R1은 감지 칸을 사실대로 고쳐, R2는 예외를 결정 쪽에 넣는 대신 절차에서 없애는 방식으로 대응했다. R2 대응이 risk-ops 권고(예외를 D-058에 반영하고 사용자 확인)와 다른 선택이므로 받아들일지는 risk-ops가 판단한다. 3cbb3e2 대상 risk-ops 원문은 이 검토 시점에 없다(동시 검토 중). 머지는 지침 10장에 따라 사용자가 한다 |
+| B8 | 통과 | 이번 커밋에 새 출력 없음. 앞 근거 유지 |
+
+### 앞 재검토 권고 처리
+| # | 처리 | 근거 |
+|---|---|---|
+| R1 판단 불가 회귀 테스트 | 반영 | `RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다`, 변이로 효력 확인 |
+| R2 null로 확인 끄기 | 반영 | `RunGuard.java:55` `Objects.requireNonNull(stopRequest, "stopRequest")`, `checkSession`의 null 분기 제거(`:65`). 이제 정지 요청 확인을 끄는 생성 경로가 없다 |
+| N5 ProcessBuilder 우회 | 후속 과제로 유지 | 감시 쪽 구현 PR(D-058 ④) |
+
+### 점검표 밖 발견 (권고, 머지 막지 않음)
+- **S1 (운영 위험 기록)**: 사람이 지우는 예외를 없앴으므로, 감시가 고장 난 채 파일이 남으면 고칠 때까지 수집과 선정 생산이 멈춘다. 실전 경로에는 영향이 없고(멈추는 쪽), 캐시에서 이어 받으므로 데이터 손실도 없다. 다만 선정 생산이 멈추면 다음 거래일 선정 결과가 `MISSING`이 되는 경로(ADR-007 2.7)가 생긴다. D-058 ④ 후속 과제에서 감시 생존 감지를 정할 때 이 경로의 알림도 함께 다루길 권한다.
+- **S2 (경미)**: `RunGuardTest.NO_STOP`과 `KrxScaleProbe`의 없는 경로는 테스트 작업 폴더 기준 상대 경로라, 누가 그 위치에 `stop-request`를 만들면 테스트가 엉뚱하게 멈출 수 있다. `@TempDir` 아래 경로를 쓰면 더 단단하다. 지금 동작에는 문제가 없다.
+
+### 재검토 판정 (2)
+승인(architect 범위. B 전 항목이 통과 또는 해당 없음이고 확인 못 한 항목이 없다. B7은 risk-ops의 3cbb3e2 재검토 원문 판정이 "승인"이어야 머지 조건이 갖춰지며, 장애 대응 변경이므로 지침 10장·11장에 따라 독립 QA 뒤 사용자가 머지한다)
