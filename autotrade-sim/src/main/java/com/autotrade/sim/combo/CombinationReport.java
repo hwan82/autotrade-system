@@ -54,7 +54,7 @@ final class CombinationReport {
 
     static String inputs(Context c, SimulationReport report) {
         StringBuilder sb = new StringBuilder();
-        sb.append("# 실험 입력(실행기가 씀, D-060). 이 파일에 이름이 있는 스냅샷은 수집기 --keep-snapshots가 지우지 않는다.\n");
+        sb.append("# 실험 입력(실행기가 씀, D-061). 이 파일에 이름이 있는 스냅샷은 수집기 --keep-snapshots가 지우지 않는다.\n");
         sb.append("experiment: ").append(c.plan().id()).append('\n');
         sb.append("code: \"").append(report.result().codeCommit()).append(report.result().codeDirty() ? " dirty" : "")
                 .append("\"\n");

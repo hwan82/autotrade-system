@@ -19,7 +19,7 @@
 
 결과에 남는 코드 커밋은 **main에 있는 커밋**이어야 한다. PR은 squash 머지라 브랜치 커밋이 main 이력에 남지 않는다(PR #14 architect 검토 M1). 그래서 결과 파일은 main(또는 main과 코드가 같은 깨끗한 작업 트리)에서 돌려 만들고, 브랜치에서 돌린 결과는 머지 뒤 main에서 다시 돌려 커밋 줄을 갱신한다. 다시 돌린 결과가 커밋 줄 말고 바이트 일치하는지 확인하고 report.md에 적는다.
 
-조합 실험(선정 × 매매지표, 수집 스냅샷 위 일봉 리플레이, D-060)은 등록 파일 `experiment.yaml`을 사람이 먼저 쓰고 커밋한 뒤 돌린다. 실행기는 같은 폴더에 `inputs.yaml`(입력 스냅샷 ID·해시. 수집기 `--keep-snapshots`가 이 스냅샷을 지우지 않는다), `results.md`, `runs.tsv`, `selection-days.tsv`, `detail.txt`를 쓴다. 절차는 [조합 실험 절차](../docs/strategy/combination-experiments.md) 5장.
+조합 실험(선정 × 매매지표, 수집 스냅샷 위 일봉 리플레이, D-061)은 등록 파일 `experiment.yaml`을 사람이 먼저 쓰고 커밋한 뒤 돌린다. 실행기는 같은 폴더에 `inputs.yaml`(입력 스냅샷 ID·해시. 수집기 `--keep-snapshots`가 이 스냅샷을 지우지 않는다), `results.md`, `runs.tsv`, `selection-days.tsv`, `detail.txt`를 쓴다. 절차는 [조합 실험 절차](../docs/strategy/combination-experiments.md) 5장.
 
 ```bash
 ./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=<실험ID> -PverifyDeterminism

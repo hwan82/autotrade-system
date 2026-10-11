@@ -51,7 +51,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * 수집 스냅샷(ADR-008) 위에서 선정 × 매매지표 조합 실험(STR-17, ADR-007 2.4·2.7 실험실 쪽, 조합 실험 절차)을 돌린다(D-060).
+ * 수집 스냅샷(ADR-008) 위에서 선정 × 매매지표 조합 실험(STR-17, ADR-007 2.4·2.7 실험실 쪽, 조합 실험 절차)을 돌린다(D-061).
  *
  * <p>이어 붙이는 것: 일봉 스냅샷 → {@link DailyBarMarketDataSet}(일봉 해상도 리플레이), 일봉·상장주식수·재무 스냅샷 →
  * {@link SnapshotSelectionData} → {@link SelectionCalculator} → {@link CalculatedSelectionSource}(날짜별 선정), 그리고

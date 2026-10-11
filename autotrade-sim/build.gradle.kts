@@ -37,7 +37,7 @@ val runStrategyStudy by tasks.registering(JavaExec::class) {
     argumentProviders.add(CommandLineArgumentProvider { listOf(root.absolutePath, commit.get(), dirty.get()) })
 }
 
-// 조합 실험(D-060): ./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=<실험ID> [-PsnapshotsDir=폴더] [-PverifyDeterminism]
+// 조합 실험(D-061): ./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=<실험ID> [-PsnapshotsDir=폴더] [-PverifyDeterminism]
 // experiments/<실험ID>/experiment.yaml(등록 파일)을 읽어 수집 스냅샷(일봉·재무) 위에서 선정 × 지표 조합을 돌리고 결과를
 // 같은 폴더에 쓴다. 절차는 docs/strategy/combination-experiments.md, 커밋 규칙은 experiments/README.md.
 val runCombinationExperiment by tasks.registering(JavaExec::class) {

@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
 
 /**
- * 스냅샷 일봉 날짜로 만든 거래일(D-060). 번들 캘린더(KRX 2026, 3/2 삼일절 대체공휴일 휴장)와 겹치는 구간은 날짜 하나까지 대조한다.
+ * 스냅샷 일봉 날짜로 만든 거래일(D-061). 번들 캘린더(KRX 2026, 3/2 삼일절 대체공휴일 휴장)와 겹치는 구간은 날짜 하나까지 대조한다.
  */
 class SnapshotTradingDaysTest {
 

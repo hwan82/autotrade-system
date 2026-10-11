@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 수집 스냅샷 폴더 → 조합 실험 → 결과 파일까지(D-060). 저장소의 실제 프로필 {@code kr-ma-trend@1}(3/8일 종가 이동평균,
+ * 수집 스냅샷 폴더 → 조합 실험 → 결과 파일까지(D-061). 저장소의 실제 프로필 {@code kr-ma-trend@1}(3/8일 종가 이동평균,
  * 진입 09:05~10:00)과 (나) 선정 {@code kr-vol-surge-quiet@1}(거래량 20일/앞 20일 ≥ 3, 20일 수익률 < 3%)을 쓴다.
  *
  * <p>일봉(2026-01-02부터 번들 캘린더 거래일 80일, i = 0부터 셈)

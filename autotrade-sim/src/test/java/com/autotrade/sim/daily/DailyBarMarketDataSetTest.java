@@ -25,7 +25,7 @@ import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /**
- * 일봉 → 리플레이 이벤트(SIM-06 일봉 해상도, D-060 경로 모델 DAILY-PATH-V1). 손 계산 기대값과 비교한다.
+ * 일봉 → 리플레이 이벤트(SIM-06 일봉 해상도, D-061 경로 모델 DAILY-PATH-V1). 손 계산 기대값과 비교한다.
  */
 class DailyBarMarketDataSetTest {
 

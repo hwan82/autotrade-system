@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * 조합 실험 실행 명령(D-060): {@code ./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=<실험ID>}.
+ * 조합 실험 실행 명령(D-061): {@code ./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=<실험ID>}.
  * 등록 파일 {@code experiments/<실험ID>/experiment.yaml}을 읽어 수집 스냅샷 위에서 돌리고, 결과를 같은 폴더에 쓴다.
  *
  * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--snapshots-dir 폴더] [--verify-determinism]}.
