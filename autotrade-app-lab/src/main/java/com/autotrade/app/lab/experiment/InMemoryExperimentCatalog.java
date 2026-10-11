@@ -2,13 +2,16 @@ package com.autotrade.app.lab.experiment;
 
 import com.autotrade.app.lab.web.Page;
 import com.autotrade.marketdata.symbols.SymbolNames;
+import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationReport;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,11 +40,12 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
         this.names = Objects.requireNonNull(names, "names");
     }
 
-    private record Entry(ExperimentSpec spec, SimulationReport report) {
+    private record Entry(ExperimentSpec spec, SimulationReport report, Map<String, SelectionResult> results) {
     }
 
     @Override
-    public synchronized void register(ExperimentSpec spec, SimulationReport report) {
+    public synchronized void register(
+            ExperimentSpec spec, SimulationReport report, Collection<SelectionResult> selectionResults) {
         Objects.requireNonNull(spec, "spec");
         Objects.requireNonNull(report, "report");
         if (!spec.id().equals(report.result().experimentId())) {
@@ -56,7 +60,17 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
                 throw new IllegalArgumentException("같은 runId가 두 번 있습니다: " + r.summary().runId());
             }
         }
-        if (entries.putIfAbsent(spec.id().value(), new Entry(spec, report)) != null) {
+        Set<String> selectionHashes = new HashSet<>();
+        spec.combinations().forEach(c -> c.selection().ifPresent(sel -> selectionHashes.add(sel.selectionHash())));
+        Map<String, SelectionResult> results = new HashMap<>();
+        for (SelectionResult r : selectionResults) {
+            if (!selectionHashes.contains(r.selection().hash())) {
+                throw new IllegalArgumentException("실험 조합에 없는 선정의 결과입니다: " + r.selection().id() + "@"
+                        + r.selection().version());
+            }
+            results.putIfAbsent(r.contentHash(), r);
+        }
+        if (entries.putIfAbsent(spec.id().value(), new Entry(spec, report, Map.copyOf(results))) != null) {
             throw new IllegalArgumentException("이미 등록된 실험 ID입니다: " + spec.id());
         }
     }
@@ -70,7 +84,7 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
 
     @Override
     public synchronized Optional<ExperimentViews.Detail> detail(ExperimentId id) {
-        return entry(id).map(e -> ExperimentViews.Detail.of(e.spec(), e.report()));
+        return entry(id).map(e -> ExperimentViews.Detail.of(e.spec(), e.report(), e.results()));
     }
 
     @Override
@@ -108,6 +122,37 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
         return entry(id).flatMap(e -> e.report().runs().stream()
                 .filter(r -> r.summary().runId().equals(runId)).findFirst()
                 .map(r -> ExperimentViews.RunSummary.of(e.spec(), r, names)));
+    }
+
+    @Override
+    public synchronized Optional<SelectionViews.CrossTable> crossTable(ExperimentId id, String metric, String rowControl) {
+        return entry(id).map(e -> SelectionViews.CrossTable.of(e.report().runs(), metric, rowControl));
+    }
+
+    @Override
+    public synchronized Optional<Page<SelectionViews.SelectionDayRow>> selectionDays(
+            ExperimentId id, String runId, int page, int size) {
+        return entry(id).flatMap(e -> e.report().runs().stream()
+                .filter(r -> r.summary().runId().equals(runId)).findFirst()
+                .map(r -> Page.of(r.selectionDays().stream()
+                        .map(d -> SelectionViews.SelectionDayRow.of(d, e.results())).toList(), page, size)));
+    }
+
+    @Override
+    public synchronized Optional<SelectionViews.SelectionResultView> selectionResult(ExperimentId id, String resultHash) {
+        return result(id, resultHash).map(r -> SelectionViews.SelectionResultView.of(r, names));
+    }
+
+    @Override
+    public synchronized Optional<Page<SelectionViews.EvaluationRow>> selectionEvaluations(
+            ExperimentId id, String resultHash, String filter, String reason, int page, int size) {
+        SelectionViews.EvaluationFilter f = SelectionViews.EvaluationFilter.parse(filter);
+        return result(id, resultHash)
+                .map(r -> Page.of(SelectionViews.evaluations(r, names, f, reason), page, size));
+    }
+
+    private Optional<SelectionResult> result(ExperimentId id, String resultHash) {
+        return entry(id).flatMap(e -> Optional.ofNullable(e.results().get(resultHash)));
     }
 
     /** 건수 내림차순, 같으면 stage·code 이름순(결과가 매번 같은 순서). */
