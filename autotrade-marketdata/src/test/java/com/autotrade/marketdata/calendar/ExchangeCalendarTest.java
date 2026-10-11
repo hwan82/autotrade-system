@@ -29,6 +29,40 @@ class ExchangeCalendarTest {
     }
 
     @Test
+    void KRX_2027_휴장일은_월력요항_공휴일과_연말_휴장_16일이다() {
+        LocalDate from = LocalDate.of(2027, 1, 1);
+        LocalDate to = LocalDate.of(2027, 12, 31);
+        long weekdays = from.datesUntil(to.plusDays(1))
+                .filter(d -> d.getDayOfWeek().getValue() <= 5).count();
+        assertThat(weekdays - krx.tradingDays(from, to).size()).isEqualTo(16);
+        assertThat(krx.isTradingDay(LocalDate.of(2027, 2, 9))).isFalse();   // 설날 대체공휴일
+        assertThat(krx.isTradingDay(LocalDate.of(2027, 5, 3))).isFalse();   // 노동절 대체공휴일
+        assertThat(krx.isTradingDay(LocalDate.of(2027, 7, 19))).isFalse();  // 제헌절 대체공휴일
+        assertThat(krx.isTradingDay(LocalDate.of(2027, 12, 31))).isFalse(); // 연말 휴장
+        assertThat(krx.nextTradingDay(LocalDate.of(2027, 2, 5))).isEqualTo(LocalDate.of(2027, 2, 10));
+        assertThat(krx.nextTradingDay(LocalDate.of(2026, 12, 30))).isEqualTo(LocalDate.of(2027, 1, 4));
+        assertThat(krx.session(LocalDate.of(2027, 1, 4)).orElseThrow().open()).isEqualTo(LocalTime.of(10, 0));
+        assertThat(krx.session(LocalDate.of(2027, 11, 18)).orElseThrow().close()).isEqualTo(LocalTime.of(16, 30));
+        // 거래소 공지 전이라 2027년 날짜는 모두 확인 대상으로 남긴다
+        assertThat(krx.unverifiedDates()).contains(LocalDate.of(2027, 1, 1), LocalDate.of(2027, 1, 4), LocalDate.of(2027, 12, 31));
+    }
+
+    @Test
+    void 연말_자정에도_장_시간_보호가_판단할_수_있다() {
+        // 2026-12-31 12:00 KST(국내 연말 휴장, 뉴욕 12-30 22:00): 다음 날 2027-01-01까지 수록돼야 판단된다
+        assertThat(SessionProtection.check(Instant.parse("2026-12-31T03:00:00Z"), java.util.List.of(krx, us)))
+                .isInstanceOf(SessionProtection.Clear.class);
+        // 2027-01-04 연초 개장일은 10:00 개장이라 09:00 KST(00:00Z)부터 보호
+        assertThat(SessionProtection.check(Instant.parse("2027-01-03T23:59:00Z"), java.util.List.of(krx)))
+                .isInstanceOf(SessionProtection.Clear.class);
+        assertThat(SessionProtection.check(Instant.parse("2027-01-04T00:00:00Z"), java.util.List.of(krx)))
+                .isInstanceOf(SessionProtection.Inside.class);
+        // 2027-12-31 00:00 KST부터는 다음 날(2028-01-01)이 수록 범위 밖이라 멈춘다: 그 전에 2028년을 넣는다
+        assertThat(SessionProtection.check(Instant.parse("2027-12-30T15:00:00Z"), java.util.List.of(krx)))
+                .isInstanceOf(SessionProtection.Unknown.class);
+    }
+
+    @Test
     void KRX_연초_개장일은_10시에_연다() {
         TradingSession s = krx.session(LocalDate.of(2026, 1, 2)).orElseThrow();
         assertThat(s.open()).isEqualTo(LocalTime.of(10, 0));
@@ -74,7 +108,7 @@ class ExchangeCalendarTest {
 
     @Test
     void 수록_범위_밖은_추측하지_않고_실패한다() {
-        assertThatThrownBy(() -> krx.session(LocalDate.of(2027, 1, 4))).isInstanceOf(CalendarCoverageException.class);
+        assertThatThrownBy(() -> krx.session(LocalDate.of(2028, 1, 3))).isInstanceOf(CalendarCoverageException.class);
         assertThatThrownBy(() -> us.isTradingDay(LocalDate.of(2025, 12, 31))).isInstanceOf(CalendarCoverageException.class);
     }
 

@@ -56,7 +56,7 @@ class RunGuardTest {
 
     @Test
     void 캘린더_수록_범위_밖이면_판단할_수_없어_막는다() {
-        assertThatThrownBy(() -> at("2027-01-05T10:00:00Z", false).checkSession()).isInstanceOf(RunGuard.Refused.class)
+        assertThatThrownBy(() -> at("2028-01-05T10:00:00Z", false).checkSession()).isInstanceOf(RunGuard.Refused.class)
                 .hasMessageContaining("수록 범위 밖");
     }
 
