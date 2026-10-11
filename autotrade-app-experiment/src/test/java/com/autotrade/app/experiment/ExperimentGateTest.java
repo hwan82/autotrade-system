@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -114,6 +115,36 @@ class ExperimentGateTest {
 
         assertThat(code).isEqualTo(4);
         assertThat(root.resolve("experiments")).doesNotExist();
+    }
+
+    @Test
+    void 장_시간_보호_해제는_값이_없거나_true일_때만이고_그_밖의_값은_입력_오류다(@TempDir Path root) throws IOException {
+        // PR #52 QA F2: -PallowDuringSession=false가 보호를 풀면 안 된다
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261011-CMB01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261011-CMB01\n");
+        Clock session = Clock.fixed(Instant.parse(KRX_SESSION), ZoneOffset.UTC);
+        String[] tail = {root.toString(), "abc", "false", "EXP-20261011-CMB01"};
+
+        for (String bad : List.of("--allow-during-session=false", "--allow-during-session=yes", "--allow-during-sessions")) {
+            assertThat(ExperimentMain.run(concat("combination", bad, tail), session, config)).as(bad).isEqualTo(1);
+        }
+        // 장 시간이라 옵션이 없으면 4(보호), 해제되면 보호를 지나 등록 파일 해석에서 입력 오류 1
+        assertThat(ExperimentMain.run(concat("combination", null, tail), session, config)).isEqualTo(4);
+        for (String ok : List.of("--allow-during-session", "--allow-during-session=", "--allow-during-session=true")) {
+            assertThat(ExperimentMain.run(concat("combination", ok, tail), session, config)).as(ok).isEqualTo(1);
+        }
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).hasSize(1);
+        }
+    }
+
+    private static String[] concat(String command, String option, String[] tail) {
+        List<String> all = new java.util.ArrayList<>(List.of(command));
+        if (option != null) {
+            all.add(option);
+        }
+        all.addAll(List.of(tail));
+        return all.toArray(String[]::new);
     }
 
     @Test

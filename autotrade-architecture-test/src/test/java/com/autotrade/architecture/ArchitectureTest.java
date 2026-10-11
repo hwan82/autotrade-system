@@ -246,11 +246,15 @@ class ArchitectureTest {
      */
     static final ArchRule APPS_RUN_EXPERIMENTS_THROUGH_GATE = noClasses()
             .that().resideInAPackage("com.autotrade.app..")
-            .should().accessTargetWhere(DescribedPredicate.describe("RunGate 인자가 없는 실험 실행 입구",
+            .should().accessTargetWhere(DescribedPredicate.describe("RunGate 인자가 없는 실험 실행 입구나 RunGate.NONE",
                     a -> ungatedExperimentEntry(a.getTarget())))
             .because("실험 실행은 장 시간 보호·정지 요청 파일 확인을 거친다(D-063, broker-and-fault-design 5.2 0번)");
 
     private static boolean ungatedExperimentEntry(AccessTarget t) {
+        if (t instanceof AccessTarget.FieldAccessTarget f) {
+            // 늘 열린 문을 넘기면 인자는 있어도 같은 우회다(PR #52 QA Q2)
+            return f.getOwner().isEquivalentTo(RunGate.class) && f.getName().equals("NONE");
+        }
         if (!(t instanceof AccessTarget.CodeUnitAccessTarget c)) {
             return false;
         }
@@ -381,11 +385,11 @@ class ArchitectureTest {
     void 실험_실행_명령은_정지_확인을_거치고_프로세스_설정을_모른다() {
         APPS_RUN_EXPERIMENTS_THROUGH_GATE.check(PRODUCTION);
         EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG.check(PRODUCTION);
-        // 위반 고정 예제: 게이트 없는 실행기·연구·조합 실험 입구, 설정 로더, 주문 포트
+        // 위반 고정 예제: 게이트 없는 실행기·연구·조합 실험 입구, RunGate.NONE, 설정 로더, 주문 포트
         JavaClasses fixture = new ClassFileImporter().importClasses(RunsWithoutGate.class);
         EvaluationResult gate = APPS_RUN_EXPERIMENTS_THROUGH_GATE.evaluate(fixture);
         assertThat(gate.hasViolation()).isTrue();
-        assertThat(gate.getFailureReport().getDetails()).hasSize(3);
+        assertThat(gate.getFailureReport().getDetails()).hasSize(4);
         EvaluationResult config = EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG.evaluate(fixture);
         assertThat(String.join("\n", config.getFailureReport().getDetails()))
                 .contains("ConfigLoader", "LoadedConfig", "OrderGateway");

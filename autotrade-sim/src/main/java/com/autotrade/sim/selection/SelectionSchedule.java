@@ -47,7 +47,18 @@ public final class SelectionSchedule {
      */
     public static SelectionSchedule compute(
             Collection<Combination> combinations, Collection<LocalDate> tradingDates, SelectionSource source) {
+        return compute(combinations, tradingDates, source, () -> { });
+    }
+
+    /**
+     * @param checkpoint 공급자를 부르기 전마다 부른다. 실험 실행기가 정지 확인(D-063)을 넣는다. 여기서 던진 예외는 판정으로
+     *     바꾸지 않고 그대로 올라간다(공급자 실패만 {@code PRODUCER_FAILED})
+     */
+    public static SelectionSchedule compute(
+            Collection<Combination> combinations, Collection<LocalDate> tradingDates, SelectionSource source,
+            Runnable checkpoint) {
         Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(checkpoint, "checkpoint");
         // 선정 해시 순으로 처리해 공급자 호출 순서가 조합 목록 순서와 무관하게 정해진다
         TreeMap<String, SelectionProfile> selections = new TreeMap<>();
         for (Combination c : combinations) {
@@ -56,7 +67,8 @@ public final class SelectionSchedule {
         List<LocalDate> dates = new TreeSet<>(tradingDates).stream().toList();
         Map<String, NavigableMap<LocalDate, SelectionDay>> out = new LinkedHashMap<>();
         for (Map.Entry<String, SelectionProfile> e : selections.entrySet()) {
-            out.put(e.getKey(), Collections.unmodifiableNavigableMap(schedule(e.getValue(), e.getKey(), dates, source)));
+            out.put(e.getKey(),
+                    Collections.unmodifiableNavigableMap(schedule(e.getValue(), e.getKey(), dates, source, checkpoint)));
         }
         return new SelectionSchedule(Collections.unmodifiableMap(out));
     }
@@ -75,11 +87,13 @@ public final class SelectionSchedule {
     }
 
     private static NavigableMap<LocalDate, SelectionDay> schedule(
-            SelectionProfile selection, String selectionHash, List<LocalDate> dates, SelectionSource source) {
+            SelectionProfile selection, String selectionHash, List<LocalDate> dates, SelectionSource source,
+            Runnable checkpoint) {
         TreeMap<LocalDate, SelectionDay> out = new TreeMap<>();
         DailySelection.Selected current = null;
         for (LocalDate date : dates) {
             if (current == null || date.isAfter(current.applyTo()) || date.isBefore(current.applyFrom())) {
+                checkpoint.run(); // 공급자 호출(선정 계산)이 실험 준비에서 가장 무거운 단계라 그 앞마다 본다
                 DailySelection got;
                 try {
                     got = source.select(selection, date);

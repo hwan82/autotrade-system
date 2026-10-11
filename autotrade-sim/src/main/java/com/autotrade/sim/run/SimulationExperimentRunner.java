@@ -154,10 +154,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         Objects.requireNonNull(spec, "spec");
         List<MarketEvent> events = validateAndSlice(spec);
         BigDecimal benchmarkReturn = benchmarkReturn(events);
+        gate.check(); // 선정 일정 계산(모든 선정 × 거래일) 전에 본다. 계산 중에도 공급자 호출마다 본다(PR #52 QA F1)
         SelectionSchedule schedule = selectionSchedule(spec, events);
         List<Combination> combinations = spec.combinations();
         List<RunReport> reports = new ArrayList<>(combinations.size());
-        gate.check();
         // 한 Run이 멈춤을 보면 나머지는 문을 다시 묻지 않고 다음 확인 지점에서 같은 예외로 끝난다(D-063). 어느 Run의 결과를
         // 먼저 받든 처음 받은 정지 이유(장 시간, 정지 요청 파일 등)가 명령까지 올라가야 해서 예외 자체를 남긴다(PR #52 architect R1)
         AtomicReference<ExperimentStoppedException> stopped = new AtomicReference<>();
@@ -271,7 +271,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         for (MarketEvent e : events) {
             dates.add(rules.tradingDate(e.exchangeTime()));
         }
-        return SelectionSchedule.compute(spec.combinations(), dates, selections);
+        return SelectionSchedule.compute(spec.combinations(), dates, selections, gate::check);
     }
 
     private BigDecimal benchmarkReturn(List<MarketEvent> events) {

@@ -5,6 +5,7 @@ import com.autotrade.config.ConfigPaths;
 import com.autotrade.config.LoadedConfig;
 import com.autotrade.domain.order.OrderGateway;
 import com.autotrade.sim.combo.CombinationExperiment;
+import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.study.StrategyStudy;
 import java.util.List;
@@ -27,6 +28,10 @@ public final class RunsWithoutGate {
 
     static Object combination() {
         return CombinationExperiment.runAndWrite(null, null, null, null, false, s -> { });
+    }
+
+    static Object alwaysOpen() {
+        return RunGate.NONE;
     }
 
     static LoadedConfig load() {

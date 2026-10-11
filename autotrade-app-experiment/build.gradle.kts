@@ -36,7 +36,8 @@ val gitDirty = providers.exec {
     commandLine("git", "status", "--porcelain", "--", ".", ":!experiments")
     workingDir = repoRoot
 }.standardOutput.asText.map { it.isNotBlank().toString() }
-// 실전 엔진을 끈 날에만: -PallowDuringSession (장 시간 보호만 풀린다. 정지 요청 파일은 풀리지 않는다)
+// 실전 엔진을 끈 날에만: -PallowDuringSession (장 시간 보호만 풀린다. 정지 요청 파일은 풀리지 않는다).
+// 값은 그대로 ExperimentMain에 넘겨 거기서 판단한다: 값 없음·true만 해제, 그 밖의 값(false 포함)은 입력 오류(PR #52 QA F2)
 val allowDuringSession = providers.gradleProperty("allowDuringSession")
 
 // 조합 실험(D-061): ./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=<실험ID>
@@ -57,7 +58,7 @@ val runCombinationExperiment by tasks.registering(JavaExec::class) {
         val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
         buildList {
             add("combination")
-            if (allowDuringSession.isPresent) add("--allow-during-session")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
             if (verify.isPresent) add("--verify-determinism")
@@ -77,7 +78,7 @@ val runStrategyStudy by tasks.registering(JavaExec::class) {
     argumentProviders.add(CommandLineArgumentProvider {
         buildList {
             add("study")
-            if (allowDuringSession.isPresent) add("--allow-during-session")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get()))
         }
     })

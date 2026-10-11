@@ -42,6 +42,11 @@ final class ExperimentGate implements RunGate {
         this.stopRequest = Objects.requireNonNull(stopRequest, "stopRequest");
     }
 
+    /** 확인하는 정지 요청 파일. 감시가 만드는 위치와 같아야 한다(시작 때 출력). */
+    Path stopRequest() {
+        return stopRequest;
+    }
+
     @Override
     public Optional<String> stopReason() {
         if (!Files.notExists(stopRequest)) { // 있는지 판단할 수 없으면 멈추는 쪽

@@ -134,6 +134,7 @@ public final class CombinationExperiment {
             throw new IllegalArgumentException("실험 기간이 스냅샷 범위 밖입니다: " + plan.from() + " ~ " + plan.to() + ", 스냅샷 "
                     + first + " ~ " + last);
         }
+        gate.check(); // 준비 단계(스냅샷 적재·이벤트 변환)도 단계마다 본다(PR #52 QA F1)
         SnapshotListedShares shares = manifest.files().stream()
                 .anyMatch(f -> f.name().equals(SnapshotManifest.LISTED_SHARES)) ? SnapshotListedShares.load(barsDir) : null;
         SnapshotFinancials financials = null;
@@ -146,6 +147,7 @@ public final class CombinationExperiment {
             }
         }
 
+        gate.check();
         SnapshotTradingDays.Derived days = SnapshotTradingDays.derive(bars, bars.snapshotId(), Market.KRX, first, last,
                 calendar);
         SnapshotSelectionData selectionData = new SnapshotSelectionData(Market.KRX, bars, shares, financials, days.days(),
@@ -155,6 +157,7 @@ public final class CombinationExperiment {
         log.accept("일봉 → 리플레이 이벤트: " + plan.from() + " ~ " + plan.to());
         DailyBarMarketDataSet data = DailyBarMarketDataSet.of(bars, bars.snapshotId(), Market.KRX, calendar.zone(),
                 plan.from(), plan.to());
+        gate.check();
         log.accept("종목 " + data.symbols().size() + ", 거래일 " + data.tradingDays().size() + ", 이벤트 "
                 + data.events().size() + ", 권리 변동으로 이은 종목 " + data.adjustedSymbols().size());
 
@@ -199,6 +202,7 @@ public final class CombinationExperiment {
         String determinism = "확인 안 함(--verify-determinism으로 확인)";
         if (verifyDeterminism) {
             log.accept("결정론 확인: 병렬 1로 다시 실행");
+            gate.check();
             CalculatedSelectionSource again = new CalculatedSelectionSource(new SelectionCalculator(selectionData));
             String second = ReportWriter.render(new SimulationExperimentRunner(data, rules, cost, factory, risk, execution,
                     code, 1, benchmark, again, gate).runDetailed(spec));
