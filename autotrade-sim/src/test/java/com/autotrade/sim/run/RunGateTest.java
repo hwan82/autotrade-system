@@ -89,7 +89,8 @@ class RunGateTest {
         assertThatThrownBy(() -> runner(2, closesLater).runDetailed(spec()))
                 .isInstanceOf(ExperimentStoppedException.class).hasMessage("정지 요청 파일");
         // 병렬 2라 두 Run이 함께 돈다. 이미 돌던 Run도 거래일 경계에서 끝나고(예외가 결과 대신 올라옴), 먼저 멈춘 Run이 남긴
-        // 표시를 본 Run은 문을 다시 묻지 않는다. 스레드 순서에 따라 네 번째나 다섯 번째 확인에서 끝난다
+        // 예외를 본 Run은 문을 다시 묻지 않고 같은 예외로 끝난다. 그래서 어느 Run의 결과를 먼저 받든 처음 받은 정지 이유가
+        // 그대로 올라온다(PR #52 architect R1). 스레드 순서에 따라 네 번째나 다섯 번째 확인에서 끝난다
         assertThat(asked.get()).isBetween(4, 5);
     }
 

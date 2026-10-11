@@ -37,3 +37,47 @@
 
 ## 판정
 수정 필요(F1: `ExperimentGate`의 정지 요청 판단 불가 시 멈춤 테스트 추가)
+
+## 재검토 2026-10-11
+- 대상: PR #52 / 커밋 `5116758e4cd5e8bb536a348c5b38a2be55086591` / `git diff 4268621 5116758`(7개 파일)과 `git diff origin/main...HEAD` 전체 현재 상태(32개 파일, +956 −115)
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon`: BUILD SUCCESSFUL.
+  - 강제 재실행 `:autotrade-{risk,architecture-test,app-engine,app-experiment,sim,app-collector,marketdata}:test --rerun`: BUILD SUCCESSFUL. 실패 0, 건너뜀 0. 건수는 risk 55, architecture-test 31, app-engine 48, app-experiment 10, sim 114, app-collector 60, marketdata 80. 새 테스트 3개(`ExperimentGateTest#정지_요청이_있는지_판단할_수_없으면_해제_옵션과_상관없이_멈춘다`, `RunGateTest#병렬로_돌던_Run도_다음_거래일에_끝나고_결과_없이_멈춘다`, `ArchitectureTest#실험_실행_명령은_정지_확인을_거치고_프로세스_설정을_모른다`)가 결과 XML에 있다.
+  - F1 변이 확인: `ExperimentGate.java:47`의 `!Files.notExists(stopRequest)`를 잠시 `Files.exists(stopRequest)`로 바꿔 `:autotrade-app-experiment:test --rerun`을 돌렸다. "10 tests completed, 1 failed"로 새 테스트가 잡았다. 바꾼 코드는 `git checkout`으로 되돌렸다.
+  - `RunGateTest`만 반복 실행(`./gradlew :autotrade-sim:test --rerun --tests com.autotrade.sim.run.RunGateTest`): 6번 중 2번(1·4회차) 실패. 그 앞의 `-q` 반복 5번에서도 FAILED 줄이 4번 나왔다. 실패 내용은 아래 F2.
+  - 주의: 이 재검토를 쓰는 동안 같은 작업 트리에 검토자가 만들지 않은 커밋 전 변경이 생겼다. 대상은 `SimulationExperimentRunner.java`(`AtomicReference`로 첫 정지 예외를 남김, 주석에 "PR #52 architect R1"), `RunGateTest.java`, `docs/reviews/pr-52/architect.md`다. 실패한 회차의 스택은 커밋 `5116758`의 코드(`checkGate:295`의 일반 문구)를 가리킨다. 그래서 F2 판정은 `5116758` 기준이다. 이 커밋 전 변경은 검토하지 않았다. 반복 실행의 뒤쪽 회차가 이 변경 위에서 돌았는지는 확인 못 했다.
+  - 커밋 `5116758`에 들어간 `docs/reviews/pr-52/risk-ops.md`는 검토자가 쓴 원문과 바이트가 같다(`git show 5116758:... | diff -` 차이 없음).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 수정 커밋은 테스트, 고정 예제, D-063 문서만 바꿨다. RealTradingGuard 관련 변경 없음. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | 새 ArchUnit 규칙 `APPS_RUN_EXPERIMENTS_THROUGH_GATE`(`ArchitectureTest.java:247`)와 `EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG`(`:266`)는 규칙을 더하기만 했다. 둘째 규칙이 실험 명령에서 `com.autotrade.broker..`와 `com.autotrade.domain.order..` 의존을 막아 주문 출구와의 거리를 코드로 고정한다. 위반 고정 예제 `RunsWithoutGate`에서 3건과 설정·주문 포트 위반이 잡히는 것도 확인했다(`ArchitectureTest#실험_실행_명령은_정지_확인을_거치고_프로세스_설정을_모른다` 통과). 기존 규칙은 바뀌지 않았다 |
+| A3 | 해당 없음 | 변경 없음 |
+| A4 | 해당 없음 | 변경 없음 |
+| A5 | 해당 없음 | 변경 없음 |
+| A6 | 해당 없음 | 변경 없음 |
+| A7 | 해당 없음 | 변경 없음 |
+| A8 | 실패 | 정지 순서 0번의 동작 자체(시작 거부, 거래일 경계 정지, 결과 파일 없음, 해제 옵션으로 정지 요청이 풀리지 않음)는 첫 검토 때 그대로이고, 게이트 우회 호출을 ArchUnit으로 막아 더 단단해졌다. **그러나** 병렬 실행에서 정지 사유가 사라지는 결함이 있다(F2). 멈추기는 하지만 사용자가 보는 이유가 "다른 Run이 정지 요청을 받아 멈춥니다"로 바뀔 수 있다. 장애표 #10은 감시가 죽은 채 정지 요청 파일이 남은 경우를 지금 **거부 메시지(파일 시각 포함)와 종료 코드로만** 감지한다(`broker-and-fault-design.md:169`). 메시지가 사라지면 그 감지 수단이 비결정적으로 약해진다 |
+| A9 | 통과 | 보호 경로 변경 없음 |
+| A10 | 통과 | 수정 커밋에 비밀값 없음(diff 직접 확인). 고정 예제는 `ConfigPaths.defaultLocation()`만 부르고 값을 넣지 않는다 |
+| A11 | 실패 | F1은 해결됐다(새 테스트가 변이를 잡음). 보호 테스트(ArchitectureTest)는 규칙과 테스트를 더하기만 해서 강화다. **그러나** 새로 더한 `RunGateTest#병렬로_돌던_Run도_다음_거래일에_끝나고_결과_없이_멈춘다`가 비결정적으로 실패한다. 반복 실행 6번 중 2번 실패했다(F2). CI에서 간헐적으로 깨지는 테스트는 결국 끄거나 지우고 싶어지게 만든다(지침 4장 5번 위험). 원인은 테스트가 아니라 운영 코드라 테스트를 느슨하게 고쳐서는 안 된다 |
+| A12 | 실패 | A8과 같은 이유다. 장애표 #10 감지 칸이 기대는 거부 메시지가 병렬 실행에서 보장되지 않는다. 대응표 문구는 바꾸지 않아도 되고, 코드가 첫 정지 사유를 지키면 된다 |
+| A13 | 통과 | 변경 없음. 시간 판정은 첫 검토 근거 그대로다. D-063 "위험과 한계"의 캘린더 끝 시점 정정(서울 2026-12-31 00:00부터 거부)은 `SessionProtection.java:46`(다음날 세션까지 조회)과 맞다 |
+| A14 | 통과 | D-063 결정 6과 대안 F가 새 ArchUnit 규칙과 맞다(`D-063-experiment-command-stop-gate.md`). 결정 로그 표와 기획서는 첫 검토 때 그대로이고 여전히 코드와 맞다 |
+
+### 새 지적
+- **F2 (수정 필요, A8·A11·A12)**: 병렬 실행에서 첫 정지 사유를 잃는다.
+  - 재현: 위 반복 실행에서 `Expecting message to be: "정지 요청 파일" but was: "다른 Run이 정지 요청을 받아 멈춥니다"`가 나왔다. 스택은 `SimulationExperimentRunner.checkGate(SimulationExperimentRunner.java:295)` ← `runOne(:331)`이다.
+  - 원인: `runDetailed`는 `futures`를 순서대로 `get()`하고, 처음 받은 `ExecutionException`의 원인을 그대로 던진다(`SimulationExperimentRunner.java:172-184`). Run 2가 문에서 진짜 사유를 받아 `stopped`를 세우는 사이에 Run 1이 거래일 경계에서 `stopped`만 보고 일반 문구로 끝날 수 있다(`:293-296`). 이때 `futures.get(0)`의 예외, 곧 일반 문구가 위로 올라간다. 그러면 `CombinationMain`·`StudyMain`이 찍는 거부 메시지에 정지 요청 파일 경로와 만든 시각(`ExperimentGate.java:48-50`), 또는 장 시간 보호 구간 문구가 빠진다.
+  - 이 결함은 첫 커밋 `4268621`에도 있었다. 첫 검토 N1에서 "실행으로 확인하지 않았다 `[추론]`"으로 남긴 경로이고, 이번에 실행해서 드러났다.
+  - 고칠 방향(추천): 첫 정지 예외를 `AtomicReference<ExperimentStoppedException>`(또는 사유 문자열)에 `compareAndSet`으로 남긴다. `checkGate`가 `stopped`를 볼 때와 `runDetailed`가 `ExecutionException`을 받을 때 모두 그 첫 예외를 던진다. 테스트는 사유 메시지가 언제나 문이 준 문구인지 확인하도록 그대로 두고, 같은 테스트를 여러 번 돌리는 반복 테스트(예: `@RepeatedTest(50)`)나 두 Run의 경계 도달 순서를 래치로 고정한 테스트로 비결정성이 사라졌는지 보인다.
+  - 대안: 테스트에서 메시지 확인을 빼거나 두 문구를 모두 허용하는 방법은 받아들이지 않는다. 운영 결함을 테스트를 느슨하게 해서 가리는 것이기 때문이다.
+
+### 첫 검토 지적 처리
+- F1: 해결. 근거는 `ExperimentGateTest.java:51` 테스트와 변이 확인이다.
+- N1: 테스트가 추가됐다. 다만 그 테스트가 F2를 드러냈다.
+- N2~N5: 첫 검토 때와 같다(후속 과제, 이번 PR을 막지 않음). 새 ArchUnit 규칙이 설정 로더 의존을 막으므로, N2(설정 폴더 일치)는 감시 구현 때 `ConfigPaths` 순서를 같게 맞추는 시험으로 다룬다.
+
+## 판정 (재검토)
+수정 필요(F2: 병렬 실행에서 첫 정지 사유 보존, `RunGateTest` 병렬 테스트의 비결정적 실패 해소)

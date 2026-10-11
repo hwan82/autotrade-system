@@ -48,3 +48,42 @@
 
 ## 판정
 수정 필요(B7: 장애 대응 규칙 변경이므로 risk-ops 검토 원문 `docs/reviews/pr-52/risk-ops.md`가 필요. architect가 요구하는 코드 수정은 없고 N1~N4는 권고다(N1은 문서 사실 오류라 고치기를 권함). risk-ops 판정이 "승인"이면 architect 쪽 막는 항목은 없다. 지침 10장·11장에 따라 독립 QA 뒤 사용자가 머지한다)
+
+## 재검토 2026-10-11
+- 대상: 커밋 5116758e4cd5e8bb536a348c5b38a2be55086591(`git diff 4268621 5116758`: 7파일 +206 −2)과 PR 전체 현재 상태(`git diff origin/main...5116758`)
+- 점검표: B
+- 직접 실행한 것:
+  - 이번에도 같은 작업 트리에서 다른 빌드가 돌 수 있어서, 격리 복제본(스크래치 폴더)을 5116758로 체크아웃해 `./gradlew clean build --no-daemon`을 돌렸다 → **BUILD FAILED**(EXIT 1). 실패는 `:autotrade-sim:test`의 `RunGateTest#병렬로_돌던_Run도_다음_거래일에_끝나고_결과_없이_멈춘다` 1건이다
+  - `./gradlew build --continue --no-daemon` → 실패는 같은 1건뿐(테스트 883, 실패 1, 오류 0). `ArchitectureTest` 18, `ModuleOwnershipTest` 13, `ExperimentGateTest` 10은 모두 통과
+  - 같은 테스트 클래스를 `--rerun`으로 6번 더 돌렸다 → 통과 4번, 실패 2번(run4, run6). clean build까지 합치면 **7번 중 3번 실패**. 실패 메시지: `Expecting message to be: "정지 요청 파일" but was: "다른 Run이 정지 요청을 받아 멈춥니다"`(at `SimulationExperimentRunner.checkGate`:295 ← `runOne`:331)
+  - `docs/reviews/pr-52/architect.md`의 커밋 본(5116758)과 작업 트리 본이 첫 검토 원문과 바이트 같음을 확인했다(`diff` 일치). 메인이 고친 곳 없음
+  - `docs/reviews/pr-52/risk-ops.md`를 읽었다. 4268621 대상 판정은 수정 필요(F1)이고, 5116758 대상 risk-ops 재검토 원문은 이 시점에 아직 없다
+
+### 앞 지적 처리
+| 지적 | 처리 | 근거 |
+|---|---|---|
+| N1 캘린더 끝 시점 | 반영됨 | D-063 "위험과 한계"가 "서울 2026-12-31 00:00부터"로 바뀌었다(D-063-experiment-command-stop-gate.md:37). 코드 판정(jshell 확인)과 맞다 |
+| N2 게이트 없는 입구 | 반영됨 | `APPS_RUN_EXPERIMENTS_THROUGH_GATE`(ArchitectureTest.java:247-263): `com.autotrade.app..`이 `RunGate` 인자 없는 `SimulationExperimentRunner`·`StrategyStudy` 생성자나 `CombinationExperiment.run`·`runAndWrite`를 부르면 실패한다. 위반 고정 예제 `RunsWithoutGate`에서 위반 3건을 잡고, 운영 코드에서는 통과한다. 게이트 없는 오버로드를 지우지 않은 이유와 되돌릴 조건은 D-063 대안 F에 적혔다 |
+| N3 병렬 정지 테스트 | **새 테스트가 불안정함(아래 R1)** | `RunGateTest`:83-94 |
+| N4 설정 로더·주문 포트 | 반영됨 | `EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG`(ArchitectureTest.java:266-275). 수집기 규칙과 같은 대상이고, 위반 예제에서 `ConfigLoader`·`LoadedConfig`·`OrderGateway`를 잡는다 |
+| risk-ops F1 판단 불가 | 반영됨 | `ExperimentGateTest#정지_요청이_있는지_판단할_수_없으면_해제_옵션과_상관없이_멈춘다`: 부모 경로를 일반 파일로 만들어 `exists`·`notExists`가 둘 다 false인 상태에서 해제 옵션을 켜도 멈춘다. 통과 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 실패 | 격리 복제본 clean build 실패. `RunGateTest`의 새 병렬 테스트가 스레드 순서에 따라 7번 중 3번 실패한다(위). CI에서도 같은 확률로 깨진다 `[추론]` → R1 |
+| B2 | 통과 | 이번 커밋은 운영 코드를 바꾸지 않았다. ArchUnit 규칙 2개가 추가됐고 약화된 것은 없다. 고정 예제는 `autotrade-architecture-test`의 테스트 소스(`com.autotrade.app.experiment.archfixture`)에 있고, 수집기·감시 예제와 같은 방식이다. `ModuleOwnershipTest` 통과 |
+| B3 | 통과 | D-063 결정 6과 대안 F에 새 규칙이 적혔다. 계약 변경은 없다 |
+| B4 | 통과 | 앞 근거와 같다. `RunGateTest#멈추지_않는_문은_결과를_바꾸지_않는다`와 골든 테스트가 통과한다 |
+| B5 | 해당 없음 | 금액 변경 없음 |
+| B6 | 실패 | 테스트를 지우거나 건너뛴 곳은 없다. 다만 새 병렬 정지 테스트가 결정적이지 않고(R1), 테스트가 기대하는 동작(처음 멈춘 이유가 올라옴)을 운영 코드가 보장하지 않는다 |
+| B7 | risk-ops 검토 필요 | 장애 대응 규칙 변경(5.2 0번, 장애표 #10), 보호 테스트 `ArchitectureTest` 추가 변경. `risk-ops.md`의 4268621 판정은 수정 필요(F1)이고, F1은 5116758에 반영됐지만 risk-ops 재검토 원문은 아직 없다. 머지는 지침 10장에 따라 사용자가 한다 |
+| B8 | 통과 | 이번 커밋에 새 출력 없음. 고정 예제는 실행하지 않는 코드이고 비밀값이 없다 |
+
+### R1 (수정 필요, B1·B6): 병렬 정지 때 올라오는 이유가 스레드 순서에 따라 "다른 Run이 정지 요청을 받아 멈춥니다"로 바뀐다
+- [사실] `runDetailed`는 `futures`를 제출 순서대로 `get()`하고, 처음 만난 `ExecutionException`의 원인을 그대로 던진다(SimulationExperimentRunner.java:172-181). 병렬 2에서 Run B가 문(gate)에서 진짜 이유("정지 요청 파일")를 받아 `stopped`를 켜고, 그 뒤 Run A가 거래일 경계에서 깃발만 보고 `checkGate`:295의 일반 문구로 끝나면, 앞 순서인 A의 예외가 올라간다. 테스트는 `hasMessage("정지 요청 파일")`(RunGateTest.java:90)을 기대하므로 이 순서일 때 실패한다(직접 재현 3/7).
+- [추론] 운영 영향도 있다. 실행 명령은 이 메시지를 `[combo] 멈췄습니다…`·`[study] 멈췄습니다…`로 출력하는데(CombinationMain.java:85, StudyMain.java:79), 병렬 실험에서는 운영자가 실제 이유(장 시간 보호 구간인지, 감시 정지 요청인지, 캘린더 범위 밖인지)와 해제 방법 안내 대신 "다른 Run이 정지 요청을 받아 멈춥니다"만 보게 된다. 장애표 #10은 이 거부 메시지를 감지 수단으로 쓴다.
+- 요구 사항: 처음 멈춘 이유를 실행기에 남겨(예: `AtomicReference<ExperimentStoppedException>`에 첫 예외를 compare-and-set하고, 깃발만 보고 끝난 Run과 `ExecutionException` 처리에서 그 예외를 다시 던짐) 어떤 스레드 순서에서도 진짜 이유가 올라오게 한다. 그러면 테스트의 `hasMessage`가 결정적으로 맞는다. 테스트는 고친 뒤 반복 실행(예: `@RepeatedTest` 또는 여러 번 `--rerun`)으로 안정성을 확인한다. 테스트 쪽 기대만 느슨하게 바꾸는 것(메시지 비교를 빼는 것)은 운영 메시지 문제를 남기므로 받지 않는다.
+- 덧붙임(권고): 이 테스트는 "이미 돌던 Run이 다음 거래일에 끝나는" 경로를 항상 지나지는 않는다. Run A가 Run B 시작 전에 하나뿐인 거래일 경계를 지나 정상 완료하는 순서도 가능하다(이때 호출 수 4). 거래일이 셋 이상인 데이터를 쓰거나 문이 Run 시작은 통과시키고 거래일 경계에서만 멈추게 하면 의도한 경로를 확실히 시험할 수 있다.
+
+### 판정
+수정 필요(R1: 병렬 정지에서 실제 정지 이유가 스레드 순서에 따라 일반 문구로 바뀌고, 그 때문에 새 테스트가 불안정해 `./gradlew build`가 7번 중 3번 실패한다. 실행기에 첫 정지 이유를 남겨 결정적으로 고칠 것. B7은 risk-ops의 5116758 재검토 원문 판정 "승인"이 필요하다. 앞 지적 N1·N2·N4와 risk-ops F1은 반영 확인)

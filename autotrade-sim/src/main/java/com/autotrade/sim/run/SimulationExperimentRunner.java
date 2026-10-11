@@ -52,7 +52,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 녹화·스냅샷 리플레이 실험 실행기(SIM-03·04·09·10, {@link ExperimentRunner} 계약).
@@ -158,8 +158,9 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         List<Combination> combinations = spec.combinations();
         List<RunReport> reports = new ArrayList<>(combinations.size());
         gate.check();
-        // 한 Run이 멈춤을 보면 나머지는 문을 다시 묻지 않고 다음 확인 지점에서 끝난다(D-063)
-        AtomicBoolean stopped = new AtomicBoolean();
+        // 한 Run이 멈춤을 보면 나머지는 문을 다시 묻지 않고 다음 확인 지점에서 같은 예외로 끝난다(D-063). 어느 Run의 결과를
+        // 먼저 받든 처음 받은 정지 이유(장 시간, 정지 요청 파일 등)가 명령까지 올라가야 해서 예외 자체를 남긴다(PR #52 architect R1)
+        AtomicReference<ExperimentStoppedException> stopped = new AtomicReference<>();
         try (ExecutorService pool = Executors.newFixedThreadPool(Math.min(parallelism, combinations.size()))) {
             List<Future<RunReport>> futures = new ArrayList<>();
             for (int i = 0; i < combinations.size(); i++) {
@@ -174,10 +175,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     reports.add(f.get());
                 }
             } catch (ExecutionException e) {
-                stopped.set(true);
                 futures.forEach(f -> f.cancel(false)); // 아직 시작하지 않은 Run은 시작하지 않는다
                 if (e.getCause() instanceof ExperimentStoppedException s) {
-                    throw s;
+                    stopped.compareAndSet(null, s);
+                    throw stopped.get();
                 }
                 // runOne은 Run 실패를 결과로 담으므로 여기 오는 것은 실행기 자체 오류다
                 throw new IllegalStateException("실험 실행기 오류: " + spec.id(), e.getCause());
@@ -290,21 +291,22 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         return first == null ? null : last.divide(first, MathContext.DECIMAL128).subtract(BigDecimal.ONE);
     }
 
-    private void checkGate(AtomicBoolean stopped) {
-        if (stopped.get()) {
-            throw new ExperimentStoppedException("다른 Run이 정지 요청을 받아 멈춥니다");
+    private void checkGate(AtomicReference<ExperimentStoppedException> stopped) {
+        ExperimentStoppedException first = stopped.get();
+        if (first != null) {
+            throw first;
         }
         try {
             gate.check();
         } catch (ExperimentStoppedException e) {
-            stopped.set(true);
-            throw e;
+            stopped.compareAndSet(null, e);
+            throw stopped.get();
         }
     }
 
     private RunReport runOne(
             ExperimentSpec spec, int index, List<MarketEvent> events, BigDecimal benchmarkReturn,
-            SelectionSchedule schedule, AtomicBoolean stopped) {
+            SelectionSchedule schedule, AtomicReference<ExperimentStoppedException> stopped) {
         Combination combination = spec.combinations().get(index);
         String runId = spec.id().value() + String.format("-A%02d", index + 1);
         AccountId accountId = new AccountId(runId);
