@@ -111,6 +111,7 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.broker", "autotrade-broker-api"),
             Map.entry("com.autotrade.broker.kiwoom", "autotrade-broker-kiwoom"),
             Map.entry("com.autotrade.broker.kis", "autotrade-broker-kis"),
+            Map.entry("com.autotrade.broker.toss", "autotrade-broker-toss"),
             Map.entry("com.autotrade.config", "autotrade-config"),
             Map.entry("com.autotrade.control", "autotrade-control"),
             Map.entry("com.autotrade.notification", "autotrade-notification-jar"),
