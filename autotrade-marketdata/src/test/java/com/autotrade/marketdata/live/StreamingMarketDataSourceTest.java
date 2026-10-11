@@ -151,6 +151,19 @@ class StreamingMarketDataSourceTest {
     }
 
     @Test
+    void PONG_프레임_응답은_텍스트로_보내지_않고_125바이트를_넘으면_보내지_않는다() {
+        connected();
+        FakeTransport.Conn c = transport.last();
+        int before = c.sent.size();
+        c.push("HEARTBEAT 20261008093355");
+        assertThat(c.pongs).containsExactly("HEARTBEAT 20261008093355");
+        assertThat(c.sent).hasSize(before);
+        c.push("HEARTBEAT " + "x".repeat(StreamingMarketDataSource.MAX_PONG_BYTES));
+        assertThat(c.pongs).hasSize(1);
+        assertThat(c.closed).isFalse();
+    }
+
+    @Test
     void 끊기면_재연결하고_누락_구간을_종목마다_표시하고_구독을_복구한다() {
         StreamingMarketDataSource s = connected();
         clock.set(T0.plusSeconds(10));

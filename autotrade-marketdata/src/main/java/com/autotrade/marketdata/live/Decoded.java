@@ -10,14 +10,20 @@ import java.util.Objects;
  * @param replies 바로 돌려보낼 메시지(PING 응답 등)
  * @param control 연결 제어 신호
  * @param detail 제어 신호의 사유(증권사 결과 코드·메시지). 비밀값을 담지 않는다
+ * @param pongs 바로 돌려보낼 WebSocket PONG 제어 프레임의 내용(한국투자 PINGPONG). 텍스트 메시지로 보내지 않는다
  */
-public record Decoded(List<RawQuote> quotes, List<String> replies, Control control, String detail) {
+public record Decoded(List<RawQuote> quotes, List<String> replies, Control control, String detail, List<String> pongs) {
 
     public Decoded {
         quotes = List.copyOf(quotes);
         replies = List.copyOf(replies);
         Objects.requireNonNull(control, "control");
         detail = detail == null ? "" : detail;
+        pongs = List.copyOf(pongs);
+    }
+
+    public Decoded(List<RawQuote> quotes, List<String> replies, Control control, String detail) {
+        this(quotes, replies, control, detail, List.of());
     }
 
     public static Decoded quotes(List<RawQuote> quotes) {
@@ -26,6 +32,11 @@ public record Decoded(List<RawQuote> quotes, List<String> replies, Control contr
 
     public static Decoded reply(String text) {
         return new Decoded(List.of(), List.of(text), Control.NONE, "");
+    }
+
+    /** 받은 내용을 PONG 제어 프레임으로 돌려준다(텍스트 메시지 아님). */
+    public static Decoded pong(String payload) {
+        return new Decoded(List.of(), List.of(), Control.NONE, "", List.of(payload));
     }
 
     public static Decoded control(Control control, String detail) {
