@@ -47,7 +47,7 @@ public final class SessionProtection {
 
     /**
      * 캘린더 순서대로 보고 처음 걸린 판정을 돌려준다. 현지 날짜 전날·당일·다음날 세션을 모두 봐서 자정을 넘는 구간과 시간대
-     * 차이를 놓치지 않는다.
+     * 차이를 놓치지 않는다. 거래소 공지로 확인되지 않은 날짜는 {@link ExchangeCalendar#protectionSession}으로 넓게 본다.
      */
     public static Verdict check(Instant now, List<ExchangeCalendar> calendars) {
         Objects.requireNonNull(now, "now");
@@ -56,7 +56,7 @@ public final class SessionProtection {
             for (LocalDate d : List.of(local.minusDays(1), local, local.plusDays(1))) {
                 Optional<TradingSession> s;
                 try {
-                    s = cal.session(d);
+                    s = cal.protectionSession(d);
                 } catch (CalendarCoverageException e) {
                     return new Unknown(cal.market(), d);
                 }

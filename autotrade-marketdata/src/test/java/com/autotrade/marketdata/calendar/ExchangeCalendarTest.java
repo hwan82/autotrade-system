@@ -49,17 +49,34 @@ class ExchangeCalendarTest {
 
     @Test
     void 연말_자정에도_장_시간_보호가_판단할_수_있다() {
-        // 2026-12-31 12:00 KST(국내 연말 휴장, 뉴욕 12-30 22:00): 다음 날 2027-01-01까지 수록돼야 판단된다
-        assertThat(SessionProtection.check(Instant.parse("2026-12-31T03:00:00Z"), java.util.List.of(krx, us)))
+        // 2026-12-31 18:00 KST(뉴욕 04:00): 다음 날 2027-01-01까지 수록돼야 판단된다
+        assertThat(SessionProtection.check(Instant.parse("2026-12-31T09:00:00Z"), java.util.List.of(krx, us)))
                 .isInstanceOf(SessionProtection.Clear.class);
-        // 2027-01-04 연초 개장일은 10:00 개장이라 09:00 KST(00:00Z)부터 보호
-        assertThat(SessionProtection.check(Instant.parse("2027-01-03T23:59:00Z"), java.util.List.of(krx)))
+        // 확인 안 된 2027-01-04 연초 개장일(10:00 개장 [가정])은 정규장과 합쳐 08:00 KST(전날 23:00Z)부터 보호
+        assertThat(SessionProtection.check(Instant.parse("2027-01-03T22:59:00Z"), java.util.List.of(krx)))
                 .isInstanceOf(SessionProtection.Clear.class);
-        assertThat(SessionProtection.check(Instant.parse("2027-01-04T00:00:00Z"), java.util.List.of(krx)))
+        assertThat(SessionProtection.check(Instant.parse("2027-01-03T23:00:00Z"), java.util.List.of(krx)))
                 .isInstanceOf(SessionProtection.Inside.class);
         // 2027-12-31 00:00 KST부터는 다음 날(2028-01-01)이 수록 범위 밖이라 멈춘다: 그 전에 2028년을 넣는다
         assertThat(SessionProtection.check(Instant.parse("2027-12-30T15:00:00Z"), java.util.List.of(krx)))
                 .isInstanceOf(SessionProtection.Unknown.class);
+    }
+
+    @Test
+    void 장_시간_보호는_확인_안_된_날짜를_틀려도_보호가_빠지지_않는_쪽으로_본다() {
+        java.util.List<ExchangeCalendar> cals = java.util.List.of(krx);
+        // 확인 안 된 휴장일(노동절·제헌절 대체공휴일): 거래일 계산은 휴장, 보호는 정규장이 있는 날처럼
+        assertThat(krx.isTradingDay(LocalDate.of(2027, 5, 3))).isFalse();
+        assertThat(SessionProtection.check(Instant.parse("2027-05-03T00:30:00Z"), cals)).isInstanceOf(SessionProtection.Inside.class); // 09:30
+        assertThat(SessionProtection.check(Instant.parse("2027-07-19T00:30:00Z"), cals)).isInstanceOf(SessionProtection.Inside.class);
+        // 확인 안 된 수능일(10:00~16:30 [가정]): 08:00~17:00 보호(정규장 09:00 개장과 16:30 폐장을 합침)
+        assertThat(SessionProtection.check(Instant.parse("2027-11-17T23:00:00Z"), cals)).isInstanceOf(SessionProtection.Inside.class); // 08:00
+        assertThat(SessionProtection.check(Instant.parse("2027-11-18T07:59:00Z"), cals)).isInstanceOf(SessionProtection.Inside.class); // 16:59
+        assertThat(SessionProtection.check(Instant.parse("2027-11-18T08:00:00Z"), cals)).isInstanceOf(SessionProtection.Clear.class);  // 17:00
+        // 확인된 휴장일(2026-06-03 지방선거)은 막지 않는다
+        assertThat(SessionProtection.check(Instant.parse("2026-06-03T01:00:00Z"), cals)).isInstanceOf(SessionProtection.Clear.class);
+        // 확인된 특별 운영일(2026-01-02 10:00 개장)은 그 시각 그대로
+        assertThat(krx.protectionSession(LocalDate.of(2026, 1, 2)).orElseThrow().open()).isEqualTo(LocalTime.of(10, 0));
     }
 
     @Test
