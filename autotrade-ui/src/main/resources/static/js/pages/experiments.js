@@ -1,31 +1,69 @@
 // 실험 비교 대시보드(UI-02): 목록, 실험 상세(리더보드 + 자산 곡선), 계좌 드릴다운(체결·왕복·거절 사유).
 import { h, table } from '../dom.js';
-import { get } from '../api.js';
+import { get, post } from '../api.js';
 import { equityChart, colorSwatches } from '../chart.js';
 import { money, number, pct, ratio, signClass, time, shortHash, delta, combinationLabel, STATUS, MARKET, STYLE, REFRESH, VALIDITY, SIDE, INTENT } from '../format.js';
 
 const enc = encodeURIComponent;
 
 export async function experimentsPage() {
-  const first = await get('/api/experiments?page=0&size=50');
+  const [first, folders] = await Promise.all([get('/api/experiments?page=0&size=50'), get('/api/experiment-folders')]);
   const head = h('div', { class: 'page-head' }, h('div', {},
     h('h1', {}, '실험'),
     h('p', { class: 'muted' }, '같은 기간·시드·비용 모델로 여러 전략 계좌를 돌린 결과입니다. 실험을 열면 계좌끼리 비교합니다.')));
-  if (first.total === 0) {
-    return h('div', {}, head, h('div', { class: 'empty' },
-      h('p', {}, '아직 실행한 실험이 없습니다.'),
-      h('p', { class: 'muted small' }, '실험은 녹화 데이터와 전략 구현이 준비되면 이 화면에서 만들 수 있습니다. 지금은 실험 실행기가 결과를 등록하면 여기에 나타납니다. 실험실을 다시 띄우면 목록이 비워집니다(결과 DB 저장 전).')));
-  }
-  return h('div', {}, head, pagedSection('/api/experiments', [
-    { label: '실험', render: e => h('a', { href: `#/experiments/${enc(e.id)}` }, e.id) },
-    { label: '시장', render: e => MARKET[e.market] || e.market },
-    { label: '기간', render: e => `${e.from} ~ ${e.to}` },
-    { label: '시드머니', num: true, render: e => money(e.seedCapital, e.currency) },
-    { label: '시드', num: true, render: e => e.randomSeed },
-    { label: '계좌', num: true, render: e => `${e.completedRuns}/${e.runCount}${e.failedRuns ? ` (실패 ${e.failedRuns})` : ''}` },
-    { label: '방식', render: e => e.clockMode === 'REPLAY' ? '녹화 리플레이' : '실시간 모의' },
-    { label: '데이터', render: e => e.dataSnapshotVersion },
-  ], '실험이 없습니다.'));
+  const list = first.total === 0
+    ? h('div', { class: 'empty' },
+      h('p', {}, '화면에 올라온 실험이 없습니다.'),
+      h('p', { class: 'muted small' }, '조합 실험은 실행 명령으로 돌린 뒤 아래 실험 폴더에서 불러옵니다. 실험실을 다시 띄우면 목록이 비워지므로 다시 불러옵니다(결과 DB 저장 전).'))
+    : pagedSection('/api/experiments', [
+      { label: '실험', render: e => h('a', { href: `#/experiments/${enc(e.id)}` }, e.id) },
+      { label: '시장', render: e => MARKET[e.market] || e.market },
+      { label: '기간', render: e => `${e.from} ~ ${e.to}` },
+      { label: '시드머니', num: true, render: e => money(e.seedCapital, e.currency) },
+      { label: '시드', num: true, render: e => e.randomSeed },
+      { label: '계좌', num: true, render: e => `${e.completedRuns}/${e.runCount}${e.failedRuns ? ` (실패 ${e.failedRuns})` : ''}` },
+      { label: '방식', render: e => e.clockMode === 'REPLAY' ? '녹화 리플레이' : '실시간 모의' },
+      { label: '데이터', render: e => e.dataSnapshotVersion },
+    ], '실험이 없습니다.');
+  return h('div', {}, head, list, h('h2', {}, '실험 폴더'), folderSection(folders));
+}
+
+const FOLDER_STATE = {
+  LOADED: '화면에 있음',
+  READY: '불러올 수 있음',
+  NO_BUNDLE: '결과 묶음 없음',
+  NOT_RUN: '아직 실행 안 함',
+};
+
+/** 조합 실험 폴더(D-062): 실행 명령이 쓴 결과 묶음을 확인해 화면에 올린다. 실험을 다시 돌리지 않는다. */
+function folderSection(folders) {
+  const note = h('p', { class: 'muted small' },
+    '조합 실험 폴더(experiments/)입니다. 실행 명령(runCombinationExperiment)이 쓴 결과 묶음을 detail.txt와 대조한 뒤 올립니다. '
+    + '결과 묶음이 없으면 같은 명령으로 다시 돌리면 같은 결과로 만들어집니다.');
+  if (folders.length === 0) return h('div', {}, note, h('p', { class: 'muted' }, '조합 실험 폴더가 없습니다.'));
+  const message = h('div', {});
+  const load = async (f, button) => {
+    button.disabled = true;
+    message.replaceChildren(h('p', { class: 'notice' }, `${f.id} 결과를 확인하는 중입니다.`));
+    try {
+      const res = await post(`/api/experiment-folders/${enc(f.id)}/load`);
+      location.hash = `#/experiments/${enc(res.id)}`;
+    } catch (err) {
+      button.disabled = false;
+      message.replaceChildren(h('p', { class: 'notice warn' }, `${f.id}: ${err.message}`));
+    }
+  };
+  return h('div', {}, note, message, table([
+    { label: '실험', render: f => f.state === 'LOADED' ? h('a', { href: `#/experiments/${enc(f.id)}` }, f.id) : f.id },
+    { label: '질문', render: f => f.question },
+    { label: '기간', render: f => f.period },
+    { label: '조합', num: true, render: f => number(f.combinations) },
+    { label: '상태', render: f => h('span', {}, FOLDER_STATE[f.state] || f.state,
+      f.lastError ? h('span', { class: 'sub warn' }, ` 실패: ${f.lastError}`) : null) },
+    { label: '', render: f => f.state === 'READY'
+      ? h('button', { class: 'btn secondary', type: 'button', onclick: (ev) => load(f, ev.currentTarget) }, '불러오기')
+      : null },
+  ], folders));
 }
 
 const METRIC_COLUMNS = [

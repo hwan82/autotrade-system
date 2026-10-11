@@ -112,7 +112,7 @@ parameters:
 체결·왕복·거절 행과 보유 종목 행의 `symbolName`은 설정 폴더 `symbols/<MARKET>.csv`(표시용 이름표, 없으면 필드 생략)에서 붙인다. 이름은 계산·식별에 쓰지 않는다. 요약을 기존 상세 응답에 넣지 않고 별도 경로로 둔 이유: 상세는 실험 안 모든 계좌를 한 번에 주는데 보유 종목 계산은 계좌마다 체결 원장을 다시 반영해야 하므로, 계좌 화면이 열릴 때 그 계좌 것만 계산한다(기존 응답 필드는 바뀌지 않음). 보유 종목은 `VirtualAccount`에 원장을 같은 순서로 다시 반영해 얻는다(평균 원가 규칙을 따로 구현하지 않음).
 
 ### 실험 결과 출처
-`ExperimentCatalog` 인터페이스로 읽는다. 조합 실험은 `register(spec, report, selectionResults)`로 실험이 쓴 선정 결과 본문(실험실은 `CalculatedSelectionSource.results()`)을 함께 넘기고, 카탈로그는 내용 해시로 찾는다. 실험 조합에 없는 선정의 결과는 거절한다. 본문 없이 등록하면 날짜별 기록만 보이고 본문 조회는 404다(D-060). 메서드는 화면 질의 단위(목록 한 쪽, 상세, 자산 곡선, 체결·왕복·거절 한 쪽)라서 DB 구현은 메서드마다 질의 하나로 옮기면 되고 실험 전체를 메모리로 되살릴 필요가 없다(architect 검토 3). 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. DB 구현으로 바꿔도 REST 응답은 바뀌지 않는다.
+`ExperimentCatalog` 인터페이스로 읽는다. 조합 실험은 `register(spec, report, selectionResults)`로 실험이 쓴 선정 결과 본문(실험실은 `CalculatedSelectionSource.results()`)을 함께 넘기고, 카탈로그는 내용 해시로 찾는다. 실험 조합에 없는 선정의 결과는 거절한다. 본문 없이 등록하면 날짜별 기록만 보이고 본문 조회는 404다(D-060). 메서드는 화면 질의 단위(목록 한 쪽, 상세, 자산 곡선, 체결·왕복·거절 한 쪽)라서 DB 구현은 메서드마다 질의 하나로 옮기면 되고 실험 전체를 메모리로 되살릴 필요가 없다(architect 검토 3). 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. DB 구현으로 바꿔도 REST 응답은 바뀌지 않는다. 조합 실험 결과는 실행 명령이 쓴 결과 묶음(`experiments/<실험ID>/result-bundle.jsonl.gz`)을 "실험 폴더"에서 불러와 `detail.txt`와 대조한 뒤 등록한다(`ExperimentFolders`, `/api/experiment-folders`, D-062). 실험실은 실험을 다시 돌리지 않는다.
 
 ## 6. 설정 화면 (UI-04)
 

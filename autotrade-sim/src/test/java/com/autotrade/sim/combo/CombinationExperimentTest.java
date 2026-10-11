@@ -13,6 +13,7 @@ import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.run.ResultBundle;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationReport;
 import java.io.IOException;
@@ -22,6 +23,9 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.zip.GZIPInputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -172,8 +176,41 @@ class CombinationExperimentTest {
     @Test
     void 같은_입력이면_결과_파일이_바이트까지_같다() throws IOException {
         CombinationExperiment.Outcome first = run(false);
+        byte[] firstBundle = Files.readAllBytes(tmp.resolve("experiments").resolve(ID).resolve(ResultBundle.FILE_NAME));
         CombinationExperiment.Outcome second = run(false);
+        byte[] secondBundle = Files.readAllBytes(tmp.resolve("experiments").resolve(ID).resolve(ResultBundle.FILE_NAME));
         assertThat(second.files()).isEqualTo(first.files());
+        assertThat(secondBundle).isEqualTo(firstBundle);
+        assertThat(Files.exists(tmp.resolve("experiments").resolve(ID).resolve(ResultBundle.FILE_NAME + ".tmp"))).isFalse();
+    }
+
+    @Test
+    void 결과_묶음은_선정_기록이_가리키는_선정_결과를_모두_담는다() throws IOException {
+        CombinationExperiment.Outcome out = run(false);
+        assertThat(out.spec().combinations()).hasSize(2);
+        Set<String> referenced = new TreeSet<>();
+        out.report().runs().forEach(r -> r.selectionDays().forEach(d -> {
+            if (d.selection().isValid()) {
+                referenced.add(d.selection().resultHash());
+            }
+        }));
+        Set<String> inTsv = new TreeSet<>();
+        out.files().get("selection-days.tsv").lines().skip(1).forEach(l -> inTsv.add(l.split("\t", -1)[6]));
+        Set<String> bundled = new TreeSet<>();
+        out.selectionResults().forEach(r -> bundled.add(r.contentHash()));
+        assertThat(referenced).isNotEmpty();
+        assertThat(bundled).isEqualTo(inTsv).containsAll(referenced);
+
+        String text;
+        try (var in = new GZIPInputStream(Files.newInputStream(
+                tmp.resolve("experiments").resolve(ID).resolve(ResultBundle.FILE_NAME)))) {
+            text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        List<String> lines = text.lines().toList();
+        assertThat(lines.get(0)).startsWith("{\"kind\":\"result-bundle\",\"schema\":1,\"experiment\":\"" + ID + "\"");
+        assertThat(lines.stream().filter(l -> l.startsWith("{\"kind\":\"run\"")).count()).isEqualTo(2);
+        assertThat(lines.stream().filter(l -> l.startsWith("{\"kind\":\"selection-result\"")).count())
+                .isEqualTo(bundled.size());
     }
 
     @Test
