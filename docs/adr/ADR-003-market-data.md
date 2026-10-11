@@ -163,7 +163,7 @@
 | 환율 이력(OVS-08) | 미구현 | 수집기 스냅샷에 환율 파일 추가 |
 | 게이트웨이 → 실전 엔진·실험실 실시간 전달(IPC) | 녹화까지만 | 3단계(실험실 실시간)·7단계(엔진)에서 방식 결정 (architect) |
 | 구독 거절(`SUBSCRIBE_REJECTED`)이 장애 전환·경보로 이어지지 않음. 한국투자는 접속키 오류도 구독 응답 `rt_cd`로 와서 접속키를 버리지 않음 | 건수(`stats().subscribeRejected`)만 셈 | 거절된 종목을 그 소스에서 받지 못한 것으로 보고 재배분, 보유 종목이면 경보, 인증 오류 코드면 자격 증명 폐기 (data-engineer, risk-ops 검토 R2) |
-| 토스 WebSocket 실시간 소스(D-024, 2순위, 게이트웨이 연결 최대 1개) | 미구현. 우선순위에 있어도 건너뜀. **D-059로 토스 Client ID가 하나인 동안 만들지 않음** | Q-042 ①에서 Client ID 2개가 확인되고 새 결정으로 게이트웨이용 토스 실시간을 되살릴 때만 `TossStreamProtocol` 추가 (data-engineer, risk-ops) |
+| 토스 WebSocket 실시간 소스(D-024, 2순위, 게이트웨이 연결 최대 1개) | 미구현. 우선순위에 있어도 건너뜀. **D-059로 토스 Client ID가 하나인 동안 만들지 않음** | 토스가 Client ID를 2개 이상 발급하게 되고(2026-10-11 확인 때는 불가, Q-042) 새 결정으로 게이트웨이용 토스 실시간을 되살릴 때만 `TossStreamProtocol` 추가 (data-engineer, risk-ops) |
 | 보유 종목 종목별 수신 공백 시 즉시 보호 폴링(D-024) | 게이트웨이는 `DataGap`·`unservedHeld`만 남김 | 7단계 실전 엔진 보호 경로 (risk-ops) |
 | 플러그인이 주문 출구 구현을 직접 만드는 우회를 막는 ArchUnit 규칙(ADR-002 6장 예고) | 이 PR의 플러그인에는 주문 코드가 없어 우회 경로 없음 | Guard 관련 변경이라 risk-ops 별도 PR(사용자 머지) |
 | `unservedHeld` 경보 알림 연결 | ERROR 로그만 | 7단계 알림 연결 (risk-ops) |
