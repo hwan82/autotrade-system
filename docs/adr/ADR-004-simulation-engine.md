@@ -107,6 +107,7 @@
 | 실제 `KrxMarketRules`·`UsMarketRules`로 실행 | sim-engine | PR #10 머지 후. 테스트는 같은 호가 단위표의 테스트 규칙을 쓴다 |
 | 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)을 가상·실전이 공유(SIM-12), ORD-06 신호 경과 폐기, ORD-07 상태머신 | risk-ops | 실행기는 공통 체인 `RiskChain`(D-032)만 받아 모든 모의 주문에 적용한다(블랙리스트·리스크 단계 반영됨, 멱등 키·상태머신 단계는 남음). 가상 거래소 상태는 domain `OrderState` 값만 쓴다 |
 | 일봉(다음 날 시가)·분봉(다음 봉 시가) 체결 해상도(SIM-06) | sim-engine | **일봉은 [D-061](../decisions/D-061-daily-replay-combination-runner.md)으로 끝남**(`DailyBarMarketDataSet`, 경로 모델 `DAILY-PATH-V1`). 분봉은 분봉 데이터가 생기면 |
+| 실험 단발 명령(`runCombinationExperiment`, `runStrategyStudy`)의 장 시간 보호·정지 요청 파일(D-058) | risk-ops, sim-engine | [Q-049](../decisions/README.md). 7단계 전 |
 | 고정 슬리피지 0.15%와 호가 기반 체결의 오차 측정(D-021 위험 항목) | sim-engine, strategy-researcher | 실제 녹화일이 생긴 뒤 같은 신호를 두 방식으로 체결해 비교 |
 | DB 저장(experiment·experiment_run·virtual_account·virtual_trade_log·equity_curve)과 `experiment.execution_model_id` 열 추가 | architect(스키마), sim-engine(저장) | 변경 제안: `execution_model_id VARCHAR(64) NOT NULL`. 같은 체결 모델끼리만 비교하려면 필요 |
 | 비용 표 설정 키(`cost.profiles.*`, Q-004 조사 4장) | architect | 지금은 `CostModels`의 코드 기본값. 설정에서 읽어도 `CostModel` 구조는 같다 |
