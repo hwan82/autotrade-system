@@ -53,3 +53,22 @@
 
 ## 판정
 수정 필요(A14: PR 헤드가 main과 `docs/spec/autotrade-spec.md`에서 충돌. main을 병합해 버전 칸 v14.13과 변경 이력 순서(v14.13 D-058 줄을 v14.12 D-056 줄 위)를 정리한 뒤 재검토. 그 밖의 A·B1·B6·과금 항목은 통과 또는 해당 없음)
+
+## 재검토 2026-10-11
+- 대상: PR #46 / 커밋 63ee5b5 / main(e8cc529) 대비 전체 diff(16개 파일 +430 −20, 1차 보고서 포함)
+- 1차 이후 변경: 커밋 1개(`63ee5b5 Merge remote-tracking branch 'origin/main'`)뿐. main 쪽 #42·#48·#38을 들여왔다.
+- 직접 실행한 것:
+  - `git merge-base --is-ancestor origin/main origin/pr46` → main 포함. `git merge-tree --write-tree origin/main origin/pr46` → **충돌 없음**.
+  - 1차 헤드(9d3ec31)의 merge-base 대비 diff와 새 헤드의 main 대비 diff를 `docs/spec`·`docs/decisions`·이 보고서를 빼고 비교 → **추가·삭제 줄이 같음**(코드·테스트·ADR·runbook·장애 설계 변경 없음).
+  - `./gradlew build --no-daemon` (헤드 63ee5b5): **BUILD SUCCESSFUL**(1회째). 테스트 결과 XML 집계 821개, 실패 0, 건너뜀 0(1차보다 늘어난 16개는 main에서 들어온 #42 테스트).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A14 | 통과 | `docs/spec/autotrade-spec.md` main 대비 diff: 버전 칸 v14.12 → v14.13, 변경 이력 맨 위에 v14.13(D-058) 줄을 v14.12(D-056) 줄 위에 추가, RSK-07 문구만 바뀜. `docs/decisions/README.md`: D-058 줄이 D-057 뒤에 추가되고, Q-041이 미확정에서 빠져 닫힌 미확정에 들어감. main의 D-056·Q-046 줄은 그대로 남음. 결정 내용은 1차에서 대조한 코드(`RunGuard.java:64-70`, `CollectorMain.java:73-79,95`)와 같음 |
+| 나머지 A1~A13, B1, B6, 과금 8.1~8.5 | 1차와 같음(통과 또는 해당 없음) | 코드 diff가 같고, main에서 들어온 변경(#42 한국투자 PONG·조회 호출기, #48·#38 문서)은 이 PR이 고친 파일과 겹치지 않음. B1은 위 빌드로 다시 확인함 |
+
+### 점검표 밖
+- 1차 권고 Q1~Q3(감시 로그의 요청 경로, 리포트 없는 스냅샷의 실전 입력 금지, 감시 프로세스 실행 한 클래스화)는 이 PR 범위 밖 후속 과제로 그대로 남는다. 새 위험은 없다.
+
+### 재검토 판정
+승인
