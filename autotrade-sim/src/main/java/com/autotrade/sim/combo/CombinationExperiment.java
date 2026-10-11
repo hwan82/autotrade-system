@@ -19,6 +19,7 @@ import com.autotrade.selection.calc.SnapshotSelectionData;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.selection.profile.SelectionProfileYaml;
+import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.cost.CostModel;
@@ -29,17 +30,22 @@ import com.autotrade.sim.daily.SnapshotTradingDays;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
+import com.autotrade.sim.run.ResultBundle;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
 import com.autotrade.sim.selection.CalculatedSelectionSource;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
 import com.autotrade.strategy.profile.ProfileYaml;
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.UncheckedIOException;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -47,8 +53,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * 수집 스냅샷(ADR-008) 위에서 선정 × 매매지표 조합 실험(STR-17, ADR-007 2.4·2.7 실험실 쪽, 조합 실험 절차)을 돌린다(D-061).
@@ -64,11 +72,19 @@ public final class CombinationExperiment {
     private CombinationExperiment() {
     }
 
-    /** 실험 결과와 결과 폴더에 쓸 파일(이름 → 내용, 같은 입력이면 바이트까지 같다). */
-    public record Outcome(SimulationReport report, Map<String, String> files) {
+    /**
+     * 실험 결과와 결과 폴더에 쓸 파일(이름 → 내용, 같은 입력이면 바이트까지 같다).
+     *
+     * @param selectionResults 실험이 쓴 선정 결과(선정 프로필 키 순, 그 안은 선정 기준일 순). 실험실 화면이 선정 결과 본문을
+     *     보여 주는 데 쓴다({@link ResultBundle}, D-062)
+     */
+    public record Outcome(ExperimentSpec spec, SimulationReport report, List<SelectionResult> selectionResults,
+            Map<String, String> files) {
 
         public Outcome {
+            Objects.requireNonNull(spec, "spec");
             Objects.requireNonNull(report, "report");
+            selectionResults = List.copyOf(selectionResults);
             files = Map.copyOf(files);
         }
     }
@@ -188,10 +204,17 @@ public final class CombinationExperiment {
         files.put("runs.tsv", CombinationReport.runsTsv(report));
         files.put("selection-days.tsv", CombinationReport.selectionDaysTsv(ctx, report));
         files.put("detail.txt", detail);
-        return new Outcome(report, files);
+        Map<String, String> hashByKey = new TreeMap<>();
+        selectionCache.values().forEach(p -> hashByKey.put(p.key(), p.selectionHash()));
+        List<SelectionResult> used = new ArrayList<>();
+        hashByKey.values().forEach(hash -> used.addAll(selections.results(hash).values()));
+        return new Outcome(spec, report, used, files);
     }
 
-    /** 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. */
+    /**
+     * 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. 실험실 화면용 결과 묶음 {@value ResultBundle#FILE_NAME}
+     * (gzip, 커밋하지 않음, D-062)도 함께 쓴다.
+     */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path snapshotsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log) {
         Path file = experimentDir.resolve("experiment.yaml");
@@ -214,6 +237,19 @@ public final class CombinationExperiment {
             }
             log.accept("작성: " + target);
         }
+        // 쓰다 멈춘 파일을 실험실이 읽지 않도록 임시 파일에 다 쓴 뒤 바꿔 넣는다
+        Path bundle = experimentDir.resolve(ResultBundle.FILE_NAME);
+        Path tmp = experimentDir.resolve(ResultBundle.FILE_NAME + ".tmp");
+        try {
+            try (Writer w = new BufferedWriter(new OutputStreamWriter(
+                    new GZIPOutputStream(Files.newOutputStream(tmp), 1 << 16), StandardCharsets.UTF_8), 1 << 16)) {
+                ResultBundle.write(out.spec(), out.report(), out.selectionResults(), w);
+            }
+            Files.move(tmp, bundle, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new UncheckedIOException("결과 묶음을 쓸 수 없습니다: " + bundle, e);
+        }
+        log.accept("작성: " + bundle + " (실험실 화면에서 불러오기)");
         return out;
     }
 

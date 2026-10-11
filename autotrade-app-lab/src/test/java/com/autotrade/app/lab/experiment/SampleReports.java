@@ -25,6 +25,7 @@ import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.RunSeeds;
 import com.autotrade.sim.run.RunSelectionDay;
 import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.run.SimulationReport;
@@ -175,8 +176,13 @@ public final class SampleReports {
         return days;
     }
 
+    /** 실행기와 같게 요약의 선정·조합 해시와 시드 방식도 조합에 맞춘다(결과 묶음 읽기가 대조한다, D-062). */
     private static RunReport withCombination(RunReport r, Combination c, List<RunSelectionDay> selectionDays) {
-        return new RunReport(r.summary(), c, r.fills(), r.equityCurve(), r.roundTrips(), r.rejections(), selectionDays);
+        RunResult s = r.summary();
+        RunResult summary = new RunResult(s.runId(), s.accountId(), s.profileHash(), c.selectionHashOrNone(),
+                c.combinationHash(), s.runSeed(), c.hasSelection() ? RunSeeds.V2 : RunSeeds.V1, s.status(),
+                s.finalEquity(), s.failureReason(), s.metrics());
+        return new RunReport(summary, c, r.fills(), r.equityCurve(), r.roundTrips(), r.rejections(), selectionDays);
     }
 
     public static Sample krx(String experimentId, int tradingDays) {

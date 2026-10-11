@@ -81,7 +81,7 @@ parameters:
 
 ## 5. REST 계약 (`/api`, JSON)
 
-공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403). 실전 운영 API(`/api/real/*`, ADR-006 2.3)는 여기에 `UNKNOWN_ACCOUNT` 404, `CONFIRMATION_FAILED` 403, `LOCKED` 423, `PASSWORD_NOT_CONFIGURED`·`INVALID_STATE`·`STALE` 409, `BUSY`·`ENGINE_UNREACHABLE` 503, `INTERNAL` 502를 더한다).
+공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절·실험 폴더)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403). 실전 운영 API(`/api/real/*`, ADR-006 2.3)는 여기에 `UNKNOWN_ACCOUNT` 404, `CONFIRMATION_FAILED` 403, `LOCKED` 423, `PASSWORD_NOT_CONFIGURED`·`INVALID_STATE`·`STALE` 409, `BUSY`·`ENGINE_UNREACHABLE` 503, `INTERNAL` 502를 더한다).
 
 | 메서드·경로 | 설명 |
 |---|---|
@@ -104,6 +104,8 @@ parameters:
 | `GET /api/experiments/{id}/runs/{runId}/selection-days` | 날짜별 선정 기록(`run_selection_day`): 판정(`VALID`·사유), 결과 해시, 선정 종목 수, 막은 신규 진입 수, 결과 본문 유무, 정정 대체 규칙 적용 수 |
 | `GET /api/experiments/{id}/selection-results/{hash}` | 선정 결과 하나(ADR-007 2.6 내용): 적용 범위, 입력 기준일, 평가·선정 종목 수, `restatementFallback`(MD-10 (2) 적용 수), 탈락 사유별 종목 수, 선정 종목(순위·종목명) |
 | `GET /api/experiments/{id}/selection-results/{hash}/evaluations?filter=&reason=` | 평가 행(종목 코드순, 페이징): 통과·순위, 탈락 사유, 조건별 값, 정정 대체 규칙 표시. `filter`는 `all`·`passed`·`failed`·`fallback` |
+| `GET /api/experiment-folders` | 조합 실험 폴더(`experiments-dir` 아래 `combinations:` 키가 있는 `experiment.yaml`, 실험 ID 내림차순, 페이징, D-062): `id`, `question`, `period`(`from ~ to`), `combinations`(조합 수), `state`(`LOADED` 화면에 있음·`READY` 불러올 수 있음·`NO_BUNDLE` 결과 묶음 없음·`NOT_RUN` 결과 파일 없음·`INVALID` 등록 파일 오류), `lastError`(마지막 불러오기 실패 사유나 등록 파일 오류, 없으면 null). `INVALID`면 `question`·`period`가 null |
+| `POST /api/experiment-folders/{id}/load` | 결과 묶음(`result-bundle.jsonl.gz`)을 `detail.txt`·`selection-days.tsv`와 대조한 뒤 실험 목록에 올린다(실험을 다시 돌리지 않음, D-062). 응답 `{id}`. 실험 ID 형식이 아니거나 묶음이 깨졌거나 대조가 다르면 400 `INVALID`(사유는 목록 `lastError`에도 남음), 폴더·묶음·`detail.txt`가 없으면 404 `NOT_FOUND`, 이미 올라가 있으면 409 `CONFLICT`, CSRF 토큰이 없으면 403 `CSRF` |
 | `GET /api/settings` | 그룹별 키: 현재 값, 내장 default 값, 비밀값 여부·설정 여부, 편집 가능 여부, 반영 시점 |
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
 
@@ -112,7 +114,7 @@ parameters:
 체결·왕복·거절 행과 보유 종목 행의 `symbolName`은 설정 폴더 `symbols/<MARKET>.csv`(표시용 이름표, 없으면 필드 생략)에서 붙인다. 이름은 계산·식별에 쓰지 않는다. 요약을 기존 상세 응답에 넣지 않고 별도 경로로 둔 이유: 상세는 실험 안 모든 계좌를 한 번에 주는데 보유 종목 계산은 계좌마다 체결 원장을 다시 반영해야 하므로, 계좌 화면이 열릴 때 그 계좌 것만 계산한다(기존 응답 필드는 바뀌지 않음). 보유 종목은 `VirtualAccount`에 원장을 같은 순서로 다시 반영해 얻는다(평균 원가 규칙을 따로 구현하지 않음).
 
 ### 실험 결과 출처
-`ExperimentCatalog` 인터페이스로 읽는다. 조합 실험은 `register(spec, report, selectionResults)`로 실험이 쓴 선정 결과 본문(실험실은 `CalculatedSelectionSource.results()`)을 함께 넘기고, 카탈로그는 내용 해시로 찾는다. 실험 조합에 없는 선정의 결과는 거절한다. 본문 없이 등록하면 날짜별 기록만 보이고 본문 조회는 404다(D-060). 메서드는 화면 질의 단위(목록 한 쪽, 상세, 자산 곡선, 체결·왕복·거절 한 쪽)라서 DB 구현은 메서드마다 질의 하나로 옮기면 되고 실험 전체를 메모리로 되살릴 필요가 없다(architect 검토 3). 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. DB 구현으로 바꿔도 REST 응답은 바뀌지 않는다.
+`ExperimentCatalog` 인터페이스로 읽는다. 조합 실험은 `register(spec, report, selectionResults)`로 실험이 쓴 선정 결과 본문(실험실은 `CalculatedSelectionSource.results()`)을 함께 넘기고, 카탈로그는 내용 해시로 찾는다. 실험 조합에 없는 선정의 결과는 거절한다. 본문 없이 등록하면 날짜별 기록만 보이고 본문 조회는 404다(D-060). 메서드는 화면 질의 단위(목록 한 쪽, 상세, 자산 곡선, 체결·왕복·거절 한 쪽)라서 DB 구현은 메서드마다 질의 하나로 옮기면 되고 실험 전체를 메모리로 되살릴 필요가 없다(architect 검토 3). 지금 구현은 `InMemoryExperimentCatalog`(프로세스 메모리)라서 실험실을 다시 띄우면 비어 있다. DB 구현으로 바꿔도 REST 응답은 바뀌지 않는다. 조합 실험 결과는 실행 명령이 쓴 결과 묶음(`experiments/<실험ID>/result-bundle.jsonl.gz`)을 "실험 폴더"에서 불러와 `detail.txt`와 대조한 뒤 등록한다(`ExperimentFolders`, `/api/experiment-folders`, D-062). 실험실은 실험을 다시 돌리지 않는다.
 
 ## 6. 설정 화면 (UI-04)
 

@@ -17,6 +17,9 @@ out/
 data/
 recordings/
 experiments/**/raw/
+# 실험실 화면용 결과 묶음(D-062): 실행 명령이 다시 만든다
+experiments/**/result-bundle.jsonl.gz
+experiments/**/result-bundle.jsonl.gz.tmp
 
 # IDE
 .idea/

@@ -1,6 +1,7 @@
 package com.autotrade.app.lab;
 
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
+import com.autotrade.app.lab.experiment.ExperimentFolders;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
@@ -31,6 +32,17 @@ public class LabWebConfiguration {
         loaded.warnings().forEach(w -> log.warn("종목명 표: {}", w));
         log.info("종목명 표: {}건 ({})", loaded.names().size(), configDir.resolve(SymbolNameFiles.DIR));
         return new InMemoryExperimentCatalog(loaded.names());
+    }
+
+    /**
+     * 조합 실험 폴더(D-062). 실행 명령이 결과를 쓰는 {@code experiments/}와 같은 폴더를 가리켜야 결과를 불러올 수 있다.
+     */
+    @Bean
+    ExperimentFolders experimentFolders(
+            @Value("${autotrade.lab.experiments-dir:experiments}") String dir, ExperimentCatalog catalog) {
+        ExperimentFolders folders = new ExperimentFolders(Path.of(dir), catalog);
+        log.info("실험 폴더: {}", folders.root());
+        return folders;
     }
 
     /**
