@@ -71,7 +71,7 @@ class ArchitectureTest {
     // 실험실(Spring)을 뺀 프로세스 진입점도 Spring을 쓰지 않는다
     private static final String[] PLAIN_PROCESSES = {
         "com.autotrade.app.engine..", "com.autotrade.app.gateway..", "com.autotrade.app.watchdog..",
-        "com.autotrade.app.collector..",
+        "com.autotrade.app.collector..", "com.autotrade.app.experiment..",
     };
 
     // 검사 범위: 우리 프로젝트(settings의 모든 Java 모듈)의 운영 클래스 전체(패키지 필터 없음) + 클래스패스의 com.autotrade

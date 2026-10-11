@@ -52,6 +52,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 녹화·스냅샷 리플레이 실험 실행기(SIM-03·04·09·10, {@link ExperimentRunner} 계약).
@@ -83,6 +84,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final ExecutionSettings execution;
     private final CodeVersion code;
     private final int parallelism;
+    private final RunGate gate;
     private final Symbol benchmark;
     private final SelectionSource selections;
 
@@ -112,6 +114,18 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
             SelectionSource selections) {
+        this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, selections, RunGate.NONE);
+    }
+
+    /**
+     * @param gate Run 시작 전과 Run 안에서 거래일이 바뀔 때마다 묻는 정지 확인(D-063). 멈추라고 하면 남은 Run을 시작하지
+     *     않고 {@link ExperimentStoppedException}을 던진다. 결과에는 영향이 없다
+     */
+    public SimulationExperimentRunner(
+            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
+            SelectionSource selections, RunGate gate) {
+        this.gate = Objects.requireNonNull(gate, "gate");
         this.data = Objects.requireNonNull(data, "data");
         this.rules = Objects.requireNonNull(rules, "rules");
         this.cost = Objects.requireNonNull(cost, "cost");
@@ -143,21 +157,34 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         SelectionSchedule schedule = selectionSchedule(spec, events);
         List<Combination> combinations = spec.combinations();
         List<RunReport> reports = new ArrayList<>(combinations.size());
+        gate.check();
+        // 한 Run이 멈춤을 보면 나머지는 문을 다시 묻지 않고 다음 확인 지점에서 끝난다(D-063)
+        AtomicBoolean stopped = new AtomicBoolean();
         try (ExecutorService pool = Executors.newFixedThreadPool(Math.min(parallelism, combinations.size()))) {
             List<Future<RunReport>> futures = new ArrayList<>();
             for (int i = 0; i < combinations.size(); i++) {
                 int index = i;
-                futures.add(pool.submit(() -> runOne(spec, index, events, benchmarkReturn, schedule)));
+                futures.add(pool.submit(() -> {
+                    checkGate(stopped);
+                    return runOne(spec, index, events, benchmarkReturn, schedule, stopped);
+                }));
             }
-            for (Future<RunReport> f : futures) {
-                reports.add(f.get());
+            try {
+                for (Future<RunReport> f : futures) {
+                    reports.add(f.get());
+                }
+            } catch (ExecutionException e) {
+                stopped.set(true);
+                futures.forEach(f -> f.cancel(false)); // 아직 시작하지 않은 Run은 시작하지 않는다
+                if (e.getCause() instanceof ExperimentStoppedException s) {
+                    throw s;
+                }
+                // runOne은 Run 실패를 결과로 담으므로 여기 오는 것은 실행기 자체 오류다
+                throw new IllegalStateException("실험 실행기 오류: " + spec.id(), e.getCause());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("실험 실행이 중단됐습니다: " + spec.id(), e);
-        } catch (ExecutionException e) {
-            // runOne은 Run 실패를 결과로 담으므로 여기 오는 것은 실행기 자체 오류다
-            throw new IllegalStateException("실험 실행기 오류: " + spec.id(), e.getCause());
         }
         List<RunResult> summaries = reports.stream().map(RunReport::summary).toList();
         ExperimentResult result = new ExperimentResult(spec.id(), code.commit(), code.dirty(),
@@ -263,9 +290,21 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         return first == null ? null : last.divide(first, MathContext.DECIMAL128).subtract(BigDecimal.ONE);
     }
 
+    private void checkGate(AtomicBoolean stopped) {
+        if (stopped.get()) {
+            throw new ExperimentStoppedException("다른 Run이 정지 요청을 받아 멈춥니다");
+        }
+        try {
+            gate.check();
+        } catch (ExperimentStoppedException e) {
+            stopped.set(true);
+            throw e;
+        }
+    }
+
     private RunReport runOne(
             ExperimentSpec spec, int index, List<MarketEvent> events, BigDecimal benchmarkReturn,
-            SelectionSchedule schedule) {
+            SelectionSchedule schedule, AtomicBoolean stopped) {
         Combination combination = spec.combinations().get(index);
         String runId = spec.id().value() + String.format("-A%02d", index + 1);
         AccountId accountId = new AccountId(runId);
@@ -289,6 +328,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 LocalDate d = rules.tradingDate(e.exchangeTime());
                 if (day != null && !d.equals(day)) {
                     closeDay(day, dayLastTime, exchange, account, state);
+                    checkGate(stopped);
                 }
                 if (!d.equals(day) && combination.hasSelection()) {
                     state.openSelectionDay(schedule.day(selectionHash, d));
@@ -321,6 +361,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     seedScheme, RunStatus.COMPLETED, metrics.finalEquity(), "", metrics);
             return new RunReport(summary, combination, account.ledger(), state.equity, account.roundTrips(),
                     state.rejections, state.selectionDays);
+        } catch (ExperimentStoppedException e) {
+            throw e; // Run 실패가 아니라 실험 전체 정지다(결과에 남기지 않음)
         } catch (RuntimeException e) {
             // 계좌 격리: 이 Run만 실패로 끝낸다. 다른 Run은 계속 돈다
             state.closeSelectionDay();

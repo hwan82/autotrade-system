@@ -1,17 +1,12 @@
 package com.autotrade.app.collector;
 
-import com.autotrade.marketdata.calendar.CalendarCoverageException;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
-import com.autotrade.marketdata.calendar.TradingSession;
+import com.autotrade.marketdata.calendar.SessionProtection;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 실전 엔진 PC 자원 보호(broker-and-fault-design 5.1·5.2, risk-ops 검토 PR #39 F1·F2, D-058). 감시 프로세스는 어떤 프로세스도
@@ -31,8 +26,8 @@ import java.util.Optional;
  */
 final class RunGuard {
 
-    static final int BEFORE_OPEN_MINUTES = 60;
-    static final int AFTER_CLOSE_MINUTES = 30;
+    static final int BEFORE_OPEN_MINUTES = SessionProtection.BEFORE_OPEN_MINUTES;
+    static final int AFTER_CLOSE_MINUTES = SessionProtection.AFTER_CLOSE_MINUTES;
     static final long DEFAULT_MIN_FREE_GB = 20;
 
     /** 디스크 여유 바이트. 테스트는 고정값을 넣는다. */
@@ -70,27 +65,14 @@ final class RunGuard {
         if (allowDuringSession) {
             return;
         }
-        Instant now = clock.instant();
-        for (ExchangeCalendar cal : calendars) {
-            LocalDate local = now.atZone(cal.zone()).toLocalDate();
-            for (LocalDate d : List.of(local.minusDays(1), local, local.plusDays(1))) {
-                Optional<TradingSession> s;
-                try {
-                    s = cal.session(d);
-                } catch (CalendarCoverageException e) {
-                    throw new Refused(cal.market() + " 캘린더 수록 범위 밖(" + d + ")이라 장 시간인지 판단할 수 없어 멈춥니다."
-                            + " 캘린더를 갱신하거나, 실전 엔진을 끈 날에만 --allow-during-session으로 실행하세요");
-                }
-                if (s.isPresent()) {
-                    Instant from = s.get().openInstant().minus(Duration.ofMinutes(BEFORE_OPEN_MINUTES));
-                    Instant to = s.get().closeInstant().plus(Duration.ofMinutes(AFTER_CLOSE_MINUTES));
-                    if (!now.isBefore(from) && now.isBefore(to)) {
-                        throw new Refused(cal.market() + " 장 시간 보호 구간(" + from.atZone(cal.zone()).toLocalTime() + "~"
-                                + to.atZone(cal.zone()).toLocalTime() + " " + cal.zone() + ")이라 수집을 멈춥니다."
-                                + " 받은 자료는 캐시에 남았고 구간이 끝난 뒤 다시 실행하면 이어 받습니다");
-                    }
-                }
+        switch (SessionProtection.check(clock.instant(), calendars)) {
+            case SessionProtection.Clear c -> {
             }
+            case SessionProtection.Unknown u -> throw new Refused(u.market() + " 캘린더 수록 범위 밖(" + u.date()
+                    + ")이라 장 시간인지 판단할 수 없어 멈춥니다."
+                    + " 캘린더를 갱신하거나, 실전 엔진을 끈 날에만 --allow-during-session으로 실행하세요");
+            case SessionProtection.Inside in -> throw new Refused(in.market() + " 장 시간 보호 구간(" + in.localRange()
+                    + ")이라 수집을 멈춥니다. 받은 자료는 캐시에 남았고 구간이 끝난 뒤 다시 실행하면 이어 받습니다");
         }
     }
 
