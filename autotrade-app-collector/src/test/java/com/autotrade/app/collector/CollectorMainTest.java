@@ -211,6 +211,45 @@ class CollectorMainTest {
     }
 
     @Test
+    void 감시의_정지_요청이_있으면_장_시간_해제_옵션을_줘도_시작하지_않고_파일을_지우지_않는다() throws IOException {
+        writeKeys();
+        Path stop = Files.createDirectories(config.resolve("collector-state")).resolve("stop-request");
+        Files.writeString(stop, "2026-10-08T10:00:00Z");
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = krxServer();
+        for (String cmd : List.of("krx-daily", "dart-financials")) {
+            assertThat(CollectorMain.run(args(cmd, "--allow-during-session"), clock, http, ms -> {}, PLENTY)).isEqualTo(4);
+        }
+        assertThat(http.calls).isEmpty();
+        assertThat(stop).exists();
+        assertThat(config.resolve("snapshots")).doesNotExist();
+        // 감시가 요청을 거두면 다시 돈다
+        Files.delete(stop);
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08", "--no-snapshot"), clock, http,
+                ms -> {}, PLENTY)).isZero();
+    }
+
+    @Test
+    void 실행_중_정지_요청이_생기면_다음_호출_전에_멈추고_파일을_지우지_않는다() throws IOException {
+        writeKeys();
+        Path stop = Files.createDirectories(config.resolve("collector-state")).resolve("stop-request");
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = new FakeHttp((u, n) -> {
+            try {
+                Files.writeString(stop, "now");
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+            return FakeHttp.ok("{\"OutBlock_1\":[]}");
+        });
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-06", "--allow-during-session"), clock,
+                http, ms -> {}, PLENTY)).isEqualTo(4);
+        assertThat(http.calls).hasSize(1);
+        assertThat(stop).exists();
+        assertThat(config.resolve("snapshots")).doesNotExist();
+    }
+
+    @Test
     void 디스크_여유가_기준_미만이면_시작하지_않는다() throws IOException {
         writeKeys();
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);

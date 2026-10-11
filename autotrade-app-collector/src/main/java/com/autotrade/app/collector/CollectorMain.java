@@ -68,7 +68,7 @@ public final class CollectorMain {
             return 2;
         }
         RunGuard guard = new RunGuard(clock, List.of(ExchangeCalendar.bundled(Market.KRX), ExchangeCalendar.bundled(Market.US)),
-                o.allowDuringSession, freeSpace, o.minFreeGb);
+                o.allowDuringSession, freeSpace, o.minFreeGb, o.stopRequest());
         try {
             guard.checkSession();
             guard.checkDisk(List.of(o.cacheDir, o.snapshotDir));
@@ -275,6 +275,11 @@ public final class CollectorMain {
          */
         Path budgetDir() {
             return configDir.resolve("collector-state");
+        }
+
+        /** 감시 프로세스가 만드는 정지 요청 파일(broker-and-fault-design 5.2 0번, D-058). */
+        Path stopRequest() {
+            return budgetDir().resolve("stop-request");
         }
 
         static Options parse(String[] args) {

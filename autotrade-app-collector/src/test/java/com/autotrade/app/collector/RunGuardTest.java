@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.market.Market;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -68,5 +69,17 @@ class RunGuardTest {
                 .hasMessageContaining("5GB");
         RunGuard ok = new RunGuard(Clock.systemUTC(), List.of(), false, d -> 21L * 1024 * 1024 * 1024, 20);
         assertThatCode(() -> ok.checkDisk(List.of(dir.resolve("a")))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void 정지_요청_파일은_해제_옵션과_상관없이_막고_지우지_않는다() throws IOException {
+        Path stop = dir.resolve("stop-request");
+        RunGuard g = new RunGuard(Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC),
+                List.of(ExchangeCalendar.bundled(Market.KRX), ExchangeCalendar.bundled(Market.US)), true, d -> 1L << 40, 20, stop);
+        assertThatCode(g::checkSession).doesNotThrowAnyException();
+        java.nio.file.Files.writeString(stop, "x");
+        assertThatThrownBy(g::checkSession).isInstanceOf(RunGuard.Refused.class).hasMessageContaining("정지를 요청");
+        assertThatThrownBy(g::checkSession).isInstanceOf(RunGuard.Refused.class);
+        org.assertj.core.api.Assertions.assertThat(stop).exists();
     }
 }

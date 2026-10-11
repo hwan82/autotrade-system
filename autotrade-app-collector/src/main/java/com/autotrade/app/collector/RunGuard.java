@@ -14,10 +14,13 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 실전 엔진 PC 자원 보호(broker-and-fault-design 5.1, risk-ops 검토 PR #39 F1·F2). 수집기는 감시 프로세스가 멈출 수 없는
- * 단발 명령이라 스스로 물러난다.
+ * 실전 엔진 PC 자원 보호(broker-and-fault-design 5.1·5.2, risk-ops 검토 PR #39 F1·F2, D-058). 감시 프로세스는 어떤 프로세스도
+ * 죽이지 않으므로 수집기가 스스로 물러난다.
  *
  * <ul>
+ *   <li><b>정지 요청</b>(5.2 0번, D-058): 감시 프로세스가 자원 임계치에서 {@code <설정 폴더>/collector-state/stop-request}를
+ *       만들면 시작하지 않고, 실행 중이면 다음 호출 전·하루 읽을 때마다 멈춘다. {@code --allow-during-session}으로도 풀리지 않는다.
+ *       수집기는 이 파일을 지우지 않는다(감시만 지움, ADR-007 2.7과 같은 규칙).</li>
  *   <li><b>세션 시간대 거부</b>: 국내·미국 거래일의 정규장 {@value #BEFORE_OPEN_MINUTES}분 전부터 폐장
  *       {@value #AFTER_CLOSE_MINUTES}분 뒤까지는 시작하지 않고, 실행 중 그 구간에 들어서면 다음 호출 전에 멈춘다. 수집기는
  *       Guard 상태를 읽지 못하므로 실전 계좌가 켜졌는지와 상관없이 시간으로 막는다. 캘린더 수록 범위 밖이면 판단할 수 없어 막는다.
@@ -45,8 +48,16 @@ final class RunGuard {
     private final boolean allowDuringSession;
     private final FreeSpace freeSpace;
     private final long minFreeBytes;
+    private final Path stopRequest;
 
     RunGuard(Clock clock, List<ExchangeCalendar> calendars, boolean allowDuringSession, FreeSpace freeSpace, long minFreeGb) {
+        this(clock, calendars, allowDuringSession, freeSpace, minFreeGb, null);
+    }
+
+    /** {@code stopRequest}가 null이면 정지 요청을 보지 않는다(테스트 전용). */
+    RunGuard(Clock clock, List<ExchangeCalendar> calendars, boolean allowDuringSession, FreeSpace freeSpace, long minFreeGb,
+            Path stopRequest) {
+        this.stopRequest = stopRequest;
         this.clock = clock;
         this.calendars = List.copyOf(calendars);
         this.allowDuringSession = allowDuringSession;
@@ -54,8 +65,12 @@ final class RunGuard {
         this.minFreeBytes = minFreeGb * 1024L * 1024L * 1024L;
     }
 
-    /** 지금 어느 시장 세션 보호 구간이면 {@link Refused}. */
+    /** 정지 요청 파일이 있거나 지금 어느 시장 세션 보호 구간이면 {@link Refused}. 실행 중 반복해서 부른다. */
     void checkSession() {
+        if (stopRequest != null && Files.exists(stopRequest)) {
+            throw new Refused("감시 프로세스가 자원 부족으로 정지를 요청해 멈춥니다(" + stopRequest + ")."
+                    + " 받은 자료는 캐시에 남았고, 자원이 회복돼 감시가 요청을 거두면 다시 실행할 수 있습니다. 이 파일은 직접 지우지 마세요");
+        }
         if (allowDuringSession) {
             return;
         }
