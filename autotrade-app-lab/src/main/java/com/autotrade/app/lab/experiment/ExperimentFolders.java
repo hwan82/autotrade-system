@@ -14,11 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -42,7 +42,9 @@ public final class ExperimentFolders {
 
     private final Path root;
     private final ExperimentCatalog catalog;
-    private final Map<String, String> lastErrors = new HashMap<>();
+    /** 불러오기끼리만 줄 세운다. 목록은 불러오는 동안에도 바로 답한다(불러오는 폴더는 끝날 때까지 READY로 보인다). */
+    private final Object loadLock = new Object();
+    private final Map<String, String> lastErrors = new ConcurrentHashMap<>();
 
     public ExperimentFolders(Path root, ExperimentCatalog catalog) {
         this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
@@ -57,14 +59,18 @@ public final class ExperimentFolders {
      * 폴더 하나의 상태.
      *
      * @param state LOADED(화면에 있음), READY(불러올 수 있음), NO_BUNDLE(결과 묶음 없음: 실행 명령을 아직 안 돌렸거나 D-062 전
-     *     실행), NOT_RUN(결과 파일 없음)
-     * @param lastError 이 프로세스에서 마지막으로 불러오기에 실패한 사유. 없으면 null
+     *     실행), NOT_RUN(결과 파일 없음), INVALID(조합 실험 등록 파일을 읽을 수 없음, 사유는 {@code lastError})
+     * @param lastError 이 프로세스에서 마지막으로 불러오기에 실패한 사유나 등록 파일 오류. 없으면 null. INVALID면 질문·기간이 null,
+     *     조합 수가 0
      */
     public record Folder(String id, String question, String period, int combinations, String state, String lastError) {
     }
 
-    /** 조합 실험 등록 파일이 있는 폴더(실험 ID 내림차순). 다른 모양의 {@code experiment.yaml}(합성 시세 실험 등)은 뺀다. */
-    public synchronized List<Folder> list() {
+    /**
+     * 조합 실험 등록 파일이 있는 폴더(실험 ID 내림차순). {@code combinations:} 키가 없는 {@code experiment.yaml}(합성 시세 실험
+     * 등)은 조합 실험이 아니라서 뺀다. 그 키가 있는데 읽을 수 없으면 INVALID로 보인다.
+     */
+    public List<Folder> list() {
         if (!Files.isDirectory(root)) {
             return List.of();
         }
@@ -75,11 +81,21 @@ public final class ExperimentFolders {
                 if (!ID.matcher(id).matches() || !Files.isRegularFile(dir.resolve("experiment.yaml"))) {
                     continue;
                 }
+                String yaml;
+                try {
+                    yaml = Files.readString(dir.resolve("experiment.yaml"), StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    out.add(new Folder(id, null, null, 0, "INVALID", "experiment.yaml을 읽을 수 없습니다"));
+                    continue;
+                }
+                if (yaml.lines().noneMatch(l -> l.startsWith("combinations:"))) {
+                    continue;
+                }
                 CombinationPlan plan;
                 try {
-                    plan = CombinationPlan.parse(Files.readString(dir.resolve("experiment.yaml"), StandardCharsets.UTF_8),
-                            dir.resolve("experiment.yaml").toString());
-                } catch (RuntimeException | IOException e) {
+                    plan = CombinationPlan.parse(yaml, "experiment.yaml");
+                } catch (RuntimeException e) {
+                    out.add(new Folder(id, null, null, 0, "INVALID", e.getMessage()));
                     continue;
                 }
                 String state;
@@ -108,7 +124,13 @@ public final class ExperimentFolders {
      * @throws IllegalStateException 이미 올라가 있을 때
      * @throws IllegalArgumentException 형식이 어긋나거나 확인에 실패했을 때(올리지 않는다)
      */
-    public synchronized ExperimentId load(String id) {
+    public ExperimentId load(String id) {
+        synchronized (loadLock) {
+            return loadLocked(id);
+        }
+    }
+
+    private ExperimentId loadLocked(String id) {
         if (!ID.matcher(id).matches()) {
             throw new IllegalArgumentException("실험 ID 형식이 아닙니다");
         }

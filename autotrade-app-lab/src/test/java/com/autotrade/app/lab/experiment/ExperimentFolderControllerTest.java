@@ -54,9 +54,10 @@ class ExperimentFolderControllerTest {
     void 목록에서_불러오면_실험_화면_API가_실제_결과를_준다() throws Exception {
         mvc.perform(get("/api/experiment-folders").header("Host", "127.0.0.1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].id").value(ID))
-                .andExpect(jsonPath("$[0].state").value("READY"));
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(ID))
+                .andExpect(jsonPath("$.items[0].state").value("READY"));
 
         mvc.perform(post("/api/experiment-folders/{id}/load", ID).header("Host", "127.0.0.1"))
                 .andExpect(status().isForbidden());
@@ -75,7 +76,7 @@ class ExperimentFolderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(sample.results().get(0).evaluations().size()));
         mvc.perform(get("/api/experiment-folders").header("Host", "127.0.0.1"))
-                .andExpect(jsonPath("$[0].state").value("LOADED"));
+                .andExpect(jsonPath("$.items[0].state").value("LOADED"));
     }
 
     @Test

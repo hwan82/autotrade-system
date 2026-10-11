@@ -140,6 +140,17 @@ public class ExperimentFoldersTest {
     }
 
     @Test
+    void 조합_실험_등록_파일이_깨졌으면_사유와_함께_보인다() throws IOException {
+        Path bad = Files.createDirectories(root.resolve("EXP-20261012-CMB02"));
+        Files.writeString(bad.resolve("experiment.yaml"), "id: \"EXP-20261012-CMB02\"\ncombinations:\n  - \"oops\"\n");
+        ExperimentFolders folders = new ExperimentFolders(root, new InMemoryExperimentCatalog());
+        assertThat(folders.list()).singleElement().satisfies(f -> {
+            assertThat(f.state()).isEqualTo("INVALID");
+            assertThat(f.lastError()).isNotBlank();
+        });
+    }
+
+    @Test
     void 폴더가_없으면_빈_목록() {
         assertThat(new ExperimentFolders(root.resolve("none"), new InMemoryExperimentCatalog()).list()).isEmpty();
     }

@@ -7,7 +7,9 @@ import { money, number, pct, ratio, signClass, time, shortHash, delta, combinati
 const enc = encodeURIComponent;
 
 export async function experimentsPage() {
-  const [first, folders] = await Promise.all([get('/api/experiments?page=0&size=50'), get('/api/experiment-folders')]);
+  // 폴더 목록이 실패해도 실험 목록은 보인다
+  const [first, folders] = await Promise.all([get('/api/experiments?page=0&size=50'),
+    get(`/api/experiment-folders?page=0&size=${FOLDER_PAGE}`).catch(err => ({ error: err.message }))]);
   const head = h('div', { class: 'page-head' }, h('div', {},
     h('h1', {}, '실험'),
     h('p', { class: 'muted' }, '같은 기간·시드·비용 모델로 여러 전략 계좌를 돌린 결과입니다. 실험을 열면 계좌끼리 비교합니다.')));
@@ -28,7 +30,10 @@ export async function experimentsPage() {
   return h('div', {}, head, list, h('h2', {}, '실험 폴더'), folderSection(folders));
 }
 
+const FOLDER_PAGE = 200;
+
 const FOLDER_STATE = {
+  INVALID: '등록 파일 오류',
   LOADED: '화면에 있음',
   READY: '불러올 수 있음',
   NO_BUNDLE: '결과 묶음 없음',
@@ -36,7 +41,9 @@ const FOLDER_STATE = {
 };
 
 /** 조합 실험 폴더(D-062): 실행 명령이 쓴 결과 묶음을 확인해 화면에 올린다. 실험을 다시 돌리지 않는다. */
-function folderSection(folders) {
+function folderSection(res) {
+  if (res.error) return h('p', { class: 'notice warn' }, `실험 폴더를 읽지 못했습니다: ${res.error}`);
+  const folders = res.items;
   const note = h('p', { class: 'muted small' },
     '조합 실험 폴더(experiments/)입니다. 실행 명령(runCombinationExperiment)이 쓴 결과 묶음을 detail.txt와 대조한 뒤 올립니다. '
     + '결과 묶음이 없으면 같은 명령으로 다시 돌리면 같은 결과로 만들어집니다.');
@@ -59,11 +66,11 @@ function folderSection(folders) {
     { label: '기간', render: f => f.period },
     { label: '조합', num: true, render: f => number(f.combinations) },
     { label: '상태', render: f => h('span', {}, FOLDER_STATE[f.state] || f.state,
-      f.lastError ? h('span', { class: 'sub warn' }, ` 실패: ${f.lastError}`) : null) },
+      f.lastError ? h('span', { class: 'sub warn' }, ` ${f.state === 'INVALID' ? '' : '실패: '}${f.lastError}`) : null) },
     { label: '', render: f => f.state === 'READY'
       ? h('button', { class: 'btn secondary', type: 'button', onclick: (ev) => load(f, ev.currentTarget) }, '불러오기')
       : null },
-  ], folders));
+  ], folders), res.total > folders.length ? h('p', { class: 'muted small' }, `최근 ${folders.length}개만 보입니다(전체 ${number(res.total)}개).`) : null);
 }
 
 const METRIC_COLUMNS = [
