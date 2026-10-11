@@ -121,3 +121,55 @@
 
 ## 판정 (재검토 2)
 승인. 장애 대응표(#10, 정지 순서 0번)를 바꾸는 실전 관련 PR이라 지침 10장에 따라 사용자가 직접 확인하고 머지한다.
+
+## 재검토 3 2026-10-11
+- 대상: PR #52 / 커밋 `79269ae7bd7dfab1b209eca68b0e3b8e95d403e3`(독립 QA `docs/reviews/pr-52/qa.md` F1·F2·Q1·Q2 반영) / `git diff 8254e03 79269ae`(16개 파일)와 `git diff origin/main...HEAD` 전체 현재 상태
+- 점검표: A
+- 스크래치 폴더에 새로 clone한 곳(`<scratchpad>/r3`, `git checkout 79269ae`)에서만 빌드하고 테스트했다. 커밋에 들어간 이 파일의 앞부분은 검토자 원문과 바이트가 같다.
+- 검토자 자기 지적: 독립 QA F2(`-PallowDuringSession=false`도 보호를 풂)는 첫 검토 때 `build.gradle.kts`의 `allowDuringSession.isPresent`를 읽고도 기록하지 않은 결함이다. risk-ops 검토가 놓친 것으로 남긴다.
+- 직접 실행한 것(clone 안에서):
+  - `./gradlew --no-daemon build`: BUILD SUCCESSFUL.
+  - 강제 재실행 `:autotrade-{risk,architecture-test,app-engine,app-experiment,sim,app-collector,marketdata}:test --rerun`: BUILD SUCCESSFUL. 실패 0, 건너뜀 0. 건수는 risk 55, architecture-test 31, app-engine 48, app-experiment 11, sim 115, app-collector 60, marketdata 80.
+    - 첫 시도는 "Gradle build daemon has been stopped: stop command received"로 중단됐다. 외부에서 데몬 정지 명령이 들어온 것으로 보이고, 테스트 실패는 아니다. 결과 폴더를 지우고 다시 돌려 위 결과를 얻었다.
+  - 변이 확인 1(QA F1): `SelectionSchedule.java:96`의 `checkpoint.run()`을 주석 처리하자 `SelectionCombinationRunnerTest`가 "8 tests completed, 1 failed"로 잡았다. 되돌림.
+  - 변이 확인 2(QA F2): `ExperimentMain.java:42`의 허용 조건을 고치기 전 동작과 같은 `a.startsWith("--allow-during-session")`(어떤 값이든 해제)로 바꿨다. **`:autotrade-app-experiment:test` 11건이 모두 통과했다(변이 생존).** 아래 F3. 되돌림.
+  - Gradle 끝단 확인(`AUTOTRADE_CONFIG_DIR=<scratchpad>/cfg`, 없는 실험 ID):
+    - `-PallowDuringSession=false`: "--allow-during-session은 값이 없거나 true여야 합니다…" 출력, 종료 코드 1.
+    - `-PallowDuringSession`과 `=true`: "[experiment] 정지 요청 파일 확인 위치: …/cfg/experiment-state/stop-request"와 "장 시간 보호 해제됨…" 출력 뒤 등록 파일 없음으로 종료 코드 1.
+    - 운영 동작은 맞다. clone의 `git status`는 깨끗하다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | Guard 변경 없음. risk 55건 통과 |
+| A2 | 통과 | `APPS_RUN_EXPERIMENTS_THROUGH_GATE`가 `RunGate.NONE` 필드 접근도 막도록 넓어졌다(`ArchitectureTest.java:249-256`, 고정 예제 위반 3 → 4건). 다른 규칙은 그대로다. ArchitectureTest 31건 통과 |
+| A3 | 해당 없음 | 변경 없음 |
+| A4 | 해당 없음 | 변경 없음 |
+| A5 | 해당 없음 | 변경 없음 |
+| A6 | 해당 없음 | 변경 없음 |
+| A7 | 해당 없음 | 변경 없음 |
+| A8 | 통과 | QA F1: 준비 단계 확인 지점이 생겼다. 위치는 스냅샷 적재 전·후, 거래일 도출 뒤, 이벤트 변환 뒤, 결정론 재실행 전(`CombinationExperiment.java:116,137,150,160,205`), 선정 일정 계산 전(`SimulationExperimentRunner.java:157`), 선정 공급자 호출마다(`SelectionSchedule.java:96`)다. 공급자 호출의 `try` 바깥에 있어서 정지가 `PRODUCER_FAILED`로 삼켜지지 않는다(`:96` 뒤 `:98` `try`, 테스트의 `hasMessage("장 시간")`). QA F2: 운영 동작은 맞다(`ExperimentMain.java:42-46`, Gradle 끝단 확인). 해제는 값이 없거나 `true`일 때만이고, `false`와 오타는 종료 코드 1로 멈춘다. 이쪽은 닫힌 쪽 실패다. 확인 경로와 해제 여부도 출력한다(QA Q1, 감시와 설정 폴더가 어긋날 때 사람이 알아챌 수단) |
+| A9 | 통과 | 보호 경로 변경 없음 |
+| A10 | 통과 | 시작 출력은 설정 폴더 경로뿐이고 비밀값은 없다. 수정 커밋 diff를 직접 확인했다 |
+| A11 | 실패 | QA F1 테스트(`SelectionCombinationRunnerTest#정지_확인은_선정_일정_계산_전과_공급자_호출마다_묻는다`)는 변이를 잡는다. **그러나** QA F2 테스트 `ExperimentGateTest#장_시간_보호_해제는_값이_없거나_true일_때만이고_그_밖의_값은_입력_오류다`(`ExperimentGateTest.java:121-139`)는 이 PR이 고친 바로 그 결함을 되살려도 통과한다(변이 확인 2). 나쁜 값(`:128`)과 좋은 값(`:133`) 모두 기대값이 종료 코드 1이기 때문이다. 해제가 거부돼도 1(입력 오류)이고, 해제된 뒤 최소 등록 파일 해석에서 실패해도 1이라 두 경우를 가르지 못한다. 보호 규칙에 실패하는 경우의 테스트가 사실상 없는 상태다 → F3 |
+| A12 | 통과 | 5.2 0번 문구가 새 확인 지점과 맞게 바뀌었다(`broker-and-fault-design.md` 5.2 0번 "준비 단계마다·선정 계산 중·Run 시작 전·거래일마다"). 대응표 17종, O1~O8, 장애 테스트 8종의 전제는 바뀌지 않았다 |
+| A13 | 통과 | 변경 없음 |
+| A14 | 통과 | D-063 결정 2·4, 위험과 한계(준비 단계 지연 `[가정]`, 측정 안 함), 검증 절이 코드와 맞다. 절차 문서에 "`gradle.properties`에 넣어 두지 않는다"가 추가됐다 |
+
+### 새 지적
+- **F3 (수정 필요, A11)**: 해제 옵션 값 검사 테스트가 결함을 가려내지 못한다.
+  - 고칠 방향: 나쁜 값이 "해제되지 않았다"는 것을 종료 코드 말고 다른 근거로 확인한다. 예:
+    - ① 장 시간 시계에서 나쁜 값으로 돌릴 때 `System.err`를 잡아 "값이 없거나 true여야" 문구를 확인하고, "장 시간 보호 해제됨"이 `System.out`에 나오지 않는지도 본다.
+    - ② 옵션 해석을 `static Optional<Boolean> parseAllow(String)` 같은 함수로 떼어 직접 단위 테스트한다.
+    - ③ 좋은 값의 기대 종료 코드를 1이 아닌 값으로 만든다(정지 요청 파일을 두어 해제 뒤 4가 나오게). 그러면 나쁜 값(1)과 갈린다.
+  - 완료 확인: 위 변이 확인 2(`startsWith`로 되돌리기)에서 테스트가 실패해야 한다.
+- 기록(수정 불요): `SelectionCombinationRunnerTest.java:197`의 `CountingSource` 설명 주석이 새 테스트 메서드(`:199`) 위로 밀려 메서드 설명처럼 붙었다. 다음에 그 파일을 고칠 때 옮기길 권한다.
+
+### 지적 처리
+- 첫 검토 F1, 재검토 1 F2, N1: 해결 상태 유지(이번 빌드에서 관련 테스트 통과).
+- 독립 QA F1: 해결(변이 확인 1).
+- 독립 QA F2: 운영 코드는 해결. 테스트는 F3.
+- QA Q1·Q2: 반영됨(시작 출력, `RunGate.NONE` 규칙).
+- N2~N5: 후속 과제로 유지. N2는 Q1의 시작 출력으로 사람이 알아챌 수단이 생겼으나, 감시 구현 때 설정 폴더 일치 시험은 여전히 필요하다.
+
+## 판정 (재검토 3)
+수정 필요(F3: `-PallowDuringSession` 값 검사 테스트가 고친 결함의 재발을 잡도록 고침. 변이 `startsWith`로 실패 확인)

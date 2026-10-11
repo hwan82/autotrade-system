@@ -125,13 +125,23 @@ class ExperimentGateTest {
         Clock session = Clock.fixed(Instant.parse(KRX_SESSION), ZoneOffset.UTC);
         String[] tail = {root.toString(), "abc", "false", "EXP-20261011-CMB01"};
 
-        for (String bad : List.of("--allow-during-session=false", "--allow-during-session=yes", "--allow-during-sessions")) {
-            assertThat(ExperimentMain.run(concat("combination", bad, tail), session, config)).as(bad).isEqualTo(1);
-        }
-        // 장 시간이라 옵션이 없으면 4(보호), 해제되면 보호를 지나 등록 파일 해석에서 입력 오류 1
+        List<String> bads = List.of("--allow-during-session=false", "--allow-during-session=yes", "--allow-during-sessions");
+        List<String> oks = List.of("--allow-during-session", "--allow-during-session=", "--allow-during-session=true");
+
+        // 1) 정지 요청 파일 없음, 장 시간: 옵션이 없으면 4(보호). 해제되면 보호를 지나 등록 파일 해석에서 입력 오류 1
         assertThat(ExperimentMain.run(concat("combination", null, tail), session, config)).isEqualTo(4);
-        for (String ok : List.of("--allow-during-session", "--allow-during-session=", "--allow-during-session=true")) {
+        for (String ok : oks) {
             assertThat(ExperimentMain.run(concat("combination", ok, tail), session, config)).as(ok).isEqualTo(1);
+        }
+
+        // 2) 정지 요청 파일 있음: 받아들인 해제 값은 옵션 해석을 지나 문에서 4로 멈추고, 나쁜 값은 문에 닿기 전에 입력 오류 1.
+        //    나쁜 값이 해제로 받아들여지면(예전 결함) 여기서 4가 나와 실패한다(PR #52 risk-ops F3)
+        stopRequest();
+        for (String ok : oks) {
+            assertThat(ExperimentMain.run(concat("combination", ok, tail), session, config)).as(ok).isEqualTo(4);
+        }
+        for (String bad : bads) {
+            assertThat(ExperimentMain.run(concat("combination", bad, tail), session, config)).as(bad).isEqualTo(1);
         }
         try (Stream<Path> files = Files.list(dir)) {
             assertThat(files).hasSize(1);

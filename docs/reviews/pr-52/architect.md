@@ -124,3 +124,41 @@
 
 ### 판정
 승인(architect 범위. B 전 항목이 통과 또는 해당 없음이고 확인 못 한 항목이 없다. R1은 해소됐고 앞 지적 N1·N2·N4와 risk-ops F1은 반영 확인. B7은 risk-ops의 8254e03 재검토 원문 판정이 "승인"이어야 머지 조건이 갖춰지며, 장애 대응 변경이므로 지침 10장·11장에 따라 독립 QA 뒤 사용자가 머지한다)
+
+## 재검토 3 2026-10-11
+- 대상: 커밋 79269ae7bd7dfab1b209eca68b0e3b8e95d403e3. 범위는 `git diff 8254e03 79269ae`(검토 원문을 빼면 13파일 +125 −19)와 PR 전체 현재 상태(`git diff origin/main...79269ae`)다. 이번 커밋은 독립 QA `docs/reviews/pr-52/qa.md`의 F1·F2와 권고 Q1·Q2를 반영했다
+- 점검표: B
+- 직접 실행한 것:
+  - 스크래치 폴더에 새로 `git clone`하고 79269ae를 체크아웃했다. `./gradlew clean build --no-daemon` → **BUILD SUCCESSFUL**(EXIT 0, 152 tasks 중 130 실행). 테스트 결과 XML 합계 885건, 실패 0, 오류 0, 건너뜀 0. 새·관련 테스트도 모두 통과했다: `ExperimentGateTest` 11, `SelectionCombinationRunnerTest` 8, `RunGateTest` 4, `ArchitectureTest` 18, `ModuleOwnershipTest` 13
+  - 같은 복제본에서 `RunGateTest`와 `SelectionCombinationRunnerTest`를 `--rerun`으로 10번 반복했다 → 10번 모두 통과(확인 지점이 옮겨진 뒤에도 안정적)
+  - 끝단 실행(`AUTOTRADE_CONFIG_DIR`=임시 폴더, 없는 실험 ID):
+    - `-PallowDuringSession=false` → `--allow-during-session은 값이 없거나 true여야 합니다(...): --allow-during-session=false`, 종료 코드 1. 보호가 풀리지 않는다
+    - `-PallowDuringSession` → 시작 출력에 `[experiment] 정지 요청 파일 확인 위치: <임시 폴더>/experiment-state/stop-request`와 `[experiment] 장 시간 보호 해제됨(실전 엔진을 끈 날만)...`가 나온 뒤 등록 파일 없음으로 종료 코드 1. 복제본 `git status` 깨끗
+  - `docs/reviews/pr-52/architect.md`의 79269ae 커밋 본과 작업 트리 본이 같다(재검토 2까지의 원문, 메인 수정 없음). `qa.md`(독립 QA, 수정 필요 F1·F2)와 `risk-ops.md`(재검토 2 판정까지)를 읽었다. 79269ae 대상 risk-ops 재검토 원문은 이 시점에 없다(동시 검토 중)
+
+### QA 지적 처리
+| 지적 | 처리 | 근거 |
+|---|---|---|
+| QA F1 준비 단계 정지 확인 | 반영됨(남은 공백은 문서화) | 조합 실험이 묻는 곳: 스냅샷 읽기 전(CombinationExperiment.java:116), 일봉 스냅샷 적재 뒤(:137), 상장주식수·재무 적재 뒤(:150), 이벤트 변환 뒤(:160), 결정론 확인 재실행 전(:205). 실행기는 선정 일정 계산 **전**에 묻고(SimulationExperimentRunner.java:157, 앞으로 옮김), 계산 안에서는 선정 공급자를 부르기 전마다 묻는다(`SelectionSchedule.compute(..., Runnable checkpoint)`, SelectionSchedule.java:96). 확인 지점은 공급자 실패를 `PRODUCER_FAILED`로 바꾸는 `try`(:98) **밖**에 있어서, 정지 예외가 판정으로 삼켜지지 않는다. `SelectionCombinationRunnerTest#정지_확인은_선정_일정_계산_전과_공급자_호출마다_묻는다`로 확인했다: 처음부터 멈추면 공급자 호출 0건, 도중에 멈추면 첫날만 불림. 남은 공백(가장 큰 단계인 일봉 스냅샷 한 번 읽기 중에는 확인하지 않음, 실제 규모 측정 없음)은 D-063 "위험과 한계"에 `[가정]`으로 적혔다 |
+| QA F2 해제 옵션 값 | 반영됨 | 이제 Gradle은 값을 그대로 넘기고(`--allow-during-session=$it`, build.gradle.kts:61·81), `ExperimentMain`이 판단한다(ExperimentMain.java:42-47). 값이 없거나 `=`이거나 `=true`일 때만 해제하고, 그 밖의 값(`false`, `yes`, 오타 `--allow-during-sessions`)은 입력 오류 1로 멈춘다. 대소문자가 다른 `TRUE`도 오류로 막힌다(닫힌 쪽). `ExperimentGateTest#장_시간_보호_해제는_값이_없거나_true일_때만이고_그_밖의_값은_입력_오류다`와 위 끝단 실행으로 확인했다 |
+| QA Q1 확인 위치 출력 | 반영됨 | ExperimentMain.java:52. 해제됐을 때도 출력한다 |
+| QA Q2 `RunGate.NONE` | 반영됨 | `APPS_RUN_EXPERIMENTS_THROUGH_GATE`가 이제 `com.autotrade.app..`의 `RunGate.NONE` 필드 접근도 막는다(ArchitectureTest.java:254-257). 위반 예제 `RunsWithoutGate.alwaysOpen`을 더해 4건을 잡고, 운영 코드에서는 통과한다 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 격리 복제본 clean build 성공, 관련 테스트 10번 반복 전부 통과(위) |
+| B2 | 통과 | 의존 변경 없음. sim 안의 새 겹치기 `SelectionSchedule.compute(..., Runnable)`는 JDK 타입만 쓴다(sim이 app을 모름). ArchUnit 규칙은 범위를 넓히기만 했다(`RunGate.NONE` 추가). 약화 없음 |
+| B3 | 통과 | 바뀐 계약은 해제 옵션 값 규칙, 시작 출력, `SelectionSchedule` public 겹치기(기존 3인자 겹치기는 유지, 호환), 확인 지점 위치다. 모두 D-063 결정 2·4, "위험과 한계", "검증"과 장애 설계 5.2 0번, 조합 실험 절차 문서에 반영됐다 |
+| B4 | 통과 | 확인 지점은 결과에 영향이 없다. 선정 공급자 호출 순서와 결과는 그대로이고, 체크포인트는 호출 앞에서 문만 묻는다. `RunGateTest#멈추지_않는_문은_결과를_바꾸지_않는다`, 선정 조합·골든 테스트가 통과한다 |
+| B5 | 해당 없음 | 금액 변경 없음 |
+| B6 | 통과 | QA F1·F2마다 실패 경우 테스트가 있다(위). 테스트 삭제·건너뜀 없음. `ArchitectureTest` 고정 예제 단언은 3 → 4로 강화됐다 |
+| B7 | risk-ops 검토 필요 | 장애 대응 규칙(5.2 0번 문구 갱신)과 보호 테스트 `ArchitectureTest`를 다시 바꿨다(강화). risk-ops 재검토 2(8254e03) 판정은 이번 변경 전 것이다. 79269ae 대상 risk-ops 재검토 원문은 아직 없다. 그 판정 "승인"과 독립 QA 재검토 "승인"이 있어야 머지 조건이 갖춰지고, 머지는 사용자가 한다 |
+| B8 | 통과 | 새 출력은 설정 폴더 아래 정지 요청 파일 경로와 해제 여부뿐이다. 경로는 비밀값이 아니다. diff `+` 줄에 키·토큰·계좌 없음 |
+
+### 남은 권고(막지 않음)
+- `SelectionCombinationRunnerTest`: 새 테스트를 기존 Javadoc `/** 선정 ID가 pick-samsung이면 ... 호출을 기록한다. */`와 `CountingSource` 사이에 끼워 넣었다. 그래서 그 Javadoc이 새 테스트 메서드에 붙고 `CountingSource`는 설명을 잃었다(테스트 파일 :194-198). 새 테스트 안의 `java.util.Optional`·`java.util.concurrent.atomic.AtomicInteger` 완전 이름도 import로 바꾸면 읽기 쉽다. 다음 PR에서 함께 고치면 된다.
+- 재검토 2의 권고(병렬 정지 테스트가 2거래일 데이터라 "돌던 Run이 다음 거래일에 끝나는" 경로를 항상 지나지는 않음)는 그대로 남아 있다. 후속으로 충분하다.
+- 일봉 스냅샷 한 번 읽기 중의 반응 지연은 측정되지 않았다(D-063 `[가정]`). 첫 실제 조합 실험 때 단계별 시간 로그로 확인한다는 후속이 D-063에 적혀 있으니, 실험 보고서(report.md)에 그 시간을 남기기를 권한다.
+
+### 판정
+승인(architect 범위. B 전 항목이 통과 또는 해당 없음이고 확인 못 한 항목이 없다. 독립 QA F1·F2와 Q1·Q2는 코드·테스트·문서로 반영됐다. B7은 79269ae 대상 risk-ops 재검토 원문 판정이 "승인"이어야 하고, 독립 QA 재검토도 필요하다. 장애 대응 변경이므로 지침 10장·11장에 따라 사용자가 머지한다)
