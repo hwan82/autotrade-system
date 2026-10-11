@@ -43,6 +43,36 @@
 
 ## 4. 남은 일
 
-- 실제 일봉·재무 스냅샷(사용자 키 발급 뒤)으로 (가)(나) × 스윙·중기 조합 첫 실험. 지금 `StudyMain`은 합성 장중 데이터로만 돌아 일봉 리플레이 데이터셋 연결이 필요하다(sim-engine, 일봉 → 이벤트 변환).
+- 실제 일봉·재무 스냅샷(사용자 키 발급 뒤)으로 (가)(나) × 스윙·중기 조합 첫 실험. 실행 명령은 [D-061](../decisions/D-061-daily-replay-combination-runner.md)으로 준비됐다(아래 5장).
+- 2025년 전 매매 구간: 비용 표(증권거래세 연혁)를 공식 자료로 넣어야 중기 워크포워드(2019년~)를 돌릴 수 있다(sim-engine).
+- 일봉용 매수 후 보유 기준선: `kr-bh-baseline@1`은 호가 이벤트에서만 사서 일봉 데이터에서는 거래가 없다(strategy-researcher 새 버전).
 - 다중 비교 판정과 교차표 리더보드 구현(배치표 4번 ui-dev, 리포트 쓰기는 sim-engine).
 - 화면 스타일 표기 `POSITION`(배치표 4번).
+
+## 5. 실행 (D-061)
+
+1. 수집기로 일봉(필요하면 재무) 스냅샷을 만든다([수집기 runbook](../runbooks/collector.md)). 스냅샷은 `<설정 폴더>/snapshots/krx-daily/<ID>/`에 생긴다.
+2. `experiments/<실험ID>/experiment.yaml`을 쓰고 커밋한다(형식은 `CombinationPlan` 주석). 예:
+
+```yaml
+id: "EXP-20261012-CMB01"
+question: "(나) 선정이 같은 스윙 지표의 선정 없음보다 비용 차감 후 나은가"
+market: "KRX"
+from: "2025-01-02"
+to: "2026-10-08"
+seed: "20261012"
+seed-capital: "10000000"
+bars-snapshot: "krx-daily-2026-10-08-1a2b3c4d"
+financials-snapshot: "dart-financials-2026-10-08-5e6f7a8b"   # 재무 조건 선정이 없으면 생략
+benchmark: "none"
+parallelism: "4"
+combinations:
+  - "kr-vol-surge-quiet@1 x kr-ma-trend@1"
+  - "kr-vol-surge-quiet@1 x kr-random-daily-swing@1"
+  - "none x kr-ma-trend@1"
+  - "none x kr-random-daily-swing@1"
+```
+
+3. `./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=EXP-20261012-CMB01 -PverifyDeterminism`
+   (스냅샷 폴더가 기본 위치가 아니면 `-PsnapshotsDir=...`, 힙은 `-Pheap=8g`). 결과는 같은 폴더의 `inputs.yaml`, `results.md`, `runs.tsv`, `selection-days.tsv`, `detail.txt`.
+4. 결과 해석·보고(`report.md`)는 1장 5·7번과 [experiments/README.md](../../experiments/README.md) 커밋 규칙을 따른다.
