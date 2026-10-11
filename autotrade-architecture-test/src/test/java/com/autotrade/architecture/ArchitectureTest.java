@@ -12,6 +12,7 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.app.collector.archfixture.LoadsProcessConfig;
+import com.autotrade.app.watchdog.archfixture.KillsBatchProcess;
 import com.autotrade.app.engine.command.ForgedConfirmation;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
@@ -233,6 +234,19 @@ class ArchitectureTest {
             .orShould().dependOnClassesThat().resideInAnyPackage("com.autotrade.broker..", "com.autotrade.domain.order..")
             .because("수집기는 증권사 키·계좌·주문을 다루지 않는다(D-019 3장, D-051)");
 
+    /**
+     * 감시 프로세스(진입점과 {@code autotrade-monitor-agent-jar})는 어떤 프로세스도 죽이지 않는다. 자원 부족 때 단발 일괄 명령에는 정지 요청 파일만 만든다(D-058, broker-and-fault-design
+     * 5.2 0번, ADR-007 2.7). PID로 고른 프로세스를 죽이면 PID 재사용 때 실전 엔진을 죽일 수 있다.
+     */
+    static final ArchRule WATCHDOG_KILLS_NO_PROCESS = noClasses()
+            // 감시 진입점과 감시만 쓰는 자원 감시 라이브러리(monitor-agent-jar, 장애표 #10 감지) 모두(PR #46 risk-ops F2)
+            .that().resideInAnyPackage("com.autotrade.app.watchdog..", "com.autotrade.monitor..")
+            // 호출뿐 아니라 메서드 참조(ProcessHandle::destroyForcibly)도 막는다(callMethod는 참조를 보지 않음)
+            .should().accessTargetWhere(DescribedPredicate.describe("Process·ProcessHandle의 destroy*",
+                    a -> a.getName().startsWith("destroy")
+                            && (a.getTargetOwner().isAssignableTo(Process.class) || a.getTargetOwner().isAssignableTo(ProcessHandle.class))))
+            .because("감시는 정지 요청 파일로만 멈추게 한다(D-058)");
+
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
@@ -321,6 +335,16 @@ class ArchitectureTest {
         assertThat(r.hasViolation()).isTrue();
         assertThat(String.join("\n", r.getFailureReport().getDetails()))
                 .contains("ConfigLoader", "LoadedConfig", "OrderGateway");
+    }
+
+    @Test
+    void 감시는_프로세스를_죽이지_않는다() {
+        WATCHDOG_KILLS_NO_PROCESS.check(PRODUCTION);
+        // 위반 고정 예제: ProcessHandle 메서드 참조와 Process.destroy 호출
+        EvaluationResult r = WATCHDOG_KILLS_NO_PROCESS.evaluate(
+                new ClassFileImporter().importClasses(KillsBatchProcess.class));
+        assertThat(r.hasViolation()).isTrue();
+        assertThat(String.join("\n", r.getFailureReport().getDetails())).contains("destroyForcibly", "Process.destroy()");
     }
 
     @Test

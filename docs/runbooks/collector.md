@@ -54,6 +54,9 @@
 - 매일 실행은 **서울 18:30~21:30 사이**에 맞춘다(서머타임이 아니면 22:30 전).
 - 실전 엔진을 끈 날에만 `--allow-during-session`으로 풀 수 있다.
 - 거래소 캘린더 수록 범위 밖이면(KRX 캘린더는 2026-12-31까지) 장 시간인지 판단할 수 없어 멈춘다. 연말 전에 캘린더를 갱신한다(data-engineer).
+- **감시의 정지 요청**(D-058): 설정 폴더에 `collector-state/stop-request` 파일이 있으면 PC 자원이 모자란다는 감시 프로세스의 요청이다. 수집기는 시작하지 않고, 실행 중이면 다음 호출 전에 멈춘다(종료 코드 4). `--allow-during-session`으로도 풀리지 않는다. **이 파일은 직접 지우지 않는다.** 자원이 회복되면 감시가 지우고, 그 뒤 다시 돌리면 캐시에서 이어 받는다.
+  - 수집기는 시작할 때 `감시 정지 요청 확인 위치:`로 보는 경로를 출력한다. **감시 프로세스와 같은 설정 폴더(`AUTOTRADE_CONFIG_DIR` 또는 `--config-dir`)로 실행한다.** 다르면 감시의 요청을 보지 못한다.
+  - **요청이 오래 남아 있을 때(예약 실행이 며칠째 종료 코드 4로 끝나고 메시지에 "정지를 요청"이 나올 때)**: ① 감시 프로세스가 살아 있는지 확인하고, 죽었거나 멈췄으면 감시를 다시 띄운다(장애표 #9·#10). 살아 있는 감시는 자원이 해제 기준 아래면 파일을 지운다. ② 감시가 살아 있는데도 남아 있으면 실제로 자원이 모자란 것이다. 실험실·녹화 부하를 줄이거나 디스크를 비운다. ③ 감시를 띄울 수 없으면 감시를 먼저 고친다. 그동안 수집은 쉰다(받은 것은 캐시에 남아 나중에 이어 받는다). 파일은 감시만 지운다(D-058). 사람이 지우는 예외는 두지 않는다.
 
 ## 4. 매일 운영 (장 마감 뒤)
 
@@ -65,7 +68,7 @@
   - Windows 작업 스케줄러: 동작에 `cmd /c start "" /low /wait <저장소>\autotrade-app-collector\build\install\autotrade-collector\bin\autotrade-collector.bat krx-daily --report-dir <저장소>\experiments\_data-quality --experiments-dir <저장소>\experiments --keep-snapshots 3`. 작업 설정의 우선순위도 낮게(기본 7) 둔다.
   - Linux·macOS: `nice -n 19 <저장소>/autotrade-app-collector/build/install/autotrade-collector/bin/autotrade-collector krx-daily --report-dir <저장소>/experiments/_data-quality --experiments-dir <저장소>/experiments --keep-snapshots 3`
   - 힙 상한(2GB)은 설치본 실행 스크립트에 들어 있다. `JAVA_OPTS`로 올리지 않는다.
-- 종료 코드: 0 완료, 1 오류(키·형식·네트워크), 2 사용법 오류, 3 호출 상한·한도 초과(다음 날 이어 받음), 4 실전 PC 자원 보호로 멈춤(장 시간 보호 구간, 디스크 여유 부족. 구간이 끝나거나 공간을 비운 뒤 다시 돌리면 이어 받음).
+- 종료 코드: 0 완료, 1 오류(키·형식·네트워크), 2 사용법 오류, 3 호출 상한·한도 초과(다음 날 이어 받음), 4 실전 PC 자원 보호로 멈춤(감시의 정지 요청, 장 시간 보호 구간, 디스크 여유 부족. 요청이 풀리거나 구간이 끝나거나 공간을 비운 뒤 다시 돌리면 이어 받음).
 
 ## 5. 결과물 위치
 
