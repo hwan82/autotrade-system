@@ -108,3 +108,26 @@
 
 ### 판정
 수정 필요(4: D-056 사용자 결정 출처를 사용자가 PR #38에서 직접 확인(댓글·승인 리뷰 또는 사용자 직접 머지)해야 함. PR 본문의 기획서 버전 v14.10을 v14.12로 갱신. 문서 내용은 이 밖에 수정할 것 없음)
+
+## 재검토 2026-10-11 (2)
+- 대상: PR #38 / head 4e90026(908d380 + 이 원문 커밋) / `git diff origin/main...HEAD` 전체. 직전 재검토 이후 브랜치 커밋 변경 없음(`git diff 4e90026..HEAD` 0건). main 대비 바뀐 파일은 `docs/` 5개 그대로
+- 직접 실행한 것: `./gradlew build --rerun-tasks` **BUILD SUCCESSFUL**(117 작업 실행), 테스트 XML 합계 tests 710, skipped 0, failures 0, errors 0. GitHub REST로 PR 본문, 댓글(`issues/38/comments`, `issues/comments/6107665889`), 타임라인, 리뷰 조회
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 결과 |
+| B2 | 해당 없음 | 빌드·모듈·ArchUnit 변경 없음. `ArchitectureTest` 재실행 통과 |
+| B3 | 해당 없음 | 계약 변경 없음 |
+| B4 | 해당 없음 | 코드 변경 없음. 골든 테스트 포함 재실행 통과 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 테스트 파일 변경·삭제 없음 |
+| B7 | 해당 없음 | 실전 경로 변경 없음 |
+| B8 | 통과 | 추가된 줄에 비밀값 없음 |
+
+### 남은 항목 확인
+- **4(사용자 결정 출처): 해결.** PR #38 댓글 id 6107665889, 작성자 `hwan82`(user type `User`, author_association `OWNER`), 2026-10-11T09:38:50Z, 본문 "D-056 결정 확인", `performed_via_github_app` 없음, 수정 이력 없음(created = updated). D-056 출처 줄의 사용자(GitHub `hwan82`)와 같은 계정이다.
+  - 한계 [사실]: 이 세션의 `gh` 토큰도 `hwan82` 계정으로 인증된다(`gh api user`). 그래서 GitHub 기록만으로는 사람이 썼는지 Claude가 그 토큰으로 썼는지 구별할 수 없다. 보완으로 이 기기의 이 프로젝트 세션 기록(메인 세션과 서브에이전트 transcript)에서 댓글·리뷰를 올리는 호출(`mcp__github__add_issue_comment`, `pull_request_review_write`, `gh pr comment`, POST `.../comments`)을 찾았고 0건이었다. 메인 세션 기록에는 사용자에게 이 댓글을 남겨 달라고 요청한 문장만 있다. 다른 기기·세션에서 올렸을 가능성은 이 검토로 배제할 수 없다 [가정: 사용자 본인 작성].
+- **PR 본문: 해결.** "기획서 v14.12(OVS-09~11, STR-16). v14.11은 열린 PR #43이 쓰고 있어 건너뜁니다"로 실제 diff와 일치. 검토 상태도 최신 판정을 옮겨 적음.
+
+### 판정
+승인
