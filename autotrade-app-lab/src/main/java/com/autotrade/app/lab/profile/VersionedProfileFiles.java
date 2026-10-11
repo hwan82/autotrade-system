@@ -94,10 +94,6 @@ final class VersionedProfileFiles<S> {
         return root;
     }
 
-    Instant now() {
-        return clock.instant();
-    }
-
     /** ID 이름순. */
     synchronized List<Summary> list() {
         List<Summary> out = new ArrayList<>();

@@ -88,8 +88,8 @@ parameters:
 | `GET /api/session` | 모드(`LAB`), `realOrderPath=false`, 증권사 키 설정 여부, 실전 계좌 별칭·계좌번호 설정 여부, CSRF 토큰 |
 | `GET /api/experiments` | 실험 목록(실험 ID 문자열 내림차순. `EXP-YYYYMMDD-NN` 형식이면 최근 실험이 위): 시장·통화·기간·시드·시드머니·비용 모델·비용 표 해시·체결 모델·데이터 버전·실행 방식·코드·계좌 수 |
 | `GET /api/experiments/{id}` | 요약 + 계좌별 행(프로필 ID·버전·해시, 상태, 실패 사유, 최종 평가금액, 지표 14개, 거절 건수). 조합(D-060): `selectionId`·`selectionVersion`(선정 없음이면 null), `selectionHash`(선정 없음이면 `"none"`), `combinationHash`, `selection`(선정 있는 계좌만: 결과 있던 날·없던 날과 사유별 일수, 막은 신규 진입 수, 쓴 결과 수, 정정 대체 규칙 적용 수, 본문 없는 결과 수) |
-| `GET /api/experiments/{id}/equity` | 계좌별 일별 평가금액(비용 차감 후)과 시드머니 |
-| `GET /api/experiments/{id}/runs/{runId}/summary` | 계좌 상세 머리 요약: 계좌·프로필·상태·실패 사유, 실험 기간·거래일 수·시드머니·통화, 마지막 평가금액·현금(자산 곡선 마지막 점)·총수익률, 누적 실현손익(매도 체결 `realizedPnl` 합, 비용 차감 후), 비용(수수료·세금·합계·슬리피지), 기간 끝(실패면 직전) 보유 종목(종목코드·종목명·수량·평균 단가·보유 원가), `symbolNameCount`. 실패한 Run은 곡선이 없으면 평가금액·수익률이 없다 |
+| `GET /api/experiments/{id}/equity` | 계좌별 일별 평가금액(비용 차감 후)과 시드머니. 계열마다 `selectionId`·`selectionVersion`(선정 없음이면 null, D-060) |
+| `GET /api/experiments/{id}/runs/{runId}/summary` | 계좌 상세 머리 요약: 계좌·프로필·상태·실패 사유, 실험 기간·거래일 수·시드머니·통화, 마지막 평가금액·현금(자산 곡선 마지막 점)·총수익률, 누적 실현손익(매도 체결 `realizedPnl` 합, 비용 차감 후), 비용(수수료·세금·합계·슬리피지), 기간 끝(실패면 직전) 보유 종목(종목코드·종목명·수량·평균 단가·보유 원가), `symbolNameCount`, 조합(D-060) `selectionId`·`selectionVersion`(선정 없음이면 null)·`selectionHash`(선정 없음이면 `"none"`)·`combinationHash`. 실패한 Run은 곡선이 없으면 평가금액·수익률이 없다 |
 | `GET /api/experiments/{id}/runs/{runId}/fills` | 체결 내역(종목명, 멱등 키, 체결 순번, 신호·체결 이벤트 순번과 시각, 비용 항목, 실현 손익) |
 | `GET /api/experiments/{id}/runs/{runId}/round-trips` | 왕복 거래(종목명 포함) |
 | `GET /api/experiments/{id}/runs/{runId}/rejections?stage=&code=` | 거절 사유 로그 + 거르기 전 사유별 건수(`counts`) |
