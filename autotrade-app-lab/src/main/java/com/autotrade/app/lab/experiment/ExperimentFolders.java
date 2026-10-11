@@ -95,7 +95,9 @@ public final class ExperimentFolders {
                 try {
                     plan = CombinationPlan.parse(yaml, "experiment.yaml");
                 } catch (RuntimeException e) {
-                    out.add(new Folder(id, null, null, 0, "INVALID", e.getMessage()));
+                    out.add(new Folder(id, null, null, 0, "INVALID",
+                            e.getMessage() == null ? "등록 파일을 읽을 수 없습니다(" + e.getClass().getSimpleName() + ")"
+                                    : e.getMessage()));
                     continue;
                 }
                 String state;
@@ -172,7 +174,7 @@ public final class ExperimentFolders {
             lastErrors.put(id, "결과 파일을 읽을 수 없습니다");
             throw new IllegalArgumentException("결과 파일을 읽을 수 없습니다: " + id, e);
         } catch (RuntimeException e) {
-            lastErrors.put(id, e.getMessage());
+            lastErrors.put(id, e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             throw e;
         }
     }

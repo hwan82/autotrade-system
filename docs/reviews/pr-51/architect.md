@@ -52,3 +52,37 @@
 
 ## 판정
 수정 필요(F1: B3 — ADR-005 5장 REST 계약 표에 새 두 경로의 응답·상태 값·오류 코드를 넣고, 목록의 페이징 규칙 예외를 정리)
+
+## 재검토 2026-10-11
+- 대상: PR #51 / 커밋 7a1f142fe30f3413b5b1012cd85a574097452257 / `git diff origin/main...HEAD`(origin/main = 120b827, 커밋 2개 23efd04·7a1f142). 처음 검토한 diff 전체를 다시 보고, 7a1f142의 8파일 변경을 줄 단위로 읽었다
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` → 성공(EXIT 0)
+  - `./gradlew :autotrade-sim:test :autotrade-app-lab:test :autotrade-architecture-test:test --rerun-tasks --no-daemon` → 성공(EXIT 0). 결과 XML 전부 실패·오류·건너뜀 0
+  - `ExperimentFoldersTest` 7(새 테스트 1건 포함), `ExperimentFolderControllerTest` 2, `ResultBundleReaderTest` 6, `CombinationExperimentTest` 5, 모두 통과
+- 참고: 이 검토 원문 파일은 7a1f142에 커밋되어 들어갔다. 커밋된 내용이 내가 쓴 원문과 같은지 확인했다(판정 줄과 B2 근거 줄 그대로, 덧붙이거나 고친 곳 없음)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드와 강제 재실행 모두 성공 |
+| B2 | 통과 | 바뀐 코드는 app-lab(`ExperimentFolders`, `ExperimentFolderController`)과 UI JS뿐이다. 새로 쓰는 것은 기존 `com.autotrade.app.lab.web.Page`. 모듈 의존 변경 없고 `ArchitectureTest`·`verifyPureDependencies` 통과 |
+| B3 | 통과 | ADR-005 5장 표에 두 행이 추가됐다(docs/adr/ADR-005-ui-dashboard.md:107-108). 응답 필드, `state` 값 5개(`INVALID` 포함), `lastError`, 오류 코드 400/404/409/403이 들어 있다. 84행 공통 규칙의 페이징 목록에 "실험 폴더"가 추가됐고, 구현도 `Page.of`로 `{items,page,size,total}`을 준다(ExperimentFolderController.java `list`). 크기 1~200과 page ≥ 0은 `Page.of`가 400으로 막는다(Page.java:18-23). `ExperimentFolderControllerTest`가 `$.items`·`$.total`을 확인한다. D-062 3번도 상태 값과 ADR 링크로 갱신됐다 |
+| B4 | 통과 | 새 코드에 시계·난수 없음. 목록 정렬은 그대로 폴더 이름 내림차순. 결정론·골든 테스트는 변경 없이 통과 |
+| B5 | 통과 | 금액 관련 변경 없음 |
+| B6 | 통과 | 새 동작(INVALID 상태)에 `ExperimentFoldersTest#조합_실험_등록_파일이_깨졌으면_사유와_함께_보인다`. 페이징 응답 모양은 컨트롤러 테스트로 확인. 테스트 삭제·약화 없음(기존 단언은 `$[0]`에서 `$.items[0]`로 바뀐 모양에 맞춰 옮겼다) |
+| B7 | 해당 없음 | 실전 경로·Guard·블랙리스트·리스크·장애 대응·보호 테스트 변경 없음 |
+| B8 | 통과 | 비밀값 없음. `CombinationPlan.parse`의 출처 이름을 절대 경로에서 `"experiment.yaml"`로 바꿔, INVALID 사유(`lastError`)에 PC 경로가 실리지 않는다 |
+
+### 이전 발견 처리
+- F1(수정 필요): 해결. 근거는 위 B3
+- F2(권고): 반영. 폴더 목록 요청만 `.catch`로 잡고 실험 목록은 그대로 그린다(experiments.js:10-12, `folderSection`의 `res.error` 분기)
+- F3(권고): 반영. `list()`의 잠금을 뺐고, 불러오기끼리만 `loadLock`으로 줄 세운다. `lastErrors`는 `ConcurrentHashMap`이다. `list()`가 부르는 `catalog.detail`은 `InMemoryExperimentCatalog`의 `synchronized` 메서드라서(InMemoryExperimentCatalog.java:86) 등록 중에도 안전하게 읽힌다. 묶음 파싱과 대조는 카탈로그 잠금 밖에서 하므로, 목록이 기다리는 시간은 `register` 한 번뿐이다
+- F4(권고): 반영. `combinations:`로 시작하는 줄이 있는 등록 파일이 읽히지 않으면 INVALID와 사유를 보인다
+- F5(권고, 문서): 반영. D-062 "위험과 한계"에 `detail.txt` 대조가 보지 못하는 칸이 적혔다
+
+### 새 발견 (권고, 머지 차단 아님)
+- R1: INVALID의 `lastError`가 `e.getMessage()` 그대로라서, 메시지 없는 예외(예: NPE)면 null이 되고 화면에 사유가 비어 보인다(ExperimentFolders.list). `Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName())`처럼 대체 문구를 두기를 권한다.
+- R2: 조합 실험 판별을 줄 첫머리 `combinations:` 문자열로 한다. 키 앞에 공백이 있거나 따옴표를 붙여 `"combinations":`로 쓴 등록 파일은 목록에서 빠진다. 실행 명령은 같은 파일을 정상으로 읽을 수 있다 `[추론]`. 지금 등록 파일 예시(docs/strategy/combination-experiments.md)는 모두 줄 첫머리 형식이라 영향은 작다.
+
+## 판정
+승인
