@@ -36,3 +36,35 @@ val runStrategyStudy by tasks.registering(JavaExec::class) {
     }.standardOutput.asText.map { it.isNotBlank().toString() }
     argumentProviders.add(CommandLineArgumentProvider { listOf(root.absolutePath, commit.get(), dirty.get()) })
 }
+
+// 조합 실험(D-060): ./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=<실험ID> [-PsnapshotsDir=폴더] [-PverifyDeterminism]
+// experiments/<실험ID>/experiment.yaml(등록 파일)을 읽어 수집 스냅샷(일봉·재무) 위에서 선정 × 지표 조합을 돌리고 결과를
+// 같은 폴더에 쓴다. 절차는 docs/strategy/combination-experiments.md, 커밋 규칙은 experiments/README.md.
+val runCombinationExperiment by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "선정 × 매매지표 조합 실험을 수집 스냅샷 위에서 돌려 experiments/<실험ID>/에 결과를 쓴다."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.sim.combo.CombinationMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "6g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val root = rootProject.projectDir
+    val experiment = providers.gradleProperty("experiment")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
+    val verify = providers.gradleProperty("verifyDeterminism")
+    val commit = providers.exec {
+        commandLine("git", "rev-parse", "HEAD")
+        workingDir = root
+    }.standardOutput.asText.map { it.trim() }
+    val dirty = providers.exec {
+        commandLine("git", "status", "--porcelain", "--", ".", ":!experiments")
+        workingDir = root
+    }.standardOutput.asText.map { it.isNotBlank().toString() }
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            addAll(listOf(root.absolutePath, commit.get(), dirty.get(), id))
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
+            if (verify.isPresent) add("--verify-determinism")
+        }
+    })
+}

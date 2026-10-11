@@ -43,8 +43,10 @@ import java.math.MathContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.RandomAccess;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -189,13 +191,38 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException(
                     "실험 기간이 비용 표 밖입니다(SIM-07): " + spec.from() + " ~ " + spec.to() + ", " + cost.id());
         }
-        List<MarketEvent> out = new ArrayList<>();
+        // 기간 안 이벤트가 이어져 있으면(거래일이 sequence 순으로 느는 보통의 경우) 복사하지 않고 그 구간만 넘긴다.
+        // 일봉 데이터셋(DailyBarMarketDataSet)은 이벤트를 읽을 때 만들므로 복사하면 메모리가 이벤트 수에 비례해진다.
+        // 이어져 있지 않으면 예전처럼 기간 안 이벤트만 모은다. 어느 쪽이든 Run이 보는 이벤트 순서와 내용은 같다.
+        List<MarketEvent> all = data.events();
+        int first = -1;
+        int last = -1;
+        boolean contiguous = true;
         long prev = Long.MIN_VALUE;
-        for (MarketEvent e : data.events()) {
+        for (int i = 0; i < all.size(); i++) {
+            MarketEvent e = all.get(i);
             if (e.sequence() <= prev) {
                 throw new IllegalArgumentException("시세 이벤트가 sequence 오름차순이 아닙니다: " + e.sequence());
             }
             prev = e.sequence();
+            LocalDate d = rules.tradingDate(e.exchangeTime());
+            if (!d.isBefore(spec.from()) && !d.isAfter(spec.to())) {
+                if (first < 0) {
+                    first = i;
+                } else if (last != i - 1) {
+                    contiguous = false;
+                }
+                last = i;
+            }
+        }
+        if (first < 0) {
+            return List.of();
+        }
+        if (contiguous && all instanceof RandomAccess) {
+            return Collections.unmodifiableList(all.subList(first, last + 1));
+        }
+        List<MarketEvent> out = new ArrayList<>();
+        for (MarketEvent e : all) {
             LocalDate d = rules.tradingDate(e.exchangeTime());
             if (!d.isBefore(spec.from()) && !d.isAfter(spec.to())) {
                 out.add(e);
