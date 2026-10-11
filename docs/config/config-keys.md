@@ -47,6 +47,14 @@
 - 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.
 - 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
 
+## 수집 일괄 명령 전용 파일 (`collector-secrets.json`)
+4개 프로세스는 이 파일을 읽지 않고, 수집 명령(`autotrade-app-collector`)은 `runtime-config.json`·`secrets.json`을 읽지 않는다(D-050 ⑤, D-051, [ADR-008](../adr/ADR-008-collector.md) 2.2). 같은 설정 폴더에 둔다. 모르는 항목이 있으면 수집 명령이 파일 전체를 거부한다. 기간·호출 상한·폴더는 설정 키가 아니라 명령줄 옵션이다([수집기 runbook](../runbooks/collector.md)).
+
+| 키 | 형식 | 기본값 | 설명 |
+|---|---|---|---|
+| `krx.auth-key` 🔒 | 문자열 | 빈 값 | KRX Open API 인증키(`AUTH_KEY` 헤더). 비면 `krx-daily`가 오류로 끝난다 |
+| `opendart.crtfc-key` 🔒 | 문자열 | 빈 값 | OpenDART 인증키(쿼리 `crtfc_key`, 로그·오류 메시지에서 가림). 비면 `dart-financials`가 오류로 끝난다 |
+
 ## 예시 (자리표시자)
 `runtime-config.json`
 ```json
@@ -68,4 +76,8 @@
     "operator-password-hash": "<OUTPUT_OF_autotrade-engine_hash-password>"
   }
 }
+```
+`collector-secrets.json`
+```json
+{ "krx": { "auth-key": "<KRX_OPEN_API_AUTH_KEY>" }, "opendart": { "crtfc-key": "<OPENDART_CRTFC_KEY>" } }
 ```

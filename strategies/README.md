@@ -13,7 +13,7 @@
 id: "kr-orb-30"
 version: 1
 market: "KRX"          # KRX, US
-style: "INTRADAY"      # INTRADAY, SWING
+style: "INTRADAY"      # INTRADAY, SWING, POSITION
 created-at: "2026-10-08T00:00:00Z"
 parameters:
   logic: "orb"
@@ -46,7 +46,8 @@ parameters:
 | `limits.max-consecutive-stops` | 연속 손절이 이 횟수면 그날 신규 진입 중단 | 1~100 |
 | `exit.stop-loss-pct` | 평균 단가 대비 손절(STOP_LOSS 의도) | 필수 |
 | `exit.take-profit-pct`, `exit.trailing-pct`, `exit.time-exit-minutes` | 익절, 보유 중 최고가 대비 추적 손절, 시간 청산 | 선택(0 = 없음) |
-| `exit.eod` | 장 마감 정책 `FLATTEN`(장중 필수) 또는 `CARRY`(스윙) | 필수 |
+| `exit.eod` | 장 마감 정책 `FLATTEN`(장중 필수) 또는 `CARRY`(스윙, 중기 필수) | 필수 |
+| `exit.max-hold-days` | 최대 보유 거래일(STR-18). 진입한 거래일이 0일째, 이른 날 첫 이벤트에서 시간 청산 | 단타 받지 않음, 스윙 2~20(새 프로필 필수, D-057), 중기 20~120 필수 |
 | `exit.eod-time` | `FLATTEN`일 때 청산 시각. 진입 허용 끝 이후 | FLATTEN이면 필수 |
 | `study.key-param` | 실험의 ±20% 민감도 검사 대상 키(STR-04) | 선택 |
 
@@ -64,11 +65,12 @@ parameters:
 | `volume-surge` | INTRADAY | 최근 N분 거래량 ≥ 앞선 평균 × r, 같은 기간 가격 x% 이상 상승 | `signal.window-minutes`, `signal.surge-ratio`, `signal.min-rise-pct` |
 | `book-imbalance` | INTRADAY | 상위 5단계 매수 잔량 ≥ 매도 잔량 × r가 K번 연속 | `signal.ratio`, `signal.snapshots` |
 | `pullback` | INTRADAY | 시가 대비 x% 오른 날, 고가 대비 y% 밀린 뒤 눌림 저점에서 z% 반등 | `signal.trend-pct`, `signal.pullback-pct`, `signal.bounce-pct` |
-| `ma-trend` | SWING | 전일까지 종가의 단기 평균 > 장기 평균이면 진입, 반대면 로직 청산(하루 첫 체결에 한 번 판단) | `signal.fast-days`, `signal.slow-days` |
+| `ma-trend` | SWING, POSITION | 전일까지 종가의 단기 평균 > 장기 평균이면 진입, 반대면 로직 청산(하루 첫 체결에 한 번 판단) | `signal.fast-days`, `signal.slow-days` |
 | `random` | INTRADAY | 체결마다 p/1000 확률(대조군, Run 시드 사용) | `signal.per-mille` |
+| `random-daily` | SWING, POSITION | 종목·거래일 첫 체결마다 한 번 p/1000 확률로 그날 진입(일봉 대조군, Run 시드 사용) | `signal.per-mille` |
 
-아직 없는 것: 장전 후보 풀·스크리너 점수화(STR-03·08·10·11, 일봉 스냅샷 필요), 미국 프로필(US 규칙·지정가 여유폭).
-지금 유니버스는 실험 데이터에 있는 종목 전체다.
+종목 선정은 전략 프로필이 아니라 선정 프로필(`selections/`, [선정 조건 카탈로그](../docs/strategy/selection-catalog.md))이 맡고, 실험 계좌 하나는 (선정, 전략) 조합이다(D-041). 선정 없는 조합의 유니버스는 실험 데이터에 있는 종목 전체다.
+아직 없는 것: 장중 장전 후보 풀(STR-08), 가중 합산 점수(STR-11), 미국 프로필(US 규칙·지정가 여유폭).
 
 ## 현재 프로필
 
@@ -77,6 +79,8 @@ parameters:
 | `kr-bh-baseline` | 기준선(매수 후 보유) |
 | `kr-orb-30`, `kr-vwap-reclaim`, `kr-pdh-breakout`, `kr-volume-surge`, `kr-book-imbalance`, `kr-pullback` | 장중 후보 |
 | `kr-ma-trend` | 스윙 후보 |
-| `kr-random-control` | 대조군(무작위 진입) |
+| `kr-ma-trend-position` | 중기 후보(20/60일, 최대 120거래일) |
+| `kr-random-control` | 단타 대조군(무작위 진입) |
+| `kr-random-daily-swing`, `kr-random-daily-position` | 스윙·중기 대조군(일봉 무작위 진입, [조합 실험 절차](../docs/strategy/combination-experiments.md)) |
 
 첫 비교 실험: [EXP-20261008-STR01](../experiments/EXP-20261008-STR01/report.md).

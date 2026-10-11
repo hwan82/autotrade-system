@@ -47,7 +47,7 @@ public final class ExperimentViews {
             ExperimentResult r = report.result();
             int completed = (int) r.runs().stream().filter(x -> x.status() == RunStatus.COMPLETED).count();
             int failed = (int) r.runs().stream().filter(x -> x.status() == RunStatus.FAILED).count();
-            return new Summary(s.id().value(), s.profiles().get(0).market().name(),
+            return new Summary(s.id().value(), s.market().name(),
                     s.seedCapital().currency().getCurrencyCode(), s.from().toString(), s.to().toString(),
                     s.randomSeed(), plain(s.seedCapital()), s.costModelId(), r.costTableHash(), r.executionModelId(),
                     s.dataSnapshotVersion(), s.clockMode().name(), r.codeCommit(), r.codeDirty(), r.runs().size(),
@@ -201,7 +201,7 @@ public final class ExperimentViews {
             String totalReturn = summaryReturn(spec, s, last);
             return new RunSummary(spec.id().value(), s.runId(), s.accountId().value(), run.profile().id(),
                     run.profile().version(), s.profileHash(), s.status().name(), s.failureReason(),
-                    spec.profiles().get(0).market().name(), currency.getCurrencyCode(), spec.from().toString(),
+                    spec.market().name(), currency.getCurrencyCode(), spec.from().toString(),
                     spec.to().toString(), run.equityCurve().size(), plain(spec.seedCapital()),
                     last == null ? null : last.date().toString(), last == null ? null : plain(last.equity()),
                     last == null ? null : plain(last.cash()), totalReturn, plain(realized), run.fills().size(),
