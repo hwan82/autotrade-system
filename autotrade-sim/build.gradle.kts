@@ -5,6 +5,7 @@ plugins {
 dependencies {
     api(project(":autotrade-domain"))
     api(project(":autotrade-strategy"))
+    api(project(":autotrade-selection"))
     implementation(project(":autotrade-marketdata"))
     implementation(project(":autotrade-risk"))
 }

@@ -1,0 +1,128 @@
+package com.autotrade.selection.profile;
+
+import com.autotrade.domain.market.Market;
+import com.autotrade.strategy.TradingStyle;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
+import java.util.HexFormat;
+import java.util.Map;
+import java.util.Objects;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import java.util.regex.Pattern;
+
+/**
+ * 선정 프로필: "어떤 종목을 매매 대상 후보로 고를지"를 정의하는 불변 데이터(STR-15, ADR-007 2.1). 매매 지표(진입·청산)는
+ * {@link com.autotrade.strategy.StrategyProfile}이고, 실험 계좌 하나는 둘의 조합({@link Combination})이다(D-041).
+ *
+ * <p>예약 키(이 클래스가 검사한다. 나머지 {@code filter.*}·{@code gate.<nn>.*}·{@code score.*} 키의 이름과 값은 선정 조건
+ * 카탈로그가 정하고 검사한다)
+ * <ul>
+ *   <li>{@code hypothesis}(필수): 가설 한 문장(STR-02)</li>
+ *   <li>{@code refresh}(필수): {@link SelectionRefresh} 이름. 스타일과 맞아야 한다</li>
+ *   <li>{@code max-symbols}(필수): 1 이상 정수. 선정 결과 종목 수 상한</li>
+ * </ul>
+ *
+ * <p>{@link #selectionHash()}는 전략 프로필 해시와 같은 길이 접두 인코딩의 SHA-256이고, 첫 줄에
+ * {@code kind=selection-profile}을 넣어 같은 ID·파라미터의 전략 프로필과 해시가 겹치지 않게 한다. 해시에 {@code Market}·
+ * {@link TradingStyle}의 enum 이름이 들어가므로 이 이름들은 바꾸지 않는다(골든 테스트가 지킴).
+ *
+ * @param parameters 키는 소문자·숫자·점·하이픈, 값은 문자열(숫자도 문자열)
+ */
+public record SelectionProfile(
+        String id, int version, Market market, TradingStyle style, SortedMap<String, String> parameters) {
+
+    public static final String HYPOTHESIS = "hypothesis";
+    public static final String REFRESH = "refresh";
+    public static final String MAX_SYMBOLS = "max-symbols";
+
+    // 형식은 StrategyProfile과 같다(ADR-007 2.1)
+    private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
+    private static final Pattern PARAM_KEY = Pattern.compile("[a-z0-9][a-z0-9.-]{0,127}");
+
+    public SelectionProfile {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(market, "market");
+        Objects.requireNonNull(style, "style");
+        if (!ID.matcher(id).matches()) {
+            throw new IllegalArgumentException("선정 프로필 ID 형식이 아닙니다: " + id);
+        }
+        if (version < 1) {
+            throw new IllegalArgumentException("version은 1 이상이어야 합니다: " + version);
+        }
+        TreeMap<String, String> copy = new TreeMap<>();
+        for (Map.Entry<String, String> e : parameters.entrySet()) {
+            if (!PARAM_KEY.matcher(e.getKey()).matches()) {
+                throw new IllegalArgumentException("파라미터 키 형식이 아닙니다: " + e.getKey());
+            }
+            copy.put(e.getKey(), Objects.requireNonNull(e.getValue(), e.getKey()));
+        }
+        parameters = Collections.unmodifiableSortedMap(copy);
+        String hypothesis = parameters.get(HYPOTHESIS);
+        if (hypothesis == null || hypothesis.isBlank()) {
+            throw new IllegalArgumentException("선정 프로필에 가설(hypothesis)이 필요합니다: " + id);
+        }
+        SelectionRefresh refresh = parseRefresh(parameters.get(REFRESH), id);
+        if (!refresh.allows(style)) {
+            throw new IllegalArgumentException("갱신 주기 " + refresh + "는 " + style + " 선정에 쓸 수 없습니다"
+                    + "(단타는 PRE_OPEN_DAILY만, 스윙·중기는 장 마감 뒤 갱신만): " + id);
+        }
+        parseMaxSymbols(parameters.get(MAX_SYMBOLS), id);
+    }
+
+    public SelectionRefresh refresh() {
+        return parseRefresh(parameters.get(REFRESH), id);
+    }
+
+    public int maxSymbols() {
+        return parseMaxSymbols(parameters.get(MAX_SYMBOLS), id);
+    }
+
+    /** 내용 기반 해시(소문자 hex 64자). {@code based-on}·{@code created-at}·{@code note}는 넣지 않는다. */
+    public String selectionHash() {
+        StringBuilder canonical = new StringBuilder();
+        append(canonical, "kind", "selection-profile");
+        append(canonical, "id", id);
+        append(canonical, "version", Integer.toString(version));
+        append(canonical, "market", market.name());
+        append(canonical, "style", style.name());
+        parameters.forEach((k, v) -> append(canonical, "p." + k, v));
+        try {
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(sha256.digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256을 쓸 수 없습니다", e);
+        }
+    }
+
+    /** 결과·보고서에 쓰는 {@code id@version}. */
+    public String key() {
+        return id + "@" + version;
+    }
+
+    private static SelectionRefresh parseRefresh(String value, String id) {
+        if (value == null) {
+            throw new IllegalArgumentException("선정 프로필에 갱신 주기(refresh)가 필요합니다: " + id);
+        }
+        try {
+            return SelectionRefresh.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("알 수 없는 갱신 주기입니다: " + value + " (" + id + ")", e);
+        }
+    }
+
+    private static int parseMaxSymbols(String value, String id) {
+        if (value == null || !value.matches("[1-9][0-9]{0,8}")) {
+            throw new IllegalArgumentException("max-symbols는 1 이상 정수여야 합니다: " + value + " (" + id + ")");
+        }
+        return Integer.parseInt(value);
+    }
+
+    /** 길이 접두 인코딩. {@code StrategyProfile.profileHash()}와 같은 방식이다. */
+    private static void append(StringBuilder sb, String key, String value) {
+        sb.append(key.length()).append(':').append(key).append('=')
+                .append(value.length()).append(':').append(value).append('\n');
+    }
+}

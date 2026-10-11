@@ -59,7 +59,7 @@ public final class SampleReports {
         StrategyProfile meanRev = profile("mean-revert", 1, "entry.signal", "rsi-oversold", "exit.stop-loss-pct", "5");
         StrategyProfile broken = profile("broken", 1, "entry.signal", "unknown", "exit.stop-loss-pct", "1");
         Money seed = Money.of(10_000_000, Money.KRW);
-        ExperimentSpec spec = new ExperimentSpec(new ExperimentId(experimentId), from, to, 42L, seed,
+        ExperimentSpec spec = ExperimentSpec.ofProfiles(new ExperimentId(experimentId), from, to, 42L, seed,
                 "KR-DEFAULT-2026", "DAILY-20260930", ClockMode.REPLAY, List.of(breakout, meanRev, broken));
 
         RunReport a01 = completed(experimentId + "-A01", breakout, days, 10_000_000, 25_000, 12, true);

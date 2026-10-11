@@ -2,6 +2,7 @@
 .env
 **/runtime-config.json
 **/secrets.json
+**/collector-secrets.json
 **/*.secret.*
 .claude/settings.local.json
 
