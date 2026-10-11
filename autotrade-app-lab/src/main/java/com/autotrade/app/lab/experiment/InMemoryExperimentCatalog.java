@@ -47,8 +47,8 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
         if (!spec.id().equals(report.result().experimentId())) {
             throw new IllegalArgumentException("명세와 결과의 실험 ID가 다릅니다: " + spec.id());
         }
-        if (spec.profiles().size() != report.runs().size()) {
-            throw new IllegalArgumentException("프로필 수와 Run 수가 다릅니다: " + spec.id());
+        if (spec.combinations().size() != report.runs().size()) {
+            throw new IllegalArgumentException("조합 수와 Run 수가 다릅니다: " + spec.id());
         }
         Set<String> runIds = new HashSet<>();
         for (RunReport r : report.runs()) {

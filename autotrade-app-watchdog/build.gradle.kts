@@ -9,7 +9,7 @@ application {
 }
 
 processIsolation {
-    forbiddenProjects.set(listOf(":autotrade-sim", ":autotrade-app-lab", ":autotrade-ui", ":autotrade-strategy", ":autotrade-control"))
+    forbiddenProjects.set(listOf(":autotrade-sim", ":autotrade-app-lab", ":autotrade-ui", ":autotrade-strategy", ":autotrade-control", ":autotrade-app-collector", ":autotrade-selection"))
     forbiddenGroups.set(listOf("org.springframework"))
 }
 

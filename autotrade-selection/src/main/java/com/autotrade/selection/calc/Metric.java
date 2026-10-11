@@ -1,0 +1,66 @@
+package com.autotrade.selection.calc;
+
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * 선정 조건 카탈로그의 지표(STR-16). 프로필 키 {@code gate.<nn>.metric}·{@code score.metric}에 {@link #key()}를 쓴다.
+ * 비율·증가율 값은 소수(0.5 = 50%), 금액은 원이다. 계산 정의는 docs/strategy/selection-catalog.md에 손 계산 예와 함께 둔다.
+ */
+public enum Metric {
+    /** 최근 사업보고서 영업이익률 ÷ {@code years}개 사업연도 전 영업이익률 − 1. 두 해 모두 0보다 커야 함(아니면 DEFICIT). */
+    OP_MARGIN_GROWTH("op-margin-growth", Kind.FINANCIAL, Param.YEARS),
+    /** 최근 사업보고서 자산총계 ÷ {@code years}개 사업연도 전 자산총계 − 1. */
+    TOTAL_ASSETS_GROWTH("total-assets-growth", Kind.FINANCIAL, Param.YEARS),
+    /** 최근 사업보고서 매출액 ÷ {@code years}개 사업연도 전 매출액 − 1. */
+    REVENUE_GROWTH("revenue-growth", Kind.FINANCIAL, Param.YEARS),
+    /** 최근 사업보고서 영업이익 ÷ 매출액. */
+    OP_MARGIN("op-margin", Kind.FINANCIAL, Param.NONE),
+    /** 최근 사업보고서 부채총계 ÷ 자본총계. 자본총계 ≤ 0이면 CAPITAL_IMPAIRED. */
+    DEBT_RATIO("debt-ratio", Kind.FINANCIAL, Param.NONE),
+    /** 직전 거래일 종가(원가격) × 직전 거래일 장 마감 시점 상장주식수(MD-07). */
+    MARKET_CAP("market-cap", Kind.SHARES, Param.NONE),
+    /** 직전 {@code window}거래일 수정 거래량 합 ÷ 그 앞 {@code window}거래일 합(= 평균의 비). */
+    VOLUME_RATIO("volume-ratio", Kind.BARS, Param.WINDOW),
+    /** 직전 {@code window}거래일 수익률: 마지막 수정 종가 ÷ 구간 시작 전날 수정 종가 − 1. */
+    RETURN("return", Kind.BARS, Param.WINDOW),
+    /** 직전 {@code window}거래일 평균 거래대금(원가격 종가 × 거래량). */
+    AVG_TURNOVER("avg-turnover", Kind.BARS, Param.WINDOW);
+
+    /** 지표가 읽는 입력. */
+    public enum Kind { BARS, SHARES, FINANCIAL }
+
+    /** 지표의 기간 파라미터. */
+    public enum Param { NONE, WINDOW, YEARS }
+
+    private final String key;
+    private final Kind kind;
+    private final Param param;
+
+    Metric(String key, Kind kind, Param param) {
+        this.key = key;
+        this.kind = kind;
+        this.param = param;
+    }
+
+    public String key() {
+        return key;
+    }
+
+    public Kind kind() {
+        return kind;
+    }
+
+    public Param param() {
+        return param;
+    }
+
+    public static Metric fromKey(String key) {
+        return Arrays.stream(values()).filter(m -> m.key.equals(key)).findFirst().orElseThrow(
+                () -> new IllegalArgumentException("모르는 지표입니다: " + key + ". 지원: " + keys()));
+    }
+
+    public static List<String> keys() {
+        return Arrays.stream(values()).map(Metric::key).toList();
+    }
+}

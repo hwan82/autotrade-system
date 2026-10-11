@@ -1,0 +1,23 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# 예시 (나) 거래량 급증·가격 정체(D-043 확정 해석). 수정 거래량, 경계 처리, 순위는 D-041 4장·D-057.
+id: "kr-vol-surge-quiet"
+version: 1
+market: "KRX"
+style: "SWING"
+created-at: "2026-10-10T00:00:00Z"
+parameters:
+  hypothesis: "직전 20거래일 평균 거래량이 그 앞 20거래일의 3배 이상인데 같은 20거래일 수익률이 3% 미만인 국내 종목은 매집이 가격보다 먼저 나타난 것이므로, 이 후보에서 스윙 매매지표로 진입하면 같은 지표의 선정 없음 대비 비용 차감 후 성과가 낫다"
+  refresh: "POST_CLOSE_DAILY"
+  max-symbols: "30"
+  filter.kinds: "STOCK"
+  gate.01.metric: "volume-ratio"
+  gate.01.window: "20"
+  gate.01.op: "GE"
+  gate.01.value: "3.0"
+  gate.02.metric: "return"
+  gate.02.window: "20"
+  gate.02.op: "LT"
+  gate.02.value: "0.03"
+  score.metric: "volume-ratio"
+  score.window: "20"
+  score.order: "DESC"
