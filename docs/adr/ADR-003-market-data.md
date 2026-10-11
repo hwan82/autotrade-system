@@ -91,8 +91,9 @@
 ### 2.5 거래소 캘린더와 시장 규칙 (MD-08)
 
 - `ExchangeCalendar.bundled(KRX|US)`: 리소스 JSON(`calendar/krx.json`, `calendar/us.json`)에서 휴장일, 특수 개장(지연 개장, 조기 폐장)을 읽는다. 범위 밖 날짜는 `CalendarCoverageException`으로 거절한다(조용히 평일로 보지 않음).
-- 범위: KRX 2026년, 미국 2026~2028년(NYSE 공식 휴장·조기 폐장표).
+- 범위: KRX 2026~2027년(2027년은 거래소 공지 전 월력요항 기준 `[가정]`, D-064), 미국 2026~2028년(NYSE 공식 휴장·조기 폐장표).
 - 항목마다 출처를 남기고, 원문으로 확인 못 한 날은 `verified:false`로 둔다. `unverifiedDates()`로 꺼낼 수 있다.
+- 두 가지 구간 질의가 있다. `session(date)`는 캘린더에 적힌 그대로의 거래일·정규장이고 거래일 계산(선정, 실험, 리플레이)에 쓴다. `protectionSession(date)`는 장 시간 보호(`SessionProtection`) 전용이며, 틀려도 보호가 빠지지 않는 쪽으로 본다: `verified:false` 휴장일은 정규장이 있는 날로, `verified:false` 특별 운영일은 정규장과 합친 구간으로(D-064 5번). 같은 날짜에 두 답이 다를 수 있으므로 **보호 판단에는 `session`을 쓰지 않는다.**
 - `KrxMarketRules`, `UsMarketRules`가 도메인 `MarketRules`를 구현한다. 정규장 판단은 캘린더 기준, 호가 단위는 아래 표.
 
 | 시장 | 호가 단위 | 근거 |
