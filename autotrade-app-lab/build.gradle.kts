@@ -11,6 +11,7 @@ dependencies {
     implementation(project(":autotrade-marketdata"))
     implementation(project(":autotrade-strategy"))
     implementation(project(":autotrade-risk"))
+    implementation(project(":autotrade-selection"))
     implementation(project(":autotrade-sim"))
     implementation(project(":autotrade-config"))
     implementation(project(":autotrade-control"))

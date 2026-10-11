@@ -203,3 +203,24 @@ dialog.confirm::backdrop { background: rgba(28, 40, 40, .55); }
   .form-grid, .form-grid.narrow, .setting { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* 조합·선정 화면(UI-02·03·08, ADR-007) */
+.combo .sub, .xcell .sub, th .sub { display: block; font-size: .75rem; color: var(--ink-soft); font-weight: 400; }
+.badge.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); margin-left: .35rem; }
+/* 정정 대체 규칙(MD-10 (2)) 편향 표시: 점선 테두리로 일반 경고와 구분 */
+.badge.bias { background: var(--warn-soft); border: 1px dashed var(--warn); color: var(--warn); margin-left: .35rem; }
+table.cross th[scope="row"] { text-align: left; white-space: nowrap; }
+table.cross tr.control th, table.cross tr.control td { background: var(--grid); }
+table.cross th.control { background: var(--grid); }
+table.cross td.xcell { min-width: 9.5rem; vertical-align: top; }
+table.cross td.failed { color: var(--ink-soft); }
+.kv { display: flex; flex-wrap: wrap; gap: .15rem .7rem; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .8rem; }
+.cond-editor textarea { width: 100%; max-width: 60ch; font: inherit; }
+input.narrow { width: 9rem; }
+.check { margin-right: .8rem; white-space: nowrap; }
+.period { white-space: nowrap; }
+.kinds { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+.check input { width: auto; margin: 0 .3rem 0 0; }
+.period input[disabled], input.narrow[disabled] { background: var(--grid); }
+.inline-fields { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.inline-fields select { width: auto; }
