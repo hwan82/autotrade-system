@@ -2,6 +2,7 @@ package com.autotrade.app.lab;
 
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
+import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.control.ControlClient;
@@ -46,6 +47,15 @@ public class LabWebConfiguration {
             @Value("${autotrade.lab.strategies-dir:strategies}") String dir, Clock clock) {
         StrategyProfileStore store = new StrategyProfileStore(Path.of(dir), clock);
         log.info("전략 프로필 폴더: {}", store.root());
+        return store;
+    }
+
+    /** 선정 프로필 폴더(ADR-007 2.1). 실험 실행기가 읽는 {@code selections/}와 같은 폴더다. */
+    @Bean
+    SelectionProfileStore selectionProfileStore(
+            @Value("${autotrade.lab.selections-dir:selections}") String dir, Clock clock) {
+        SelectionProfileStore store = new SelectionProfileStore(Path.of(dir), clock);
+        log.info("선정 프로필 폴더: {}", store.root());
         return store;
     }
 }

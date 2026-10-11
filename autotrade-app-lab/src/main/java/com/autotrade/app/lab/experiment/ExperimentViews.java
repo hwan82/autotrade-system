@@ -4,6 +4,9 @@ import com.autotrade.app.lab.web.Page;
 import com.autotrade.domain.Money;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.symbols.SymbolNames;
+import com.autotrade.selection.profile.Combination;
+import com.autotrade.selection.profile.SelectionProfile;
+import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.RunResult;
@@ -16,6 +19,7 @@ import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.RunSelectionDay;
 import com.autotrade.sim.run.SimulationReport;
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -23,6 +27,9 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,24 +65,89 @@ public final class ExperimentViews {
     /** 실험 상세: 요약 + 계좌(Run)별 리더보드 행. 같은 실험 안의 계좌만 비교한다(같은 기간·시드·비용, 지침 5장). */
     public record Detail(Summary summary, String benchmarkNote, List<RunRow> runs) {
 
-        static Detail of(ExperimentSpec spec, SimulationReport report) {
-            List<RunRow> rows = report.runs().stream().map(RunRow::of).toList();
+        static Detail of(ExperimentSpec spec, SimulationReport report, Map<String, SelectionResult> results) {
+            List<RunRow> rows = report.runs().stream().map(r -> RunRow.of(r, results)).toList();
             return new Detail(Summary.of(spec, report),
                     "같은 실험의 계좌들은 기간·시드·비용 모델·체결 모델이 같아 서로 비교할 수 있습니다. 다른 실험과는 비교하지 않습니다.",
                     rows);
         }
     }
 
+    /**
+     * 리더보드 한 줄 = 계좌 하나 = 조합 하나(D-041, ADR-007 2.2).
+     *
+     * @param selectionId 선정 없는 조합이면 null
+     * @param selectionVersion 선정 없는 조합이면 null
+     * @param selectionHash 선정 해시, 선정 없는 조합이면 {@code "none"}(ADR-007 2.2 표식)
+     * @param selection 날짜별 선정 기록 요약. 선정 없는 조합이면 null
+     */
     public record RunRow(
             String runId, String accountId, String profileId, int profileVersion, String profileHash, long runSeed,
-            String status, String failureReason, String finalEquity, Metrics metrics, int rejectionCount) {
+            String status, String failureReason, String finalEquity, Metrics metrics, int rejectionCount,
+            String selectionId, Integer selectionVersion, String selectionHash, String combinationHash,
+            SelectionStats selection) {
 
-        static RunRow of(RunReport run) {
+        static RunRow of(RunReport run, Map<String, SelectionResult> results) {
             RunResult s = run.summary();
+            Combination c = run.combination();
             return new RunRow(s.runId(), s.accountId().value(), run.profile().id(), run.profile().version(),
                     s.profileHash(), s.runSeed(), s.status().name(), s.failureReason(),
                     s.finalEquity() == null ? null : plain(s.finalEquity()),
-                    s.metrics() == null ? null : Metrics.of(s.metrics()), run.rejections().size());
+                    s.metrics() == null ? null : Metrics.of(s.metrics()), run.rejections().size(),
+                    c.selection().map(SelectionProfile::id).orElse(null),
+                    c.selection().map(SelectionProfile::version).orElse(null),
+                    c.selectionHashOrNone(), c.combinationHash(),
+                    c.hasSelection() ? SelectionStats.of(run, results) : null);
+        }
+    }
+
+    /**
+     * 선정 있는 계좌의 날짜별 선정 기록 요약({@code run_selection_day}).
+     *
+     * @param validDays 결과가 있던 거래일 수
+     * @param invalidDays 결과가 없어 신규 진입을 막은 거래일 수(사유별 건수는 {@code invalidReasons})
+     * @param blockedEntries 선정 밖이거나 결과가 없어 내지 않은 신규 진입 신호 수
+     * @param results 쓴 선정 결과 수(내용 해시 기준, 주간 결과는 한 번)
+     * @param restatementFallback 쓴 결과들의 정정 대체 규칙(MD-10 (2)) 적용 평가 수 합. 결과 본문이 등록되지 않은 결과는 빠진다
+     * @param unknownResults 결과 본문이 실험실에 등록되지 않아 위 합에서 빠진 결과 수
+     */
+    public record SelectionStats(
+            int validDays, int invalidDays, List<ReasonCount> invalidReasons, long blockedEntries, int results,
+            int restatementFallback, int unknownResults) {
+
+        static SelectionStats of(RunReport run, Map<String, SelectionResult> known) {
+            int valid = 0;
+            long blocked = 0;
+            TreeMap<String, Long> reasons = new TreeMap<>();
+            TreeSet<String> hashes = new TreeSet<>();
+            for (RunSelectionDay d : run.selectionDays()) {
+                blocked += d.blockedEntries();
+                if (d.selection().isValid()) {
+                    valid++;
+                    hashes.add(d.selection().resultHash());
+                } else {
+                    reasons.merge(d.selection().validity(), 1L, Long::sum);
+                }
+            }
+            int fallback = 0;
+            int unknown = 0;
+            for (String h : hashes) {
+                SelectionResult r = known.get(h);
+                if (r == null) {
+                    unknown++;
+                } else {
+                    fallback += r.restatementFallbackCount();
+                }
+            }
+            return new SelectionStats(valid, run.selectionDays().size() - valid, ReasonCount.of(reasons), blocked,
+                    hashes.size(), fallback, unknown);
+        }
+    }
+
+    /** 사유 코드별 건수(코드 이름순). */
+    public record ReasonCount(String code, long count) {
+        static List<ReasonCount> of(Map<String, Long> counts) {
+            return counts.entrySet().stream().map(e -> new ReasonCount(e.getKey(), e.getValue())).toList();
         }
     }
 
@@ -98,6 +170,8 @@ public final class ExperimentViews {
         static EquityOverlay of(ExperimentSpec spec, SimulationReport report) {
             List<EquitySeries> series = report.runs().stream()
                     .map(r -> new EquitySeries(r.summary().runId(), r.profile().id(), r.profile().version(),
+                            r.combination().selection().map(SelectionProfile::id).orElse(null),
+                            r.combination().selection().map(SelectionProfile::version).orElse(null),
                             r.equityCurve().stream().map(EquityPointView::of).toList()))
                     .toList();
             return new EquityOverlay(spec.seedCapital().currency().getCurrencyCode(),
@@ -105,7 +179,9 @@ public final class ExperimentViews {
         }
     }
 
-    public record EquitySeries(String runId, String profileId, int profileVersion, List<EquityPointView> points) {
+    /** 계좌 하나의 곡선. 선정 없는 조합이면 {@code selectionId}·{@code selectionVersion}이 null이다. */
+    public record EquitySeries(String runId, String profileId, int profileVersion, String selectionId,
+            Integer selectionVersion, List<EquityPointView> points) {
     }
 
     public record EquityPointView(String date, String equity, String cash) {
@@ -172,13 +248,15 @@ public final class ExperimentViews {
      * @param tradingDays 자산 곡선 점 수(거래일 수)
      * @param holdings 기간 끝(실패한 Run은 실패 직전) 보유 종목. 원장을 다시 계산하지 못하면 null
      * @param symbolNameCount 종목명 표에 든 종목 수. 0이면 이름표가 없는 것이다
+     * @param selectionId 조합의 선정 ID. 선정 없는 조합이면 null({@code selectionHash}는 {@code "none"})
      */
     public record RunSummary(
             String experimentId, String runId, String accountId, String profileId, int profileVersion,
             String profileHash, String status, String failureReason, String market, String currency, String from,
             String to, int tradingDays, String seedCapital, String lastEquityDate, String lastEquity, String lastCash,
             String totalReturn, String realizedPnl, int fillCount, int roundTripCount, Costs costs,
-            List<HoldingRow> holdings, int symbolNameCount) {
+            List<HoldingRow> holdings, int symbolNameCount, String selectionId, Integer selectionVersion,
+            String selectionHash, String combinationHash) {
 
         static RunSummary of(ExperimentSpec spec, RunReport run, SymbolNames names) {
             RunResult s = run.summary();
@@ -207,7 +285,10 @@ public final class ExperimentViews {
                     last == null ? null : plain(last.cash()), totalReturn, plain(realized), run.fills().size(),
                     run.roundTrips().size(),
                     new Costs(plain(commission), plain(tax), plain(commission.plus(tax)), plain(slippage)),
-                    holdings(spec, run, names), names.size());
+                    holdings(spec, run, names), names.size(),
+                    run.combination().selection().map(SelectionProfile::id).orElse(null),
+                    run.combination().selection().map(SelectionProfile::version).orElse(null),
+                    run.combination().selectionHashOrNone(), run.combination().combinationHash());
         }
 
         /**

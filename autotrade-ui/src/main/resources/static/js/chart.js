@@ -1,6 +1,6 @@
 // 자산 곡선 겹쳐 보기(SVG). 같은 실험의 계좌만 그리므로 시드머니·통화·날짜 축이 같다.
 import { h, s } from './dom.js';
-import { money } from './format.js';
+import { money, combinationLabel } from './format.js';
 
 export const SERIES_COLORS = ['#2f4ba0', '#c77d1a', '#1e8c6e', '#8a3fa0', '#b33a3a', '#4d6b7a', '#7a8a1e', '#c0478a'];
 
@@ -38,7 +38,7 @@ export function equityChart(overlay) {
   const paths = series.map((ser, idx) => {
     const d = ser.points.map((p, j) => `${j === 0 ? 'M' : 'L'}${x(xi.get(p.date)).toFixed(1)},${y(Number(p.equity)).toFixed(1)}`).join(' ');
     const path = s('path', { class: 'series', d, stroke: SERIES_COLORS[idx % SERIES_COLORS.length] },
-      s('title', {}, `${ser.profileId} v${ser.profileVersion} (${ser.runId})`));
+      s('title', {}, `${combinationLabel(ser)} (${ser.runId})`));
     svg.append(path);
     return path;
   });
@@ -46,7 +46,7 @@ export function equityChart(overlay) {
   const legend = h('div', { class: 'legend', role: 'group', 'aria-label': '계좌 선택' },
     series.map((ser, idx) => {
       const btn = h('button', { type: 'button', 'aria-pressed': 'true' },
-        h('span', { class: 'swatch', 'data-color': idx }), `${ser.profileId} v${ser.profileVersion}`);
+        h('span', { class: 'swatch', 'data-color': idx }), combinationLabel(ser));
       btn.addEventListener('click', () => {
         const on = btn.getAttribute('aria-pressed') !== 'true';
         btn.setAttribute('aria-pressed', String(on));
