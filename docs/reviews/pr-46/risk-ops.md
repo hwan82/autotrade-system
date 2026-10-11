@@ -1,0 +1,114 @@
+# risk-ops 검토: Q-041 결정(D-058): 단발 일괄 명령을 자원 부족 정지 순서 0번에, 수집기는 감시의 정지 요청 파일로 멈춤
+
+- 대상: PR #46 / 브랜치 `claude/project-thread-vip8tu` / 커밋 16bf953 / main(53254d9) 대비 `git diff origin/main...HEAD` 전체(병합 기준 78288bd, 12개 파일, +130 −14)
+- 점검표: A
+- 직접 실행한 것:
+  - 별도 복제본 `/tmp/claude-0/review-riskops-46`에서 16bf953 체크아웃 후 `./gradlew build --no-daemon` → BUILD SUCCESSFUL in 2m 27s, 117 actionable tasks 모두 실행(캐시 없음), EXIT 0. 결과 XML 합계 714/0/0/0(tests/failures/errors/skipped). 모듈별: `:autotrade-risk:test` 55/0/0/0(`RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `BlacklistSnapshotTest` 포함), `:autotrade-architecture-test:test` 30/0/0/0(`ArchitectureTest` 17, `ModuleOwnershipTest` 13), `:autotrade-app-engine:test` 48/0/0/0, `:autotrade-app-collector:test` 59/0/0/0(`RunGuardTest` 7, `CollectorMainTest` 15), `:autotrade-app-watchdog:test` 1/0/0/0.
+  - 새 테스트 4건이 실제로 돌았는지 XML에서 확인: `RunGuardTest#정지_요청_파일은_해제_옵션과_상관없이_막고_지우지_않는다`, `CollectorMainTest#감시의_정지_요청이_있으면_장_시간_해제_옵션을_줘도_시작하지_않고_파일을_지우지_않는다`, `CollectorMainTest#실행_중_정지_요청이_생기면_다음_호출_전에_멈추고_파일을_지우지_않는다`, `ArchitectureTest#감시는_프로세스를_죽이지_않는다` 모두 통과.
+  - 브랜치가 main보다 뒤(PR #41 미포함)라 worktree에서 origin/main에 16bf953을 `merge --no-commit` → 충돌 없음(`docs/decisions/README.md` 자동 병합). 병합본에서 `:autotrade-app-collector:test :autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test :autotrade-app-watchdog:test` → EXIT 0.
+  - `git diff --stat`: 운영 코드 변경은 `autotrade-app-collector`의 `CollectorMain.java`(+6 −1), `RunGuard.java`(+18 −3)뿐. risk·engine·gateway·watchdog·broker·control·config·domain 운영 코드 변경 없음. 테스트 파일 변경은 추가만(삭제 줄 0).
+  - D-058의 사용자 결정 출처 확인: 프로젝트 스레드(cmsg_01Du6VLttqgn6f15sF8UYTuUEJVd9cjEuTF1sHbVrgT1JD)의 결정 카드(cmsg_…H7XWF6an5ZZJ2z4u5MGf95, 2026-10-10T14:31:33Z, 선택지 "넣음": "정지 순서 1번 앞과 장애표 #10에 추가하고, 수집기도 stop-request 파일을 보고 물러나게 하는 별도 PR")를 사용자 user_01Vc7USeKzFq1SwmNQt6Je3E가 2026-10-11T09:08:46Z에 option_index 0으로 고른 기록이 있다. 카드 맥락이 stop-request 파일 방식을 설명하므로, 옛 Q-041 문구("감시 프로세스가 단발 명령을 종료")와 달리 "죽이지 않음"으로 기록한 D-058은 사용자가 고른 내용과 맞다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·설정·테스트 변경 없음(diff에 `autotrade-risk`, `autotrade-config` 없음). `RealTradingGuardTest` 31건 통과. 수집기는 `runtime-config.json`·`secrets.json`을 읽지 않는다(`ArchitectureTest` `COLLECTOR_READS_ONLY_ITS_SECRETS` 그대로, 통과). 새 정지 요청은 수집기를 더 멈추게만 하고 Guard에 닿는 경로가 없다 |
+| A2 | 통과 | ArchitectureTest diff는 추가만(`ArchitectureTest.java:237-247` 규칙, `:339-347` 테스트). Guard 팩토리·출구 규칙 변경 없음. `GuardedOrderGatewayTest` 8건, engine 테스트 48건 통과 |
+| A3 | 해당 없음 | 주문 라우팅·증권사 선택 코드 변경 없음. 수집기 클래스패스에 증권사 플러그인 없음(`verifyProcessIsolation` 통과) |
+| A4 | 해당 없음 | 주문 타임아웃·재발주 코드 변경 없음. 수집기 `ApiCaller`의 재시도는 공개 데이터 GET이며, 이번 변경으로 재시도마다 정지 요청을 먼저 본다(`ApiCaller.java` `get` 루프의 `beforeCall.run()`) |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음. 수집기는 주문을 만들지 않는다 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 코드 변경 없음(`BlacklistSnapshotTest` 통과) |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 코드 변경 없음(engine 48건 통과). 수집기 호출 상한(`CallBudget`)은 KRX·OpenDART 몫이라 증권사 버킷과 공유하지 않는다 |
+| A8 | 통과 | 실전 보호 쪽으로만 바뀐다. ① 수집기가 감시의 정지 요청을 시작 전(`CollectorMain.java:70-77`, 비밀값 읽기보다 먼저), API 호출마다(`:114`, `:169`), 스냅샷 쓰기 직전(`:122`, `:178`), 일봉 스냅샷 하루마다(`:221`), 품질 리포트 하루마다(`:155`) 확인한다(`RunGuard.java:70-73`). `--allow-during-session`으로 풀리지 않는다(검사가 그 분기보다 앞, `:70-76`). 수집기는 파일을 지우지 않는다(코드에 삭제 없음, 세 테스트 모두 `stop` 존재 단언). ② 감시가 프로세스를 죽이지 않는 규칙을 ArchUnit으로 처음 강제(`WATCHDOG_KILLS_NO_PROCESS`, 위반 예제로 메서드 참조 `destroyForcibly`와 `Process.destroy()`를 잡는 것 확인). 기존 장 시간·힙·디스크 기준은 그대로다. 남은 틈은 아래 F2(규칙 범위)·N1(설정 폴더 불일치) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. 5.2 6번 "보유 종목 보호는 끝까지 유지"는 그대로이고, 0번이 앞에 더해져 실전 보호까지의 완충 단계가 하나 늘었다(`broker-and-fault-design.md:144-152`) |
+| A10 | 통과 | 새 테스트 픽스처 값은 시각 문자열·`"now"`·`"x"`뿐(`CollectorMainTest.java:214-250`, `RunGuardTest.java:75-84`). 거부 메시지는 정지 요청 파일 경로만 담는다(`RunGuard.java:71`, 설정 폴더 경로이며 키·계좌 아님). 문서 변경에 비밀값 없음 |
+| A11 | 통과 | 지운 테스트·`@Disabled` 없음(테스트 diff는 추가만). 보호 테스트 `ArchitectureTest`는 규칙 추가만. 새 동작마다 실패하는 경우 테스트가 있다: 시작 거부(종료 코드 4, HTTP 0회, 스냅샷 없음, 두 명령 모두), 실행 중 생기면 다음 호출 전 멈춤(HTTP 1회, 스냅샷 없음), 해제 옵션 무시, 파일 미삭제, 요청이 거둬지면 다시 실행(종료 코드 0). ArchUnit 규칙은 위반 고정 예제로 실제로 잡는지 검증 |
+| A12 | **실패** | 장애표 #10(`broker-and-fault-design.md:169`)에 0번을 넣었지만, 0번이 새로 만드는 장애 경로("감시가 죽거나 멈춘 채 `stop-request`가 남아 단발 명령이 계속 시작을 거부")의 감지가 없다. 이것은 PR #37 risk-ops 재검토 3 **K4**(`docs/reviews/pr-37/risk-ops.md:203`, ADR-007:325 "남은 `stop-request` 감지를 장애표 새 행에")가 구현 조건으로 남긴 항목이다. D-058이 새 행 대신 #10을 쓰기로 했으므로 K4는 #10 감지 칸으로 와야 하는데, 이번 diff는 #10 감지 칸을 "monitor-agent 임계치"로 그대로 두었다. 또 runbook은 "이 파일은 직접 지우지 않는다"만 적고(`docs/runbooks/collector.md:57`) 감시가 죽었을 때의 복구 절차가 없어, 그 상태면 매일 예약 실행이 종료 코드 4로 끝나며 아무도 모른 채 일봉이 멈춘다. 상세 F1 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음. `RunGuard`의 미국 세션 계산(거래소 캘린더, `cal.zone()`)은 바뀌지 않았다. 새 테스트 시각 2026-10-08T10:00Z는 서울 19:00, 뉴욕 06:00으로 두 보호 구간 밖이다(확인) |
+| A14 | 통과 | D-058(`docs/decisions/README.md:59`)이 코드와 일치: 파일 위치(`CollectorMain.java:281-283` `<설정 폴더>/collector-state/stop-request`), 종료 코드 4, 해제 옵션 무시, 미삭제, 확인 지점. Q-041은 닫힌 미확정으로 옮겨짐(`:104`). 기획서 v14.12 RSK-07 문구와 broker-and-fault-design 5.2 0번·#10, ADR-008 2.7, runbook 3·4장 일치. 사용자 결정 출처는 위 "직접 실행한 것"에서 확인. 경미: `CollectorMain.java:35-36` 클래스 주석의 종료 코드 4 설명에 "정지 요청"이 빠졌고, 기획서 판이 v14.10 → v14.12로 v14.11을 건너뛴다(내용 불일치는 아님, N3) |
+
+## 점검표 밖 발견
+
+- **F1 (A12, 수정 필요) 남은 `stop-request` 감지와 복구 절차가 없다.** [사실] D-058로 감시가 만들고 감시만 지우는 파일이 생겼다(`broker-and-fault-design.md:144`). ADR-007 2.7은 감시가 해제 조건에서만 지우고 임계치 동안 다시 만든다고 정했다(ADR-007:233). [사실] 감시가 죽거나 멈추면 파일이 남고, 수집기는 매번 종료 코드 4로 끝난다(`RunGuard.java:70-73`). runbook은 직접 지우지 말라고만 한다(`docs/runbooks/collector.md:57`). [추론] 닫힌 쪽 실패라 계좌를 해치지는 않지만, 일봉 스냅샷이 조용히 낡고 선정 일괄 명령(같은 규칙)도 멈춰 실전용 선정이 `MISSING`·신선도 초과로 신규 진입이 막힌다. 원인이 감시 장애인지 아무도 알 수 없다. 고칠 내용(문서만, 이 PR 범위):
+  1. 장애표 #10 감지 칸에 K4를 넣는다. 예: "`stop-request`가 해제 기준 시간(ADR-007 2.7) 넘게 남았는데 감시 하트비트가 없거나 임계치 아래임 → 알림". 감지 주체는 감시가 죽은 경우이므로 감시 밖(실전 엔진의 감시 하트비트 확인 또는 일괄 명령 자신이 파일 나이를 로그·종료 메시지로 알림)이어야 한다는 점을 적는다. 구현은 감시 쪽 후속 과제(D-058 ④)에 함께 묶어 등록한다.
+  2. runbook 3장에 복구 절차를 적는다: 감시 프로세스 상태와 자원 상태를 먼저 확인하고, 감시가 살아 있으면 기다리고, 감시가 죽었으면 감시를 재기동해 감시가 지우게 한다(사람이 지우는 것은 감시를 되살릴 수 없을 때만, 자원 상태 확인 후, 기록을 남김 — 이 예외를 둘지 여부는 risk-ops 추천: 둔다, 단 장 시간 보호 구간 밖에서만).
+- **F2 (A8, 수정 필요) ArchUnit 규칙이 감시 프로세스의 일부만 본다.** [사실] `WATCHDOG_KILLS_NO_PROCESS`는 `com.autotrade.app.watchdog..`만 대상이다(`ArchitectureTest.java:241-247`). 감시 프로세스는 `autotrade-monitor-agent-jar`(`com.autotrade.monitor`)에 의존하고(`autotrade-app-watchdog/build.gradle.kts:18`), 그 모듈을 쓰는 곳은 감시뿐이다. 장애표 #10의 감지가 "monitor-agent 임계치"이므로 자원 임계치 코드와 "부하원 정리" 코드가 들어갈 가장 자연스러운 자리가 바로 그 모듈이다. [추론] 거기에 `ProcessHandle.destroy*`를 두면 감시가 호출만 해도 규칙을 피한다. D-058의 약속("감시는 어떤 프로세스도 죽이지 않는다")은 프로세스 단위이므로 규칙도 프로세스 단위여야 한다. 고칠 내용: 규칙 대상을 `resideInAnyPackage("com.autotrade.app.watchdog..", "com.autotrade.monitor..")`로 넓히고(monitor 모듈은 아직 클래스가 없어 지금 깨지는 것 없음, `ModuleOwnershipTest.NO_CLASSES_YET`), `because` 문구와 D-058 ①을 같이 고친다. 참고: 운영체제 명령(`ProcessBuilder("taskkill" …)`, `Runtime.exec`)으로 죽이는 길은 이 규칙으로 막히지 않는다. 감시는 장애표 #8 자동 재기동 때문에 `ProcessBuilder`가 필요할 수 있어 지금 일괄 금지는 권하지 않고, 감시 구현 PR에서 risk-ops가 그 호출 지점을 검토 대상으로 둔다고 D-058 ④ 후속 과제에 적기를 권한다.
+- **N1 (권고) 설정 폴더가 다르면 정지 요청이 조용히 무시된다.** [사실] 수집기는 정지 요청 위치를 `--config-dir` 또는 `AUTOTRADE_CONFIG_DIR`/기본 `~/.autotrade`에서 정한다(`CollectorMain.java:281-283`, `:342-345`). [추론] 예약 작업이 셸에서만 설정한 환경 변수를 못 받거나 `--config-dir`를 다르게 주면 감시가 만든 파일을 보지 못한다. 장 시간·디스크·힙 기준은 남으므로 막는 항목은 아니다. 권고: 수집기가 시작할 때 보는 정지 요청 경로를 한 줄 출력하고, runbook 4장 예약 작업 항목에 "감시 프로세스와 같은 설정 폴더(같은 사용자·같은 `AUTOTRADE_CONFIG_DIR`)로 실행"을 적는다. 감시 구현 PR에서 이 일치를 확인하는 방법을 정한다.
+- **N2 (권고) 실패 시 열린 쪽 판정 두 가지.** ① `Files.exists`는 권한 오류 등으로 확인하지 못하면 false를 돌려 "요청 없음"으로 본다(`RunGuard.java:70`). `!Files.notExists(stopRequest)`로 바꾸면 확인 못 함을 멈춤 쪽으로 판정한다. 같은 폴더에 호출 기록을 쓰므로 실제로 열린 쪽이 될 여지는 작다. ② 정지 요청을 보지 않는 5인자 생성자(`RunGuard.java:53-55`, "테스트 전용")가 운영 클래스에 남아 있어 나중에 다른 진입점이 실수로 쓸 수 있다. 테스트는 존재하지 않는 경로를 넘기면 되므로 생성자를 하나로 줄이기를 권한다.
+- **N3 (경미)** `CollectorMain.java:35-36` 종료 코드 4 주석에 "감시의 정지 요청"을 더한다. 기획서 판 번호 v14.11 건너뜀은 다른 열린 PR이 쓰는 번호라면 그대로 두어도 되나, 아니면 이유를 변경 이력에 남긴다.
+- **관찰 (판정 무관)** 감시가 어떤 프로세스도 죽이지 않는다는 규칙은 단발 명령뿐 아니라 실전 엔진에도 적용된다. 장애표 #8은 "크래시 → 자동 재기동"만 다루므로 지금은 충돌이 없지만, 실전 엔진이 살아 있으나 응답하지 않는(행) 경우의 처리를 정할 때는 이 규칙과 함께 새 결정이 필요하다. 감시 구현 PR에서 risk-ops가 다룬다.
+
+## 판정
+수정 필요(A12: F1 장애표 #10 감지 칸에 남은 `stop-request` 감지(K4)와 runbook 복구 절차 추가 / A8: F2 `WATCHDOG_KILLS_NO_PROCESS` 대상에 `com.autotrade.monitor..` 포함과 D-058 문구 갱신). N1~N3은 권고.
+
+## 재검토 2026-10-11
+
+- 대상: PR #46 / 커밋 4e69072(앞 검토 16bf953 뒤에 main 병합 05cb14b와 반영 커밋 4e69072) / main(9100cb3) 대비 `git diff origin/main...HEAD` 전체(병합 기준 51eb6ef, 15개 파일, +220 −21. 이 파일과 architect 원문 포함)
+- 점검표: A
+- 직접 실행한 것:
+  - GitHub에서 새로 받은 복제본 `/tmp/claude-0/review-riskops-46b`에서 4e69072 체크아웃 후 `./gradlew build --no-daemon` → BUILD SUCCESSFUL in 2m 40s, EXIT 0. 결과 XML 합계 804/0/0/0. 모듈별: `:autotrade-risk:test` 55/0/0/0(`RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8 포함), `:autotrade-architecture-test:test` 30/0/0/0, `:autotrade-app-engine:test` 48/0/0/0, `:autotrade-app-collector:test` 59/0/0/0, `:autotrade-app-watchdog:test` 1/0/0/0, `:autotrade-broker-toss:test` 90/0/0/0(main 병합분).
+  - 정지 요청 테스트 3건과 `ArchitectureTest#감시는_프로세스를_죽이지_않는다`가 다시 돌았고 통과했다(XML 확인).
+  - 현재 main(9100cb3, PR #42 포함)에 4e69072을 `merge --no-commit` → 충돌 없음. 병합본에서 `:autotrade-app-collector:test :autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test` → EXIT 0.
+  - 4e69072의 변경(`git show 4e69072`)과 PR 전체 diff를 다시 읽었다. 이 원문 파일은 커밋 안에서 앞 검토 내용 그대로다(작업 폴더 파일과 diff 없음). 운영 코드 변경은 여전히 `CollectorMain.java`·`RunGuard.java`뿐이다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·설정·테스트 변경 없음. `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | ArchitectureTest 변경은 `WATCHDOG_KILLS_NO_PROCESS` 대상 확대(`ArchitectureTest.java:243`)뿐. Guard 출구 규칙 그대로, `GuardedOrderGatewayTest` 8건 통과 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트 코드 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·버킷·킬스위치 변경 없음(engine 48건 통과) |
+| A8 | 통과 | F2 해소: 규칙 대상이 `com.autotrade.app.watchdog..`와 `com.autotrade.monitor..`(`ArchitectureTest.java:243`), D-058 ①도 같은 범위로 고침. N2 ① 해소: `!Files.notExists`로 확인 실패를 멈춤 쪽으로(`RunGuard.java:66`). N2 ②: 5인자 생성자는 없앴고 남은 생성자의 `null`은 테스트만 넘긴다(운영 호출은 `CollectorMain.java:70-71` 하나, 항상 경로를 넘김). N1 해소: 시작할 때 보는 경로 출력(`CollectorMain.java:72-73`), runbook에 같은 설정 폴더 안내(`docs/runbooks/collector.md:58`) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. 5.2 6번 그대로 |
+| A10 | 통과 | 새 출력과 거부 메시지는 정지 요청 파일 경로와 수정 시각만 담는다(`RunGuard.java:67-69`, `:98-104`). 비밀값 없음 |
+| A11 | 통과 | 지운 테스트 없음. 테스트 변경은 생성자 인자 `null` 추가(`RunGuardTest.java:24`, `:67`, `:70`, `CollectorMainTest.java:324`, `KrxScaleProbe.java:57`)뿐이고 단언은 그대로다. `!Files.notExists`의 권한 오류 분기는 테스트가 없다(환경 의존이라 받아들임, 아래 N4) |
+| A12 | **실패** | F1의 감지 칸은 채웠지만 적힌 감지 경로 하나가 설계에 없다. #10 감지 칸(`broker-and-fault-design.md:169`)은 "감시 하트비트 끊김(#9 감지와 같은 경로)"이라 적었다. 그러나 #9의 감지는 **감시 프로세스가** 실험실·UI·게이트웨이 하트비트를 보는 것이고(`:168`, 기획서 MON-02 `autotrade-spec.md:262`), 감시 자신의 하트비트를 보는 주체는 문서 어디에도 없다(`docs/team`·`docs/adr`·`docs/spec`에서 확인). 그래서 지금 실제로 남는 감지는 일괄 명령의 거부 메시지와 종료 코드뿐이고, 사람이 예약 작업 결과를 봐야 알 수 있다. 대응표에 없는 감지를 있다고 적으면 7단계 전 장애 테스트·활성화 판정이 그 전제를 믿게 된다. 상세 R1 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | **실패** | runbook 3.5 ③(`docs/runbooks/collector.md:59`)이 "감시를 띄울 수 없을 때 사람이 파일을 지운다"는 예외를 두었는데, 사용자 결정 D-058 ①(`docs/decisions/README.md:59`)과 5.2 0번(`broker-and-fault-design.md:144`), ADR-008 2.7(`docs/adr/ADR-008-collector.md:81`)은 모두 "파일은 감시만 지운다"로 남아 있다. 앞 검토 F1 2에서 risk-ops가 이 예외를 추천했으므로 내용은 맞지만, 사용자 결정 문구와 실행 절차가 다르다. 상세 R2. 그 밖에 D-058 ①의 감시 범위·K4·runbook 3.5 언급과 기획서 v14.13은 코드와 일치 |
+
+### 재검토 발견
+- **R1 (A12, 수정 필요) #10 감지 칸의 "감시 하트비트 끊김(#9 감지와 같은 경로)"을 사실대로 고친다.** 고칠 내용(문서만): ① 그 문구를 빼거나 "감시 프로세스 자신의 생존 감지 주체는 아직 없음(후속 과제)"로 바꾼다. ② 지금 있는 감지는 "일괄 명령이 거부 메시지에 정지 요청 파일 시각을 남기고 종료 코드 4(수집기)·2(선정)로 끝남, 사용자가 예약 작업 결과로 확인"이라고 적는다. ③ D-058 ④ 후속 과제에 "감시 생존을 누가 보는가(예: 실전 엔진이나 OS 서비스 관리자가 감시 하트비트를 보고 알림)"를 더한다. 이 항목은 MON-02(모든 프로세스 하트비트 감시)의 빈칸이기도 해서, 감시 구현 PR에서 risk-ops가 정한다.
+- **R2 (A14, 수정 필요) 사람이 지우는 예외를 결정·설계 문구와 맞춘다.** D-058 ①과 5.2 0번, ADR-008 2.7의 "파일은 감시만 지운다" 뒤에 "감시를 띄울 수 없을 때만, 실전 엔진 자원 여유를 확인한 뒤 사람이 지울 수 있고 운영 기록에 남긴다(runbook 3.5)"를 같은 뜻으로 더한다. 사용자 결정(D-058) 문구를 바꾸는 것이므로 PR 본문의 사용자 확인 항목에 한 줄로 적어 사용자가 머지할 때 보게 한다. 수집기는 이 경우에도 장 시간 보호 구간·디스크 기준으로 막히므로 실전 보호가 약해지지는 않는다.
+- **N4 (권고)** `!Files.notExists` 분기(확인 실패 → 멈춤)는 권한을 바꾸는 테스트가 운영체제에 따라 달라 지금 없다. POSIX에서만 도는 조건부 테스트(`@EnabledOnOs`, 폴더 실행 권한 제거)를 더하면 이 동작이 회귀하지 않게 지킬 수 있다.
+- 앞 검토 F1(감지 칸·복구 절차), F2(규칙 범위), N1~N3은 R1·R2를 빼고 해소됐다.
+
+### 판정
+수정 필요(A12: R1 #10 감지 칸의 없는 감지 경로를 사실대로 고치고 감시 생존 감지를 후속 과제로 등록 / A14: R2 사람이 지우는 예외를 D-058·5.2 0번·ADR-008 2.7에 반영하고 사용자 확인 항목으로 표시). 둘 다 문서 수정이며 코드 변경은 필요 없다.
+
+## 재검토 2 2026-10-11
+
+- 대상: PR #46 / 커밋 3cbb3e2(앞 재검토 4e69072 뒤 반영 커밋 하나) / main(9100cb3) 대비 `git diff origin/main...HEAD` 전체(병합 기준 51eb6ef, 15개 파일, +305 −21. 검토 원문 포함)
+- 점검표: A
+- 직접 실행한 것:
+  - GitHub에서 새로 받은 복제본 `/tmp/claude-0/review-riskops-46c`에서 3cbb3e2 체크아웃 후 `./gradlew build --no-daemon` → BUILD SUCCESSFUL in 2m 56s, EXIT 0. 결과 XML 합계 805/0/0/0. 모듈별: `:autotrade-risk:test` 55/0/0/0, `:autotrade-architecture-test:test` 30/0/0/0, `:autotrade-app-engine:test` 48/0/0/0, `:autotrade-app-collector:test` 60/0/0/0, `:autotrade-app-watchdog:test` 1/0/0/0.
+  - 정지 요청 테스트 4건(새 `RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다` 포함)과 `ArchitectureTest#감시는_프로세스를_죽이지_않는다`가 통과했다(XML 확인).
+  - 변이 확인: `RunGuard.java:65`의 `!Files.notExists(stopRequest)`를 `Files.exists(stopRequest)`로 바꾸면 `RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다`만 실패했다(8건 중 1건 실패). 확인 후 원복했고 작업 트리 변경은 0건이다. 새 테스트가 확인 실패 시 멈추는 동작을 실제로 지킨다.
+  - 현재 main(9100cb3)에 3cbb3e2를 `merge --no-commit` → 충돌 없음. 병합본에서 `:autotrade-app-collector:test :autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test` → EXIT 0.
+  - 커밋 안의 이 원문은 작업 폴더 파일과 같다(diff 없음). 운영 코드 변경은 여전히 `CollectorMain.java`·`RunGuard.java`뿐이다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·설정·테스트 변경 없음. `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | Guard 출구 규칙 그대로. 이번 커밋은 ArchitectureTest를 건드리지 않았다. `GuardedOrderGatewayTest` 8건 통과 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트 코드 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·버킷·킬스위치 변경 없음(engine 48건 통과) |
+| A8 | 통과 | 정지 요청을 끄는 길이 없어졌다. 생성자가 `null`을 거부하고(`RunGuard.java:55` `Objects.requireNonNull`), 검사에 `null` 분기가 없다(`:65`). 운영 생성 지점은 `CollectorMain.java:70` 하나다(grep 확인). 테스트는 없는 경로 `NO_STOP`(`RunGuardTest.java:20`)을 넘긴다. 확인 실패는 멈춤 쪽이다(`:65`, 변이 확인). `WATCHDOG_KILLS_NO_PROCESS` 범위(watchdog과 monitor) 그대로 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. 5.2 6번 그대로 |
+| A10 | 통과 | 새 테스트 값은 `"file"`과 시각 문자열뿐(`RunGuardTest.java:90-96`). 비밀값 없음 |
+| A11 | 통과 | 지운 테스트 없음. 바뀐 테스트 줄은 생성자 인자를 `null`에서 `NO_STOP`·없는 경로로 바꾼 것뿐이고 단언은 그대로다. 새 실패 경우 테스트 1건 추가(`RunGuardTest#정지_요청이_있는지_판단할_수_없으면_멈춘다`). 이 테스트는 "부모가 일반 파일"로 확인 실패를 만든다. Linux에서는 `ENOTDIR`이라 `exists`·`notExists`가 모두 false가 되고, CI도 `ubuntu-latest`다(`.github/workflows/ci.yml:18`). Windows에서는 같은 결과가 보장되지 않을 수 있다(아래 N5) |
+| A12 | 통과 | R1 해소. #10 감지 칸(`broker-and-fault-design.md:169`)에서 없는 감지 경로("#9 감지와 같은 경로")를 뺐다. 지금 있는 감지(거부 메시지의 파일 시각, 종료 코드 수집기 4·선정 2, 사용자가 예약 작업 결과로 확인)와 "감시 자신의 생존을 보는 주체는 아직 없음(D-058 ④ 후속 과제)"을 사실대로 적었다. D-058 ④에도 MON-02와 함께 후속 과제로 등록됐다(`docs/decisions/README.md:61`) |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 통과 | R2 해소. 사람이 지우는 예외를 runbook에서 없애(`docs/runbooks/collector.md:59` ③ "파일은 감시만 지운다(D-058). 사람이 지우는 예외는 두지 않는다") 사용자 결정 D-058 ①, 5.2 0번(`broker-and-fault-design.md:144`), ADR-008 2.7(`ADR-008-collector.md:81`)과 같은 문구가 됐다. 사용자 결정 문구는 바뀌지 않았으므로 따로 사용자 확인 항목이 필요 없다. 앞 검토에서 risk-ops는 예외를 추천했지만, 감시를 고칠 때까지 수집을 쉬는 쪽은 닫힌 쪽(일봉이 늦어지고 선정이 신규 진입을 막는 방향)이라 계좌 보호에서 더 보수적이다. 받아들인다 |
+
+### 재검토 2 발견
+- **N5 (권고, 판정 무관)** `정지_요청이_있는지_판단할_수_없으면_멈춘다`는 Linux에서 "부모가 일반 파일이면 확인 실패" 동작에 기댄다. Windows에서는 같은 경우를 "없음"으로 볼 수 있어, 사용자가 Windows에서 `./gradlew build`를 돌리면 이 테스트가 실패할 수 있다(확인 못 했음, 이 환경은 Linux). 운영 코드의 판단(`!Files.notExists`)은 맞다. 필요하면 테스트에 `@EnabledOnOs({LINUX, MAC})`를 붙이고 주석에 이유를 적기를 권한다.
+- **N6 (권고)** 테스트 상수 `NO_STOP`이 작업 폴더 기준 상대 경로 `build/no-such-dir/stop-request`다. 누군가 그 경로를 만들면 테스트가 엉뚱하게 멈춘다. `@TempDir` 아래 경로를 쓰면 더 단단하다.
+- 앞 검토 F1·F2, 재검토 R1·R2와 권고 N1~N4는 모두 해소됐다.
+- 운영상 남는 위험(판정 무관, 기록용): 감시 쪽 구현(임계치 감시, 파일 생성·해제, 감시 생존 감지)은 아직 없다. 이 PR이 머지돼도 정지 순서 0번은 수집기 쪽 장치만 있고, 실제 동작은 감시 구현 PR에서 생긴다(D-058 ④). 그때 risk-ops 검토가 필요하다.
+
+### 판정
+승인
