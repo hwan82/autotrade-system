@@ -66,3 +66,32 @@
 
 ## 판정
 수정 필요(A8: F1 준비 단계(스냅샷 적재·이벤트 변환·선정 일정 전체 계산, 결정론 확인 재계산)에 정지 확인이 없어 정지 요청 반응 시간이 정해지지 않음, F2 `-PallowDuringSession`이 값과 무관하게(`=false` 포함) 장 시간 보호를 풂. B6은 통과지만 F1·F2를 고칠 때 실패 경우 테스트를 함께 둘 것. 그 밖의 A·B1·과금 항목은 통과 또는 해당 없음)
+
+## 재검토 2026-10-11
+- 대상: PR #52 / 커밋 0ae6736180ce14c3a9a3b5dc68c99abe16fcf7c1 / main(ff6d74f) 대비 전체 diff. main을 포함하고(`merge-base --is-ancestor`) `git merge-tree` 충돌 없음
+- 1차(6fecd47) 이후 변경: 커밋 3개. `79269ae`(QA F1·F2·Q1·Q2 반영), `8d256a6`(risk-ops F3: F2 테스트가 결함을 가려내게 함), `0ae6736`(architect·risk-ops 재검토 원문). 코드·테스트 10개 파일 +115 −13, 문서 D-063·5.2 0번·실험 절차 문서
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (헤드 0ae6736): **BUILD SUCCESSFUL**(1회째). 테스트 결과 XML 집계 885개, 실패 0, 오류 0, 건너뜀 0. `ExperimentGateTest` 11, `SelectionCombinationRunnerTest` 8, `RunGateTest` 4, `ArchitectureTest` 18, `RunGuardTest` 8 통과.
+  - 변이 확인(작업 트리에서 바꿔 돌린 뒤 되돌림, 커밋하지 않음):
+    1. `SelectionSchedule.java`의 공급자 호출 전 `checkpoint.run()` 제거 → `SelectionCombinationRunnerTest` 1건 실패(변이 잡힘).
+    2. `SimulationExperimentRunner.runDetailed`의 선정 일정 계산 전 `gate.check()` 제거 → `SelectionCombinationRunnerTest`·`RunGateTest` 2건 실패(변이 잡힘).
+    3. `ExperimentMain`의 해제 조건을 고치기 전 동작과 같은 `a.startsWith("--allow-during-session")`로 바꿈 → `ExperimentGateTest` 1건 실패(변이 잡힘).
+  - `./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=EXP-QA-NONE -PallowDuringSession=false`: `--allow-during-session은 값이 없거나 true여야 합니다 ... --allow-during-session=false` 출력 뒤 종료 코드 1(장 시간 보호 해제 안 됨). 같은 명령에 `-PallowDuringSession`(값 없음): `[experiment] 정지 요청 파일 확인 위치: /root/.autotrade/experiment-state/stop-request`, `[experiment] 장 시간 보호 해제됨(실전 엔진을 끈 날만). 정지 요청 파일은 계속 확인합니다` 출력 뒤 없는 실험 ID라 종료 코드 1. 두 번 다 결과 파일 없음(`git status` 깨끗).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A8 | 통과 | **F1 해결**: 조합 실험은 스냅샷 읽기 전(`CombinationExperiment.java:116`), 기간 확인 뒤·상장주식수·재무 적재 전(`:137`), 거래일 도출 전(`:150`), 이벤트 변환 뒤(`:160`), 결정론 확인 재실행 전(`:205`)에 묻는다. 실행기는 선정 일정 계산 **전**(`SimulationExperimentRunner.java:157`)과 계산 안 공급자 호출마다(`SelectionSchedule.compute(..., Runnable checkpoint)`) 묻고, 확인 지점은 공급자 실패를 `PRODUCER_FAILED`로 바꾸는 `try` 밖이라 정지 예외가 판정으로 삼켜지지 않는다. 테스트 `정지_확인은_선정_일정_계산_전과_공급자_호출마다_묻는다`가 1차 QA 탐침과 같은 상황(처음부터 정지)에서 공급자 호출 0건을 단언하고, 변이 1·2를 잡는다. 남은 공백(일봉 스냅샷 한 번 읽기 같은 단일 단계 중에는 확인 없음, 실제 규모 측정 없음)은 D-063 "위험과 한계"에 `[가정]`과 확인 방법(첫 실제 조합 실험 단계별 로그)으로 적혔다. **F2 해결**: Gradle은 값을 그대로 넘기고(`build.gradle.kts` `--allow-during-session=$it`), `ExperimentMain`은 값 없음·`true`만 해제하고 그 밖의 값은 입력 오류 1로 문에 닿기 전에 멈춘다(위 실행 확인). 해제되면 시작 출력에 남는다. 테스트는 정지 요청 파일을 둔 상태에서 받아들인 값은 4, 나쁜 값은 1로 두 경우를 가르고 변이 3을 잡는다 |
+| A11 | 통과 | 보호 테스트는 강화만 됨: `APPS_RUN_EXPERIMENTS_THROUGH_GATE`가 `RunGate.NONE` 접근도 막고 위반 예제 4건(1차 3건 + `RunGate.NONE`)을 단언. 기존 규칙·단언 삭제·완화 없음. 새 동작(준비 단계 정지, 해제 값 검사)마다 실패 경우 테스트가 있고 변이로 유효성 확인 |
+| A12 | 통과 | 5.2 0번(`broker-and-fault-design.md:144`) 문구가 실제 확인 지점(준비 단계마다·선정 계산 중·Run 시작 전·거래일마다)과 일치하게 바뀜. 장애 테스트 8종 전제 변경 없음 |
+| A14 | 통과 | D-063 ②·④·"위험과 한계"·"검증"과 실험 절차 문서가 바뀐 코드와 일치(확인 지점 목록, 해제 값 규칙, 시작 출력, `gradle.properties`에 넣지 말라는 안내) |
+| B1 | 통과 | 위 빌드 직접 실행 BUILD SUCCESSFUL(테스트 885개 실패 0) |
+| B6 | 통과 | F1·F2 실패 경우 테스트 추가, 건너뜀 0, 지운 테스트 없음 |
+| 나머지 A1~A7, A9, A10, A13, 과금 8.1~8.5 | 1차와 같음(통과 또는 해당 없음) | 이번 변경은 실험 명령의 정지 확인 지점·인자 해석·테스트·문서뿐이고 주문·Guard·증권사·외부 호출 코드를 건드리지 않음. 실험 명령 클래스패스와 ArchUnit 경계(설정 로더·broker·주문 포트 금지) 그대로. 추가 줄에 키·계좌번호·토큰 없음 |
+
+### 점검표 밖
+- 1차 시나리오 3(감시와 실험 명령의 설정 폴더 불일치, `-Dautotrade.config-dir`가 `JavaExec`로 안 넘어감)은 시작 때 확인 위치 출력(Q1)으로 사람이 알아챌 수단이 생겼다. 감시 구현 PR의 설정 폴더 일치 시험(risk-ops N2·N5)은 여전히 필요하다(후속 과제, 판정 무관).
+- `gradle.properties`·`ORG_GRADLE_PROJECT_allowDuringSession=true`로 해제가 오래 남는 경우는 이제 매 실행 시작 출력에 "장 시간 보호 해제됨"이 찍힌다. 코드로 막지는 않는다(실전 엔진을 끈 날 쓰는 정상 경로와 구분할 수 없음). 7단계 운영 절차서에서 실전 엔진 기동 전 이 출력이 없는지 확인하는 항목을 두기를 권한다(권고 Q4, 판정 무관).
+- 1차 권고 Q1·Q2는 반영됨. Q3(2027년 캘린더)은 PR 후속 과제로 남음.
+
+### 재검토 판정
+승인
