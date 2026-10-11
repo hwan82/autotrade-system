@@ -29,8 +29,10 @@ import com.autotrade.sim.daily.DailyBarMarketDataSet;
 import com.autotrade.sim.daily.SnapshotTradingDays;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.run.ExperimentStoppedException;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.ResultBundle;
+import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
 import com.autotrade.sim.selection.CalculatedSelectionSource;
@@ -98,10 +100,20 @@ public final class CombinationExperiment {
      */
     public static Outcome run(CombinationPlan plan, Path repoRoot, Path snapshotsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log) {
+        return run(plan, repoRoot, snapshotsRoot, code, verifyDeterminism, log, RunGate.NONE);
+    }
+
+    /**
+     * @param gate 정지 확인(D-063). 스냅샷을 읽기 전, 결정론 확인 실행 전, 그리고 실행기가 Run 시작 전·거래일마다 묻는다
+     * @throws ExperimentStoppedException 문이 멈추라고 했을 때(결과 없음)
+     */
+    public static Outcome run(CombinationPlan plan, Path repoRoot, Path snapshotsRoot, CodeVersion code,
+            boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
         if (plan.market() != Market.KRX) {
             throw new IllegalArgumentException("일봉 조합 실험은 국내(KRX)만 지원합니다: " + plan.market());
         }
         ExchangeCalendar calendar = ExchangeCalendar.bundled(Market.KRX);
+        gate.check(); // 힙을 크게 쓰는 스냅샷 읽기 전에 먼저 본다
 
         Path barsDir = snapshotsRoot.resolve("krx-daily").resolve(plan.barsSnapshot());
         log.accept("일봉 스냅샷 읽기: " + barsDir);
@@ -122,6 +134,7 @@ public final class CombinationExperiment {
             throw new IllegalArgumentException("실험 기간이 스냅샷 범위 밖입니다: " + plan.from() + " ~ " + plan.to() + ", 스냅샷 "
                     + first + " ~ " + last);
         }
+        gate.check(); // 준비 단계(스냅샷 적재·이벤트 변환)도 단계마다 본다(PR #52 QA F1)
         SnapshotListedShares shares = manifest.files().stream()
                 .anyMatch(f -> f.name().equals(SnapshotManifest.LISTED_SHARES)) ? SnapshotListedShares.load(barsDir) : null;
         SnapshotFinancials financials = null;
@@ -134,6 +147,7 @@ public final class CombinationExperiment {
             }
         }
 
+        gate.check();
         SnapshotTradingDays.Derived days = SnapshotTradingDays.derive(bars, bars.snapshotId(), Market.KRX, first, last,
                 calendar);
         SnapshotSelectionData selectionData = new SnapshotSelectionData(Market.KRX, bars, shares, financials, days.days(),
@@ -143,6 +157,7 @@ public final class CombinationExperiment {
         log.accept("일봉 → 리플레이 이벤트: " + plan.from() + " ~ " + plan.to());
         DailyBarMarketDataSet data = DailyBarMarketDataSet.of(bars, bars.snapshotId(), Market.KRX, calendar.zone(),
                 plan.from(), plan.to());
+        gate.check();
         log.accept("종목 " + data.symbols().size() + ", 거래일 " + data.tradingDays().size() + ", 이벤트 "
                 + data.events().size() + ", 권리 변동으로 이은 종목 " + data.adjustedSymbols().size());
 
@@ -182,14 +197,15 @@ public final class CombinationExperiment {
 
         log.accept("조합 " + combinations.size() + "개 실행(병렬 " + plan.parallelism() + ")");
         SimulationReport report = new SimulationExperimentRunner(data, rules, cost, factory, risk, execution, code,
-                plan.parallelism(), benchmark, selections).runDetailed(spec);
+                plan.parallelism(), benchmark, selections, gate).runDetailed(spec);
         String detail = ReportWriter.render(report);
         String determinism = "확인 안 함(--verify-determinism으로 확인)";
         if (verifyDeterminism) {
             log.accept("결정론 확인: 병렬 1로 다시 실행");
+            gate.check();
             CalculatedSelectionSource again = new CalculatedSelectionSource(new SelectionCalculator(selectionData));
             String second = ReportWriter.render(new SimulationExperimentRunner(data, rules, cost, factory, risk, execution,
-                    code, 1, benchmark, again).runDetailed(spec));
+                    code, 1, benchmark, again, gate).runDetailed(spec));
             determinism = second.equals(detail) ? "같음(병렬 " + plan.parallelism() + " vs 1, 상세 보고서 바이트 일치)" : "다름";
             if (!second.equals(detail)) {
                 log.accept("결정론 확인 실패: 두 실행의 상세 보고서가 다릅니다");
@@ -217,6 +233,15 @@ public final class CombinationExperiment {
      */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path snapshotsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log) {
+        return runAndWrite(experimentDir, repoRoot, snapshotsRoot, code, verifyDeterminism, log, RunGate.NONE);
+    }
+
+    /**
+     * {@link #runAndWrite(Path, Path, Path, CodeVersion, boolean, Consumer)}에 정지 확인(D-063)을 더한 것. 멈추면
+     * {@link ExperimentStoppedException}을 던지고 결과 파일을 하나도 쓰지 않는다(이전 실행 결과는 그대로 남는다).
+     */
+    public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path snapshotsRoot, CodeVersion code,
+            boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
         Path file = experimentDir.resolve("experiment.yaml");
         CombinationPlan plan;
         try {
@@ -227,7 +252,7 @@ public final class CombinationExperiment {
         if (!plan.id().value().equals(experimentDir.getFileName().toString())) {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다: " + experimentDir.getFileName() + " ≠ " + plan.id());
         }
-        Outcome out = run(plan, repoRoot, snapshotsRoot, code, verifyDeterminism, log);
+        Outcome out = run(plan, repoRoot, snapshotsRoot, code, verifyDeterminism, log, gate);
         for (Map.Entry<String, String> f : out.files().entrySet()) {
             Path target = experimentDir.resolve(f.getKey());
             try {

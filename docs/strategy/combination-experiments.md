@@ -73,7 +73,7 @@ combinations:
   - "none x kr-random-daily-swing@1"
 ```
 
-3. `./gradlew :autotrade-sim:runCombinationExperiment -Pexperiment=EXP-20261012-CMB01 -PverifyDeterminism`
-   (스냅샷 폴더가 기본 위치가 아니면 `-PsnapshotsDir=...`, 힙은 `-Pheap=8g`). 결과는 같은 폴더의 `inputs.yaml`, `results.md`, `runs.tsv`, `selection-days.tsv`, `detail.txt`와 실험실 화면용 `result-bundle.jsonl.gz`(커밋하지 않음, D-062).
+3. `./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=EXP-20261012-CMB01 -PverifyDeterminism`
+   (스냅샷 폴더가 기본 위치가 아니면 `-PsnapshotsDir=...`, 힙은 `-Pheap=8g`). 실전 엔진과 같은 PC라 국내·미국 장 시간 보호 구간(정규장 60분 전~폐장 30분 뒤)과 감시의 정지 요청 파일(`<설정 폴더>/experiment-state/stop-request`)이 있으면 시작하지 않고, 실행 중이면 거래일 경계에서 멈춰 결과 파일 없이 종료 코드 4로 끝난다([D-063](../decisions/D-063-experiment-command-stop-gate.md)). 실전 엔진을 끈 날에만 `-PallowDuringSession`(값 없음 또는 `true`, 그 밖의 값은 입력 오류)으로 장 시간 보호를 푼다(정지 요청 파일은 풀리지 않는다). `gradle.properties`에 넣어 두지 않는다. 시작 출력에 확인 위치와 해제 여부가 나온다. 결과는 같은 폴더의 `inputs.yaml`, `results.md`, `runs.tsv`, `selection-days.tsv`, `detail.txt`와 실험실 화면용 `result-bundle.jsonl.gz`(커밋하지 않음, D-062).
 4. 실험실(`./gradlew :autotrade-app-lab:bootRun`)의 "실험" 화면 아래 "실험 폴더"에서 그 실험을 "불러오기"하면 계좌 비교, 선정 × 매매지표 교차표, 날짜별 선정 기록, 선정 결과(평가 행)를 화면에서 본다. 실험실은 묶음을 커밋된 `detail.txt`와 대조한 뒤 올리고 실험을 다시 돌리지 않는다. 실험실을 다시 띄우면 다시 불러온다.
 5. 결과 해석·보고(`report.md`)는 1장 5·7번과 [experiments/README.md](../../experiments/README.md) 커밋 규칙을 따른다.

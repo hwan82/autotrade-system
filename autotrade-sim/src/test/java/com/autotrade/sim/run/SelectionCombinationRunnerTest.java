@@ -35,9 +35,11 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -194,6 +196,25 @@ class SelectionCombinationRunnerTest {
         return out;
     }
 
+    @Test
+    void 정지_확인은_선정_일정_계산_전과_공급자_호출마다_묻는다() {
+        // PR #52 QA F1: 처음부터 멈추라고 하면 선정 공급자를 한 번도 부르지 않는다
+        CountingSource never = new CountingSource();
+        assertThatThrownBy(() -> runner(1, never, () -> Optional.of("정지 요청 파일"))
+                .runDetailed(spec(List.of(Combination.of(PICK_SAMSUNG, MKT_HOLD)))))
+                .isInstanceOf(ExperimentStoppedException.class);
+        assertThat(never.calls).isEmpty();
+
+        // 계산 도중 멈추면 남은 거래일의 공급자를 부르지 않는다(시작 확인 1 + 첫 호출 전 1은 통과, 둘째 호출 전에 멈춤)
+        CountingSource partial = new CountingSource();
+        AtomicInteger asked = new AtomicInteger();
+        assertThatThrownBy(() -> runner(1, partial,
+                () -> asked.incrementAndGet() >= 3 ? Optional.of("장 시간") : Optional.empty())
+                .runDetailed(spec(List.of(Combination.of(PICK_SAMSUNG, MKT_HOLD)))))
+                .isInstanceOf(ExperimentStoppedException.class).hasMessage("장 시간");
+        assertThat(partial.calls).containsExactly("pick-samsung@" + D1);
+    }
+
     /** 선정 ID가 pick-samsung이면 삼성전자, pick-hynix면 하이닉스를 그날 하루 고른다. 호출을 기록한다. */
     static final class CountingSource implements SelectionSource {
         final List<String> calls = new ArrayList<>();
@@ -216,6 +237,12 @@ class SelectionCombinationRunnerTest {
             }
             return HexFormat.of().formatHex(b);
         }
+    }
+
+    private static SimulationExperimentRunner runner(int parallelism, SelectionSource source, RunGate gate) {
+        return new SimulationExperimentRunner(DATA, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
+                RiskChain.builder(BlacklistSnapshot.EMPTY).build(), ExecutionSettings.defaults(),
+                new CodeVersion("test", false), parallelism, SAMSUNG, source, gate);
     }
 
     private static SimulationExperimentRunner runner(int parallelism, SelectionSource source) {

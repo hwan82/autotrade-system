@@ -30,6 +30,7 @@ include(
     "autotrade-app-lab",
     "autotrade-app-watchdog",
     "autotrade-app-collector",
+    "autotrade-app-experiment",
     "autotrade-architecture-test",
     "autotrade-ui",
     "autotrade-notification-jar",
