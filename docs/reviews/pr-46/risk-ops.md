@@ -39,3 +39,39 @@
 
 ## 판정
 수정 필요(A12: F1 장애표 #10 감지 칸에 남은 `stop-request` 감지(K4)와 runbook 복구 절차 추가 / A8: F2 `WATCHDOG_KILLS_NO_PROCESS` 대상에 `com.autotrade.monitor..` 포함과 D-058 문구 갱신). N1~N3은 권고.
+
+## 재검토 2026-10-11
+
+- 대상: PR #46 / 커밋 4e69072(앞 검토 16bf953 뒤에 main 병합 05cb14b와 반영 커밋 4e69072) / main(9100cb3) 대비 `git diff origin/main...HEAD` 전체(병합 기준 51eb6ef, 15개 파일, +220 −21. 이 파일과 architect 원문 포함)
+- 점검표: A
+- 직접 실행한 것:
+  - GitHub에서 새로 받은 복제본 `/tmp/claude-0/review-riskops-46b`에서 4e69072 체크아웃 후 `./gradlew build --no-daemon` → BUILD SUCCESSFUL in 2m 40s, EXIT 0. 결과 XML 합계 804/0/0/0. 모듈별: `:autotrade-risk:test` 55/0/0/0(`RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8 포함), `:autotrade-architecture-test:test` 30/0/0/0, `:autotrade-app-engine:test` 48/0/0/0, `:autotrade-app-collector:test` 59/0/0/0, `:autotrade-app-watchdog:test` 1/0/0/0, `:autotrade-broker-toss:test` 90/0/0/0(main 병합분).
+  - 정지 요청 테스트 3건과 `ArchitectureTest#감시는_프로세스를_죽이지_않는다`가 다시 돌았고 통과했다(XML 확인).
+  - 현재 main(9100cb3, PR #42 포함)에 4e69072을 `merge --no-commit` → 충돌 없음. 병합본에서 `:autotrade-app-collector:test :autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test` → EXIT 0.
+  - 4e69072의 변경(`git show 4e69072`)과 PR 전체 diff를 다시 읽었다. 이 원문 파일은 커밋 안에서 앞 검토 내용 그대로다(작업 폴더 파일과 diff 없음). 운영 코드 변경은 여전히 `CollectorMain.java`·`RunGuard.java`뿐이다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드·설정·테스트 변경 없음. `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | ArchitectureTest 변경은 `WATCHDOG_KILLS_NO_PROCESS` 대상 확대(`ArchitectureTest.java:243`)뿐. Guard 출구 규칙 그대로, `GuardedOrderGatewayTest` 8건 통과 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트 코드 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·버킷·킬스위치 변경 없음(engine 48건 통과) |
+| A8 | 통과 | F2 해소: 규칙 대상이 `com.autotrade.app.watchdog..`와 `com.autotrade.monitor..`(`ArchitectureTest.java:243`), D-058 ①도 같은 범위로 고침. N2 ① 해소: `!Files.notExists`로 확인 실패를 멈춤 쪽으로(`RunGuard.java:66`). N2 ②: 5인자 생성자는 없앴고 남은 생성자의 `null`은 테스트만 넘긴다(운영 호출은 `CollectorMain.java:70-71` 하나, 항상 경로를 넘김). N1 해소: 시작할 때 보는 경로 출력(`CollectorMain.java:72-73`), runbook에 같은 설정 폴더 안내(`docs/runbooks/collector.md:58`) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음. 5.2 6번 그대로 |
+| A10 | 통과 | 새 출력과 거부 메시지는 정지 요청 파일 경로와 수정 시각만 담는다(`RunGuard.java:67-69`, `:98-104`). 비밀값 없음 |
+| A11 | 통과 | 지운 테스트 없음. 테스트 변경은 생성자 인자 `null` 추가(`RunGuardTest.java:24`, `:67`, `:70`, `CollectorMainTest.java:324`, `KrxScaleProbe.java:57`)뿐이고 단언은 그대로다. `!Files.notExists`의 권한 오류 분기는 테스트가 없다(환경 의존이라 받아들임, 아래 N4) |
+| A12 | **실패** | F1의 감지 칸은 채웠지만 적힌 감지 경로 하나가 설계에 없다. #10 감지 칸(`broker-and-fault-design.md:169`)은 "감시 하트비트 끊김(#9 감지와 같은 경로)"이라 적었다. 그러나 #9의 감지는 **감시 프로세스가** 실험실·UI·게이트웨이 하트비트를 보는 것이고(`:168`, 기획서 MON-02 `autotrade-spec.md:262`), 감시 자신의 하트비트를 보는 주체는 문서 어디에도 없다(`docs/team`·`docs/adr`·`docs/spec`에서 확인). 그래서 지금 실제로 남는 감지는 일괄 명령의 거부 메시지와 종료 코드뿐이고, 사람이 예약 작업 결과를 봐야 알 수 있다. 대응표에 없는 감지를 있다고 적으면 7단계 전 장애 테스트·활성화 판정이 그 전제를 믿게 된다. 상세 R1 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | **실패** | runbook 3.5 ③(`docs/runbooks/collector.md:59`)이 "감시를 띄울 수 없을 때 사람이 파일을 지운다"는 예외를 두었는데, 사용자 결정 D-058 ①(`docs/decisions/README.md:59`)과 5.2 0번(`broker-and-fault-design.md:144`), ADR-008 2.7(`docs/adr/ADR-008-collector.md:81`)은 모두 "파일은 감시만 지운다"로 남아 있다. 앞 검토 F1 2에서 risk-ops가 이 예외를 추천했으므로 내용은 맞지만, 사용자 결정 문구와 실행 절차가 다르다. 상세 R2. 그 밖에 D-058 ①의 감시 범위·K4·runbook 3.5 언급과 기획서 v14.13은 코드와 일치 |
+
+### 재검토 발견
+- **R1 (A12, 수정 필요) #10 감지 칸의 "감시 하트비트 끊김(#9 감지와 같은 경로)"을 사실대로 고친다.** 고칠 내용(문서만): ① 그 문구를 빼거나 "감시 프로세스 자신의 생존 감지 주체는 아직 없음(후속 과제)"로 바꾼다. ② 지금 있는 감지는 "일괄 명령이 거부 메시지에 정지 요청 파일 시각을 남기고 종료 코드 4(수집기)·2(선정)로 끝남, 사용자가 예약 작업 결과로 확인"이라고 적는다. ③ D-058 ④ 후속 과제에 "감시 생존을 누가 보는가(예: 실전 엔진이나 OS 서비스 관리자가 감시 하트비트를 보고 알림)"를 더한다. 이 항목은 MON-02(모든 프로세스 하트비트 감시)의 빈칸이기도 해서, 감시 구현 PR에서 risk-ops가 정한다.
+- **R2 (A14, 수정 필요) 사람이 지우는 예외를 결정·설계 문구와 맞춘다.** D-058 ①과 5.2 0번, ADR-008 2.7의 "파일은 감시만 지운다" 뒤에 "감시를 띄울 수 없을 때만, 실전 엔진 자원 여유를 확인한 뒤 사람이 지울 수 있고 운영 기록에 남긴다(runbook 3.5)"를 같은 뜻으로 더한다. 사용자 결정(D-058) 문구를 바꾸는 것이므로 PR 본문의 사용자 확인 항목에 한 줄로 적어 사용자가 머지할 때 보게 한다. 수집기는 이 경우에도 장 시간 보호 구간·디스크 기준으로 막히므로 실전 보호가 약해지지는 않는다.
+- **N4 (권고)** `!Files.notExists` 분기(확인 실패 → 멈춤)는 권한을 바꾸는 테스트가 운영체제에 따라 달라 지금 없다. POSIX에서만 도는 조건부 테스트(`@EnabledOnOs`, 폴더 실행 권한 제거)를 더하면 이 동작이 회귀하지 않게 지킬 수 있다.
+- 앞 검토 F1(감지 칸·복구 절차), F2(규칙 범위), N1~N3은 R1·R2를 빼고 해소됐다.
+
+### 판정
+수정 필요(A12: R1 #10 감지 칸의 없는 감지 경로를 사실대로 고치고 감시 생존 감지를 후속 과제로 등록 / A14: R2 사람이 지우는 예외를 D-058·5.2 0번·ADR-008 2.7에 반영하고 사용자 확인 항목으로 표시). 둘 다 문서 수정이며 코드 변경은 필요 없다.

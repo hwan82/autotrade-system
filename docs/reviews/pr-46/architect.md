@@ -30,3 +30,41 @@
 
 ## 판정
 수정 필요(B7: 장애 대응 규칙 변경이므로 risk-ops 검토 원문 `docs/reviews/pr-46/risk-ops.md`가 필요. 그 밖의 B 항목은 통과 또는 해당 없음이며 아키텍처 관점의 코드 수정 요구는 없다. 지침 10장에 따라 머지는 사용자가 한다)
+
+## 재검토 2026-10-11
+- 대상: PR #46 / 커밋 4e69072(앞 검토 뒤 05cb14b main 병합, 4e69072 검토 반영) / `git diff origin/main...HEAD` 전체(병합 기준 51eb6ef = 현재 main, 15개 파일 +220 −21). 16bf953 → 05cb14b 사이 나머지 변경은 main(#41·#43) 병합분이며 `origin/main...HEAD` diff에 나타나지 않음을 확인
+- 점검표: B
+- 직접 실행한 것 (새 복제본 `/tmp/claude-0/review-architect-46-r2`, 4e69072 체크아웃):
+  - `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**(122 tasks 모두 실행). 결과 XML 합계 804/0/0/0(tests/failures/errors/skipped). 새 테스트 4건(`ArchitectureTest#감시는_프로세스를_죽이지_않는다`, `RunGuardTest#정지_요청_파일은_해제_옵션과_상관없이_막고_지우지_않는다`, `CollectorMainTest`의 정지 요청 2건) 통과.
+  - 변이 확인 ①: `autotrade-monitor-agent-jar`에 `com.autotrade.monitor.ProbeKill`(`Process.destroyForcibly()` 호출)을 넣고 `ArchitectureTest` 실행 → `감시는_프로세스를_죽이지_않는다` 실패(`ProbeKill.k(Process) calls method Process.destroyForcibly()`). 확장된 대상 패키지가 실제로 검사된다.
+  - 변이 확인 ②: 임시 테스트로 정지 요청 경로의 부모가 일반 파일인 경우(판단 불가)를 만들어 확인 → `Files.exists`=false, `Files.notExists`=false, `RunGuard.checkSession`은 `Refused`(멈춤 쪽). 예전 코드였다면 그냥 진행했을 경우가 이제 닫힌다.
+  - 두 변이 모두 지우고 작업 트리 깨끗함 확인.
+  - 브랜치에 커밋된 `docs/reviews/pr-46/architect.md`가 앞 검토 원문과 같음을 `diff`로 확인(고쳐지지 않음).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 직접 실행 BUILD SUCCESSFUL, 804건 실패 0·건너뜀 0 |
+| B2 | 통과 | `WATCHDOG_KILLS_NO_PROCESS` 대상이 `com.autotrade.app.watchdog..`, `com.autotrade.monitor..`로 넓어짐(`ArchitectureTest.java:242`, 강화). D-058 ①에 같은 범위가 적혀 있다. `com.autotrade.monitor`는 `ModuleOwnershipTest.OWNERS`(`:118`)에서 `autotrade-monitor-agent-jar` 소유. 규칙은 의존을 더하지 않아 monitor-agent-jar의 도메인 무지 원칙과 무관. 운영 코드 새 의존 없음 |
+| B3 | 통과 | 앞 근거 유지. 이번에 더한 것: 장애표 #10 감지 칸(남은 정지 요청 파일, `broker-and-fault-design.md:169`), runbook 3장 복구 절차와 "감시와 같은 설정 폴더로 실행", D-058 ① 문구, 클래스 Javadoc 종료 코드 4(`CollectorMain.java:36`). 기획서는 main의 v14.11(#43) 다음 **v14.13**으로, 열린 `claude/project-thread-2w1z9y`의 v14.12와 겹치지 않는다(앞 N2 해소. 단 v14.12가 먼저 머지되지 않으면 판 번호 순서가 잠시 건너뛴다. 기능 영향 없음) |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음. `RunGuard.modified`는 파일 시각을 읽을 뿐 시계를 부르지 않는다 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 앞 테스트 유지, 삭제·`@Disabled` 없음. 5인자 생성자 제거에 따라 테스트 호출부는 `null`을 명시하도록 바뀜(`RunGuardTest.java:24,67,70`, `CollectorMainTest.java:324`, `KrxScaleProbe.java:57`), 검사 약화 아님. 이번 커밋의 새 동작 두 가지(판단 불가 시 멈춤, 확인 위치 출력)에는 전용 테스트가 없다. 판단 불가 시 멈춤은 검토자가 위 변이 ②로 직접 확인했고, 출력은 안내 문구라 막는 항목으로 보지 않는다(아래 R1 권고) |
+| B7 | 통과(risk-ops 검토 있음, 재검토 필요) | 장애 대응 규칙 변경이므로 A 점검표 대상. `docs/reviews/pr-46/risk-ops.md`가 브랜치에 있다(16bf953 대상, 판정 수정 필요 F1·F2). 4e69072가 F1(장애표 #10 감지·runbook 복구)·F2(규칙 대상에 monitor 포함)를 반영했으나 **risk-ops 재검토 원문은 아직 없다**. risk-ops 재검토 판정 "승인" 전에는 머지 조건이 갖춰지지 않는다. 지침 10장에 따라 머지는 사용자가 한다 |
+| B8 | 통과 | 새 출력은 정지 요청 경로(`<설정 폴더>/collector-state/stop-request`)와 파일 시각뿐이다(`CollectorMain.java:72-73`, `RunGuard.java:67-69`). 설정 폴더 경로는 비밀값이 아니다. diff `+` 줄에 키·토큰·계좌 없음 |
+
+### 앞 검토 권고 처리
+| # | 처리 | 근거 |
+|---|---|---|
+| N1 Javadoc 종료 코드 4 | 반영 | `CollectorMain.java:36` |
+| N2 기획서 판 번호 충돌 | 반영 | v14.13으로 다시 매김(위 B3) |
+| N3 fail-open | 반영 | `!Files.notExists(stopRequest)`(`RunGuard.java:66`), 변이 ② 확인 |
+| N4 null 생성자 | 일부 반영 | 5인자 생성자는 없앴다. 6인자 생성자는 여전히 `null`이면 확인을 끄고 운영 경로에서 막는 장치가 없다(`RunGuard.java:53-56`). 운영 호출은 `CollectorMain.java:70` 하나라 지금 위험은 없다 |
+| N5 ProcessBuilder 우회 | 후속 과제로 유지 | 감시 쪽 구현 PR에서 검토(앞 검토와 같은 이유) |
+| N6 | 해당 없음 | 사실 확인 항목 |
+
+### 재검토 점검표 밖 발견 (권고, 머지 막지 않음)
+- **R1**: 판단 불가 시 멈춤 동작을 회귀 테스트로 고정하길 권한다. 정지 요청 경로의 부모를 일반 파일로 만들면 OS와 권한에 상관없이 `Files.notExists`=false·`Files.exists`=false가 되어 재현된다(검토자 변이 ②와 같은 방법). 지금은 누가 `Files.exists`로 되돌려도 테스트가 잡지 못한다.
+- **R2**: N4 잔여. 운영 경로에서 `null`을 못 넘기게 하려면 `RunGuard`가 `Objects.requireNonNull`을 하고, 테스트에서는 존재하지 않는 임시 경로를 넘기는 방식(risk-ops N2 ② 제안과 같음)을 권한다.
+
+### 재검토 판정
+수정 필요(B7: risk-ops 재검토 원문 필요. architect가 요구하는 코드·문서 수정은 없다. R1·R2는 권고다. risk-ops 재검토가 "승인"이면 architect 쪽 막는 항목은 없다. 머지는 지침 10장에 따라 사용자가 한다)

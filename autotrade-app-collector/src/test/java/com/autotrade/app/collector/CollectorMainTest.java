@@ -321,7 +321,7 @@ class CollectorMainTest {
             }
         };
         RunGuard guard = new RunGuard(moving, List.of(com.autotrade.marketdata.calendar.ExchangeCalendar.bundled(Market.KRX)),
-                false, PLENTY, 20, null);
+                false, PLENTY, 20, RunGuardTest.NO_STOP);
         int[] reads = {0};
         KrxDaySource src = CollectorMain.guarded(new KrxDaySource() {
             @Override
