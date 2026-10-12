@@ -33,6 +33,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -129,7 +130,8 @@ public final class ReplayCheck {
         Run first = replayOnce(dayDir, session);
         Run second = replayOnce(dayDir, session);
         return new Report(dayDir, first.meta(), first.truncated(), first.eventCount(), first.gapCount(), session,
-                first.digest(), second.digest(), first.replayed(), second.replayed(), first.symbols(), names);
+                first.digest(), second.digest(), first.replayed(), second.replayed(), first.symbols(), names,
+                first.unmarkedRestarts());
     }
 
     private static Optional<TradingSession> regularSession(Market market, LocalDate date) {
@@ -141,7 +143,7 @@ public final class ReplayCheck {
     }
 
     private record Run(Optional<RecordingMeta> meta, boolean truncated, long eventCount, long gapCount, String digest,
-            long replayed, Map<Symbol, SymbolSummary> symbols) {}
+            long replayed, Map<Symbol, SymbolSummary> symbols, List<RecordingMeta.Segment> unmarkedRestarts) {}
 
     private static Run replayOnce(Path dayDir, Optional<TradingSession> session) {
         RecordedDay day = RecordedDay.open(dayDir);
@@ -162,7 +164,11 @@ public final class ReplayCheck {
         });
         source.replay();
         return new Run(day.meta(), day.truncated(), day.eventCount(), day.gapCount(),
-                HexFormat.of().formatHex(sha.digest()), count[0], summaries);
+                HexFormat.of().formatHex(sha.digest()), count[0], summaries, day.unmarkedRestarts());
+    }
+
+    private static String localTime(String isoInstant, String zone) {
+        return LocalTime.ofInstant(Instant.parse(isoInstant), ZoneId.of(zone)).truncatedTo(ChronoUnit.SECONDS).toString();
     }
 
     private static MessageDigest sha256() {
@@ -247,7 +253,7 @@ public final class ReplayCheck {
 
     record Report(Path dir, Optional<RecordingMeta> meta, boolean truncated, long eventCount, long gapCount,
             Optional<TradingSession> session, String firstDigest, String secondDigest, long firstCount, long secondCount,
-            Map<Symbol, SymbolSummary> symbols, SymbolNames names) {
+            Map<Symbol, SymbolSummary> symbols, SymbolNames names, List<RecordingMeta.Segment> unmarkedRestarts) {
 
         boolean complete() {
             return meta.map(RecordingMeta::complete).orElse(false);
@@ -281,6 +287,15 @@ public final class ReplayCheck {
                         .append(hashVerified() ? " (파일과 일치 확인됨)" : " (파일 대조 안 함: 정상 종료 녹화만 대조)").append('\n');
                 b.append("- 출처: ").append(new TreeMap<>(m.sources())).append('\n');
                 b.append("- 녹화 구간 수(재기동 포함): ").append(m.segments().size()).append('\n');
+                if (!unmarkedRestarts.isEmpty()) {
+                    b.append("- 재기동 공백 표시 없음(D-065 이전 녹화): 구간 시작 ");
+                    for (int i = 0; i < unmarkedRestarts.size(); i++) {
+                        RecordingMeta.Segment s = unmarkedRestarts.get(i);
+                        b.append(i == 0 ? "" : ", ").append(localTime(s.startedAt(), m.zone())).append("(seq ")
+                                .append(s.firstSeq()).append(')');
+                    }
+                    b.append(". 이 경계 앞 시간은 이벤트 흐름에 끊김 표시 없이 비어 있다\n");
+                }
             } else {
                 b.append("- 메타: 없음(정상 종료되지 않음, 파일 해시 대조 안 함)\n");
             }

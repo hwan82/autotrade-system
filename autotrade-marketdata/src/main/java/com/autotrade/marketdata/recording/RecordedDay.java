@@ -137,6 +137,33 @@ public final class RecordedDay {
         return lines.stream().filter(l -> l.event() instanceof DataGap).count();
     }
 
+    /**
+     * 재기동 공백 표시가 없는 구간 경계(새 구간 목록). 재기동 공백 표시(D-065) 이전에 만든 녹화는 구간 사이에
+     * {@link DataGap}(RECORDER_RESTART)이 없어, 리플레이만 보면 그 시간을 "이벤트 없음"으로 읽는다.
+     * 이 목록이 비어 있지 않으면 읽는 쪽(시뮬레이션 어댑터 등)이 구간 경계를 끊김으로 다뤄야 한다.
+     * 새 구간에 줄이 하나도 없으면(이벤트를 받기 전에 다시 멈춤) 표시할 자리가 없으므로 넣지 않는다.
+     */
+    public List<RecordingMeta.Segment> unmarkedRestarts() {
+        if (meta.isEmpty()) {
+            return List.of();
+        }
+        List<RecordingMeta.Segment> out = new ArrayList<>();
+        List<RecordingMeta.Segment> segs = meta.get().segments();
+        for (int i = 1; i < segs.size(); i++) {
+            RecordingMeta.Segment s = segs.get(i);
+            long first = s.firstSeq();
+            if (first <= 1 || first > lastSeq()) {
+                continue;
+            }
+            boolean marked = lines.get((int) (first - 1)).event() instanceof DataGap g
+                    && g.reason() == DataGap.GapReason.RECORDER_RESTART;
+            if (!marked) {
+                out.add(s);
+            }
+        }
+        return out;
+    }
+
     public Instant lastReceivedAt() {
         return lines.isEmpty() ? null : lines.get(lines.size() - 1).event().receivedAt();
     }

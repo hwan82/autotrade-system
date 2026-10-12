@@ -10,6 +10,7 @@ import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.recording.MarketEventRecorder;
 import com.autotrade.marketdata.recording.RecordingLayout;
+import com.autotrade.marketdata.recording.RecordingMeta;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
 import com.autotrade.marketdata.symbols.SymbolNames;
 import java.io.ByteArrayOutputStream;
@@ -133,14 +134,48 @@ class ReplayCheckTest {
     void 잘림이나_0건이면_불완전이고_회차가_다르면_다름이다() {
         Path dir = root.resolve("KRX/2026-10-08");
         String h = "a".repeat(64);
-        ReplayCheck.Report truncated = new ReplayCheck.Report(dir, Optional.empty(), true, 5, 0, Optional.empty(), h, h, 5, 5, Map.of(), SymbolNames.empty());
-        ReplayCheck.Report empty = new ReplayCheck.Report(dir, Optional.empty(), false, 0, 0, Optional.empty(), h, h, 0, 0, Map.of(), SymbolNames.empty());
-        ReplayCheck.Report differs = new ReplayCheck.Report(dir, Optional.empty(), false, 5, 0, Optional.empty(), h, "b".repeat(64), 5, 5, Map.of(), SymbolNames.empty());
+        ReplayCheck.Report truncated = new ReplayCheck.Report(dir, Optional.empty(), true, 5, 0, Optional.empty(), h, h, 5, 5, Map.of(), SymbolNames.empty(), List.of());
+        ReplayCheck.Report empty = new ReplayCheck.Report(dir, Optional.empty(), false, 0, 0, Optional.empty(), h, h, 0, 0, Map.of(), SymbolNames.empty(), List.of());
+        ReplayCheck.Report differs = new ReplayCheck.Report(dir, Optional.empty(), false, 5, 0, Optional.empty(), h, "b".repeat(64), 5, 5, Map.of(), SymbolNames.empty(), List.of());
 
         assertThat(truncated.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
         assertThat(empty.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
         assertThat(differs.verdict()).isEqualTo(ReplayCheck.Verdict.DIFFERENT);
         assertThat(ReplayCheck.Verdict.DIFFERENT.exitCode).isEqualTo(1);
+    }
+
+    @Test
+    void 같은_날_재기동한_녹화는_구간_경계에_종목마다_끊김이_세지고_표시_없음_경고가_없다() {
+        Path day = recordDay();
+        MarketEventRecorder rec = new MarketEventRecorder(new RecordingLayout(root), Market.KRX, ZoneId.of("Asia/Seoul"),
+                Clock.fixed(OPEN.plusSeconds(4 * 3600), ZoneOffset.UTC), Map.of("KIWOOM-WS", "KRX_REALTIME"),
+                "본인 연구용, 외부 공유 금지", 1_000, Duration.ofMillis(50));
+        Instant back = OPEN.plusSeconds(4 * 3600 + 10); // 13:00:10 재기동 뒤 첫 체결
+        rec.offer("KIWOOM-WS", new TradeTick(SAMSUNG, 1, back, back, new BigDecimal("71100"), 1));
+        rec.close();
+
+        ReplayCheck.Report r = ReplayCheck.check(day);
+        assertThat(r.verdict()).isEqualTo(ReplayCheck.Verdict.SAME);
+        assertThat(r.gapCount()).isEqualTo(3); // 원래 끊김 1 + 재기동 2(000660, 005930)
+        assertThat(r.toMarkdown())
+                .contains("녹화 구간 수(재기동 포함): 2")
+                .doesNotContain("재기동 공백 표시 없음")
+                .contains("| 000660 | – | 1 | 120500 | 120500 | 120500 | 120500 | 3 | 09:00:01 | 09:00:01 | 0 / 0 | 0 | 1 |")
+                .contains("RECORDER=녹화기 공백 표시");
+    }
+
+    @Test
+    void 재기동_공백_표시_이전_녹화는_표시_없는_구간_경계를_보고서에_적는다() {
+        Path dir = root.resolve("KRX/2026-10-08");
+        RecordingMeta.Segment second = new RecordingMeta.Segment("2026-10-08T05:19:47Z", "2026-10-08T06:43:28Z", 410641);
+        RecordingMeta m = new RecordingMeta(1, "KRX", "2026-10-08", "Asia/Seoul", Map.of(), "", List.of(
+                new RecordingMeta.Segment("2026-10-07T23:50:00Z", "2026-10-08T04:05:41Z", 1), second),
+                410700, 410700, 0, 0, true, "a".repeat(64));
+        String h = "a".repeat(64);
+        ReplayCheck.Report r = new ReplayCheck.Report(dir, Optional.of(m), false, 410700, 0, Optional.empty(), h, h, 410700,
+                410700, Map.of(), SymbolNames.empty(), List.of(second));
+
+        assertThat(r.toMarkdown()).contains("재기동 공백 표시 없음(D-065 이전 녹화): 구간 시작 14:19:47(seq 410641)");
     }
 
     @Test
