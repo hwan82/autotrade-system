@@ -26,6 +26,8 @@
 | ② 시세 게이트웨이 | autotrade-app-gateway | `GatewayMain` | 순수 Java | sim, app-lab, ui, risk, strategy, control, Spring |
 | ③ 실험실 | autotrade-app-lab | `AutotradeLabApplication` | Spring Boot, `bootJar` | (Spring 허용. 다른 프로세스 모듈 참조는 ArchUnit이 막음) |
 | ④ 감시·킬스위치 | autotrade-app-watchdog | `WatchdogMain` | 순수 Java | sim, app-lab, ui, strategy, control, Spring |
+| (상주 프로세스 아님) 수집 일괄 명령 | autotrade-app-collector | `CollectorMain` | 순수 Java, 단발 실행 | sim, app-lab, ui, risk, strategy, control, broker-*, 다른 app-*, Spring. 설정 로더 참조 금지(ArchUnit). [ADR-008](ADR-008-collector.md) |
+| (상주 프로세스 아님) 실험 실행 명령 | autotrade-app-experiment | `ExperimentMain` | 순수 Java, 단발 실행(`runCombinationExperiment`, `runStrategyStudy`) | app-lab, ui, control, broker-*, 다른 app-*, Spring. 장 시간 보호·정지 요청 파일 확인([D-063](../decisions/D-063-experiment-command-stop-gate.md)) |
 
 ```
  app-engine   app-gateway   app-lab (Spring)   app-watchdog      ← 서로 참조 금지

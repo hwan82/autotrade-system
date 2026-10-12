@@ -1,0 +1,61 @@
+# architect 검토: 실험 화면에 종목명 칸과 계좌 상세 요약 추가, 종목 마스터 받기 명령
+- 대상: PR #33 / 커밋 ffd9911 / main 대비 diff(`git diff origin/main...HEAD`, merge-base = origin/main 84f6678, 23개 파일 +1284 −43)
+- 점검표: B
+- 직접 실행한 것: `./gradlew build --rerun-tasks`(브랜치 작업 트리, ffd9911) → `BUILD SUCCESSFUL in 1m 57s`. 테스트 결과 XML 집계 546건, 실패 0·오류 0·건너뜀 0. 보호 테스트 `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `ArchitectureTest` 15, `ModuleOwnershipTest` 13 통과. 새·바뀐 테스트 `SymbolMasterUpdateTest` 5, `KisSymbolMasterTest` 6, `SymbolNameFilesTest` 7, `SymbolNameViewsTest` 2, `ExperimentControllerTest` 12, `ReplayCheckTest` 6 통과. 총수익률 이중 반올림 재현(아래 F2)은 별도 Java 한 파일로 실행. 한국투자 공식 예제 `kis_kospi_code_mst.py`를 GitHub에서 직접 받아 꼬리 길이 228과 자르기 방식을 대조함. 실제 마스터 파일 주소(`new.real.download.dws.co.kr`)는 이 환경의 egress 정책으로 막혀(CONNECT 403) 받지 못함
+- 함께 본 것: diff 전문, `Symbol.java`(코드 형식 `[A-Z0-9.]{1,12}`), `VirtualAccount` 공개 메서드(상태를 바꾸는 것은 `apply`뿐), `MetricsCalculator.compute`(:31-37, MathContext 40자리 후 6자리 HALF_EVEN), `RunResult.metrics`, `dom.js`의 `h()`(textContent만 씀), `ConfigPaths`(절대 경로화), app-lab·app-gateway `build.gradle.kts` 의존 목록. PR 본문과 커밋 메시지는 사실로 받지 않음
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 직접 실행 `./gradlew build --rerun-tasks` → BUILD SUCCESSFUL, 546건 실패·오류·건너뜀 0 |
+| B2 | 통과 | 새 의존 없음: app-lab은 원래 `:autotrade-marketdata` 의존(app-lab/build.gradle.kts:11), app-gateway는 원래 `:autotrade-broker-kis` 의존. 새 패키지 `com.autotrade.marketdata.symbols`는 marketdata 소유 범위, `ModuleOwnershipTest`·`ArchitectureTest` 통과. 게이트웨이 `processIsolation` 금지 목록 무변경. `SymbolMasterUpdate`는 주문 포트를 참조하지 않음(별도 `main`, `GatewayMain` 경로 아님). 순수 모듈(domain·strategy·sim·risk) 변경 없음 |
+| B3 | 통과 | 새 REST `GET .../runs/{runId}/summary`와 `symbolName` 필드 추가는 ADR-005:90-92·:103에, 새 설정 파일 `symbols/<MARKET>.csv`는 config-keys.md:47에, 마스터 형식 `[가정]`은 ADR-003:150에 기록. 기존 필드는 바뀌지 않고 추가뿐(`FillRow`·`RoundTripRow`·`RejectionRow`에 `symbolName` 삽입). 단 ADR-003:150의 "ETN 등 6자리가 아닌 코드는 제외됨"이 구현과 다름(F1). `Csv`를 package-private에서 public으로 연 것(Csv.java:15)은 문서에 없음(F4, 막지 않음) |
+| B4 | 통과 | sim·strategy 코드 변경 없음. 종목명은 표시에만 쓰이고 해시에 들어가지 않음: `ReplayCheckTest#이름표가_있으면_종목명_열에_이름을_넣고_없는_종목은_대시로_두며_판정과_해시는_그대로다`, `SymbolNameViewsTest#이름표가_있어도_없어도_이름_외의_값은_같다` 통과. 새 코드에 `now()`·난수 없음(요약의 보유 스냅숏 시각은 자산 곡선 마지막 점 `ts`, 없으면 `Instant.EPOCH`, ExperimentViews.java:218-219). `SymbolNameFiles.write`는 코드순 정렬로 같은 입력 같은 바이트(`SymbolNameFilesTest#입력_순서가_달라도_같은_바이트이고_다시_써도_임시_파일이_남지_않는다`). 골든 성격 테스트(`SimulationExperimentRunnerTest`, `MetricsCalculatorTest`) 무변경 통과 |
+| B5 | 통과 | 요약 금액은 모두 `Money`(BigDecimal) 합산(ExperimentViews.java:180-193), 응답은 `toPlainString` 문자열. `double`은 `SymbolMasterUpdate.MAX_FAILURE_RATIO`(:35, 줄 수 비율이며 금액 아님)뿐. 총수익률 반올림이 지표 계산과 다름(F2) |
+| B6 | 통과 | 새 동작마다 테스트: 파서(`KisSymbolMasterTest` 6, 실패 줄 집계·압축 폭탄 상한 포함), 받기 명령(`SymbolMasterUpdateTest` 5, 1% 초과·받기 실패·중복 코드 시 기존 파일 보존), 파일 읽기·쓰기(`SymbolNameFilesTest` 7, 깨진 파일 시 그 시장만 빠짐), REST 요약 손 계산(`ExperimentControllerTest#계좌_요약은_손_계산과_같다`, `#손실_계좌_요약과_기간_끝_보유_종목`, `#실패한_계좌_요약은_실패_표시와_빈_값을_준다`). 기존 테스트 변경은 `ReplayCheckTest`의 기대 행에 종목명 열 추가와 `Report` 생성자 인자 추가뿐이며 단언 삭제·`@Disabled` 없음. 단 실제 마스터 형식에 맞춘 "6자리가 아닌 코드" 경우의 테스트가 없음(F1). UI(`experiments.js`)는 이 저장소에 JS 테스트 체계가 없어 테스트 없음(기존과 같음) |
+| B7 | 해당 없음 | 실전 주문 경로, RealTradingGuard, 블랙리스트·수동 보유, 리스크 한도, 장애 대응, 증권사 주문 연동, 보호 테스트를 건드리지 않음. `KisSymbolMaster`는 broker-kis 안에 있으나 인증·주문·시세 세션과 무관한 공개 파일 파서(KisSymbolMaster.java 전문, `KisOrder*`·토큰 클래스 참조 없음). 실전 엔진(app-engine) 파일 변경 없음 |
+| B8 | 통과 | diff 전문 확인. 키·계좌번호·토큰 없음. 받기 주소는 키 없는 공개 주소(KisSymbolMaster.java:29). 실패 사유 문구에 줄 내용을 싣지 않음(KisSymbolMaster.java:140-141, 테스트 `검증에_실패한_줄은_세고_사유만_남기며_빈_줄은_건너뛴다`) |
+
+## 점검표 밖 발견
+1. **F1 [중] 6자리가 아닌 단축코드 줄을 "제외"가 아니라 "검증 실패"로 세어, 실제 코스피 마스터에서 받기 명령이 늘 실패(종료 코드 1)할 수 있다.** `KisSymbolMaster.validate`는 단축코드가 `[0-9A-Z]{6}`(KisSymbolMaster.java:35, :148)이 아니면 실패 사유를 돌려주고 `failed++`(:132)로 센다. `SymbolMasterUpdate.run`은 실패 줄이 전체의 1%를 넘으면 파일을 쓰지 않는다(SymbolMasterUpdate.java:74). 그런데 같은 PR의 ADR-003:150은 "ETN 등 6자리가 아닌 코드는 **제외됨**"이라 적어, 그런 줄이 존재한다고 보면서 처리 방식은 문서와 코드가 다르다 `[사실]`. 코스피 마스터에 ETN이 들고 ETN 단축코드가 `Q` + 6자리(7자) 형식이면, ETN 수(수백 건)가 마스터 전체 줄 수의 1%를 크게 넘어 첫 실행부터 쓰기를 거부한다 `[추론]`(마스터 실제 내용은 이 환경에서 받지 못해 확인 못 함). 1% 기준은 "형식이 바뀐 것" 탐지용인데, 알려진 정상 변형(다른 길이의 코드)까지 같은 통에 넣어 기준이 의미를 잃는다. 수정: (가) 줄 구조(길이·표준코드 `KR` 12자리·이름 비어 있지 않음)는 맞는데 단축코드만 6자리 영숫자가 아닌 줄은 `excludedLines`로 따로 세고 1% 판정에서 빼서 출력에만 건수를 적거나, (나) `Symbol`이 받는 형식(`[A-Z0-9.]{1,12}`)이면 그대로 받는다. 어느 쪽이든 ADR-003:150 문구와 맞추고, `Q500001` 같은 7자 코드 줄이 1%를 넘게 섞여도 0을 돌려주는 테스트를 추가한다. 추천은 (가): 표시용 이름표에 ETN 이름이 빠져도 화면은 "–"로 두므로 영향이 작고, 1% 기준의 원래 뜻(형식 변경 탐지)을 지킨다.
+2. **F2 [하] 요약의 총수익률을 지표와 다른 방법으로 다시 계산해, 같은 계좌의 두 화면 값이 드물게 0.000001 다를 수 있다.** `RunSummary.of`는 `평가금액 ÷ 시드`를 소수 8자리 HALF_EVEN으로 나눈 뒤 1을 빼고 다시 6자리로 맞춘다(ExperimentViews.java:196-198). `MetricsCalculator.compute`는 40자리 MathContext로 나눈 뒤 6자리로 한 번 맞춘다(MetricsCalculator.java:36-37, 반올림은 :127). Javadoc은 "RunMetrics와 같은 규칙"이라 쓰지만 이중 반올림이라 같지 않다. 재현: 시드 10,000,000, 평가금액 10,000,014.9996 → 이 PR 방식 0.000002, 지표 방식 0.000001(직접 실행). 수정: COMPLETED Run은 `run.summary().metrics().totalReturn()`을 그대로 쓰고, 지표가 없는 FAILED Run만 직접 계산하되 같은 MathContext로 나눈다. 테스트에 경계값 한 건 추가 권고.
+3. **F3 [하] 보유 종목 재계산 실패를 로그 없이 삼킨다.** `holdings()`가 `RuntimeException`을 잡아 null을 돌려준다(ExperimentViews.java:223-224). 원장 재반영이 실패한다는 것은 기록된 체결 원장과 `VirtualAccount` 규칙이 어긋났다는 뜻이라(현재 상태를 바꾸는 메서드는 `apply`뿐이라 정상이라면 일어나지 않음) 조용히 숨기면 결과 무결성 문제를 놓친다 `[추론]`. 수정: 실험 ID·Run ID와 예외 종류를 warn 로그로 남긴다(ExperimentViews는 정적 뷰라 로그는 카탈로그 쪽에서 남겨도 된다).
+4. **F4 [참고] `marketdata.daily.Csv`를 public으로 열어 `symbols` 패키지가 `daily` 패키지 내부 도구에 기대게 됐다**(Csv.java:15, SymbolNameFiles.java:5). 지금 범위에선 문제 없으나, 공용 도구라면 `com.autotrade.marketdata.csv` 같은 중립 패키지로 옮기는 것이 의존 방향이 깔끔하다. 다음 정리 때 처리, 이번 머지를 막지 않음.
+5. **F5 [참고]** `experiments.js`의 `summaryCard(s, run)`에서 `run` 인자를 쓰지 않음(:161, :173). 지워도 됨.
+6. 확인했지만 문제 아님: (a) 마스터 자르기 규칙은 공식 예제 `kis_kospi_code_mst.py`의 `row[0:len(row) - 228]`, `rf1[0:9]`, `rf1[9:21]`, `rf1[21:].strip()`과 일치하며, 예제가 텍스트 모드(줄바꿈 1자 포함)로 자르므로 줄바꿈을 뗀 줄에서 227·221을 쓰는 것도 맞다. 코스닥 222는 이 환경에서 원문을 다시 대조하지 않았다 `[가정]`(코드 주석과 ADR이 이미 `[가정]`으로 둠). (b) 받기 크기 상한 16MB(SymbolMasterUpdate.java:37)와 압축 해제 상한 32MB(KisSymbolMaster.java:32), https만 허용, `Redirect.NORMAL`은 https→http로 따라가지 않음. (c) 종목명은 `h()`가 textContent로만 넣어(dom.js:1-30) 파일 내용에 의한 XSS 없음. 보고서 Markdown은 `|`를 이스케이프(ReplayCheck.java 종목명 열). (d) 실험실은 기동 때 한 번 읽고 틱 경로에 들어가지 않으며, 파일이 없거나 깨져도 기동에 영향 없음(LabWebConfiguration.java:26-33, `SymbolNameFilesTest#깨진_파일은_그_시장만_빼고_경고를_돌려주며_예외를_던지지_않는다`). (e) 요약을 별도 경로로 둔 이유(계좌별로 원장 재반영)는 ADR-005:103에 기록되어 있고, 기존 응답 필드는 바뀌지 않음. (f) `market`을 첫 프로필에서 읽는 것은 기존 `Summary`(ExperimentViews.java:45)와 같은 방식.
+
+## 판정
+수정 필요(F1)
+
+- F1: 단축코드 형식만 다른 줄을 실패에서 분리해 1% 판정에서 빼거나 `Symbol` 형식으로 받아들이고, ADR-003:150 문구와 맞추며, 7자 코드 줄이 1%를 넘게 섞인 경우의 테스트를 추가할 것.
+- F2·F3는 같은 수정 커밋에서 고치기를 권고(머지를 막지는 않음). F4·F5는 참고.
+- 실전 경로를 건드리지 않아 risk-ops 검토 대상이 아니다. F1 수정 뒤 architect 재검토 "승인"이면 지침 10장에 따라 Claude 머지 대상이다.
+
+## 재검토 2026-10-09 (대상 커밋 6a93cc1)
+- 대상: PR #33 / 커밋 6a93cc1 / main 대비 diff 전체(`git diff origin/main...HEAD`, merge-base 84f6678, 24개 파일. 위 원문 이후 변경은 `git diff 8c4e6db 6a93cc1` 7개 파일 +78 −17이고 `docs/reviews/`는 건드리지 않음)
+- 점검표: B
+- 직접 실행한 것: `./gradlew build --rerun-tasks`(6a93cc1) → `BUILD SUCCESSFUL in 1m 36s`. 테스트 XML 집계 548건, 실패·오류·건너뜀 0. 보호 테스트 `RealTradingGuardTest` 31, `GuardedOrderGatewayTest` 8, `ArchitectureTest` 15, `ModuleOwnershipTest` 13 통과. `SymbolMasterUpdateTest` 6(+1), `KisSymbolMasterTest` 7(+1), `ExperimentControllerTest` 12, `SymbolNameViewsTest` 2 통과. 커밋 메시지는 사실로 받지 않고 코드로 대조함
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 직접 실행 `./gradlew build --rerun-tasks` → BUILD SUCCESSFUL, 548건 실패·오류·건너뜀 0 |
+| B2 | 통과 | 새 의존 없음. `ExperimentViews`에 slf4j 로거 추가(:26-27, :35)는 app-lab 안이라 경계 문제 없음. `ArchitectureTest`·`ModuleOwnershipTest` 통과 |
+| B3 | 통과 | `KisSymbolMaster.Parsed`에 `skippedLines` 추가(공개 레코드, 호출처는 `KisSymbolMaster.java:142`와 `SymbolMasterUpdate`뿐). ADR-003:150 문구를 "형식은 맞고 단축코드만 6자리가 아닌 줄은 제외로 따로 세고 1% 판정에 넣지 않음"으로 고쳐 구현과 일치. REST 응답 모양 무변경 |
+| B4 | 통과 | sim·strategy 변경 없음. 총수익률은 이제 완료 Run이면 `RunMetrics.totalReturn()`을 그대로 씀(ExperimentViews.java:245-255) |
+| B5 | 통과 | 실패 Run의 총수익률 직접 계산은 `MathContext(40, HALF_EVEN)`로 나눈 뒤 6자리 HALF_EVEN(ExperimentViews.java:252-256)으로 `MetricsCalculator.compute`(:36-37)와 같은 규칙. 금액 `double` 없음 |
+| B6 | 통과 | F1 새 테스트 `KisSymbolMasterTest#형식은_맞고_단축코드만_6자리가_아닌_줄은_실패가_아니라_제외로_센다`(7자·9자 코드 → 제외 2, 실패 0), `SymbolMasterUpdateTest#단축코드만_6자리가_아닌_줄은_1퍼센트를_넘게_섞여도_제외로_세고_통과한다`(Q 코드 50줄/전체 54줄 → 종료 0, 이름 4건). 기존 테스트 `검증에_실패한_줄은_세고_사유만_남기며_빈_줄은_건너뛴다`의 입력 `Q500001X`→`00-593`은 실패 정의가 "6자리 아님"에서 "영숫자 아님"으로 바뀐 데 맞춘 것이고 단언(실패 4, 사유에 "단축코드")은 그대로이며 `skippedLines` 0 단언이 더해짐(약화 아님). F2의 경계값 테스트는 추가되지 않음(권고였으며 지표 값을 그대로 쓰게 되어 이중 반올림 경로 자체가 사라짐) |
+| B7 | 해당 없음 | 실전 주문 경로, Guard, 블랙리스트, 리스크 한도, 장애 대응, 증권사 주문 연동, 보호 테스트 변경 없음 |
+| B8 | 통과 | 수정 diff 전문 확인. 비밀값 없음. 새 warn 로그는 Run ID와 예외 문자열만 남김(ExperimentViews.java:227) |
+
+### 지적 항목 처리
+- F1 해소: `validate`는 단축코드를 "비어 있지 않은 ASCII 영숫자"로만 보고(KisSymbolMaster.java:155), 구조 검증을 통과했지만 `[0-9A-Z]{6}`이 아닌 줄은 `skipped++`(:129-130)로 따로 센다. `SymbolMasterUpdate`는 `failed`만 1% 기준에 쓰고(:77), 제외 건수를 보드별·총계로 출력한다. 표준코드 `KR` 12자리 검사는 남아 있어 꼬리 길이가 바뀌는 형식 변경은 여전히 실패로 잡힌다 `[추론]`.
+- F2 해소: 위 B4·B5.
+- F3 해소: warn 로그 추가(ExperimentViews.java:227).
+- F5 해소: `summaryCard(s)`로 인자 정리(experiments.js:161, :173).
+- F4: 처리 안 함(참고 항목이라 머지를 막지 않음).
+
+### 새 발견
+1. [참고] 1% 판정의 분모 `lines`에 제외 줄이 들어간다(SymbolMasterUpdate.java:77, `totalLines()`가 `skippedLines` 포함). 제외 줄이 많을수록 허용 실패 수가 조금 늘어난다(예: 제외가 15%면 실질 기준 약 1.18%). 형식 변경 탐지 목적에 비해 영향이 작아 머지를 막지 않으나, 다음에 손댈 때 분모를 `lines - skipped`로 바꾸기를 권고.
+2. [참고] 제외 줄도 소문자 단축코드처럼 `Symbol` 형식(`[A-Z0-9.]`)에 안 맞는 경우까지 "제외"로 들어간다. 이름표 용도라 영향 없음.
+
+## 판정
+승인

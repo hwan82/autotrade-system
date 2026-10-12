@@ -37,6 +37,12 @@ public class ExperimentController {
         return found(catalog.equity(id(id)), "실험이 없습니다");
     }
 
+    /** 계좌 상세 머리 요약(기간, 시드, 평가금액, 수익률, 누적 실현손익, 비용, 기간 끝 보유 종목). */
+    @GetMapping("/{id}/runs/{runId}/summary")
+    public ExperimentViews.RunSummary runSummary(@PathVariable String id, @PathVariable String runId) {
+        return found(catalog.runSummary(id(id), runId), "실험이나 계좌가 없습니다");
+    }
+
     @GetMapping("/{id}/runs/{runId}/fills")
     public Page<ExperimentViews.FillRow> fills(
             @PathVariable String id, @PathVariable String runId,
@@ -58,6 +64,51 @@ public class ExperimentController {
             @RequestParam(required = false) String stage, @RequestParam(required = false) String code,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
         return found(catalog.rejections(id(id), runId, stage, code, page, size), "실험이나 계좌가 없습니다");
+    }
+
+    /** 선정 × 매매지표 교차표. {@code rowControl}은 행 대조 열(전략 {@code id@version}, 보통 무작위 진입 프로필). */
+    @GetMapping("/{id}/cross-table")
+    public SelectionViews.CrossTable crossTable(
+            @PathVariable String id, @RequestParam(defaultValue = "totalReturn") String metric,
+            @RequestParam(required = false) String rowControl) {
+        try {
+            return found(catalog.crossTable(id(id), metric,
+                    rowControl == null || rowControl.isBlank() ? null : rowControl), "실험이 없습니다");
+        } catch (IllegalArgumentException e) {
+            throw ApiException.badRequest(e.getMessage());
+        }
+    }
+
+    /** 선정 있는 계좌의 날짜별 선정 기록(run_selection_day). */
+    @GetMapping("/{id}/runs/{runId}/selection-days")
+    public Page<SelectionViews.SelectionDayRow> selectionDays(
+            @PathVariable String id, @PathVariable String runId,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        return found(catalog.selectionDays(id(id), runId, page, size), "실험이나 계좌가 없습니다");
+    }
+
+    /** 이 실험이 쓴 선정 결과 하나(입력 기준일, 선정 종목, 탈락 사유별 건수, 정정 대체 규칙 적용 수). */
+    @GetMapping("/{id}/selection-results/{hash}")
+    public SelectionViews.SelectionResultView selectionResult(@PathVariable String id, @PathVariable String hash) {
+        return found(catalog.selectionResult(id(id), resultHash(hash)), "이 실험에 등록된 선정 결과가 없습니다");
+    }
+
+    /** 선정 결과의 평가 행. {@code filter}: all, passed, failed, fallback. {@code reason}: 탈락 사유 코드. */
+    @GetMapping("/{id}/selection-results/{hash}/evaluations")
+    public Page<SelectionViews.EvaluationRow> selectionEvaluations(
+            @PathVariable String id, @PathVariable String hash,
+            @RequestParam(required = false) String filter, @RequestParam(required = false) String reason,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        try {
+            return found(catalog.selectionEvaluations(id(id), resultHash(hash), filter, reason, page, size),
+                    "이 실험에 등록된 선정 결과가 없습니다");
+        } catch (IllegalArgumentException e) {
+            throw ApiException.badRequest(e.getMessage());
+        }
+    }
+
+    private static String resultHash(String hash) {
+        return SelectionViews.checkedHash(hash).orElseThrow(() -> ApiException.badRequest("결과 해시 형식이 아닙니다"));
     }
 
     private static ExperimentId id(String id) {

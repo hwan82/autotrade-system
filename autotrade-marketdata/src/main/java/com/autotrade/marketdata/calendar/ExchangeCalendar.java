@@ -129,6 +129,31 @@ public final class ExchangeCalendar {
         return Optional.of(new TradingSession(date, zone, regularOpen, regularClose, ""));
     }
 
+    /**
+     * 장 시간 보호용 구간(PR #53 risk-ops F1). 거래소 공지로 확인되지 않은({@code verified: false}) 날짜는 틀렸을 때 보호가
+     * 빠지지 않는 쪽으로 본다: 확인 안 된 휴장일은 정규장이 있는 날로, 확인 안 된 특별 운영일은 정규장과 특별 운영 구간을 합친
+     * 구간으로. 거래일 계산({@link #session}, {@link #tradingDays})은 바꾸지 않는다. 수록 범위 밖이면 예외.
+     */
+    public Optional<TradingSession> protectionSession(LocalDate date) {
+        Optional<TradingSession> s = session(date);
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+            return s;
+        }
+        Entry h = holidays.get(date);
+        if (h != null) {
+            return h.verified() ? s : Optional.of(new TradingSession(date, zone, regularOpen, regularClose, h.name() + "(미확인 휴장일)"));
+        }
+        Special sp = specials.get(date);
+        if (sp != null && !sp.verified()) {
+            LocalTime open = LocalTime.parse(sp.open());
+            LocalTime close = LocalTime.parse(sp.close());
+            return Optional.of(new TradingSession(date, zone, open.isBefore(regularOpen) ? open : regularOpen,
+                    close.isAfter(regularClose) ? close : regularClose, sp.name() + "(미확인, 정규장과 합침)"));
+        }
+        return s;
+    }
+
     public boolean isTradingDay(LocalDate date) {
         return session(date).isPresent();
     }

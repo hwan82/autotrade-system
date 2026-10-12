@@ -2,26 +2,44 @@ package com.autotrade.app.lab.experiment;
 
 import com.autotrade.app.lab.web.Page;
 import com.autotrade.domain.Money;
+import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.symbols.SymbolNames;
+import com.autotrade.selection.profile.Combination;
+import com.autotrade.selection.profile.SelectionProfile;
+import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.account.RoundTrip;
+import com.autotrade.sim.account.VirtualAccount;
 import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.RunSelectionDay;
 import com.autotrade.sim.run.SimulationReport;
 import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.Currency;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 실험 화면 REST 응답 모양(ADR-005 5장). 금액·비율은 정밀도를 잃지 않게 문자열(BigDecimal plain)로 내보내고
  * 통화 코드를 함께 둔다. 시각은 UTC ISO-8601이며 화면이 KST와 거래소 현지 시간으로 바꿔 보여 준다(UI-07).
  */
 public final class ExperimentViews {
+
+    private static final Logger log = LoggerFactory.getLogger(ExperimentViews.class);
 
     private ExperimentViews() {
     }
@@ -36,7 +54,7 @@ public final class ExperimentViews {
             ExperimentResult r = report.result();
             int completed = (int) r.runs().stream().filter(x -> x.status() == RunStatus.COMPLETED).count();
             int failed = (int) r.runs().stream().filter(x -> x.status() == RunStatus.FAILED).count();
-            return new Summary(s.id().value(), s.profiles().get(0).market().name(),
+            return new Summary(s.id().value(), s.market().name(),
                     s.seedCapital().currency().getCurrencyCode(), s.from().toString(), s.to().toString(),
                     s.randomSeed(), plain(s.seedCapital()), s.costModelId(), r.costTableHash(), r.executionModelId(),
                     s.dataSnapshotVersion(), s.clockMode().name(), r.codeCommit(), r.codeDirty(), r.runs().size(),
@@ -47,24 +65,89 @@ public final class ExperimentViews {
     /** 실험 상세: 요약 + 계좌(Run)별 리더보드 행. 같은 실험 안의 계좌만 비교한다(같은 기간·시드·비용, 지침 5장). */
     public record Detail(Summary summary, String benchmarkNote, List<RunRow> runs) {
 
-        static Detail of(ExperimentSpec spec, SimulationReport report) {
-            List<RunRow> rows = report.runs().stream().map(RunRow::of).toList();
+        static Detail of(ExperimentSpec spec, SimulationReport report, Map<String, SelectionResult> results) {
+            List<RunRow> rows = report.runs().stream().map(r -> RunRow.of(r, results)).toList();
             return new Detail(Summary.of(spec, report),
                     "같은 실험의 계좌들은 기간·시드·비용 모델·체결 모델이 같아 서로 비교할 수 있습니다. 다른 실험과는 비교하지 않습니다.",
                     rows);
         }
     }
 
+    /**
+     * 리더보드 한 줄 = 계좌 하나 = 조합 하나(D-041, ADR-007 2.2).
+     *
+     * @param selectionId 선정 없는 조합이면 null
+     * @param selectionVersion 선정 없는 조합이면 null
+     * @param selectionHash 선정 해시, 선정 없는 조합이면 {@code "none"}(ADR-007 2.2 표식)
+     * @param selection 날짜별 선정 기록 요약. 선정 없는 조합이면 null
+     */
     public record RunRow(
             String runId, String accountId, String profileId, int profileVersion, String profileHash, long runSeed,
-            String status, String failureReason, String finalEquity, Metrics metrics, int rejectionCount) {
+            String status, String failureReason, String finalEquity, Metrics metrics, int rejectionCount,
+            String selectionId, Integer selectionVersion, String selectionHash, String combinationHash,
+            SelectionStats selection) {
 
-        static RunRow of(RunReport run) {
+        static RunRow of(RunReport run, Map<String, SelectionResult> results) {
             RunResult s = run.summary();
+            Combination c = run.combination();
             return new RunRow(s.runId(), s.accountId().value(), run.profile().id(), run.profile().version(),
                     s.profileHash(), s.runSeed(), s.status().name(), s.failureReason(),
                     s.finalEquity() == null ? null : plain(s.finalEquity()),
-                    s.metrics() == null ? null : Metrics.of(s.metrics()), run.rejections().size());
+                    s.metrics() == null ? null : Metrics.of(s.metrics()), run.rejections().size(),
+                    c.selection().map(SelectionProfile::id).orElse(null),
+                    c.selection().map(SelectionProfile::version).orElse(null),
+                    c.selectionHashOrNone(), c.combinationHash(),
+                    c.hasSelection() ? SelectionStats.of(run, results) : null);
+        }
+    }
+
+    /**
+     * 선정 있는 계좌의 날짜별 선정 기록 요약({@code run_selection_day}).
+     *
+     * @param validDays 결과가 있던 거래일 수
+     * @param invalidDays 결과가 없어 신규 진입을 막은 거래일 수(사유별 건수는 {@code invalidReasons})
+     * @param blockedEntries 선정 밖이거나 결과가 없어 내지 않은 신규 진입 신호 수
+     * @param results 쓴 선정 결과 수(내용 해시 기준, 주간 결과는 한 번)
+     * @param restatementFallback 쓴 결과들의 정정 대체 규칙(MD-10 (2)) 적용 평가 수 합. 결과 본문이 등록되지 않은 결과는 빠진다
+     * @param unknownResults 결과 본문이 실험실에 등록되지 않아 위 합에서 빠진 결과 수
+     */
+    public record SelectionStats(
+            int validDays, int invalidDays, List<ReasonCount> invalidReasons, long blockedEntries, int results,
+            int restatementFallback, int unknownResults) {
+
+        static SelectionStats of(RunReport run, Map<String, SelectionResult> known) {
+            int valid = 0;
+            long blocked = 0;
+            TreeMap<String, Long> reasons = new TreeMap<>();
+            TreeSet<String> hashes = new TreeSet<>();
+            for (RunSelectionDay d : run.selectionDays()) {
+                blocked += d.blockedEntries();
+                if (d.selection().isValid()) {
+                    valid++;
+                    hashes.add(d.selection().resultHash());
+                } else {
+                    reasons.merge(d.selection().validity(), 1L, Long::sum);
+                }
+            }
+            int fallback = 0;
+            int unknown = 0;
+            for (String h : hashes) {
+                SelectionResult r = known.get(h);
+                if (r == null) {
+                    unknown++;
+                } else {
+                    fallback += r.restatementFallbackCount();
+                }
+            }
+            return new SelectionStats(valid, run.selectionDays().size() - valid, ReasonCount.of(reasons), blocked,
+                    hashes.size(), fallback, unknown);
+        }
+    }
+
+    /** 사유 코드별 건수(코드 이름순). */
+    public record ReasonCount(String code, long count) {
+        static List<ReasonCount> of(Map<String, Long> counts) {
+            return counts.entrySet().stream().map(e -> new ReasonCount(e.getKey(), e.getValue())).toList();
         }
     }
 
@@ -87,6 +170,8 @@ public final class ExperimentViews {
         static EquityOverlay of(ExperimentSpec spec, SimulationReport report) {
             List<EquitySeries> series = report.runs().stream()
                     .map(r -> new EquitySeries(r.summary().runId(), r.profile().id(), r.profile().version(),
+                            r.combination().selection().map(SelectionProfile::id).orElse(null),
+                            r.combination().selection().map(SelectionProfile::version).orElse(null),
                             r.equityCurve().stream().map(EquityPointView::of).toList()))
                     .toList();
             return new EquityOverlay(spec.seedCapital().currency().getCurrencyCode(),
@@ -94,7 +179,9 @@ public final class ExperimentViews {
         }
     }
 
-    public record EquitySeries(String runId, String profileId, int profileVersion, List<EquityPointView> points) {
+    /** 계좌 하나의 곡선. 선정 없는 조합이면 {@code selectionId}·{@code selectionVersion}이 null이다. */
+    public record EquitySeries(String runId, String profileId, int profileVersion, String selectionId,
+            Integer selectionVersion, List<EquityPointView> points) {
     }
 
     public record EquityPointView(String date, String equity, String cash) {
@@ -105,13 +192,14 @@ public final class ExperimentViews {
 
     /** 체결 1건(virtual_trade_log 한 행). */
     public record FillRow(
-            String key, int fillSeq, String symbol, String side, String intent, long quantity, String price,
+            String key, int fillSeq, String symbol, String symbolName, String side, String intent, long quantity, String price,
             String commission, String tax, String slippage, String currency, String lotId, String realizedPnl,
             long signalEventSeq, long fillEventSeq, String signalTime, String fillTime, String exchangeDate) {
 
-        static FillRow of(AppliedFill a) {
+        static FillRow of(AppliedFill a, SymbolNames names) {
             Fill f = a.fill();
-            return new FillRow(f.key().toString(), f.fillSeq(), f.symbol().code(), f.side().name(), f.intent().name(),
+            return new FillRow(f.key().toString(), f.fillSeq(), f.symbol().code(), name(names, f.symbol()),
+                    f.side().name(), f.intent().name(),
                     f.quantity(), f.price().toPlainString(), plain(f.fees().commission()), plain(f.fees().tax()),
                     plain(f.slippage()), f.fees().commission().currency().getCurrencyCode(), a.lotId(),
                     a.realizedPnl() == null ? null : plain(a.realizedPnl()), f.signalEventSeq(), f.fillEventSeq(),
@@ -119,18 +207,20 @@ public final class ExperimentViews {
         }
     }
 
-    public record RoundTripRow(String lotId, String symbol, String entryDate, String exitDate, String pnl) {
-        static RoundTripRow of(RoundTrip t) {
-            return new RoundTripRow(t.lotId(), t.symbol().code(), t.entryDate().toString(), t.exitDate().toString(),
-                    plain(t.pnl()));
+    public record RoundTripRow(
+            String lotId, String symbol, String symbolName, String entryDate, String exitDate, String pnl) {
+        static RoundTripRow of(RoundTrip t, SymbolNames names) {
+            return new RoundTripRow(t.lotId(), t.symbol().code(), name(names, t.symbol()), t.entryDate().toString(),
+                    t.exitDate().toString(), plain(t.pnl()));
         }
     }
 
     /** 체결되지 못한 신호·주문 1건(리스크 검증 거절, 블랙리스트 포함, 또는 거래소 거절·잔량 취소). */
-    public record RejectionRow(long eventSeq, String key, String symbol, String stage, String code, String detail) {
-        static RejectionRow of(OrderRejection j) {
-            return new RejectionRow(j.eventSeq(), j.key().toString(), j.symbol().code(), j.stage(), j.code(),
-                    j.detail());
+    public record RejectionRow(
+            long eventSeq, String key, String symbol, String symbolName, String stage, String code, String detail) {
+        static RejectionRow of(OrderRejection j, SymbolNames names) {
+            return new RejectionRow(j.eventSeq(), j.key().toString(), j.symbol().code(), name(names, j.symbol()),
+                    j.stage(), j.code(), j.detail());
         }
     }
 
@@ -140,6 +230,114 @@ public final class ExperimentViews {
 
     /** 거절 사유 분포 한 줄({@code stage:code}별 건수). */
     public record RejectionCount(String stage, String code, long count) {
+    }
+
+    /**
+     * 계좌(Run) 상세 머리의 요약(ADR-005 5장 {@code .../runs/{runId}/summary}). 모든 값은 이 Run의 결과 기록에서 계산하며
+     * 비용 차감 기준이다. 금액은 {@code currency} 한 통화다.
+     *
+     * <p>정의(코드 기준): 평가금액·현금은 자산 곡선 마지막 점, 총수익률은 {@code 평가금액 / 시드머니 − 1}(소수 6자리 HALF_EVEN,
+     * {@link RunMetrics}와 같은 규칙), 누적 실현손익은 매도 체결의 {@code realizedPnl} 합(수수료·세금 차감 후,
+     * {@link VirtualAccount#apply}의 정의), 비용은 체결의 수수료·세금·슬리피지 각각의 합이다.
+     * 슬리피지는 체결가에 이미 반영된 기록용 금액이라 {@code feesTotal}(수수료+세금, {@code RunMetrics.totalCosts}와 같은
+     * 정의)에 넣지 않고 따로 보여 준다.
+     *
+     * @param lastEquity 마지막 평가금액. 자산 곡선이 비어 있으면(첫 거래일 전에 실패) null
+     * @param lastEquityDate 그 평가금액의 거래일. 곡선이 비어 있으면 null
+     * @param totalReturn 평가금액 기준 총수익률(소수). 곡선이 비어 있으면 null
+     * @param tradingDays 자산 곡선 점 수(거래일 수)
+     * @param holdings 기간 끝(실패한 Run은 실패 직전) 보유 종목. 원장을 다시 계산하지 못하면 null
+     * @param symbolNameCount 종목명 표에 든 종목 수. 0이면 이름표가 없는 것이다
+     * @param selectionId 조합의 선정 ID. 선정 없는 조합이면 null({@code selectionHash}는 {@code "none"})
+     */
+    public record RunSummary(
+            String experimentId, String runId, String accountId, String profileId, int profileVersion,
+            String profileHash, String status, String failureReason, String market, String currency, String from,
+            String to, int tradingDays, String seedCapital, String lastEquityDate, String lastEquity, String lastCash,
+            String totalReturn, String realizedPnl, int fillCount, int roundTripCount, Costs costs,
+            List<HoldingRow> holdings, int symbolNameCount, String selectionId, Integer selectionVersion,
+            String selectionHash, String combinationHash) {
+
+        static RunSummary of(ExperimentSpec spec, RunReport run, SymbolNames names) {
+            RunResult s = run.summary();
+            Currency currency = spec.seedCapital().currency();
+            Money zero = Money.zero(currency);
+            Money realized = zero;
+            Money commission = zero;
+            Money tax = zero;
+            Money slippage = zero;
+            for (AppliedFill a : run.fills()) {
+                Fill f = a.fill();
+                commission = commission.plus(f.fees().commission());
+                tax = tax.plus(f.fees().tax());
+                slippage = slippage.plus(f.slippage());
+                if (a.realizedPnl() != null) {
+                    realized = realized.plus(a.realizedPnl());
+                }
+            }
+            EquityPoint last = run.equityCurve().isEmpty() ? null : run.equityCurve().get(run.equityCurve().size() - 1);
+            String totalReturn = summaryReturn(spec, s, last);
+            return new RunSummary(spec.id().value(), s.runId(), s.accountId().value(), run.profile().id(),
+                    run.profile().version(), s.profileHash(), s.status().name(), s.failureReason(),
+                    spec.market().name(), currency.getCurrencyCode(), spec.from().toString(),
+                    spec.to().toString(), run.equityCurve().size(), plain(spec.seedCapital()),
+                    last == null ? null : last.date().toString(), last == null ? null : plain(last.equity()),
+                    last == null ? null : plain(last.cash()), totalReturn, plain(realized), run.fills().size(),
+                    run.roundTrips().size(),
+                    new Costs(plain(commission), plain(tax), plain(commission.plus(tax)), plain(slippage)),
+                    holdings(spec, run, names), names.size(),
+                    run.combination().selection().map(SelectionProfile::id).orElse(null),
+                    run.combination().selection().map(SelectionProfile::version).orElse(null),
+                    run.combination().selectionHashOrNone(), run.combination().combinationHash());
+        }
+
+        /**
+         * 체결 원장을 {@link VirtualAccount}에 같은 순서로 다시 반영해 기간 끝 보유를 얻는다(계좌가 쓰는 평균 원가 규칙을
+         * 그대로 쓰므로 따로 구현한 계산과 어긋나지 않는다). 평균 단가는 매수 비용을 포함한 원가 기준이다.
+         */
+        private static List<HoldingRow> holdings(ExperimentSpec spec, RunReport run, SymbolNames names) {
+            try {
+                VirtualAccount account = new VirtualAccount(run.summary().accountId(), spec.seedCapital());
+                run.fills().forEach(a -> account.apply(a.fill()));
+                return account.snapshot(run.equityCurve().isEmpty() ? Instant.EPOCH : run.equityCurve()
+                                .get(run.equityCurve().size() - 1).ts()).positions().values().stream()
+                        .map(p -> new HoldingRow(p.symbol().code(), name(names, p.symbol()), p.quantity(),
+                                plain(p.averagePrice()), plain(account.costBasisOf(p.symbol()))))
+                        .toList();
+            } catch (RuntimeException e) {
+                log.warn("보유 종목을 다시 계산하지 못했습니다: {} ({})", run.summary().runId(), e.toString());
+                return null;
+            }
+        }
+    }
+
+    /** 비용 합계. {@code feesTotal = commission + tax}. 슬리피지는 체결가에 이미 들어 있어 합계에 더하지 않는다. */
+    public record Costs(String commission, String tax, String feesTotal, String slippage) {
+    }
+
+    /** 기간 끝 보유 종목 한 줄. 평균 단가·보유 원가는 매수 비용 포함. */
+    public record HoldingRow(String symbol, String symbolName, long quantity, String averagePrice, String costBasis) {
+    }
+
+    /**
+     * 총수익률. 완료된 Run은 지표 값({@link RunMetrics#totalReturn()})을 그대로 써 리더보드와 같게 하고, 지표가 없는
+     * 실패 Run만 같은 규칙(정밀도 40자리로 나눈 뒤 소수 6자리 HALF_EVEN, MetricsCalculator)으로 직접 계산한다.
+     */
+    private static String summaryReturn(ExperimentSpec spec, RunResult s, EquityPoint last) {
+        if (s.metrics() != null) {
+            return d(s.metrics().totalReturn());
+        }
+        if (last == null) {
+            return null;
+        }
+        return last.equity().amount().divide(spec.seedCapital().amount(), RETURN_MC).subtract(BigDecimal.ONE)
+                .setScale(6, RoundingMode.HALF_EVEN).toPlainString();
+    }
+
+    private static final MathContext RETURN_MC = new MathContext(40, RoundingMode.HALF_EVEN);
+
+    private static String name(SymbolNames names, Symbol symbol) {
+        return names.name(symbol).orElse(null);
     }
 
     static String plain(Money money) {

@@ -12,7 +12,7 @@
 
 [사실] 1단계 뼈대(PR #7)는 `ExperimentRunner`·`ExperimentSpec`·`RunResult` 계약만 두고 구현을 3단계로 넘겼다(`autotrade-sim/.../ExperimentRunner.java`). `StrategyProfile`은 데이터만 있고 "실행 로직은 3·4단계에서 정의"로 남아 있었다.
 [사실] 비용은 D-021과 Q-004 조사(docs/research/q-004-trading-costs.md)가 "적용 시작일이 있는 표, 체결 건 단위 항목별 반올림"으로 정했다.
-[사실] 2단계 시세(PR #10)는 아직 열려 있다. 이 ADR의 실행기는 시세 소스 대신 불변 이벤트 목록(`MarketDataSet`)을 받고, 테스트는 손으로 만든 녹화 데이터를 쓴다. #10 머지 후 녹화 형식 어댑터를 더한다(4장).
+[사실] 이 ADR 작성 당시 2단계 시세(PR #10)는 열려 있었고, 2026-10-09 main에 머지됐다(`3ffa851`). 이 ADR의 실행기는 시세 소스 대신 불변 이벤트 목록(`MarketDataSet`)을 받고, 테스트는 손으로 만든 녹화 데이터를 쓴다. #10 머지 후 녹화 형식 어댑터를 더한다(4장).
 
 ## 2. 결정
 
@@ -106,7 +106,8 @@
 | 녹화 형식 어댑터(`RecordedDay` → `MarketDataSet`)와 같은 골든을 녹화 형식으로 다시 돌리는 테스트 | sim-engine | PR #10 머지 후. 3단계 완료 기록(결정 로그)은 이 작업 뒤에 한다 |
 | 실제 `KrxMarketRules`·`UsMarketRules`로 실행 | sim-engine | PR #10 머지 후. 테스트는 같은 호가 단위표의 테스트 규칙을 쓴다 |
 | 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)을 가상·실전이 공유(SIM-12), ORD-06 신호 경과 폐기, ORD-07 상태머신 | risk-ops | 실행기는 공통 체인 `RiskChain`(D-032)만 받아 모든 모의 주문에 적용한다(블랙리스트·리스크 단계 반영됨, 멱등 키·상태머신 단계는 남음). 가상 거래소 상태는 domain `OrderState` 값만 쓴다 |
-| 일봉(다음 날 시가)·분봉(다음 봉 시가) 체결 해상도(SIM-06) | sim-engine | 2단계 일봉 스냅샷(`DailyBar`) 머지 후. 스윙 프로필 실험 전 필요 |
+| 일봉(다음 날 시가)·분봉(다음 봉 시가) 체결 해상도(SIM-06) | sim-engine | **일봉은 [D-061](../decisions/D-061-daily-replay-combination-runner.md)으로 끝남**(`DailyBarMarketDataSet`, 경로 모델 `DAILY-PATH-V1`). 분봉은 분봉 데이터가 생기면 |
+| 실험 단발 명령(`runCombinationExperiment`, `runStrategyStudy`)의 장 시간 보호·정지 요청 파일(D-058) | risk-ops, sim-engine | **[D-063](../decisions/D-063-experiment-command-stop-gate.md)으로 끝남**(`autotrade-app-experiment`, `RunGate`). 감시 쪽 파일 생성·해제는 D-058 ④ 감시 구현 후속 과제 |
 | 고정 슬리피지 0.15%와 호가 기반 체결의 오차 측정(D-021 위험 항목) | sim-engine, strategy-researcher | 실제 녹화일이 생긴 뒤 같은 신호를 두 방식으로 체결해 비교 |
 | DB 저장(experiment·experiment_run·virtual_account·virtual_trade_log·equity_curve)과 `experiment.execution_model_id` 열 추가 | architect(스키마), sim-engine(저장) | 변경 제안: `execution_model_id VARCHAR(64) NOT NULL`. 같은 체결 모델끼리만 비교하려면 필요 |
 | 비용 표 설정 키(`cost.profiles.*`, Q-004 조사 4장) | architect | 지금은 `CostModels`의 코드 기본값. 설정에서 읽어도 `CostModel` 구조는 같다 |

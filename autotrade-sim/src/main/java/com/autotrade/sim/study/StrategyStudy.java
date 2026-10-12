@@ -14,6 +14,7 @@ import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.MarketDataSet;
 import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.ReportWriter;
+import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
@@ -53,6 +54,7 @@ public final class StrategyStudy {
     private final RiskChain risk;
     private final CodeVersion code;
     private final Consumer<String> progress;
+    private final RunGate gate;
 
     /**
      * @param tradingDays 데이터의 거래일(오름차순). 학습·검증 구간을 나눌 때 쓴다
@@ -62,6 +64,14 @@ public final class StrategyStudy {
     public StrategyStudy(
             MarketDataSet data, List<LocalDate> tradingDays, MarketRules rules, CostModel cost,
             StrategyFactory strategies, RiskChain risk, CodeVersion code, Consumer<String> progress) {
+        this(data, tradingDays, rules, cost, strategies, risk, code, progress, RunGate.NONE);
+    }
+
+    /** @param gate 정지 확인(D-063). 실험마다 실행기가 Run 시작 전·거래일마다 묻는다. 멈추면 결과 없이 끝난다 */
+    public StrategyStudy(
+            MarketDataSet data, List<LocalDate> tradingDays, MarketRules rules, CostModel cost,
+            StrategyFactory strategies, RiskChain risk, CodeVersion code, Consumer<String> progress, RunGate gate) {
+        this.gate = Objects.requireNonNull(gate, "gate");
         this.data = Objects.requireNonNull(data, "data");
         this.tradingDays = List.copyOf(tradingDays);
         this.rules = Objects.requireNonNull(rules, "rules");
@@ -168,13 +178,13 @@ public final class StrategyStudy {
 
     private ExperimentSpec spec(
             StudyConfig config, String id, LocalDate from, LocalDate to, long seed, List<StrategyProfile> profiles) {
-        return new ExperimentSpec(new ExperimentId(id), from, to, seed, config.seedCapital(), cost.id(), data.version(),
+        return ExperimentSpec.ofProfiles(new ExperimentId(id), from, to, seed, config.seedCapital(), cost.id(), data.version(),
                 ClockMode.REPLAY, profiles);
     }
 
     private SimulationExperimentRunner runner(Duration latency, int parallelism) {
         return new SimulationExperimentRunner(data, rules, cost, strategies, risk, new ExecutionSettings(latency), code,
-                parallelism, null);
+                parallelism, null, null, gate);
     }
 
     private static RunSummary summarize(RunReport r) {

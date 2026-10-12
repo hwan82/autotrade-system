@@ -144,10 +144,102 @@ class SnapshotDailyBarSourceTest {
                 .containsExactly("005930@2026-10-06", "005930@2026-10-09");
     }
 
+    /** 헤더를 두고 행을 날짜 순(같은 날은 원래 순서)으로 바꾼다. 수집기가 쓰는 순서. */
+    private static String byDate(String csv) {
+        List<String> lines = csv.lines().toList();
+        List<String> rows = new java.util.ArrayList<>(lines.subList(1, lines.size()));
+        rows.sort(java.util.Comparator.comparing(l -> l.split(",")[2]));
+        return lines.get(0) + "\n" + String.join("\n", rows) + "\n";
+    }
+
+    private void assertSameAsFullLoad() throws IOException {
+        QualityReport full = SnapshotDailyBarSource.load(dir).qualityReport();
+        int[] days = {0};
+        QualityReport streamed = DailyBarQualityCheck.checkSnapshot(dir, () -> days[0]++);
+        assertThat(streamed.barsChecked()).isEqualTo(full.barsChecked());
+        assertThat(streamed.findings()).isEqualTo(full.findings());
+        assertThat(streamed.toMarkdown()).isEqualTo(full.toMarkdown());
+        assertThat(days[0]).isPositive();
+    }
+
+    @Test
+    void 날짜_순_스트리밍_검사는_전체_적재_검사와_같은_결과다() throws IOException {
+        // 기본 픽스처(0원 종가, 거래정지, 소속부 이동, 점프) + 중복 행
+        String bars = byDate(BARS + "KRX,005930,2026-10-06,71500,72500,71000,72000,1200,1\n");
+        write(bars, HISTORY, 10, 5);
+        assertSameAsFullLoad();
+        // 시점 위반·누락 일봉
+        write(byDate("""
+                market,code,date,open,high,low,close,volume,adj_factor
+                KRX,005930,2026-10-05,71000,72000,70500,71500,1000,1
+                KRX,035720,2026-10-05,40000,41000,39000,40000,100,1
+                KRX,035720,2026-10-06,40000,41000,39000,40000,100,1
+                KRX,035720,2026-10-09,40000,41000,39000,40000,100,1
+                """), HISTORY, 4, 5);
+        assertSameAsFullLoad();
+    }
+
+    @Test
+    void 날짜_순_스트리밍_검사는_무작위_이상_자료에서도_같은_결과다() throws IOException {
+        java.util.Random rnd = new java.util.Random(39);
+        StringBuilder bars = new StringBuilder("market,code,date,open,high,low,close,volume,adj_factor\n");
+        StringBuilder hist = new StringBuilder("market,code,name,kind,board,valid_from,valid_to\n");
+        int codes = 30;
+        for (int c = 0; c < codes; c++) {
+            String code = String.format("%06d", 100000 + c);
+            LocalDate from = LocalDate.of(2026, 1, 1).plusDays(rnd.nextInt(20));
+            String to = rnd.nextInt(4) == 0 ? LocalDate.of(2026, 3, 1).plusDays(rnd.nextInt(30)).toString() : "";
+            if (rnd.nextInt(10) > 0) { // 일부는 종목 이력이 없다
+                hist.append("KRX,").append(code).append(",회사").append(c).append(",STOCK,KOSPI,").append(from).append(',')
+                        .append(to).append('\n');
+            }
+        }
+        long rows = 0;
+        for (LocalDate d = LocalDate.of(2026, 1, 1); d.isBefore(LocalDate.of(2026, 5, 1)); d = d.plusDays(1)) {
+            for (int c = 0; c < codes; c++) {
+                if (rnd.nextInt(12) == 0) {
+                    continue; // 누락
+                }
+                int price = 1000 + rnd.nextInt(10) * (rnd.nextInt(15) == 0 ? 400 : 10); // 가끔 점프
+                int close = rnd.nextInt(50) == 0 ? 0 : price;
+                long vol = rnd.nextInt(20) == 0 ? 0 : 10;
+                String adj = rnd.nextInt(100) == 0 ? "0.5" : "1";
+                String row = "KRX," + String.format("%06d", 100000 + c) + "," + d + "," + price + "," + (price + 5) + ","
+                        + (price - 5) + "," + close + "," + vol + "," + adj + "\n";
+                bars.append(row);
+                rows++;
+                if (rnd.nextInt(80) == 0) {
+                    bars.append(row); // 중복
+                    rows++;
+                }
+            }
+        }
+        long histRows = hist.toString().lines().count() - 1;
+        // 생성 시각보다 뒤 날짜가 섞이도록 manifest createdAt(2026-10-08)보다 앞뒤 모두를 쓰지 않아도 규칙 대부분이 나온다
+        write(bars.toString(), hist.toString(), rows, histRows);
+        assertSameAsFullLoad();
+        QualityReport r = DailyBarQualityCheck.checkSnapshot(dir, () -> {});
+        assertThat(r.count(Rule.MISSING_BAR)).isPositive();
+        assertThat(r.count(Rule.DUPLICATE_BAR)).isPositive();
+        assertThat(r.count(Rule.UNADJUSTED_JUMP)).isPositive();
+        assertThat(r.count(Rule.OUTSIDE_LISTING)).isPositive();
+    }
+
+    @Test
+    void 스트리밍_검사는_날짜_순이_아니거나_해시나_행_수가_다르면_멈춘다() throws IOException {
+        write(BARS, HISTORY, 9, 5); // 종목 순(날짜 순 아님)
+        assertThatThrownBy(() -> DailyBarQualityCheck.checkSnapshot(dir, () -> {})).hasMessageContaining("날짜 순");
+        write(byDate(BARS), HISTORY, 8, 5);
+        assertThatThrownBy(() -> DailyBarQualityCheck.checkSnapshot(dir, () -> {})).hasMessageContaining("행 수");
+        write(byDate(BARS), HISTORY, 9, 5);
+        Files.writeString(dir.resolve(SnapshotManifest.DAILY_BARS), byDate(BARS).replace("71500", "71600"), StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> DailyBarQualityCheck.checkSnapshot(dir, () -> {})).hasMessageContaining("SHA-256");
+    }
+
     @Test
     void 스냅샷_기준일은_생성_시각의_거래소_현지_날짜다() {
         // 2026-10-07T16:00Z = 한국 10-08 01:00. 한국 10-08 일봉은 시점 위반이 아니고 10-09는 위반이다
-        SnapshotManifest m = new SnapshotManifest("krx-daily-tz-1", 1, "2026-10-07T16:00:00Z", "0.1.0", List.of(), List.of());
+        SnapshotManifest m = new SnapshotManifest("krx-daily-tz-1", 1, "2026-10-07T16:00:00Z", "0.1.0", List.of(), List.of(), null);
         Symbol s = new Symbol(Market.KRX, "005930");
         java.util.function.Function<String, DailyBar> bar = d -> new DailyBar(s, java.time.LocalDate.parse(d),
                 new java.math.BigDecimal("100"), new java.math.BigDecimal("100"), new java.math.BigDecimal("100"),

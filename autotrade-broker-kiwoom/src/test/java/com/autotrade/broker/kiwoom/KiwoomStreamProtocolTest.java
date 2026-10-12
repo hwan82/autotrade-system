@@ -12,6 +12,7 @@ import com.autotrade.marketdata.live.RawQuote;
 import com.autotrade.marketdata.live.TokenCache;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -159,5 +160,61 @@ class KiwoomStreamProtocolTest {
                 new BrokerCredentials("A", "B")).fetch();
         assertThat(issued.expiresAt()).isEqualTo(Instant.parse("2026-10-08T23:37:13Z"));
         assertThat(issued.toString()).doesNotContain("TEST-TOKEN-VALUE");
+    }
+    @Test
+    void 명세_경로를_먼저_쓰고_실패하면_예전_경로와_번갈아_시도한다() {
+        assertThat(protocol.endpoint()).hasToString("wss://api.kiwoom.com:10000/api/websocket");
+        assertThat(protocol.endpoint()).hasToString("wss://api.kiwoom.com:10000/api/dostk/websocket");
+        assertThat(protocol.endpoint()).isEqualTo(KiwoomStreamProtocol.ENDPOINT);
+        assertThat(protocol.pinnedEndpoint()).isEmpty();
+    }
+
+    @Test
+    void LOGIN이_성공한_경로로_고정한다() {
+        protocol.endpoint();
+        URI legacy = protocol.endpoint();
+        protocol.decode("{\"trnm\":\"LOGIN\",\"return_code\":\"8005\",\"return_msg\":\"\"}", RX);
+        assertThat(protocol.pinnedEndpoint()).isEmpty();
+        protocol.decode("{\"trnm\":\"LOGIN\",\"return_code\":0}", RX);
+        assertThat(protocol.pinnedEndpoint()).contains(legacy);
+        assertThat(protocol.endpoint()).isEqualTo(legacy);
+        assertThat(protocol.endpoint()).isEqualTo(legacy);
+    }
+
+    @Test
+    void 결과코드가_문자열이거나_메시지에_박혀_있어도_읽는다() {
+        assertThat(protocol.decode("{\"trnm\":\"REG\",\"return_code\":\"0\",\"return_msg\":\"\"}", RX).control())
+                .isEqualTo(Decoded.Control.IGNORED);
+        Decoded rejected = protocol.decode("{\"trnm\":\"REG\",\"return_code\":\"1\",\"return_msg\":\"CODE=1702 초과\"}", RX);
+        assertThat(rejected.control()).isEqualTo(Decoded.Control.SUBSCRIBE_REJECTED);
+        assertThat(rejected.detail()).contains("1702").contains("호출 한도 초과");
+        Decoded login = protocol.decode("{\"trnm\":\"LOGIN\",\"return_code\":3,\"return_msg\":\"[8050:IP 미등록]\"}", RX);
+        assertThat(login.control()).isEqualTo(Decoded.Control.LOGIN_FAILED);
+        assertThat(login.detail()).contains("8050").contains("IP");
+    }
+
+    @Test
+    void 거래소구분이_KRX가_아닌_체결은_버린다() {
+        String nxt = REAL_0B.replace("\"290\":\"2\"", "\"290\":\"2\",\"9081\":\"NXT\"");
+        assertThat(protocol.decode(nxt, RX).quotes()).isEmpty();
+        String krx = REAL_0B.replace("\"290\":\"2\"", "\"290\":\"2\",\"9081\":\"KRX\"");
+        assertThat(protocol.decode(krx, RX).quotes()).hasSize(1);
+    }
+
+    @Test
+    void 토큰_발급_오류코드를_재시도와_거절로_나눈다() {
+        BrokerCredentials creds = new BrokerCredentials("APP-KEY", "SECRET-KEY");
+        FakeHttp ip = new FakeHttp().respond(200, "{\"return_code\":8050,\"return_msg\":\"IP가 등록되지 않았습니다\"}");
+        assertThatThrownBy(new KiwoomTokenClient(ip, creds)::fetch).isInstanceOf(CredentialsRejectedException.class)
+                .hasMessageContaining("8050").hasMessageContaining("API 사용신청");
+        FakeHttp mock = new FakeHttp().respond(400, "{\"return_code\":8030,\"return_msg\":\"투자구분\"}");
+        assertThatThrownBy(new KiwoomTokenClient(mock, creds)::fetch).isInstanceOf(CredentialsRejectedException.class)
+                .hasMessageContaining("8030");
+        FakeHttp rate = new FakeHttp().respond(429, "{\"return_code\":1700,\"return_msg\":\"초과\"}");
+        assertThatThrownBy(new KiwoomTokenClient(rate, creds)::fetch).isInstanceOf(IOException.class)
+                .isNotInstanceOf(CredentialsRejectedException.class).hasMessageContaining("1700");
+        FakeHttp server = new FakeHttp().respond(200, "{\"return_code\":1999,\"return_msg\":\"SECRET-KEY\"}");
+        assertThatThrownBy(new KiwoomTokenClient(server, creds)::fetch).isInstanceOf(IOException.class)
+                .isNotInstanceOf(CredentialsRejectedException.class).hasMessageNotContaining("SECRET-KEY");
     }
 }

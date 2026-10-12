@@ -8,6 +8,8 @@ import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.run.ExperimentStoppedException;
+import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.synthetic.DayRegime;
 import com.autotrade.sim.synthetic.SymbolSpec;
 import com.autotrade.sim.synthetic.SyntheticKrxRules;
@@ -32,8 +34,10 @@ import java.util.TreeMap;
 /**
  * 첫 다중 전략 비교 실험(EXP-20261008-STR01)을 합성 시세로 돌리고 {@code experiments/<실험ID>/}에 결과 표를 쓴다.
  *
- * <p>실행: {@code ./gradlew :autotrade-sim:runStrategyStudy} (커밋·dirty 여부는 Gradle이 git에서 넘긴다).
- * 인자: {@code <저장소 루트> <커밋> <dirty true|false>}.
+ * <p>실행: {@code ./gradlew :autotrade-app-experiment:runStrategyStudy} (커밋·dirty 여부는 Gradle이 git에서 넘긴다).
+ * 인자: {@code <저장소 루트> <커밋> <dirty true|false>}. 프로세스 진입점은 {@code com.autotrade.app.experiment.ExperimentMain}이고
+ * 장 시간 보호와 감시의 정지 요청 파일을 {@link RunGate}로 넣는다(D-063). 이 클래스에는 {@code main}이 없다.
+ * 종료 코드: 0 완료, 4 정지 확인으로 멈춤(결과 파일을 쓰지 않음).
  *
  * <p>실험 설계는 아래 상수로 고정(사전 등록)하고 {@code experiment.yaml}로도 남긴다. 결과를 본 뒤 이 값을 바꿔 같은 데이터로
  * 다시 평가하지 않는다. 바꾸려면 새 실험 ID로 한다.
@@ -62,10 +66,22 @@ public final class StudyMain {
     private StudyMain() {
     }
 
-    public static void main(String[] args) {
+    /** @param gate 정지 확인(D-063). 합성 시세를 만들기 전과 실험 중에 묻는다 */
+    public static int run(String[] args, RunGate gate) {
         if (args.length != 3) {
             throw new IllegalArgumentException("인자: <저장소 루트> <커밋> <dirty true|false>");
         }
+        try {
+            gate.check();
+            study(args, gate);
+            return 0;
+        } catch (ExperimentStoppedException e) {
+            System.err.println("[study] 멈췄습니다(결과 파일을 쓰지 않음): " + e.getMessage());
+            return 4;
+        }
+    }
+
+    private static void study(String[] args, RunGate gate) {
         Path root = Path.of(args[0]);
         CodeVersion code = new CodeVersion(args[1], Boolean.parseBoolean(args[2]));
         List<StrategyProfile> profiles = loadProfiles(root.resolve("strategies"));
@@ -86,7 +102,7 @@ public final class StudyMain {
                 "kr-random-control", TRAIN_DAYS, LATENCIES, Duration.ofMillis(500), NULL_SEEDS,
                 ScreeningThresholds.defaults(), 4);
         StrategyStudy study = new StrategyStudy(synthetic.data(), synthetic.tradingDays(), rules, cost, factory, risk, code,
-                StudyMain::log);
+                StudyMain::log, gate);
         StudyResult result = study.run(config);
 
         Path out = root.resolve("experiments").resolve(ID.value());

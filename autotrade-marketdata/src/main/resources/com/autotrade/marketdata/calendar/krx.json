@@ -2,15 +2,19 @@
   "market": "KRX",
   "zone": "Asia/Seoul",
   "coverageFrom": "2026-01-01",
-  "coverageTo": "2026-12-31",
+  "coverageTo": "2027-12-31",
   "regularOpen": "09:00",
   "regularClose": "15:30",
-  "checkedOn": "2026-10-08",
+  "checkedOn": "2026-10-12",
   "sources": {
     "KRX-2026": "한국거래소 2026년 휴장일(17일) 정리: https://glasswallet.com/blog/stock-market-holiday-2026-guide/ (2차 자료, 한국거래소 공지 원문 대조 필요)",
     "KRX-0603-0717": "한국거래소 2026-05-19 발표, 6·3 지방선거와 제헌절 휴장: https://www.hankyung.com/article/2026052094456",
     "KRX-OPEN-0102": "2026-01-02 연초 개장일 10:00 개장 안내(KB증권 공지): https://www.kbsec.com/go.able?linkcd=s060901010000&seq=10009341&idt=20251222",
-    "KRX-CSAT": "수능일 1시간 늦은 개장·폐장 관행(2025-11-13 사례): https://www.heraldk.com/article/2025111215214040899"
+    "KRX-CSAT": "수능일 1시간 늦은 개장·폐장 관행(2025-11-13 사례): https://www.heraldk.com/article/2025111215214040899",
+    "KRX-2027": "2027년은 한국거래소 휴장일 공지 전(보통 전년 12월 공지). 우주항공청 2027년도 월력요항(2026-06-29 발표) 공휴일·대체공휴일에 유가증권시장 업무규정 휴장일 기준(공휴일, 근로자의 날, 토요일, 연말 1일)을 적용해 이끌어 냄. 월력요항: https://astro.kasi.re.kr/kor/life/post/calendarData?year=2027 , 발표 기사: https://www.segye.com/newsView/20260629506183",
+    "KRX-OPEN-2027": "연초 첫 거래일 10:00 개장 관행(2026-01-02 사례, KRX-OPEN-0102). 2027-01-04 개장 시각은 거래소 공지 전",
+    "KRX-CSAT-2026-MOE": "수능일 날짜: 교육부 보도자료 '2027학년도 대학수학능력시험은 2026년 11월 19일(목)에 시행됩니다'(2024-08-16, KDI 경제정책정보 게재본 https://eiec.kdi.re.kr/policy/materialView.do?num=255989). 평가원 2027학년도 시행기본계획(2026-03-31 발표, https://www.heraldk.com/article/2026033018340941404)도 같은 날. 개장·폐장 1시간 늦춤은 관행(KRX-CSAT)이며 거래소 공지 전",
+    "KRX-CSAT-2027-MOE": "수능일 날짜: 교육부 보도자료 '2028학년도 대학수학능력시험은 2027년 11월 18일(목)에 시행됩니다'(2025-06-02, KDI 경제정책정보 게재본 https://eiec.kdi.re.kr/policy/materialView.do?num=267335). 개장·폐장 1시간 늦춤은 관행(KRX-CSAT)이며 거래소 공지 전"
   },
   "holidays": [
     { "date": "2026-01-01", "name": "신정", "source": "KRX-2026", "verified": false },
@@ -29,10 +33,28 @@
     { "date": "2026-10-05", "name": "개천절 대체공휴일", "source": "KRX-2026", "verified": false },
     { "date": "2026-10-09", "name": "한글날", "source": "KRX-2026", "verified": false },
     { "date": "2026-12-25", "name": "성탄절", "source": "KRX-2026", "verified": false },
-    { "date": "2026-12-31", "name": "연말 휴장", "source": "KRX-2026", "verified": false }
+    { "date": "2026-12-31", "name": "연말 휴장", "source": "KRX-2026", "verified": false },
+    { "date": "2027-01-01", "name": "신정", "source": "KRX-2027", "verified": false },
+    { "date": "2027-02-08", "name": "설날 연휴", "source": "KRX-2027", "verified": false },
+    { "date": "2027-02-09", "name": "설날 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-03-01", "name": "삼일절", "source": "KRX-2027", "verified": false },
+    { "date": "2027-05-03", "name": "노동절 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-05-05", "name": "어린이날", "source": "KRX-2027", "verified": false },
+    { "date": "2027-05-13", "name": "부처님오신날", "source": "KRX-2027", "verified": false },
+    { "date": "2027-07-19", "name": "제헌절 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-08-16", "name": "광복절 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-09-14", "name": "추석 연휴", "source": "KRX-2027", "verified": false },
+    { "date": "2027-09-15", "name": "추석", "source": "KRX-2027", "verified": false },
+    { "date": "2027-09-16", "name": "추석 연휴", "source": "KRX-2027", "verified": false },
+    { "date": "2027-10-04", "name": "개천절 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-10-11", "name": "한글날 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-12-27", "name": "성탄절 대체공휴일", "source": "KRX-2027", "verified": false },
+    { "date": "2027-12-31", "name": "연말 휴장", "source": "KRX-2027", "verified": false }
   ],
   "specialSessions": [
     { "date": "2026-01-02", "open": "10:00", "close": "15:30", "name": "연초 개장일", "source": "KRX-OPEN-0102", "verified": true },
-    { "date": "2026-11-19", "open": "10:00", "close": "16:30", "name": "대학수학능력시험일", "source": "KRX-CSAT", "verified": false }
+    { "date": "2026-11-19", "open": "10:00", "close": "16:30", "name": "대학수학능력시험일", "source": "KRX-CSAT-2026-MOE", "verified": false },
+    { "date": "2027-01-04", "open": "10:00", "close": "15:30", "name": "연초 개장일", "source": "KRX-OPEN-2027", "verified": false },
+    { "date": "2027-11-18", "open": "10:00", "close": "16:30", "name": "대학수학능력시험일", "source": "KRX-CSAT-2027-MOE", "verified": false }
   ]
 }

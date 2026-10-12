@@ -105,11 +105,13 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.domain", "autotrade-domain"),
             Map.entry("com.autotrade.marketdata", "autotrade-marketdata"),
             Map.entry("com.autotrade.strategy", "autotrade-strategy"),
+            Map.entry("com.autotrade.selection", "autotrade-selection"),
             Map.entry("com.autotrade.risk", "autotrade-risk"),
             Map.entry("com.autotrade.sim", "autotrade-sim"),
             Map.entry("com.autotrade.broker", "autotrade-broker-api"),
             Map.entry("com.autotrade.broker.kiwoom", "autotrade-broker-kiwoom"),
             Map.entry("com.autotrade.broker.kis", "autotrade-broker-kis"),
+            Map.entry("com.autotrade.broker.toss", "autotrade-broker-toss"),
             Map.entry("com.autotrade.config", "autotrade-config"),
             Map.entry("com.autotrade.control", "autotrade-control"),
             Map.entry("com.autotrade.notification", "autotrade-notification-jar"),
@@ -117,7 +119,9 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.app.engine", "autotrade-app-engine"),
             Map.entry("com.autotrade.app.gateway", "autotrade-app-gateway"),
             Map.entry("com.autotrade.app.lab", "autotrade-app-lab"),
-            Map.entry("com.autotrade.app.watchdog", "autotrade-app-watchdog"));
+            Map.entry("com.autotrade.app.watchdog", "autotrade-app-watchdog"),
+            Map.entry("com.autotrade.app.collector", "autotrade-app-collector"),
+            Map.entry("com.autotrade.app.experiment", "autotrade-app-experiment"));
 
     /**
      * 표에는 있지만 아직 클래스 파일이 없는 자리 모듈({@code package-info.java}만 있어 컴파일 결과가 없다). 클래스가 생기면

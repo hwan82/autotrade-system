@@ -26,3 +26,5 @@ autotrade:
   lab:
     # 전략 프로필 YAML 폴더(ADR-005 4장). 상대 경로는 실행 폴더 기준이며 bootRun은 저장소 루트에서 돈다
     strategies-dir: strategies
+    # 조합 실험 폴더(D-062). 실행 명령이 결과 묶음을 쓰는 experiments/와 같은 폴더
+    experiments-dir: experiments

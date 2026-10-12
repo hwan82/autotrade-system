@@ -12,9 +12,9 @@
 
 | 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
 |---|---|---|---|---|---|---|
-| `market-data.priority` | 증권사 배열 | `["KIWOOM","KIS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 게이트웨이는 이 순서대로 시세 소스를 고르고, 목록에 없는 증권사는 시세 소스로 쓰지 않는다. **토스는 기본 목록에 없다**: 토스 미국 실시간 시세 요금이 공식 확인되지 않아(`docs/research/market-data-limits.md` 5장, `[추론]` 무료) 요금 미확인 소스를 기본으로 켜지 않는다. 사용자가 `runtime-config.json`에 넣으면 적은 순서대로 쓰며, D-024 순서를 쓰려면 `["KIWOOM","TOSS","KIS"]`로 둔다. 토스 보유 종목 보호 폴링은 이 키가 아니라 `market-data.toss-polling-scope`가 정한다 | 재기동 | 시세 게이트웨이 | D-024, D-033(요금 미확인 소스 기본 꺼짐, [QA 보고서](../reviews/gates/main-realpath-2026-10-09.md) P3) |
+| `market-data.priority` | 증권사 배열 | `["KIWOOM","TOSS","KIS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 게이트웨이는 이 순서대로 시세 소스를 고르고, 목록에 없는 증권사는 시세 소스로 쓰지 않는다(아직 구현하지 않은 소스는 건너뜀). 기본값은 D-024 순서다: 토스 시세 조회는 무료로 사용자가 확인했다(Q-020, D-039). 무료여도 증권사별 호출 한도는 지킨다(`docs/research/market-data-limits.md` 1장). 토스 보유 종목 보호 폴링은 이 키가 아니라 `market-data.toss-polling-scope`가 정한다. **D-059(2026-10-11)**: 토스 Client ID가 하나인 동안 게이트웨이는 토스를 호출하지 않으므로 `TOSS` 항목을 건너뛴다(토스 연결 PR에서 기동 경고와 함께 강제, 기본값을 `["KIWOOM","KIS"]`로 바꿀지도 그 PR에서 정함) | 재기동 | 시세 게이트웨이 | D-024, D-039(D-033 되돌림), D-059 |
 | `market-data.mode` | enum | `AUTO` | AUTO·FAILOVER·SHARDED. AUTO는 실시간 소스 두 곳이 설정되어 있으면 SHARDED, 아니면 FAILOVER(D-009). 운용 중 한쪽이 DEGRADED가 되면 남은 쪽으로 넘기는 동작은 2단계 ADR에서 정한다 | 재기동 | 시세 게이트웨이 | D-009 |
-| `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF. ⚠️ OFF는 전 시세 끊김 시 보유 종목 폴링 손절 감시(장애표 2번)를 끈다. 실전 보유 종목이 있을 때의 검증은 risk-ops 검토 후 추가 | 재기동 | 실전 엔진(보호 폴링) | D-008 |
+| `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF. ⚠️ OFF는 전 시세 끊김 시 보유 종목 폴링 손절 감시(장애표 2번)를 끈다. 실전 보유 종목이 있을 때의 검증은 risk-ops 검토 후 추가 | 재기동 | 실전 엔진(보호 폴링) | D-008, D-024(HELD_ONLY 유지) |
 | `lab.max-parallel-runs` | int | `4` | 1~64 | 즉시(새 Run부터) | 실험실 | ADR-001 3장 예산 `[가정]` |
 | `lab.default-seed-capital-krw` | long(원) | `10000000` | 1 이상 | 즉시 | 실험 생성 화면(국내) | D-021 |
 | `lab.default-seed-capital-usd` | long(달러) | `10000` | 1 이상 | 즉시 | 실험 생성 화면(미국) | D-021 |
@@ -37,6 +37,8 @@
 | `server.address` | `127.0.0.1` | 대시보드 바인딩 주소. 루프백이 아니거나 비우면 기동을 거부한다 | D-020, [ADR-005](../adr/ADR-005-ui-dashboard.md) |
 | `server.port` | `8480` (환경 변수 `AUTOTRADE_UI_PORT`) | 대시보드 포트 | ADR-005 |
 | `autotrade.lab.strategies-dir` | `strategies` (실행 폴더 기준, bootRun은 저장소 루트) | 전략 프로필 YAML 폴더 | ADR-005 4장 |
+| `autotrade.lab.selections-dir` | `selections` (실행 폴더 기준, bootRun은 저장소 루트) | 선정 프로필 YAML 폴더. 실험 실행기가 읽는 `selections/`와 같은 폴더를 가리켜야 화면에서 만든 선정이 실험에 쓰인다 | ADR-005 4·5장, ADR-007 2.1, D-060 |
+| `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다 | D-062 |
 
 ## 아직 없는 키 (담당 작업에서 추가)
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
@@ -44,7 +46,16 @@
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
 - 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
+- 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.
 - 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
+
+## 수집 일괄 명령 전용 파일 (`collector-secrets.json`)
+4개 프로세스는 이 파일을 읽지 않고, 수집 명령(`autotrade-app-collector`)은 `runtime-config.json`·`secrets.json`을 읽지 않는다(D-050 ⑤, D-051, [ADR-008](../adr/ADR-008-collector.md) 2.2). 같은 설정 폴더에 둔다. 모르는 항목이 있으면 수집 명령이 파일 전체를 거부한다. 기간·호출 상한·폴더는 설정 키가 아니라 명령줄 옵션이다([수집기 runbook](../runbooks/collector.md)).
+
+| 키 | 형식 | 기본값 | 설명 |
+|---|---|---|---|
+| `krx.auth-key` 🔒 | 문자열 | 빈 값 | KRX Open API 인증키(`AUTH_KEY` 헤더). 비면 `krx-daily`가 오류로 끝난다 |
+| `opendart.crtfc-key` 🔒 | 문자열 | 빈 값 | OpenDART 인증키(쿼리 `crtfc_key`, 로그·오류 메시지에서 가림). 비면 `dart-financials`가 오류로 끝난다 |
 
 ## 예시 (자리표시자)
 `runtime-config.json`
@@ -67,4 +78,8 @@
     "operator-password-hash": "<OUTPUT_OF_autotrade-engine_hash-password>"
   }
 }
+```
+`collector-secrets.json`
+```json
+{ "krx": { "auth-key": "<KRX_OPEN_API_AUTH_KEY>" }, "opendart": { "crtfc-key": "<OPENDART_CRTFC_KEY>" } }
 ```

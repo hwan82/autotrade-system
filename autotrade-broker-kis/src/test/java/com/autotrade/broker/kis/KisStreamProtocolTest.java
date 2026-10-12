@@ -104,9 +104,11 @@ class KisStreamProtocolTest {
     }
 
     @Test
-    void PINGPONG은_그대로_돌려주고_거절과_암호화_프레임을_구분한다() {
+    void PINGPONG은_PONG_프레임으로_돌려주고_거절과_암호화_프레임을_구분한다() {
         String ping = "{\"header\":{\"tr_id\":\"PINGPONG\",\"datetime\":\"20261008093355\"}}";
-        assertThat(protocol.decode(ping, RX).replies()).containsExactly(ping);
+        Decoded pong = protocol.decode(ping, RX);
+        assertThat(pong.pongs()).containsExactly(ping);
+        assertThat(pong.replies()).isEmpty(); // 공식 예제처럼 텍스트로 되보내지 않는다
         Decoded reject = protocol.decode("{\"header\":{\"tr_id\":\"H0STCNT0\",\"tr_key\":\"005930\",\"encrypt\":\"N\"},"
                 + "\"body\":{\"rt_cd\":\"1\",\"msg_cd\":\"OPSP0008\",\"msg1\":\"MAX SUBSCRIBE OVER\"}}", RX);
         assertThat(reject.control()).isEqualTo(Decoded.Control.SUBSCRIBE_REJECTED);
@@ -119,6 +121,25 @@ class KisStreamProtocolTest {
         assertThat(ok.control()).isEqualTo(Decoded.Control.IGNORED);
         assertThat(protocol.decode("1|H0STCNI0|001|abcdef", RX).quotes()).isEmpty();
         assertThat(protocol.decode("0|H0STCNT0|003|a^b", RX).control()).isEqualTo(Decoded.Control.IGNORED);
+    }
+
+    @Test
+    void 이미_등록된_종목_응답은_구독_거절로_세지_않는다() {
+        Decoded already = protocol.decode("{\"header\":{\"tr_id\":\"H0STCNT0\",\"tr_key\":\"005930\",\"encrypt\":\"N\"},"
+                + "\"body\":{\"rt_cd\":\"1\",\"msg1\":\"ALREADY IN SUBSCRIBE\"}}", RX);
+        assertThat(already.control()).isEqualTo(Decoded.Control.IGNORED);
+        Decoded unsub = protocol.decode("{\"header\":{\"tr_id\":\"H0STCNT0\",\"tr_key\":\"005930\",\"encrypt\":\"N\"},"
+                + "\"body\":{\"rt_cd\":\"0\",\"msg1\":\"UNSUBSCRIBE SUCCESS\"}}", RX);
+        assertThat(unsub.control()).isEqualTo(Decoded.Control.IGNORED);
+    }
+
+    @Test
+    void 접속키_발급_재발급_제한은_자격_증명_거절로_세지_않는다() {
+        KisApprovalClient c = new KisApprovalClient(new FakeHttp().respond(403,
+                "{\"error_description\":\"접근토큰 발급 잠시 후 다시 시도하세요(1분당 1회)\",\"error_code\":\"EGW00133\"}"),
+                new BrokerCredentials("APP-KEY", "SECRET-KEY"), CLOCK);
+        assertThatThrownBy(c::fetch).isInstanceOf(java.io.IOException.class)
+                .isNotInstanceOf(CredentialsRejectedException.class).hasMessageContaining("EGW00133");
     }
 
     @Test

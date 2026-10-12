@@ -1,11 +1,14 @@
 package com.autotrade.app.lab;
 
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
+import com.autotrade.app.lab.experiment.ExperimentFolders;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
+import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
+import com.autotrade.marketdata.symbols.SymbolNameFiles;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Clock;
@@ -21,9 +24,25 @@ public class LabWebConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(LabWebConfiguration.class);
 
+    /** 종목명 표는 설정 폴더의 {@code symbols/<MARKET>.csv}에서 읽는다. 없거나 깨져도 이름만 비고 기동에는 영향 없다. */
     @Bean
-    ExperimentCatalog experimentCatalog() {
-        return new InMemoryExperimentCatalog();
+    ExperimentCatalog experimentCatalog(RuntimeConfigStore store) {
+        Path configDir = store.paths().runtimeFile().getParent();
+        SymbolNameFiles.Loaded loaded = SymbolNameFiles.load(configDir);
+        loaded.warnings().forEach(w -> log.warn("종목명 표: {}", w));
+        log.info("종목명 표: {}건 ({})", loaded.names().size(), configDir.resolve(SymbolNameFiles.DIR));
+        return new InMemoryExperimentCatalog(loaded.names());
+    }
+
+    /**
+     * 조합 실험 폴더(D-062). 실행 명령이 결과를 쓰는 {@code experiments/}와 같은 폴더를 가리켜야 결과를 불러올 수 있다.
+     */
+    @Bean
+    ExperimentFolders experimentFolders(
+            @Value("${autotrade.lab.experiments-dir:experiments}") String dir, ExperimentCatalog catalog) {
+        ExperimentFolders folders = new ExperimentFolders(Path.of(dir), catalog);
+        log.info("실험 폴더: {}", folders.root());
+        return folders;
     }
 
     /**
@@ -40,6 +59,15 @@ public class LabWebConfiguration {
             @Value("${autotrade.lab.strategies-dir:strategies}") String dir, Clock clock) {
         StrategyProfileStore store = new StrategyProfileStore(Path.of(dir), clock);
         log.info("전략 프로필 폴더: {}", store.root());
+        return store;
+    }
+
+    /** 선정 프로필 폴더(ADR-007 2.1). 실험 실행기가 읽는 {@code selections/}와 같은 폴더다. */
+    @Bean
+    SelectionProfileStore selectionProfileStore(
+            @Value("${autotrade.lab.selections-dir:selections}") String dir, Clock clock) {
+        SelectionProfileStore store = new SelectionProfileStore(Path.of(dir), clock);
+        log.info("선정 프로필 폴더: {}", store.root());
         return store;
     }
 }

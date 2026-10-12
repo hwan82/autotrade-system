@@ -1,7 +1,8 @@
 // 해시 라우터와 상단 상태 표시. 페이지 모듈은 view 함수(params) → Promise<Element>.
 import { h, mount, toast } from './dom.js';
 import { loadSession, get } from './api.js';
-import { experimentsPage, experimentPage, runPage } from './pages/experiments.js';
+import { experimentsPage, experimentPage, runPage, selectionResultPage } from './pages/experiments.js';
+import { selectionsPage, selectionPage, newSelectionPage } from './pages/selections.js';
 import { profilesPage, profilePage, newProfilePage } from './pages/profiles.js';
 import { settingsPage } from './pages/settings.js';
 import { realPage } from './pages/real.js';
@@ -10,6 +11,10 @@ const routes = [
   [/^#\/experiments$/, 'experiments', () => experimentsPage()],
   [/^#\/experiments\/([A-Z0-9-]+)$/, 'experiments', m => experimentPage(m[1])],
   [/^#\/experiments\/([A-Z0-9-]+)\/runs\/([A-Za-z0-9-]+)$/, 'experiments', m => runPage(m[1], m[2])],
+  [/^#\/experiments\/([A-Z0-9-]+)\/selection-results\/([0-9a-f]{64})$/, 'experiments', m => selectionResultPage(m[1], m[2])],
+  [/^#\/selections$/, 'selections', () => selectionsPage()],
+  [/^#\/selections\/new$/, 'selections', () => newSelectionPage()],
+  [/^#\/selections\/([a-z0-9-]+)(?:\/v(\d+))?$/, 'selections', m => selectionPage(m[1], m[2] ? Number(m[2]) : null)],
   [/^#\/profiles$/, 'profiles', () => profilesPage()],
   [/^#\/profiles\/new$/, 'profiles', () => newProfilePage()],
   [/^#\/profiles\/([a-z0-9-]+)(?:\/v(\d+))?$/, 'profiles', m => profilePage(m[1], m[2] ? Number(m[2]) : null)],

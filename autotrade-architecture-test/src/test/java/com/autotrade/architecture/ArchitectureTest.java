@@ -11,6 +11,9 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.autotrade.app.collector.archfixture.LoadsProcessConfig;
+import com.autotrade.app.experiment.archfixture.RunsWithoutGate;
+import com.autotrade.app.watchdog.archfixture.KillsBatchProcess;
 import com.autotrade.app.engine.command.ForgedConfirmation;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
@@ -26,9 +29,14 @@ import com.autotrade.control.ControlServer;
 import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskPolicy;
 import com.autotrade.risk.archfixture.SplitPackageApproveAll;
+import com.autotrade.sim.combo.CombinationExperiment;
+import com.autotrade.sim.run.RunGate;
+import com.autotrade.sim.run.SimulationExperimentRunner;
+import com.autotrade.sim.study.StrategyStudy;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.AccessTarget;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -59,6 +67,7 @@ class ArchitectureTest {
         "com.autotrade.domain..",
         "com.autotrade.marketdata..",
         "com.autotrade.strategy..",
+        "com.autotrade.selection..",
         "com.autotrade.risk..",
         "com.autotrade.sim..",
         "com.autotrade.broker..",
@@ -68,6 +77,7 @@ class ArchitectureTest {
     // 실험실(Spring)을 뺀 프로세스 진입점도 Spring을 쓰지 않는다
     private static final String[] PLAIN_PROCESSES = {
         "com.autotrade.app.engine..", "com.autotrade.app.gateway..", "com.autotrade.app.watchdog..",
+        "com.autotrade.app.collector..", "com.autotrade.app.experiment..",
     };
 
     // 검사 범위: 우리 프로젝트(settings의 모든 Java 모듈)의 운영 클래스 전체(패키지 필터 없음) + 클래스패스의 com.autotrade
@@ -88,8 +98,9 @@ class ArchitectureTest {
     static final ArchRule DOMAIN_IS_INNERMOST = noClasses()
             .that().resideInAPackage("com.autotrade.domain..")
             .should().dependOnClassesThat().resideInAnyPackage(
-                    "com.autotrade.marketdata..", "com.autotrade.strategy..", "com.autotrade.risk..",
-                    "com.autotrade.sim..", "com.autotrade.broker..", "com.autotrade.config..", "com.autotrade.app..");
+                    "com.autotrade.marketdata..", "com.autotrade.strategy..", "com.autotrade.selection..",
+                    "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..", "com.autotrade.config..",
+                    "com.autotrade.app..");
 
     /** 가상 거래소는 증권사 플러그인을 모른다(주문 출구는 domain의 OrderGateway). */
     static final ArchRule SIM_DOES_NOT_KNOW_BROKERS = noClasses()
@@ -101,7 +112,8 @@ class ArchitectureTest {
             .that().resideInAnyPackage("com.autotrade.notification..", "com.autotrade.monitor..")
             .should().dependOnClassesThat().resideInAnyPackage(
                     "com.autotrade.domain..", "com.autotrade.marketdata..", "com.autotrade.strategy..",
-                    "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..", "com.autotrade.app..")
+                    "com.autotrade.selection..", "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..",
+                    "com.autotrade.app..")
             .allowEmptyShould(true);
 
     /** 시스템 시계를 만들어도 되는 곳: 각 프로세스 진입점(*Main)과 실험실의 CoreConfiguration. */
@@ -213,6 +225,72 @@ class ArchitectureTest {
             .should().dependOnClassesThat().areAssignableTo(ControlClient.class)
             .because("실전 제어 명령은 사람이 UI에서 2차 확인을 거쳐 보낸다. 게이트웨이·감시·엔진은 보내지 않는다(ADR-006)");
 
+    /**
+     * 수집 일괄 명령은 4개 프로세스의 설정 로더({@code runtime-config.json}·{@code secrets.json})를 쓰지 않고 수집기 전용 키
+     * 파일만 읽는다(D-050 ⑤, D-051, ADR-008 2.2). 증권사 플러그인·주문 포트도 모른다(D-019 경계를 언어와 관계없이 유지).
+     */
+    static final ArchRule COLLECTOR_READS_ONLY_ITS_SECRETS = noClasses()
+            .that().resideInAPackage("com.autotrade.app.collector..")
+            .should().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ConfigLoader")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigStore")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigHolder")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.LoadedConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ProcessStartup")
+            .orShould().dependOnClassesThat().resideInAnyPackage("com.autotrade.broker..", "com.autotrade.domain.order..")
+            .because("수집기는 증권사 키·계좌·주문을 다루지 않는다(D-019 3장, D-051)");
+
+    /**
+     * 실험 실행 명령(D-063)은 정지 확인({@link RunGate}) 없는 실행 입구를 부르지 않는다. 게이트 없는 오버로드는 순수 모듈 안
+     * 테스트·호환용으로만 남는다. 프로세스 진입점이 이것을 부르면 장 시간 보호와 감시의 정지 요청 파일(5.2 0번)을 건너뛴다.
+     */
+    static final ArchRule APPS_RUN_EXPERIMENTS_THROUGH_GATE = noClasses()
+            .that().resideInAPackage("com.autotrade.app..")
+            .should().accessTargetWhere(DescribedPredicate.describe("RunGate 인자가 없는 실험 실행 입구나 RunGate.NONE",
+                    a -> ungatedExperimentEntry(a.getTarget())))
+            .because("실험 실행은 장 시간 보호·정지 요청 파일 확인을 거친다(D-063, broker-and-fault-design 5.2 0번)");
+
+    private static boolean ungatedExperimentEntry(AccessTarget t) {
+        if (t instanceof AccessTarget.FieldAccessTarget f) {
+            // 늘 열린 문을 넘기면 인자는 있어도 같은 우회다(PR #52 QA Q2)
+            return f.getOwner().isEquivalentTo(RunGate.class) && f.getName().equals("NONE");
+        }
+        if (!(t instanceof AccessTarget.CodeUnitAccessTarget c)) {
+            return false;
+        }
+        String owner = c.getOwner().getName();
+        boolean entry = owner.equals(SimulationExperimentRunner.class.getName()) && c.getName().equals("<init>")
+                || owner.equals(StrategyStudy.class.getName()) && c.getName().equals("<init>")
+                || owner.equals(CombinationExperiment.class.getName())
+                        && (c.getName().equals("run") || c.getName().equals("runAndWrite"));
+        return entry && c.getRawParameterTypes().stream().noneMatch(p -> p.isEquivalentTo(RunGate.class));
+    }
+
+    /** 실험 실행 명령은 프로세스 설정 로더(secrets.json 포함)와 증권사·주문 포트를 모른다(D-063, 수집기 규칙과 같은 경계). */
+    static final ArchRule EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG = noClasses()
+            .that().resideInAPackage("com.autotrade.app.experiment..")
+            .should().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ConfigLoader")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigStore")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfigHolder")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.LoadedConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfig")
+            .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ProcessStartup")
+            .orShould().dependOnClassesThat().resideInAnyPackage("com.autotrade.broker..", "com.autotrade.domain.order..")
+            .because("실험 실행 명령은 설정 폴더 위치만 쓰고 증권사 키·계좌·주문을 다루지 않는다(D-063)");
+
+    /**
+     * 감시 프로세스(진입점과 {@code autotrade-monitor-agent-jar})는 어떤 프로세스도 죽이지 않는다. 자원 부족 때 단발 일괄 명령에는 정지 요청 파일만 만든다(D-058, broker-and-fault-design
+     * 5.2 0번, ADR-007 2.7). PID로 고른 프로세스를 죽이면 PID 재사용 때 실전 엔진을 죽일 수 있다.
+     */
+    static final ArchRule WATCHDOG_KILLS_NO_PROCESS = noClasses()
+            // 감시 진입점과 감시만 쓰는 자원 감시 라이브러리(monitor-agent-jar, 장애표 #10 감지) 모두(PR #46 risk-ops F2)
+            .that().resideInAnyPackage("com.autotrade.app.watchdog..", "com.autotrade.monitor..")
+            // 호출뿐 아니라 메서드 참조(ProcessHandle::destroyForcibly)도 막는다(callMethod는 참조를 보지 않음)
+            .should().accessTargetWhere(DescribedPredicate.describe("Process·ProcessHandle의 destroy*",
+                    a -> a.getName().startsWith("destroy")
+                            && (a.getTargetOwner().isAssignableTo(Process.class) || a.getTargetOwner().isAssignableTo(ProcessHandle.class))))
+            .because("감시는 정지 요청 파일로만 멈추게 한다(D-058)");
+
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
@@ -290,6 +368,41 @@ class ArchitectureTest {
     void 명령_채널_서버는_엔진만_열고_클라이언트는_실험실만_쓴다() {
         ONLY_ENGINE_OPENS_CONTROL_SERVER.check(PRODUCTION);
         ONLY_LAB_SENDS_CONTROL_COMMANDS.check(PRODUCTION);
+    }
+
+    @Test
+    void 수집_일괄_명령은_자기_키_파일만_읽고_증권사_주문을_모른다() {
+        COLLECTOR_READS_ONLY_ITS_SECRETS.check(PRODUCTION);
+        // 위반 고정 예제: 설정 로더 생성·load 호출, 반환 타입 LoadedConfig, 주문 포트 참조
+        EvaluationResult r = COLLECTOR_READS_ONLY_ITS_SECRETS.evaluate(
+                new ClassFileImporter().importClasses(LoadsProcessConfig.class));
+        assertThat(r.hasViolation()).isTrue();
+        assertThat(String.join("\n", r.getFailureReport().getDetails()))
+                .contains("ConfigLoader", "LoadedConfig", "OrderGateway");
+    }
+
+    @Test
+    void 실험_실행_명령은_정지_확인을_거치고_프로세스_설정을_모른다() {
+        APPS_RUN_EXPERIMENTS_THROUGH_GATE.check(PRODUCTION);
+        EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG.check(PRODUCTION);
+        // 위반 고정 예제: 게이트 없는 실행기·연구·조합 실험 입구, RunGate.NONE, 설정 로더, 주문 포트
+        JavaClasses fixture = new ClassFileImporter().importClasses(RunsWithoutGate.class);
+        EvaluationResult gate = APPS_RUN_EXPERIMENTS_THROUGH_GATE.evaluate(fixture);
+        assertThat(gate.hasViolation()).isTrue();
+        assertThat(gate.getFailureReport().getDetails()).hasSize(4);
+        EvaluationResult config = EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG.evaluate(fixture);
+        assertThat(String.join("\n", config.getFailureReport().getDetails()))
+                .contains("ConfigLoader", "LoadedConfig", "OrderGateway");
+    }
+
+    @Test
+    void 감시는_프로세스를_죽이지_않는다() {
+        WATCHDOG_KILLS_NO_PROCESS.check(PRODUCTION);
+        // 위반 고정 예제: ProcessHandle 메서드 참조와 Process.destroy 호출
+        EvaluationResult r = WATCHDOG_KILLS_NO_PROCESS.evaluate(
+                new ClassFileImporter().importClasses(KillsBatchProcess.class));
+        assertThat(r.hasViolation()).isTrue();
+        assertThat(String.join("\n", r.getFailureReport().getDetails())).contains("destroyForcibly", "Process.destroy()");
     }
 
     @Test

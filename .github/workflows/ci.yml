@@ -154,3 +154,5 @@ jobs:
         run: ./gitleaks git --redact --exit-code 1 .
       - name: Python collector boundary (ARC-06, D-019)
         run: scripts/ci/check-python-collectors.sh
+      - name: Collector key values (MD-11, ADR-008)
+        run: scripts/ci/check-collector-keys.sh
