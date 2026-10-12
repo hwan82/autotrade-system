@@ -41,6 +41,8 @@ final class DayWriter implements AutoCloseable {
 
     /** 녹화기가 직접 남기는 공백 표시 줄(RECORDER_OVERFLOW, RECORDER_RESTART)의 소스 이름. */
     static final String RECORDER_SOURCE = "RECORDER";
+    /** {@link #RECORDER_SOURCE}의 메타 출처 범위. 어느 줄이 먼저 쓰여도 같은 값이다. */
+    static final String RECORDER_SCOPE = "녹화기 공백 표시";
 
     private static final ObjectMapper META_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
@@ -154,7 +156,7 @@ final class DayWriter implements AutoCloseable {
                 recorderDropped++;
             }
         }
-        sources.putIfAbsent(sourceId, "UNKNOWN");
+        sources.putIfAbsent(sourceId, RECORDER_SOURCE.equals(sourceId) ? RECORDER_SCOPE : "UNKNOWN");
     }
 
     private void writeRestartGaps(Instant resumedAt) throws IOException {
@@ -167,7 +169,7 @@ final class DayWriter implements AutoCloseable {
             eventCount++;
             gapCount++;
         }
-        sources.putIfAbsent(RECORDER_SOURCE, "녹화기 공백 표시");
+        sources.put(RECORDER_SOURCE, RECORDER_SCOPE);
         restartSymbols = new TreeSet<>();
     }
 

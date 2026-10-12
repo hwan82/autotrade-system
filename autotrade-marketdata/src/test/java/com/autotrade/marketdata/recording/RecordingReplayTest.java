@@ -182,14 +182,33 @@ class RecordingReplayTest {
     }
 
     @Test
-    void 공백이_시작보다_앞서는_시계라도_끝을_넘지_않게_자른다() {
-        // 앞 구간을 정상 종료한 시각(고정 시계 OPEN)이 마지막 수신보다 앞이어도 마지막 수신 시각을 쓴다
+    void 앞_구간_정상_종료_시각이_마지막_수신보다_앞이면_마지막_수신부터_공백을_잡는다() {
+        // 고정 시계 OPEN으로 정상 종료해 구간 끝이 마지막 수신보다 앞이다
         List<Object[]> in = scriptedDay();
         Path dir = record(in.subList(0, 100));
         record(in.subList(100, in.size()));
         DataGap g = (DataGap) RecordedDay.open(dir).lines().get(100).event();
         assertThat(g.gapStart()).isEqualTo(((MarketEvent) in.get(99)[1]).receivedAt());
-        assertThat(g.gapEnd()).isAfterOrEqualTo(g.gapStart());
+    }
+
+    @Test
+    void 재기동_뒤_첫_수신이_앞_구간_마지막보다_이르면_공백_시작을_끝에_맞춘다() {
+        Instant late = OPEN.plusSeconds(10);
+        Instant early = OPEN.plusSeconds(1); // 시계가 뒤로 간 새 프로세스
+        Path dir = record(List.<Object[]>of(new Object[] {"KIWOOM-WS",
+                new TradeTick(SAMSUNG, 1, late, late, new BigDecimal("71000"), 1)}));
+        record(List.<Object[]>of(new Object[] {"KIWOOM-WS",
+                new TradeTick(SAMSUNG, 2, early, early, new BigDecimal("71100"), 1)}));
+        DataGap g = (DataGap) RecordedDay.open(dir).lines().get(1).event();
+        assertThat(g.gapStart()).isEqualTo(early);
+        assertThat(g.gapEnd()).isEqualTo(early);
+    }
+
+    @Test
+    void 녹화기_소스의_출처_범위는_쓰기_순서와_무관하게_같다() {
+        Path dir = record(scriptedDay().subList(0, 10));
+        record(scriptedDay().subList(10, 20));
+        assertThat(RecordedDay.open(dir).meta().orElseThrow().sources()).containsEntry("RECORDER", "녹화기 공백 표시");
     }
 
     @Test
