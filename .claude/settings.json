@@ -8,11 +8,18 @@
       "Bash(git diff *)",
       "Bash(git log *)"
     ],
+	"additionalDirectories": [
+      "C:\\2.Code\\myproject\\autotrade-system-qa\\qa-inbox",
+      "C:\\2.Code\\myproject\\autotrade-system-qa\\qa-out"
+    ],
     "deny": [
       "Read(./config/runtime-config.json)",
       "Read(./**/runtime-config.json)",
       "Read(./.env)",
-      "Read(./**/*.secret.*)"
+      "Read(./**/*.secret.*)",
+	  "Edit(//C:/2.Code/myproject/autotrade-system-qa/qa-out/**)",
+      "Edit(//C:/2.Code/myproject/autotrade-system-qa/baseline/**)",
+      "Edit(//C:/2.Code/myproject/autotrade-system-qa/.claude/**)"
     ]
   }
 }
