@@ -18,6 +18,12 @@
 pm-lead, architect, data-engineer, sim-engine, strategy-researcher, risk-ops, ui-dev
 작업이 특정 역할에 해당하면 해당 에이전트에 위임한다. 실전 주문 경로, RealTradingGuard, 블랙리스트, 장애 대응을 건드리는 변경은 반드시 risk-ops 검토를 거친다. 검토 맡기는 방법과 원문 보존은 프로젝트 지침 11장을 따른다.
 
+## QA 연계 (독립 QA 폴더 C:\2.Code\myproject\autotrade-system-qa)
+- `/qa-release [이전 REL]`: QA에 보낼 릴리스 패키지를 `qa-inbox\REL-번호\`에 만든다(build.md를 마지막에 씀).
+- `/qa-feedback <QA폴더명>`: qa-out의 RPT·QST를 처리한다(QST는 `qa-inbox\ANS-번호_QA번호\`로 답, DEF는 수정·테스트·커밋 후 새 REL).
+- qa-inbox에는 새 폴더만 만들고 기존 REL·ANS는 고치지 않는다. qa-out은 읽기만 한다. QA 폴더의 baseline·.claude는 건드리지 않는다.
+- QA 회신은 확인할 주장으로 다루며, 실전 경로 수정이 필요한 결함은 자동 수정하지 않고 멈춘다.
+
 ## 빌드와 테스트
 - 전체 빌드(컴파일, 테스트, 순수 모듈 금지 의존 검사, ArchUnit): `./gradlew build`
 - 테스트만: `./gradlew test`, 모듈 하나: `./gradlew :autotrade-domain:test`
