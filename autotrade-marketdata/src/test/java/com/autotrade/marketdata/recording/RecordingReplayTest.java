@@ -154,10 +154,81 @@ class RecordingReplayTest {
         Path dir = record(in.subList(0, 100));
         record(in.subList(100, in.size()));
         RecordedDay day = RecordedDay.open(dir);
-        assertThat(day.lastSeq()).isEqualTo(502);
+        assertThat(day.lastSeq()).isEqualTo(504); // 502 + 재기동 공백 표시 2(종목 2개)
         assertThat(day.meta().orElseThrow().segments()).hasSize(2)
                 .extracting(RecordingMeta.Segment::firstSeq).containsExactly(1L, 101L);
+        assertThat(day.unmarkedRestarts()).isEmpty();
         assertThat(replay(dir)).isEqualTo(replay(dir));
+    }
+
+    @Test
+    void 같은_날_재기동하면_녹화가_멈췄던_구간을_앞_구간_종목마다_공백으로_남긴다() {
+        List<Object[]> in = scriptedDay();
+        Path dir = record(in.subList(0, 100));
+        Instant lastAlive = ((MarketEvent) in.get(99)[1]).receivedAt();
+        Instant resumed = ((MarketEvent) in.get(100)[1]).receivedAt();
+        record(in.subList(100, in.size()));
+
+        RecordedDay day = RecordedDay.open(dir);
+        List<RecordingCodec.Line> lines = day.lines();
+        // 새 구간 첫 줄들: 종목 순서(000660, 005930)로 공백 표시, 그다음 새 프로세스의 첫 이벤트
+        assertThat(lines.subList(100, 102)).allSatisfy(l -> assertThat(l.sourceId()).isEqualTo("RECORDER"))
+                .extracting(l -> (DataGap) l.event())
+                .containsExactly(
+                        new DataGap(HYNIX, 101, resumed, resumed, lastAlive, resumed, DataGap.GapReason.RECORDER_RESTART),
+                        new DataGap(SAMSUNG, 102, resumed, resumed, lastAlive, resumed, DataGap.GapReason.RECORDER_RESTART));
+        assertThat(lines.get(102).event()).isEqualTo(EventSequences.withSequence((MarketEvent) in.get(100)[1], 103));
+        assertThat(day.meta().orElseThrow().gapCount()).isEqualTo(3); // 원래 끊김 1 + 재기동 2
+    }
+
+    @Test
+    void 앞_구간_정상_종료_시각이_마지막_수신보다_앞이면_마지막_수신부터_공백을_잡는다() {
+        // 고정 시계 OPEN으로 정상 종료해 구간 끝이 마지막 수신보다 앞이다
+        List<Object[]> in = scriptedDay();
+        Path dir = record(in.subList(0, 100));
+        record(in.subList(100, in.size()));
+        DataGap g = (DataGap) RecordedDay.open(dir).lines().get(100).event();
+        assertThat(g.gapStart()).isEqualTo(((MarketEvent) in.get(99)[1]).receivedAt());
+    }
+
+    @Test
+    void 재기동_뒤_첫_수신이_앞_구간_마지막보다_이르면_공백_시작을_끝에_맞춘다() {
+        Instant late = OPEN.plusSeconds(10);
+        Instant early = OPEN.plusSeconds(1); // 시계가 뒤로 간 새 프로세스
+        Path dir = record(List.<Object[]>of(new Object[] {"KIWOOM-WS",
+                new TradeTick(SAMSUNG, 1, late, late, new BigDecimal("71000"), 1)}));
+        record(List.<Object[]>of(new Object[] {"KIWOOM-WS",
+                new TradeTick(SAMSUNG, 2, early, early, new BigDecimal("71100"), 1)}));
+        DataGap g = (DataGap) RecordedDay.open(dir).lines().get(1).event();
+        assertThat(g.gapStart()).isEqualTo(early);
+        assertThat(g.gapEnd()).isEqualTo(early);
+    }
+
+    @Test
+    void 녹화기_소스의_출처_범위는_쓰기_순서와_무관하게_같다() {
+        Path dir = record(scriptedDay().subList(0, 10));
+        record(scriptedDay().subList(10, 20));
+        assertThat(RecordedDay.open(dir).meta().orElseThrow().sources()).containsEntry("RECORDER", "녹화기 공백 표시");
+    }
+
+    @Test
+    void 재기동_공백_표시_이전_형식_녹화는_표시_없는_구간_경계를_알려_준다() throws IOException {
+        Path dir = root.resolve("KRX/2026-10-08");
+        Files.createDirectories(dir);
+        RecordingCodec codec = new RecordingCodec();
+        Instant t1 = OPEN;
+        Instant t2 = OPEN.plusSeconds(4440); // 74분 뒤 재기동
+        try (OutputStream out = new GZIPOutputStream(Files.newOutputStream(dir.resolve(RecordingLayout.EVENTS_FILE)))) {
+            out.write((codec.encode(1, "K", new TradeTick(SAMSUNG, 1, t1, t1, BigDecimal.TEN, 1)) + "\n"
+                    + codec.encode(2, "K", new TradeTick(SAMSUNG, 1, t2, t2, BigDecimal.TEN, 1)) + "\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        RecordingMeta legacy = new RecordingMeta(RecordingCodec.FORMAT_VERSION, "KRX", "2026-10-08", "Asia/Seoul",
+                Map.of("K", "KRX_REALTIME"), "", List.of(new RecordingMeta.Segment(t1.toString(), t1.toString(), 1),
+                        new RecordingMeta.Segment(t2.toString(), "", 2)), 2, 2, 0, 0, false, "");
+        new com.fasterxml.jackson.databind.ObjectMapper().writeValue(dir.resolve(RecordingLayout.META_FILE).toFile(), legacy);
+
+        assertThat(RecordedDay.open(dir).unmarkedRestarts()).extracting(RecordingMeta.Segment::firstSeq).containsExactly(2L);
     }
 
     @Test
