@@ -80,6 +80,25 @@ class ExchangeCalendarTest {
     }
 
     @Test
+    void 확인_안_된_조기_폐장일도_보호는_정규장_폐장까지_간다() throws Exception {
+        // PR #53 QA Q1: 폐장 쪽 합치기를 지키는 테스트. 2026-10-08(목) 12:00 조기 폐장을 verified:false로 둔다
+        String json = """
+                {"market":"KRX","zone":"Asia/Seoul","coverageFrom":"2026-01-01","coverageTo":"2026-12-31",
+                 "regularOpen":"09:00","regularClose":"15:30","checkedOn":"2026-10-12","sources":{},
+                 "holidays":[],
+                 "specialSessions":[{"date":"2026-10-08","open":"09:00","close":"12:00","name":"조기 폐장","source":"s","verified":false}]}
+                """;
+        ExchangeCalendar cal = ExchangeCalendar.parse(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
+        assertThat(cal.session(LocalDate.of(2026, 10, 8)).orElseThrow().close()).isEqualTo(LocalTime.of(12, 0));
+        assertThat(cal.protectionSession(LocalDate.of(2026, 10, 8)).orElseThrow().close()).isEqualTo(LocalTime.of(15, 30));
+        // 서울 15:59(06:59Z)는 정규장 폐장 30분 뒤(16:00) 전이라 보호 구간 안
+        assertThat(SessionProtection.check(Instant.parse("2026-10-08T06:59:00Z"), java.util.List.of(cal)))
+                .isInstanceOf(SessionProtection.Inside.class);
+        assertThat(SessionProtection.check(Instant.parse("2026-10-08T07:00:00Z"), java.util.List.of(cal)))
+                .isInstanceOf(SessionProtection.Clear.class);
+    }
+
+    @Test
     void KRX_연초_개장일은_10시에_연다() {
         TradingSession s = krx.session(LocalDate.of(2026, 1, 2)).orElseThrow();
         assertThat(s.open()).isEqualTo(LocalTime.of(10, 0));
