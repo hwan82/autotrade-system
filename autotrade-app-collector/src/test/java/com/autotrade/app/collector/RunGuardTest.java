@@ -48,15 +48,22 @@ class RunGuardTest {
 
     @Test
     void 휴장일과_주말은_막지_않는다() {
-        // 2026-10-09 한글날(국내 휴장), 서울 10:00 = 01:00Z
-        assertThatCode(() -> at("2026-10-09T01:00:00Z", false).checkSession()).doesNotThrowAnyException();
+        // 2026-06-03 지방선거(거래소 공지로 확인된 국내 휴장), 서울 10:00 = 01:00Z
+        assertThatCode(() -> at("2026-06-03T01:00:00Z", false).checkSession()).doesNotThrowAnyException();
         // 2026-10-10 토요일 서울 10:00
         assertThatCode(() -> at("2026-10-10T01:00:00Z", false).checkSession()).doesNotThrowAnyException();
     }
 
     @Test
+    void 거래소_공지로_확인되지_않은_휴장일은_정규장이_있는_날처럼_막는다() {
+        // 2026-12-25 성탄절(verified: false), 서울 10:00
+        assertThatThrownBy(() -> at("2026-12-25T01:00:00Z", false).checkSession()).isInstanceOf(RunGuard.Refused.class)
+                .hasMessageContaining("KRX 장 시간 보호 구간");
+    }
+
+    @Test
     void 캘린더_수록_범위_밖이면_판단할_수_없어_막는다() {
-        assertThatThrownBy(() -> at("2027-01-05T10:00:00Z", false).checkSession()).isInstanceOf(RunGuard.Refused.class)
+        assertThatThrownBy(() -> at("2028-01-05T10:00:00Z", false).checkSession()).isInstanceOf(RunGuard.Refused.class)
                 .hasMessageContaining("수록 범위 밖");
     }
 

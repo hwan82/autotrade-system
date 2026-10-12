@@ -74,7 +74,7 @@ class ExperimentGateTest {
 
     @Test
     void 캘린더_수록_범위_밖이면_판단할_수_없어_멈춘다() {
-        assertThat(gate("2027-01-05T10:00:00Z", false).stopReason()).get().asString().contains("수록 범위 밖");
+        assertThat(gate("2028-01-05T10:00:00Z", false).stopReason()).get().asString().contains("수록 범위 밖");
     }
 
     @Test
