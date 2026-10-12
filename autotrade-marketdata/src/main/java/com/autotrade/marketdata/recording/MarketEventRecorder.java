@@ -98,7 +98,7 @@ public final class MarketEventRecorder implements AutoCloseable {
         if (since != null) {
             DataGap gap = new DataGap(event.symbol(), 0, event.receivedAt(), event.receivedAt(), since, event.receivedAt(),
                     DataGap.GapReason.RECORDER_OVERFLOW);
-            if (!queue.offer(new Item("RECORDER", gap))) {
+            if (!queue.offer(new Item(DayWriter.RECORDER_SOURCE, gap))) {
                 dropped++;
                 return;
             }

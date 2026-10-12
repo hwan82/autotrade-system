@@ -3,6 +3,7 @@ package com.autotrade.marketdata.recording;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
+import com.autotrade.domain.market.Symbol;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.BufferedWriter;
@@ -21,7 +22,9 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -29,8 +32,17 @@ import java.util.zip.GZIPOutputStream;
  *
  * <p>같은 날 폴더가 이미 있으면(프로세스 재기동) 기존 파일 뒤에 새 gzip 멤버를 이어 붙이고 순번을 이어 간다.
  * gzip은 {@code syncFlush}로 열어 {@link #flush()} 시점까지의 줄은 비정상 종료 뒤에도 읽을 수 있다.
+ *
+ * <p>이어 쓸 때는 새 구간 첫 이벤트 앞에 앞 구간에 나온 종목마다 {@link DataGap}(RECORDER_RESTART)을 남긴다(D-065).
+ * 구간은 앞 프로세스가 살아 있던 마지막 시각(앞 구간 끝과 마지막 수신 중 늦은 쪽)부터 새 구간 첫 이벤트 수신 시각까지다.
+ * 그래서 리플레이를 읽는 쪽은 meta.json 없이 이벤트 흐름만 보고도 녹화되지 않은 시간을 끊김으로 다룰 수 있다.
  */
 final class DayWriter implements AutoCloseable {
+
+    /** 녹화기가 직접 남기는 공백 표시 줄(RECORDER_OVERFLOW, RECORDER_RESTART)의 소스 이름. */
+    static final String RECORDER_SOURCE = "RECORDER";
+    /** {@link #RECORDER_SOURCE}의 메타 출처 범위. 어느 줄이 먼저 쓰여도 같은 값이다. */
+    static final String RECORDER_SCOPE = "녹화기 공백 표시";
 
     private static final ObjectMapper META_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
@@ -49,6 +61,9 @@ final class DayWriter implements AutoCloseable {
     private long gapCount;
     private long recorderDropped;
     private boolean closed;
+    /** 이어 쓸 때 첫 이벤트 앞에 공백을 남길 종목(이름순). 남긴 뒤 비운다. */
+    private SortedSet<Symbol> restartSymbols = new TreeSet<>();
+    private Instant restartGapStart;
 
     DayWriter(Path dir, Market market, LocalDate date, ZoneId zone, Map<String, String> knownSources, String license,
             Instant openedAt) {
@@ -73,6 +88,10 @@ final class DayWriter implements AutoCloseable {
                 });
                 // 비정상 종료로 끝난 gzip 멤버 뒤에 이어 쓰면 읽을 수 없으므로, 읽힌 줄까지 닫힌 멤버로 다시 쓴다
                 rewrite(events, previous);
+                for (RecordingCodec.Line l : previous.lines()) {
+                    restartSymbols.add(l.event().symbol());
+                }
+                restartGapStart = lastAlive(segments, previous.lastReceivedAt());
             }
             sources.putAll(knownSources);
             segments.add(new RecordingMeta.Segment(openedAt.toString(), "", seq + 1));
@@ -109,11 +128,24 @@ final class DayWriter implements AutoCloseable {
         return out;
     }
 
+    /** 앞 프로세스가 살아 있던 마지막 시각: 마지막 구간 끝(정상 종료 시각)과 마지막 수신 시각 중 늦은 쪽. */
+    private static Instant lastAlive(List<RecordingMeta.Segment> segs, Instant lastRx) {
+        Instant alive = lastRx;
+        if (!segs.isEmpty() && !segs.get(segs.size() - 1).endedAt().isEmpty()) {
+            Instant ended = Instant.parse(segs.get(segs.size() - 1).endedAt());
+            alive = alive == null || ended.isAfter(alive) ? ended : alive;
+        }
+        return alive;
+    }
+
     LocalDate date() {
         return date;
     }
 
     void write(String sourceId, MarketEvent event) throws IOException {
+        if (!restartSymbols.isEmpty()) {
+            writeRestartGaps(event.receivedAt());
+        }
         seq++;
         out.write(codec.encode(seq, sourceId, event));
         out.write('\n');
@@ -124,7 +156,21 @@ final class DayWriter implements AutoCloseable {
                 recorderDropped++;
             }
         }
-        sources.putIfAbsent(sourceId, "UNKNOWN");
+        sources.putIfAbsent(sourceId, RECORDER_SOURCE.equals(sourceId) ? RECORDER_SCOPE : "UNKNOWN");
+    }
+
+    private void writeRestartGaps(Instant resumedAt) throws IOException {
+        Instant start = restartGapStart == null || restartGapStart.isAfter(resumedAt) ? resumedAt : restartGapStart;
+        for (Symbol s : restartSymbols) {
+            seq++;
+            out.write(codec.encode(seq, RECORDER_SOURCE, new DataGap(s, 0, resumedAt, resumedAt, start, resumedAt,
+                    DataGap.GapReason.RECORDER_RESTART)));
+            out.write('\n');
+            eventCount++;
+            gapCount++;
+        }
+        sources.put(RECORDER_SOURCE, RECORDER_SCOPE);
+        restartSymbols = new TreeSet<>();
     }
 
     void flush() throws IOException {
