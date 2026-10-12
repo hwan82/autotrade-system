@@ -44,6 +44,11 @@ public record DataGap(
         /** 녹화 큐가 가득 차서 녹화에서 이벤트를 버렸다(RSK-07 녹화 축소). */
         RECORDER_OVERFLOW,
         /** 시세 소스를 다른 증권사로 바꿨다(FAILOVER·재배분). 전환 사이 이벤트가 빠졌을 수 있다. */
-        SOURCE_SWITCH
+        SOURCE_SWITCH,
+        /**
+         * 녹화 프로세스(게이트웨이)가 멈췄다가 같은 날 다시 떴다. 멈춘 동안의 이벤트는 녹화되지 않았다.
+         * 녹화기가 새 구간 첫 이벤트 앞에, 앞 구간에 나온 종목마다 하나씩 남긴다(ADR-003 2.3, D-065).
+         */
+        RECORDER_RESTART
     }
 }
