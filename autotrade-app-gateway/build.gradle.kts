@@ -53,3 +53,9 @@ tasks.register<JavaExec>("kiwoomDaily") {
     mainClass.set("com.autotrade.app.gateway.KiwoomDailyMain")
     workingDir = rootProject.projectDir
 }
+
+// Windows 콘솔에서 한글 안내·오류가 깨지지 않게 한다. 자식 JVM 출력을 UTF-8로 고정하면 Gradle이 그대로 읽어 콘솔 인코딩으로 다시 찍는다
+// (실험 명령과 같은 방식, autotrade-app-experiment/build.gradle.kts). 2026-10-12 kiwoomDaily 출력 깨짐.
+tasks.withType<JavaExec>().configureEach {
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+}
