@@ -162,7 +162,7 @@ main에는 2단계 산출물(실전 API 시세 수신, 녹화, 녹화 리플레�
 | C2 | 통과 | 지난 판정 뒤 머지된 PR의 검토 원문 최종 판정이 모두 승인: pr-56 architect·architect-2·risk-ops·risk-ops-2·qa, pr-58 architect, pr-59 architect-re1(1차 수정 필요 F1·F2 → 재검토 승인), pr-60 architect(1차 수정 필요 F1 → 재검토 승인). 지난 판정에서 본 원문(pr-27~pr-57)은 바뀌지 않았다. pr-58은 risk-ops "대상 아님"(실전 주문 경로·보호 테스트 변경 없음)으로, 코드상 녹화 모듈만 바뀌어 맞다 |
 | C3 | 통과 | 아래 "C3 자율 결정 목록 (2026-10-12 (2))" |
 | C4 | 통과 | 다음 단계를 막는 항목과 담당이 적혀 있다: Q-015 실제 접속 확인 잔여(data-engineer, 사용자), 녹화 어댑터 `RecordedDay → MarketDataSet`와 그 어댑터의 `RECORDER_RESTART`·`unmarkedRestarts()` 처리(sim-engine, ADR-004 4장, D-065 변경 제안 O4), `VirtualExchange` DataGap 처리(sim-engine, D-065 배경), 게이트웨이 → 실험실 실시간 전달(architect, ADR-003 5장) |
-| C5 | 실패 | 대조 3곳 이상: ① D-065 ① "새 구간 첫 이벤트 앞, 앞 구간 종목마다, 종목 정렬 순" = `DayWriter.writeRestartGaps`(`TreeSet`, 첫 `write` 때) 일치. ② D-065 ② 녹화 형식 버전 1 유지 = `RecordingCodec.FORMAT_VERSION` 변경 없음 일치. ③ ADR-003 2.3 갱신과 `DataGap.GapReason.RECORDER_RESTART` 주석 일치. ④ D-066은 2단계 밖(전략 기준)이라 생략. **불일치**: ⑤ `GatewayMain.java:33` 주석 대 사용자 결정 D-059(게이트웨이는 토스를 호출하지 않음) — 지난 판정과 같은 불일치가 남았다. ⑥ `DayWriter.java:34` "flush() 시점까지의 줄은 비정상 종료 뒤에도 읽을 수 있다"는 실제 동작과 다르다(H-4: 끝 약 8KB가 읽히지 않고, 재기동 때 지워진다) |
+| C5 | 실패 | 대조 3곳 이상: ① D-065 ① "새 구간 첫 이벤트 앞, 앞 구간 종목마다, 종목 정렬 순" = `DayWriter.writeRestartGaps`(`TreeSet`, 첫 `write` 때) 일치. ② D-065 ② 녹화 형식 버전 1 유지 = `RecordingCodec.FORMAT_VERSION` 변경 없음 일치. ③ ADR-003 2.3 갱신과 `DataGap.GapReason.RECORDER_RESTART` 주석 일치. ④ D-066은 2단계 밖(전략 기준)이라 생략. **불일치**: ⑤ `GatewayMain.java:33` 주석 대 사용자 결정 D-059(게이트웨이는 토스를 호출하지 않음) — 지난 판정과 같은 불일치가 남았다. ⑥ `DayWriter.java:34` "flush() 시점까지의 줄은 비정상 종료 뒤에도 읽을 수 있다"는 실제 동작과 다르다(H-4: 끝 수십 줄이 읽히지 않고, 재기동 때 지워진다) |
 
 ### C3 자율 결정 목록 (2026-10-12 (2))
 | 결정 | 내용 | 사용자 확인 필요 |
@@ -183,7 +183,7 @@ main에는 2단계 산출물(실전 API 시세 수신, 녹화, 녹화 리플레�
 
 ### 점검표 밖 발견 (2026-10-12 (2))
 - **H-4 (가장 큰 위험, C1 (3)·C5 ⑥) 비정상 종료 뒤 재기동하면 디스크에 있던 마지막 줄들이 지워지고, 짧은 녹화는 재기동 표시도 없다.**
-  - 원인 [사실]: `RecordedDay.readLines`(`RecordedDay.java:78~89`)는 `BufferedReader(InputStreamReader(GZIPInputStream))`로 줄을 읽다가 끝나지 않은 gzip 멤버에서 `EOFException`이 나면 잡고 끝낸다. 이때 리더 안에 이미 풀렸지만 아직 줄로 돌려주지 않은 글자(디코더·버퍼 몫, 약 8KB)는 버려진다. `DayWriter` 생성자는 이렇게 읽은 줄만으로 파일을 다시 쓴다(`DayWriter.java:90` `rewrite(events, previous)`, `REPLACE_EXISTING`). 그래서 `flush()`로 디스크에 내려간 줄이 재기동 순간 지워진다.
+  - 원인 [사실]: `RecordedDay.readLines`(`RecordedDay.java:78~89`)는 `BufferedReader(InputStreamReader(GZIPInputStream))`로 줄을 읽다가 끝나지 않은 gzip 멤버에서 `EOFException`이 나면 잡고 끝낸다. 이때 리더 안에 이미 풀렸지만 아직 줄로 돌려주지 않은 글자(디코더·버퍼 몫, 탐침에서 끝 15~45줄)는 버려진다. `DayWriter` 생성자는 이렇게 읽은 줄만으로 파일을 다시 쓴다(`DayWriter.java:90` `rewrite(events, previous)`, `REPLACE_EXISTING`). 그래서 `flush()`로 디스크에 내려간 줄이 재기동 순간 지워진다.
   - QA 탐침(나) 결과 [사실]: `DayWriter`로 N줄 쓰고 `flush()` 뒤 닫지 않고 다시 연 결과(읽힌 줄 / 재기동 뒤 남은 줄 / 재기동 공백 수):
     - N=1, 2, 10 → 0 / 0 / **0**(줄 전부 사라지고 재기동 `DataGap`도 없음)
     - N=100 → 55 / 55 / 1, N=1,000 → 977 / 977 / 1, N=10,000 → 9,973 / 9,973 / 1, N=100,000 → 99,985 / 99,985 / 1
