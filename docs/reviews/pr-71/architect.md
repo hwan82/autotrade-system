@@ -31,3 +31,38 @@
 
 ## 판정
 수정 필요(B3: ADR-004 2.2를 BOOK-V2 기준으로 갱신 — 제목·10번 예시 ID, 시세 공백 규칙 항목 추가, 2.4/2.5에 녹화 입력 `RecordedMarketDataSet`의 sequence·버전 규칙과 보고서 `data-gap` 줄 반영. B1: 검토자가 `./gradlew build`를 직접 돌리지 못해 확인 못 함 — 재검토 때 직접 실행해 확인한다)
+
+## 재검토 2026-10-13
+- 대상: PR #71 / 커밋 da2509dbb6d2b0694b9e8c26dfb4efb736ef2d9e / `git diff origin/main...HEAD` 전체(커밋 2개: 4eddd1c + 검토 반영 da2509d)
+- 점검표: B
+- 기록 위치: docs/reviews/README.md "재검토는 같은 파일 아래에 `## 재검토 <날짜>`로 덧붙인다"를 따라 이 파일 끝에 덧붙였다. 위의 1차 원문은 고치지 않았다. 커밋 da2509d에 들어간 1차 원문이 검토자가 쓴 내용과 같은지 `git diff HEAD -- docs/reviews/pr-71/architect.md`(0줄)로 확인했다.
+- 직접 실행한 것:
+  - `./gradlew build`: 처음에는 Maven Central 429로 의존성 해석이 실패했다. `--continue`로 되풀이해 의존성 캐시를 채운 뒤(11번째 시도 BUILD SUCCESSFUL), 캐시 결과에 기대지 않으려고 **`./gradlew build --rerun-tasks` → BUILD SUCCESSFUL in 1m 44s, 130 actionable tasks: 130 executed**를 돌렸다. 작업 트리는 HEAD da2509d와 같다(`git status` 깨끗함).
+  - 테스트 결과 XML 집계(실패/오류/건너뜀): autotrade-sim 126개 0/0/0(소스 `@Test` 126개와 같음), autotrade-architecture-test 31개 0/0/0, autotrade-app-lab 131개 0/0/0, autotrade-marketdata 97개 0/0/0. `verifyPureDependencies`(domain·risk·sim 등)와 프로세스 `verifyProcessIsolation`(collector·engine·experiment·gateway·watchdog)이 실행됐다.
+  - 별도로 javac + JUnit 콘솔로 sim 테스트를 다시 돌렸다: 126/126 성공.
+
+### 검토 반영 확인
+- **B3(1차 실패) → 해결.** ADR-004 2.2 제목이 `BOOK-V2`로 바뀌었고, BOOK-V1 대비 차이 문단, 10번 예시 `BOOK-V2;latency=PT0.5S`, 11번 시세 공백 규칙이 들어갔다. 2.4에는 `MarketDataSet` 구현 목록, 녹화 입력 규칙(sequence = 데이터셋 위치, `origin()`, 끼워 넣은 공백, 버전 형식, 녹화 중 거부), `SimulationReport.dataGaps()`와 `data-gap` 줄이 있다. 코드 동작과 대조했고 일치한다(VirtualExchange.java:88·135·226·237·284, RecordedMarketDataSet.java).
+- **R1 → 해결.** 같은 firstSeq 경계를 `while`로 모두 소비한다. 공백 시작은 마지막 경계 바로 앞 구간 끝으로 잡는다(RecordedMarketDataSet.java 145~156행 부근). 녹화기 `DayWriter`는 재기동마다 `closeOpenSegments`로 빈 끝을 마지막 수신으로 채우고, `lastAlive`는 마지막 구간 끝을 본다(DayWriter.java 106·138~151행). 비정상 종료로 구간 끝이 비어 있어도 어댑터는 마지막 수신 시각으로 떨어지므로 결과가 같다. 테스트 `RecordedMarketDataSetTest.줄_없이_끝난_구간이_낀_이전_녹화는_공백을_한_번만_넣고_그_구간_끝부터_잡는다`가 이를 확인한다: 경계 [14, 14], 공백 2줄, 시작 = 빈 구간 끝(직전 수신 + 10초), 전체 16건.
+- **R3 → 부분 해결(충분).** 위 테스트가 `lastAlive`의 "구간 끝이 직전 줄보다 늦은" 분기를 지난다. 비정상 종료(endedAt 빈 값) 분기는 별도 테스트가 없다. 다만 그 분기는 직전 줄 수신 시각을 그대로 쓰는 기본 경로이고, 기존 `공백_표시_없는_이전_녹화는_…`이 같은 결과를 내므로 머지 조건으로 요구하지 않는다.
+- **R4 → 해결(동작 변경).** `books.remove`를 없애고 `staleBooks`로 표시만 한다. 공백 뒤에는 시장가 매수 예약 기준(`referenceBuyPrice`, 284행)에서만 스냅샷을 빼고, 평가(`markPrice`, 226행)는 공백 전 최우선 매수 호가를 계속 쓴다. 새 스냅샷이 오면 `staleBooks`에서 지운다(135행). 체결 경로는 들어오는 스냅샷과 `booksSeen`만 보므로 이 변경의 영향을 받지 않는다(matchBook, VirtualExchange.java:396 부근). `VirtualExchangeTest.시세_공백_뒤에는_…`에 평가 70000 확인이 추가됐다. 골든 2종은 그대로 일치한다. ADR-004 11번과 D-068 결정 2가 이 동작으로 고쳐졌다.
+- **R2·R5 → 후속으로 기록.** D-068 "위험과 한계"에 입력 품질(`complete`·`truncated`)이 보고서에 없다는 점, 녹화 중 판정의 한계, 전략의 공백 미인지가 후속 과제로 적혔다. 실험 명령에 녹화 입력을 붙이는 작업에서 처리하면 된다.
+- R6(3단계 완료 기준 해석)은 독립 QA 판정 몫으로 남는다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 `./gradlew build --rerun-tasks` BUILD SUCCESSFUL(130/130 작업 실행), 테스트 XML 실패·오류·건너뜀 0 |
+| B2 | 통과 | `autotrade-architecture-test` 31개 통과(ArchitectureTest, ModuleOwnershipTest 포함), `autotrade-sim:verifyPureDependencies` 통과. 새 패키지 `com.autotrade.sim.recording`은 sim 소유(ModuleOwnershipTest.java:110). 빌드 파일 변경 없음 |
+| B3 | 통과 | ADR-004 2.2(제목, 10번, 11번)·2.4(녹화 입력, dataGaps, data-gap 줄) 갱신, D-068·결정 로그 README가 동작과 일치 |
+| B4 | 통과 | 새 코드에 시계·난수 없음. `staleBooks`(HashSet)는 포함 여부만 보고 순회하지 않음. 공백 순서는 TreeSet. `krx-golden.report`는 execution-model 줄만 바뀜. 녹화 형식 골든 바이트 일치 테스트(`SimulationExperimentRunnerTest.녹화_형식으로_다시_돌려도_같은_골든과_일치한다`) 통과 |
+| B5 | 해당 없음 | 새 금액 계산 없음(기존 BigDecimal·Money 경로 그대로) |
+| B6 | 통과 | 새 테스트 11개(어댑터 6, 가상 거래소 3, 실행기 2), 기존 테스트 변경은 기대 ID `BOOK-V2` 한 줄. 건너뛰거나 지운 테스트 없음(sim XML skipped 0) |
+| B7 | 해당 없음 | 바뀐 운영 코드는 autotrade-sim뿐. Guard, 실전 OrderGateway, RiskChain, 블랙리스트, 상태머신, 장애 대응, broker, 보호 테스트는 변경 없음(`git diff origin/main...HEAD --stat`) |
+| B8 | 통과 | diff에 키·토큰·계좌번호 없음(grep). 테스트 소스 이름은 자리표시자 |
+
+### 점검표 밖(재검토)
+- 남은 권고: R3의 비정상 종료 분기 테스트, R2(입력 품질 보고)는 실험 명령에 녹화 입력을 붙일 때 같이. 머지 조건 아님.
+- 참고: 검토 원문 파일이 검토 반영 커밋(da2509d)에 함께 들어갔다. 내용은 바뀌지 않았다(위 확인). 다음부터는 검토자가 쓴 원문 커밋을 반영 커밋과 나누면 이력에서 구분하기 쉽다.
+
+### 판정
+승인
