@@ -328,7 +328,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             Instant start = events.isEmpty() ? spec.from().atStartOfDay(rules.zone()).toInstant()
                     : events.get(0).receivedAt();
             ReplayClock clock = new ReplayClock(start, rules.zone());
-            VirtualExchange exchange = new VirtualExchange(accountId, rules, cost, execution, account, clock);
+            VirtualExchange exchange = new VirtualExchange(accountId, rules, cost, execution, account, clock,
+                    data.exchangeTimed());
             Strategy strategy = strategies.create(combination.profile(), runSeed);
             SimOrderKeys keys = new SimOrderKeys();
             LocalDate day = null;

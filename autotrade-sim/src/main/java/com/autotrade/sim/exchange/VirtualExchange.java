@@ -70,7 +70,10 @@ import java.util.Set;
  *       안에서 체결한다(시장가는 무조건, 지정가는 체결가가 지정가 이내일 때, 슬리피지 0). 시가 단일가에서 남은 수량은 접속 매매
  *       주문으로 이어지고(지정가 앞선 잔량은 새로 잡음), 종가 단일가에서 남은 수량은 장 마감에 만료된다. {@code CLOSED}(장전·폐장 뒤
  *       시간외, 휴장일) 이벤트로는 단일가 체결 말고는 체결하지 않는다. 단일가 구간에 그 종목 시세 공백이 오면 참여 표시를 지운다
- *       (그 사이 단일가 체결을 놓쳤을 수 있어 다음 체결을 단일가로 보지 않는다).</li>
+ *       (그 사이 단일가 체결을 놓쳤을 수 있어 다음 체결을 단일가로 보지 않는다). 시가 단일가로 여는 시장
+ *       ({@link MarketRules#opensWithAuction}, KRX)은 단일가 접수 마감이 임의로 늦춰지므로, 개장 시각이 지나도 그 종목 그날 첫
+ *       체결 전까지의 이벤트는 시가 단일가 접수로 보고(호가로 체결하지 않음, 새 주문도 참여) 첫 체결을 시가 단일가 체결로 본다.
+ *       그 체결 직전까지 유효해진 주문은 모두 참여한다. 이벤트 시각이 합성인 데이터(일봉 경로)는 매매 단계를 보지 않는다.</li>
  *   <li>우리 주문이 시장에 준 영향(소진한 잔량)은 다음 스냅샷에 이어지지 않는다 `[가정]`: 실제 스냅샷이 시장 상태다.
  *       주문 규모가 호가 잔량보다 충분히 작다는 전제이며, 큰 주문의 성과는 과대평가될 수 있다.</li>
  * </ul>
@@ -85,6 +88,8 @@ public final class VirtualExchange implements OrderGateway {
     private final ExecutionSettings settings;
     private final VirtualAccount ledger;
     private final Clock clock;
+    /** 매매 단계를 보는가(D-069). 합성 시각 데이터(일봉 경로)는 false다. */
+    private final boolean phases;
 
     private final Map<IdempotencyKey, VirtualOrder> orders = new HashMap<>();
     /** 미체결 주문, 접수 순서. */
@@ -95,14 +100,28 @@ public final class VirtualExchange implements OrderGateway {
     private final Set<Symbol> booksSeen = new HashSet<>();
     /** 시세 공백 뒤 아직 새 스냅샷이 오지 않은 종목. 그 종목의 마지막 스냅샷은 평가에만 쓰고 체결·예약에는 쓰지 않는다. */
     private final Set<Symbol> staleBooks = new HashSet<>();
+    /** 종목별로 시가 단일가 체결(그날 첫 체결)이 지난 거래일. {@link MarketRules#opensWithAuction} 시장만 쓴다. */
+    private final Map<Symbol, LocalDate> opened = new HashMap<>();
     private final List<AppliedFill> newFills = new ArrayList<>();
     private long currentSeq = Long.MIN_VALUE;
     private Instant currentReceivedAt;
     private long orderCounter;
 
+    /** 이벤트 시각이 실제 거래소 시각인 데이터용(매매 단계를 본다). */
     public VirtualExchange(
             AccountId account, MarketRules rules, CostModel cost, ExecutionSettings settings, VirtualAccount ledger,
             Clock clock) {
+        this(account, rules, cost, settings, ledger, clock, true);
+    }
+
+    /**
+     * @param phases 매매 단계(단일가·장 밖)를 볼지. 이벤트 시각이 합성인 데이터({@code MarketDataSet#exchangeTimed}가
+     *     false)는 false로 두고, 그러면 모든 이벤트를 접속 매매로 체결한다(BOOK-V2와 같다)
+     */
+    public VirtualExchange(
+            AccountId account, MarketRules rules, CostModel cost, ExecutionSettings settings, VirtualAccount ledger,
+            Clock clock, boolean phases) {
+        this.phases = phases;
         this.account = Objects.requireNonNull(account, "account");
         this.rules = Objects.requireNonNull(rules, "rules");
         this.cost = Objects.requireNonNull(cost, "cost");
@@ -135,11 +154,14 @@ public final class VirtualExchange implements OrderGateway {
         currentSeq = event.sequence();
         currentReceivedAt = event.receivedAt();
         newFills.clear();
-        SessionPhase phase = rules.sessionPhase(event.exchangeTime());
+        SessionPhase phase = phase(event);
         if (event instanceof DataGap gap) {
             invalidate(gap.symbol());
         } else if (phase.isAuction()) {
             joinAuction(event, phase);
+        } else if (openingPrint) {
+            // 시가 단일가 체결 직전까지 유효해진 주문은 모두 단일가 접수 중에 들어온 주문이다
+            joinAuction(event, SessionPhase.OPENING_AUCTION);
         }
         if (event instanceof InstrumentStatusChanged s) {
             status.put(s.symbol(), s.status());
@@ -158,6 +180,36 @@ public final class VirtualExchange implements OrderGateway {
             lastTrade.put(tick.symbol(), tick.price());
         }
         return List.copyOf(newFills);
+    }
+
+    /** 이 이벤트로 판단한 {@link #phase}가 그 종목 시가 단일가 체결인가. */
+    private boolean openingPrint;
+
+    /**
+     * 이벤트의 매매 단계. 시가 단일가로 여는 시장은 개장 시각이 지났어도 그 종목 그날 첫 체결 전까지를 시가 단일가 접수로 보고,
+     * 첫 체결을 시가 단일가 체결({@link #openingPrint})로 본다. 그 사이 시세 공백이 오면 단일가 체결을 놓쳤을 수 있으므로 열린
+     * 것으로 본다(공백 뒤 새 스냅샷부터 접속 매매, D-068).
+     */
+    private SessionPhase phase(MarketEvent event) {
+        openingPrint = false;
+        if (!phases) {
+            return SessionPhase.CONTINUOUS;
+        }
+        SessionPhase phase = rules.sessionPhase(event.exchangeTime());
+        if (phase != SessionPhase.CONTINUOUS || !rules.opensWithAuction()) {
+            return phase;
+        }
+        LocalDate day = rules.tradingDate(event.exchangeTime());
+        if (day.equals(opened.get(event.symbol()))) {
+            return phase;
+        }
+        if (event instanceof TradeTick) {
+            openingPrint = true;
+        } else if (!(event instanceof DataGap)) {
+            return SessionPhase.OPENING_AUCTION;
+        }
+        opened.put(event.symbol(), day);
+        return phase;
     }
 
     @Override

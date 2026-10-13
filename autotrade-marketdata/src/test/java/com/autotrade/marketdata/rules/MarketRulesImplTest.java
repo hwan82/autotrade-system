@@ -61,6 +61,12 @@ class MarketRulesImplTest {
     }
 
     @Test
+    void KRX만_시가_단일가로_연다() {
+        assertThat(krx.opensWithAuction()).isTrue();
+        assertThat(us.opensWithAuction()).isFalse();
+    }
+
+    @Test
     void KRX_ETF는_5원_단위다() {
         assertThat(krx.tickSize(ETF, new BigDecimal("35000"))).isEqualByComparingTo("5");
         assertThat(krx.roundToTick(ETF, new BigDecimal("35003"), RoundingMode.DOWN)).isEqualByComparingTo("35000");

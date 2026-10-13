@@ -77,6 +77,8 @@ class RecordingExperimentTest {
         assertThat(results).contains("| EXP-T-REC-A01 | kr-bh-baseline@1 | 2 | ").contains("| 샤프 |");
         assertThat(first.report().runs()).hasSize(3);
         assertThat(first.report().result().runs()).allSatisfy(r -> assertThat(r.failureReason()).isEmpty());
+        // 실제 KRX 매매 단계로 돌아도 체결이 난다(단계 판정이 모두 장 밖으로 빠지는 회귀 방지, architect PR #74 R3)
+        assertThat(first.report().runs().get(0).fills()).isNotEmpty();
     }
 
     @Test

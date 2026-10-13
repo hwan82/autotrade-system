@@ -91,6 +91,16 @@ public final class KrxMarketRules implements MarketRules {
         return instant.isBefore(close.minus(CLOSING_AUCTION)) ? SessionPhase.CONTINUOUS : SessionPhase.CLOSING_AUCTION;
     }
 
+    /**
+     * 시가 단일가 체결로 열린다. 접수 마감은 개장 시각에서 최대 30초 안에서 임의로 늦춰진다(랜덤 엔드) `[가정]`: 2026-10-12
+     * 실녹화 첫 체결이 09:00:03~09:00:24에 흩어진 것과 맞지만(experiments/stage-2-replay/2026-10-12.md) 업무규정 시행세칙 원문은
+     * 대조하지 않았다. 그래서 개장 뒤 시각 기준으로 끊지 않고 종목별 첫 체결을 시가 단일가 체결로 본다.
+     */
+    @Override
+    public boolean opensWithAuction() {
+        return true;
+    }
+
     @Override
     public BigDecimal tickSize(Symbol symbol, BigDecimal price) {
         if (symbol.market() != Market.KRX) {

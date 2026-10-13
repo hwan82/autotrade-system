@@ -16,7 +16,8 @@ public record ExecutionSettings(Duration orderLatency) {
      * BOOK-V2(D-068): 시세 공백({@code DataGap})에서 그 종목 호가와 대기 지정가의 앞선 잔량을 버린다. 공백 없는 데이터의
      * 결과는 BOOK-V1과 같다(골든 테스트로 확인).
      * BOOK-V3(D-069): 매매 단계({@code MarketRules.sessionPhase})를 따른다. 접속 매매 이벤트로만 연속 체결하고, 단일가 접수 구간
-     * 주문은 구간이 끝난 뒤 첫 체결가로 일괄 체결하며, 장 밖 이벤트로는 체결하지 않는다. 단일가 구간이 없는 규칙(정규장 내내
+     * 주문은 구간이 끝난 뒤 첫 체결가로 일괄 체결하며(KRX 시가는 종목별 그날 첫 체결), 장 밖 이벤트로는 체결하지 않는다.
+     * 이벤트 시각이 합성인 데이터(일봉 경로)는 매매 단계를 보지 않는다. 단일가 구간이 없는 규칙(정규장 내내
      * 접속 매매)으로 돌린 결과는 BOOK-V2와 같다(골든 테스트로 확인).
      */
     public static final String RULES_VERSION = "BOOK-V3";
