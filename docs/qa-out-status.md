@@ -37,4 +37,4 @@
 | 2026-10-13 | docs/reviews/pr-63/qa.md 첫 판정 | PASS | 이전 처리: PR #63 머지 `a6f2602` |
 | 2026-10-13 | docs/reviews/pr-65/qa.md 첫 판정 | PASS | 이전 처리: PR #65 머지 `fda2ca1` |
 | 2026-10-13 | docs/reviews/gates/stage-3.md 첫 판정 | FAIL(수정 필요 C1) | D-069로 처리(BOOK-V3 단일가 체결, 녹화 실험 명령, 실녹화 실험 EXP-20261013-REC01). 재판정 요청은 실녹화 실험 증거 커밋 뒤 docs/qa/pending.md에 올림 |
-| 2026-10-13 | docs/reviews/gates/stage-3.md 재검토 2026-10-13 (main `2b6acd2` 기준) | PASS | D-070 3단계 완료 기록. 권고 R3·R4는 D-070 후속 |
+| 2026-10-13 | docs/reviews/gates/stage-3.md 재검토 2026-10-13 (main `2b6acd2` 기준) | PASS | D-070 3단계 완료 기록(PR #77). 권고 R3·R4는 D-070 후속 |
