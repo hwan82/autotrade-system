@@ -23,6 +23,7 @@ pm-lead, architect, data-engineer, sim-engine, strategy-researcher, risk-ops, ui
 - `/qa-feedback <QA폴더명>`: qa-out의 RPT·QST를 처리한다(QST는 `qa-inbox\ANS-번호_QA번호\`로 답, DEF는 수정·테스트·커밋 후 새 REL).
 - qa-inbox에는 새 폴더만 만들고 기존 REL·ANS는 고치지 않는다. qa-out은 읽기만 한다. QA 폴더의 baseline·.claude는 건드리지 않는다.
 - QA 회신은 확인할 주장으로 다루며, 실전 경로 수정이 필요한 결함은 자동 수정하지 않고 멈춘다.
+- 작업 시작 때 `git pull`로 main을 받은 뒤, `docs/reviews/gates/*.md`와 `docs/reviews/pr-*/qa.md` 중 `docs/qa-out-status.md`에 처리 기록이 없는 QA 판정(새 파일 또는 새 `## 재검토 <날짜>`)이 있으면 사용자에게 먼저 알린다. 처리는 `/qa-feedback reviews`로 한다.
 
 ## 빌드와 테스트
 - 전체 빌드(컴파일, 테스트, 순수 모듈 금지 의존 검사, ArchUnit): `./gradlew build`
