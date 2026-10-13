@@ -8,6 +8,8 @@ import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ExperimentStoppedException;
 import com.autotrade.sim.run.RunGate;
+import com.autotrade.sim.synthetic.SyntheticKrxRules;
+import com.autotrade.strategy.catalog.CatalogStrategyFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -188,40 +190,16 @@ class WalkForwardStudyTest {
     }
 
     @Test
-    void 사전_등록할_4단계_10조합은_시작_전_검증과_예열_300일을_통과한다() {
-        // docs/runbooks/stage-4-walkforward.md 4장 등록 파일(스냅샷 ID만 자리표시자)
-        WalkForwardPlan plan = WalkForwardPlan.parse("""
-                id: "EXP-20261013-WF01"
-                question: "q"
-                market: "KRX"
-                bars-snapshot: "krx-daily-placeholder"
-                financials-snapshot: "dart-financials-placeholder"
-                seed: "1"
-                seed-capital: "10000000"
-                parallelism: "4"
-                first-test-from: "2022-04-01"
-                train-years: "3"
-                test-years: "1"
-                windows: "4"
-                warmup-days: "300"
-                null-seeds: "400"
-                combinations:
-                  - "none x kr-ma-trend@1"
-                  - "kr-vol-surge-quiet@1 x kr-ma-trend@1"
-                  - "none x kr-donchian-swing@1"
-                  - "kr-vol-surge-quiet@1 x kr-donchian-swing@1"
-                  - "none x kr-short-reversal-swing@1"
-                  - "kr-vol-surge-quiet@1 x kr-short-reversal-swing@1"
-                  - "none x kr-ma-trend-position@1"
-                  - "kr-fin-quality-growth@1 x kr-ma-trend-position@1"
-                  - "none x kr-52w-high-position@1"
-                  - "kr-fin-quality-growth@1 x kr-52w-high-position@1"
-                controls:
-                  - "SWING kr-random-daily-swing@1"
-                  - "POSITION kr-random-daily-position@1"
-                """, "runbook");
-        var factory = new com.autotrade.strategy.catalog.CatalogStrategyFactory(
-                com.autotrade.sim.synthetic.SyntheticKrxRules.INSTANCE);
+    void 사전_등록할_4단계_10조합은_시작_전_검증과_예열_300일을_통과한다() throws IOException {
+        // 절차서 4장의 등록 파일 초안을 그대로 읽는다(자리표시자만 채움). 절차서가 바뀌면 이 테스트가 다시 검사한다
+        String runbook = Files.readString(Path.of("../docs/runbooks/stage-4-walkforward.md"), StandardCharsets.UTF_8);
+        int from = runbook.indexOf("```yaml\n") + "```yaml\n".length();
+        String yaml = runbook.substring(from, runbook.indexOf("```", from))
+                .replace("<등록일>", "20261013").replace("<일봉 스냅샷 ID>", "krx-daily-placeholder")
+                .replace("<재무 스냅샷 ID>", "dart-financials-placeholder").replace("<PC 코어 수 - 2>", "4");
+        assertThat(yaml).doesNotContain("<");
+        WalkForwardPlan plan = WalkForwardPlan.parse(yaml, "runbook");
+        var factory = new CatalogStrategyFactory(SyntheticKrxRules.INSTANCE);
         List<WalkForwardResult.Candidate> c = WalkForwardStudy.candidates(plan, Path.of(".."), factory);
         assertThat(plan.m()).isEqualTo(10);
         assertThat(c).hasSize(10).allSatisfy(x -> assertThat(x.low()).as(x.text() + " " + x.perturbNote()).isNotNull());
