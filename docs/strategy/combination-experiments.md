@@ -22,8 +22,8 @@
 | 스타일 | 후보 | 대조군 | 최대 보유일 |
 |---|---|---|---|
 | 단타 INTRADAY | `kr-orb-30` 외 5개 | `kr-random-control` | 당일 청산(`FLATTEN`) |
-| 스윙 SWING | `kr-ma-trend`(3/8일) | `kr-random-daily-swing` | 새 버전부터 `exit.max-hold-days` 2~20 필수(대조군 10) |
-| 중기 POSITION | `kr-ma-trend-position`(20/60일) | `kr-random-daily-position` | `exit.max-hold-days` 20~120 필수(둘 다 120) |
+| 스윙 SWING | `kr-ma-trend`(3/8일), `kr-donchian-swing`(20일 채널 돌파), `kr-short-reversal-swing`(100일 추세 위 3일 연속 하락 반전) | `kr-random-daily-swing` | 새 버전부터 `exit.max-hold-days` 2~20 필수(대조군 10) |
+| 중기 POSITION | `kr-ma-trend-position`(20/60일), `kr-52w-high-position`(250일 고가 95% 근접) | `kr-random-daily-position` | `exit.max-hold-days` 20~120 필수(둘 다 120) |
 
 - 최대 보유일: 진입한 거래일이 0일째이고, 보유 거래일 수가 상한에 이른 날 첫 이벤트에서 시간 청산(`ExitReason.TIME_EXIT`, 주문 의도 `EXIT`). 손절이 먼저다.
 - 스윙 검사의 적용 방식(STR-18 "strategy-researcher가 결정"): 카탈로그는 스윙 최대 보유일을 선택 키로 두어 `kr-ma-trend@1`·`kr-bh-baseline@1` 해시와 동작을 바꾸지 않고, 저장소 검사(`RepositoryProfilesTest`)가 이 두 버전 밖의 스윙 프로필에 키를 요구한다.

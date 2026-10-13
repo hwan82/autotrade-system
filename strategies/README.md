@@ -66,6 +66,9 @@ parameters:
 | `book-imbalance` | INTRADAY | 상위 5단계 매수 잔량 ≥ 매도 잔량 × r가 K번 연속 | `signal.ratio`, `signal.snapshots` |
 | `pullback` | INTRADAY | 시가 대비 x% 오른 날, 고가 대비 y% 밀린 뒤 눌림 저점에서 z% 반등 | `signal.trend-pct`, `signal.pullback-pct`, `signal.bounce-pct` |
 | `ma-trend` | SWING, POSITION | 전일까지 종가의 단기 평균 > 장기 평균이면 진입, 반대면 로직 청산(하루 첫 체결에 한 번 판단) | `signal.fast-days`, `signal.slow-days` |
+| `breakout-days` | SWING, POSITION | 전일 종가가 그 전 N거래일 최고 종가를 넘으면(같으면 아님) 진입. 로직 청산 없음(공통 청산만) | `signal.lookback-days`(2~250) |
+| `short-reversal` | SWING | 전일 종가가 직전 M일 평균 위이고 직전 K거래일 연속 종가 하락이면 진입, 전일 종가가 직전 X일 평균을 넘으면 로직 청산(둘이 같은 날 참이면 진입 안 함) | `signal.trend-days`(M, 5~250), `signal.down-days`(K, 1~10), `signal.exit-days`(X, 2~60) |
+| `near-high` | POSITION | 전일 종가 ≥ 직전 L거래일 최고 종가 × 진입 비율이면 진입, 전일 종가 < 최고 종가 × 청산 비율이면 로직 청산 | `signal.lookback-days`(L, 2~500), `signal.entry-ratio`(0.5~1.0), `signal.exit-ratio`(0.1~0.99, 진입 비율보다 작게) |
 | `random` | INTRADAY | 체결마다 p/1000 확률(대조군, Run 시드 사용) | `signal.per-mille` |
 | `random-daily` | SWING, POSITION | 종목·거래일 첫 체결마다 한 번 p/1000 확률로 그날 진입(일봉 대조군, Run 시드 사용) | `signal.per-mille` |
 
@@ -80,6 +83,9 @@ parameters:
 | `kr-orb-30`, `kr-vwap-reclaim`, `kr-pdh-breakout`, `kr-volume-surge`, `kr-book-imbalance`, `kr-pullback` | 장중 후보 |
 | `kr-ma-trend` | 스윙 후보 |
 | `kr-ma-trend-position` | 중기 후보(20/60일, 최대 120거래일) |
+| `kr-donchian-swing` | 스윙 후보(20일 채널 돌파, 최대 10거래일, 4단계 계획 5장) |
+| `kr-short-reversal-swing` | 스윙 후보(100일 평균 위 3일 연속 하락 반전, 5일 평균 회복 또는 최대 5거래일) |
+| `kr-52w-high-position` | 중기 후보(250일 최고 종가의 95% 이상 진입, 80% 아래 청산, 최대 120거래일) |
 | `kr-random-control` | 단타 대조군(무작위 진입) |
 | `kr-random-daily-swing`, `kr-random-daily-position` | 스윙·중기 대조군(일봉 무작위 진입, [조합 실험 절차](../docs/strategy/combination-experiments.md)) |
 
