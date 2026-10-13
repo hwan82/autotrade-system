@@ -203,7 +203,7 @@ public final class StrategyStudy {
     }
 
     /** 핵심 파라미터 배율 변형. */
-    static final class Perturbation {
+    public static final class Perturbation {
 
         private Perturbation() {
         }
@@ -213,7 +213,7 @@ public final class StrategyStudy {
          * 같으면 1만큼 움직인다. 소수점이 있는 값은 그대로 곱한다(그래서 비율 파라미터는 {@code 3.0}처럼 소수점을 붙여 쓴다).
          * 새 ID는 {@code <원래 ID>-<suffix>}이고 버전은 그대로다(다른 내용이 같은 ID@버전을 갖지 않게).
          */
-        static StrategyProfile scale(StrategyProfile p, String key, BigDecimal factor, String suffix) {
+        public static StrategyProfile scale(StrategyProfile p, String key, BigDecimal factor, String suffix) {
             String raw = p.parameters().get(key);
             if (raw == null) {
                 throw new IllegalArgumentException(p.id() + ": study.key-param이 가리키는 키가 없습니다: " + key);

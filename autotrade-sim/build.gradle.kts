@@ -27,3 +27,8 @@ tasks.register("runCombinationExperiment") {
     description = "옮김(D-063): :autotrade-app-experiment:runCombinationExperiment"
     dependsOn(":autotrade-app-experiment:runCombinationExperiment")
 }
+tasks.register("runWalkForwardStudy") {
+    group = "application"
+    description = "옮김(D-063): :autotrade-app-experiment:runWalkForwardStudy"
+    dependsOn(":autotrade-app-experiment:runWalkForwardStudy")
+}

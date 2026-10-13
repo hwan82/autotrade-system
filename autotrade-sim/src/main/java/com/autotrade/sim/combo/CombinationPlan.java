@@ -89,7 +89,7 @@ public record CombinationPlan(
             Objects.requireNonNull(id, "id");
         }
 
-        static Ref parse(String text) {
+        public static Ref parse(String text) {
             Matcher m = REF.matcher(text);
             if (!m.matches()) {
                 throw new IllegalArgumentException("프로필은 id@버전 형식이어야 합니다: " + text);

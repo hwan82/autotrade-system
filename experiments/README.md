@@ -26,7 +26,13 @@
 ./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=<실험ID> -PverifyDeterminism
 ```
 
-두 명령 모두 장 시간 보호 구간과 감시의 정지 요청 파일이 있으면 결과 없이 종료 코드 4로 멈춘다. 실전 엔진을 끈 날에만 `-PallowDuringSession`을 붙인다([D-063](../docs/decisions/D-063-experiment-command-stop-gate.md)).
+일봉 워크포워드 판정(학습·검증 구간을 굴려 후보마다 통과·탈락·보류, D-071)은 등록 파일 `study.yaml`을 먼저 쓰고 커밋한 뒤 돌린다. 실행기는 `inputs.yaml`, `results.md`, `runs.tsv`, `windows.tsv`, `detail.txt`를 쓴다. 절차는 [조합 실험 절차](../docs/strategy/combination-experiments.md) 6장.
+
+```bash
+./gradlew :autotrade-app-experiment:runWalkForwardStudy -Pexperiment=<실험ID> -PverifyDeterminism
+```
+
+세 명령 모두 장 시간 보호 구간과 감시의 정지 요청 파일이 있으면 결과 없이 종료 코드 4로 멈춘다. 실전 엔진을 끈 날에만 `-PallowDuringSession`을 붙인다([D-063](../docs/decisions/D-063-experiment-command-stop-gate.md)).
 
 합성 시세 실험(`runStrategyStudy`)의 설계는 `StudyMain`의 상수로 고정한다. 결과를 본 뒤 설계를 바꿔 같은 데이터로 다시 평가하지 않는다. 바꾸려면 새 실험 ID를 쓴다.
 

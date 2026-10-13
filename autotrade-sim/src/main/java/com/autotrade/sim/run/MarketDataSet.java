@@ -2,6 +2,7 @@ package com.autotrade.sim.run;
 
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -31,5 +32,22 @@ public interface MarketDataSet {
      */
     default boolean exchangeTimed() {
         return true;
+    }
+
+    /**
+     * 이벤트가 있는 거래소 현지 거래일(오름차순, 4단계 워크포워드 예열 계약). 알려 주면 실행기가 이벤트를 훑지 않고 실험 기간과
+     * 예열 구간을 자른다. 날짜는 {@code MarketRules.tradingDate(event.exchangeTime())}와 같아야 한다. 모르면 빈 목록이고
+     * 실행기가 이벤트를 훑어 찾는다.
+     */
+    default List<LocalDate> tradingDays() {
+        return List.of();
+    }
+
+    /**
+     * {@link #tradingDays()}의 {@code dayIndex}번째 거래일 첫 이벤트 위치. {@code dayIndex == tradingDays().size()}면
+     * {@code events().size()}. {@link #tradingDays()}를 주는 데이터셋만 구현한다.
+     */
+    default int firstEventIndex(int dayIndex) {
+        throw new UnsupportedOperationException("거래일 색인을 제공하지 않는 데이터셋입니다");
     }
 }

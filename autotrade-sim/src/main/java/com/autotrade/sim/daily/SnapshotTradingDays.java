@@ -33,13 +33,16 @@ public final class SnapshotTradingDays {
 
     /**
      * @param days 선정 계산에 넘길 거래일
+     * @param dates 거래일 목록(오름차순). 스냅샷 마지막 거래일 뒤 캘린더 거래일이 이어져 있을 수 있다
      * @param digest 거래일 목록과 캘린더 출처 요약의 SHA-256. 선정 결과 {@code inputs.calendar_digest}에 들어간다
      */
-    public record Derived(TradingDays days, String digest, LocalDate first, LocalDate last, int count) {
+    public record Derived(TradingDays days, String digest, LocalDate first, LocalDate last, int count,
+            List<LocalDate> dates) {
 
         public Derived {
             Objects.requireNonNull(days, "days");
             Objects.requireNonNull(digest, "digest");
+            dates = List.copyOf(dates);
         }
     }
 
@@ -100,7 +103,8 @@ public final class SnapshotTradingDays {
                 .append(first).append('~').append(coverageTo).append('\n');
         all.forEach(d -> sb.append(d).append('\n'));
         sb.append("calendar ").append(SnapshotSelectionData.calendarDigest(calendar)).append('\n');
-        return new Derived(new TradingDays(all, first, coverageTo), sha256(sb.toString()), first, coverageTo, all.size());
+        return new Derived(new TradingDays(all, first, coverageTo), sha256(sb.toString()), first, coverageTo, all.size(),
+                List.copyOf(all));
     }
 
     private static String head(List<LocalDate> dates) {

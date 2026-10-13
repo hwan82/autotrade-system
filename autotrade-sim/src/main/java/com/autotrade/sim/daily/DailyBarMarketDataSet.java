@@ -209,8 +209,40 @@ public final class DailyBarMarketDataSet implements MarketDataSet {
     }
 
     /** 이벤트가 있는 거래일(오름차순). */
+    @Override
     public List<LocalDate> tradingDays() {
         return days;
+    }
+
+    @Override
+    public int firstEventIndex(int dayIndex) {
+        Objects.checkIndex(dayIndex, days.size() + 1);
+        return dayEventStart[dayIndex];
+    }
+
+    /**
+     * 예열을 포함한 데이터셋 시작일: {@code from} 앞 {@code warmupDays}번째 거래일. 예열은 시세만 전략에 주는 구간이라
+     * 거래 구간의 비용 표 검사에 들지 않는다. 미래 정보는 쓰지 않는다(전부 {@code from} 이전 날짜).
+     *
+     * @param allTradingDays 스냅샷 거래일(오름차순)
+     * @throws IllegalArgumentException {@code from} 앞에 거래일이 {@code warmupDays}개 없을 때
+     */
+    public static LocalDate warmupStart(List<LocalDate> allTradingDays, LocalDate from, int warmupDays) {
+        if (warmupDays < 0) {
+            throw new IllegalArgumentException("예열 일수는 0 이상이어야 합니다: " + warmupDays);
+        }
+        int firstOnOrAfter = 0;
+        while (firstOnOrAfter < allTradingDays.size() && allTradingDays.get(firstOnOrAfter).isBefore(from)) {
+            firstOnOrAfter++;
+        }
+        if (warmupDays == 0) {
+            return from;
+        }
+        if (firstOnOrAfter < warmupDays) {
+            throw new IllegalArgumentException("예열 거래일이 모자랍니다: " + from + " 앞에 거래일이 " + firstOnOrAfter
+                    + "일뿐인데 " + warmupDays + "일이 필요합니다");
+        }
+        return allTradingDays.get(firstOnOrAfter - warmupDays);
     }
 
     /** 범위 안에 그날 상장돼 있던 종목(코드 순). 일봉이 없는 종목도 있다. */

@@ -127,7 +127,7 @@ public final class ScreeningCriteria {
     }
 
     /** 경험적 분위수(가장 가까운 순위, 1-기반 ceil(q × n)). */
-    static BigDecimal quantile(List<BigDecimal> sorted, BigDecimal q) {
+    public static BigDecimal quantile(List<BigDecimal> sorted, BigDecimal q) {
         if (sorted.isEmpty()) {
             return null;
         }
@@ -145,7 +145,7 @@ public final class ScreeningCriteria {
                 "초과 " + pct(excess));
     }
 
-    private static Check profitFactor(String code, String title, RunMetrics m, BigDecimal min) {
+    public static Check profitFactor(String code, String title, RunMetrics m, BigDecimal min) {
         if (m.roundTripCount() == 0) {
             return new Check(code, title, Check.Outcome.NOT_AVAILABLE, "왕복 0건");
         }
@@ -158,7 +158,7 @@ public final class ScreeningCriteria {
                 num(m.profitFactor()));
     }
 
-    private static Check threshold(
+    public static Check threshold(
             String code, String title, BigDecimal value, BigDecimal limit, boolean atLeast, String shown) {
         if (value == null) {
             return new Check(code, title, Check.Outcome.NOT_AVAILABLE, "계산 불가");
@@ -266,23 +266,23 @@ public final class ScreeningCriteria {
         return s == null || !s.completed() ? "실패" : pct(s.metrics().totalReturn());
     }
 
-    static String pct(BigDecimal v) {
+    public static String pct(BigDecimal v) {
         return v == null ? "-" : v.movePointRight(2).setScale(2, RoundingMode.HALF_EVEN).toPlainString() + "%";
     }
 
-    static String bp(BigDecimal v) {
+    public static String bp(BigDecimal v) {
         return v == null ? "-" : v.movePointRight(4).setScale(1, RoundingMode.HALF_EVEN).toPlainString() + "bp";
     }
 
-    static String num(BigDecimal v) {
+    public static String num(BigDecimal v) {
         return v == null ? "-" : v.setScale(2, RoundingMode.HALF_EVEN).toPlainString();
     }
 
-    static String seconds(java.time.Duration d) {
+    public static String seconds(java.time.Duration d) {
         return BigDecimal.valueOf(d.toMillis()).movePointLeft(3).stripTrailingZeros().toPlainString();
     }
 
-    static String won(BigDecimal v) {
+    public static String won(BigDecimal v) {
         return v.setScale(0, RoundingMode.HALF_EVEN).toPlainString();
     }
 }

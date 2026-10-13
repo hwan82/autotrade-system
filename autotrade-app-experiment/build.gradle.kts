@@ -109,3 +109,29 @@ val runStrategyStudy by tasks.registering(JavaExec::class) {
         }
     })
 }
+
+// 일봉 워크포워드 판정(4단계 계획 3장, D-071): ./gradlew :autotrade-app-experiment:runWalkForwardStudy -Pexperiment=<실험ID>
+//     [-PsnapshotsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-Pheap=8g]
+// experiments/<실험ID>/study.yaml(등록 파일)을 읽어 수집 스냅샷 위에서 구간별 학습·검증, 대조군, ±20%, 슬리피지 2배를 돌려 판정표를
+// 같은 폴더에 쓴다. 대조군 시드가 많아 오래 걸린다(결정론 확인은 전체를 한 번 더 돈다).
+val runWalkForwardStudy by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "일봉 워크포워드 판정 실험을 수집 스냅샷 위에서 돌려 experiments/<실험ID>/에 결과를 쓴다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "8g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
+    val verify = providers.gradleProperty("verifyDeterminism")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            add("walkforward")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
+            if (verify.isPresent) add("--verify-determinism")
+        }
+    })
+}

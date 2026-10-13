@@ -70,7 +70,8 @@ public final class ReportWriter {
             for (RoundTrip t : run.roundTrips()) {
                 sb.append("  round-trip ").append(t.lotId()).append(' ').append(t.symbol())
                         .append(' ').append(t.entryDate()).append("..").append(t.exitDate())
-                        .append(" pnl=").append(t.pnl()).append('\n');
+                        .append(" pnl=").append(t.pnl())
+                        .append(run.windowEndLots().contains(t.lotId()) ? " window-end" : "").append('\n');
             }
             for (EquityPoint p : run.equityCurve()) {
                 sb.append("  equity ").append(p.date()).append(' ').append(p.equity())

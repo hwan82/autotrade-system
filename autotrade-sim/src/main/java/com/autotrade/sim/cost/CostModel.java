@@ -93,6 +93,14 @@ public final class CostModel {
         return levies;
     }
 
+    /**
+     * 슬리피지율만 바꾼 비용 모델(비용 스트레스 실험, 4단계 C9d). 표 내용이 달라지므로 {@link #id()}도 다르다.
+     * 세그먼트 판별은 그대로 쓴다.
+     */
+    public CostModel withSlippage(BigDecimal newSlippageRate) {
+        return new CostModel(profileId, market, levies, newSlippageRate, segmentOf);
+    }
+
     /** 체결 건 하나의 비용. */
     public FeeBreakdown fees(Side side, Symbol symbol, LocalDate tradeDate, BigDecimal price, long quantity) {
         Objects.requireNonNull(side, "side");
