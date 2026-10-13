@@ -22,8 +22,8 @@
 | 스타일 | 후보 | 대조군 | 최대 보유일 |
 |---|---|---|---|
 | 단타 INTRADAY | `kr-orb-30` 외 5개 | `kr-random-control` | 당일 청산(`FLATTEN`) |
-| 스윙 SWING | `kr-ma-trend`(3/8일) | `kr-random-daily-swing` | 새 버전부터 `exit.max-hold-days` 2~20 필수(대조군 10) |
-| 중기 POSITION | `kr-ma-trend-position`(20/60일) | `kr-random-daily-position` | `exit.max-hold-days` 20~120 필수(둘 다 120) |
+| 스윙 SWING | `kr-ma-trend`(3/8일), `kr-donchian-swing`(20일 채널 돌파), `kr-short-reversal-swing`(100일 추세 위 3일 연속 하락 반전) | `kr-random-daily-swing` | 새 버전부터 `exit.max-hold-days` 2~20 필수(대조군 10) |
+| 중기 POSITION | `kr-ma-trend-position`(20/60일), `kr-52w-high-position`(250일 고가 95% 근접) | `kr-random-daily-position` | `exit.max-hold-days` 20~120 필수(둘 다 120) |
 
 - 최대 보유일: 진입한 거래일이 0일째이고, 보유 거래일 수가 상한에 이른 날 첫 이벤트에서 시간 청산(`ExitReason.TIME_EXIT`, 주문 의도 `EXIT`). 손절이 먼저다.
 - 스윙 검사의 적용 방식(STR-18 "strategy-researcher가 결정"): 카탈로그는 스윙 최대 보유일을 선택 키로 두어 `kr-ma-trend@1`·`kr-bh-baseline@1` 해시와 동작을 바꾸지 않고, 저장소 검사(`RepositoryProfilesTest`)가 이 두 버전 밖의 스윙 프로필에 키를 요구한다.
@@ -77,3 +77,60 @@ combinations:
    (스냅샷 폴더가 기본 위치가 아니면 `-PsnapshotsDir=...`, 힙은 `-Pheap=8g`). 실전 엔진과 같은 PC라 국내·미국 장 시간 보호 구간(정규장 60분 전~폐장 30분 뒤)과 감시의 정지 요청 파일(`<설정 폴더>/experiment-state/stop-request`)이 있으면 시작하지 않고, 실행 중이면 거래일 경계에서 멈춰 결과 파일 없이 종료 코드 4로 끝난다([D-063](../decisions/D-063-experiment-command-stop-gate.md)). 실전 엔진을 끈 날에만 `-PallowDuringSession`(값 없음 또는 `true`, 그 밖의 값은 입력 오류)으로 장 시간 보호를 푼다(정지 요청 파일은 풀리지 않는다). `gradle.properties`에 넣어 두지 않는다. 시작 출력에 확인 위치와 해제 여부가 나온다. 결과는 같은 폴더의 `inputs.yaml`, `results.md`, `runs.tsv`, `selection-days.tsv`, `detail.txt`와 실험실 화면용 `result-bundle.jsonl.gz`(커밋하지 않음, D-062).
 4. 실험실(`./gradlew :autotrade-app-lab:bootRun`)의 "실험" 화면 아래 "실험 폴더"에서 그 실험을 "불러오기"하면 계좌 비교, 선정 × 매매지표 교차표, 날짜별 선정 기록, 선정 결과(평가 행)를 화면에서 본다. 실험실은 묶음을 커밋된 `detail.txt`와 대조한 뒤 올리고 실험을 다시 돌리지 않는다. 실험실을 다시 띄우면 다시 불러온다.
 5. 결과 해석·보고(`report.md`)는 1장 5·7번과 [experiments/README.md](../../experiments/README.md) 커밋 규칙을 따른다.
+
+## 6. 워크포워드 판정 실행 (D-071, D-066)
+
+조합 실험(5장)이 "한 기간에 후보를 줄 세우는" 단계라면, 이 장은 **학습·검증 구간을 굴려 후보 하나하나를 통과·탈락·보류로 가르는** 단계다. 계획은 [4단계 계획](stage-4-plan.md) 3·4장, 실행기 계약은 [ADR-009](../adr/ADR-009-daily-walkforward-runner.md).
+
+1. 일봉(재무 선정이 있으면 재무) 스냅샷을 만든다. 스냅샷에 `listed_shares.csv`가 있어야 한다(시가총액 가중 지수에 필요). 구간 전체와 예열 일수가 스냅샷 범위 안이어야 한다.
+2. `experiments/<실험ID>/study.yaml`을 쓰고 **커밋한다**. 결과를 본 뒤 고치지 않고 바꾸려면 새 실험 ID를 쓴다. 모르는 키, 같은 키 두 번, 같은 조합·같은 스타일 대조군 두 번은 읽기 단계에서 거절한다. 실험 ID는 30자 이하(구간·시드별 하위 ID 때문).
+
+```yaml
+id: "EXP-20261020-WF01"
+question: "스윙 후보가 시총 가중 지수와 같은 선정의 무작위 대조군을 비용 차감 후 넘는가"
+market: "KRX"
+bars-snapshot: "krx-daily-2026-10-08-1a2b3c4d"
+financials-snapshot: "dart-financials-2026-10-08-5e6f7a8b"   # 재무 선정이 없으면 생략
+seed: "20261020"
+seed-capital: "10000000"
+parallelism: "4"
+first-test-from: "2022-04-01"   # 첫 검증 구간 시작. 학습은 train-years년 전부터
+train-years: "3"
+test-years: "1"
+windows: "4"                    # 3 이상(D-066)
+warmup-days: "300"              # 구간 앞에 시세만 주는 거래일 수(후보·±20% 변형의 예열 필요량 이상, 모자라면 시작 거부)
+null-seeds: "400"               # 조합마다 무작위 대조군 시드 수. C10은 N + 1 ≥ 20m 필요(m = 후보 수)
+combinations:                   # 후보(선정 x 전략). 개수가 본페로니 m
+  - "none x kr-ma-trend@1"
+  - "kr-vol-surge-quiet@1 x kr-ma-trend@1"
+controls:                       # 스타일별 무작위 대조군(후보의 선정과 같은 선정으로 묶어 돌린다)
+  - "SWING kr-random-daily-swing@1"
+  - "POSITION kr-random-daily-position@1"
+blacklist:                      # 선택
+  - "005930"
+```
+
+3. `./gradlew :autotrade-app-experiment:runWalkForwardStudy -Pexperiment=EXP-20261020-WF01 -PverifyDeterminism`
+   (`-PsnapshotsDir=...`, `-Pheap=8g`, `-PallowDuringSession`은 5장 3번과 같다. 장 시간 보호와 감시의 정지 요청 파일은 D-063 그대로이며 구간 경계에서 멈춰 결과 파일 없이 종료 코드 4로 끝난다. 종료 코드: 0 완료, 1 입력 오류, 2 Run 실패(대조군 포함)나 결정론 불일치, 4 정지.) 계산량은 대략 `구간 수 x (조합 수 x (1 + 변형 2 + 2) + 대조군 시드 수 x 스타일 쌍 수)`개 Run이다. 대조군 400 x 조합 10 x 4구간 규모면 Run이 수천 개라 장 시간을 피해 밤사이에 돌리고, 정확한 개수와 시간 추정(실측 아님)은 `results.md`의 "계산량 추정"에 나온다.
+4. 결과는 같은 폴더에 쓴다(타임스탬프 없음, 같은 입력이면 바이트까지 같다).
+
+| 파일 | 내용 |
+|---|---|
+| `results.md` | 판정표(C1, C1w, C2..C10, C9d), 조합별 근거, 검증 전체 리더보드, 구간별 총수익률과 지수 초과, 대조군 분포(0건 왕복 시드 제외 수 포함), 구간 끝 정리(WINDOW_END) 왕복, 진입 한도 영향(신호·진입·한도로 막힌 수, 한도에 걸린 날 비율, 판정에 쓰지 않음), 계산량 추정, 벤치마크 방식과 한계 |
+| `runs.tsv` | Run별 지표(학습·변형·검증·스트레스·대조군)와 진입 깔때기 열(`signals`, `entries`, `limit_blocked`, `size_blocked`, `limit_days`) |
+| `windows.tsv` | 구간별 학습·검증 기간, 예열 시작일, 거래일 수, 첫·마지막 검증일, 지수 수익률(시총 가중·동일가중 참고 열) |
+| `inputs.yaml` | 입력 스냅샷 ID·해시(수집기 `--keep-snapshots`가 지우지 않음), 구간별 데이터 버전, 후보 조합·변형 해시(선정+전략 프로필), 비용 모델·비용 표 해시, 체결 모델, 블랙리스트 지문, 시드, 코드 커밋, 결정론 확인 결과 |
+| `detail.txt` | 검증 구간 기본 비용 체결 원장 |
+
+5. **판정 규칙** (수치는 `ScreeningThresholds` 기본값, D-027·D-066, 모두 비용 차감 후)
+   - C1 이은 검증 수익률 > 시총 가중 지수. C1w 구간의 3/4 이상(올림, 3구간이면 모두)에서 지수 초과. 동일가중 지수는 참고 열이고 판정에 쓰지 않는다.
+   - C2 PF ≥ 1.3, C3 MDD ≤ 20%, C4 샤프 ≥ 1.0 (이은 검증 곡선).
+   - C5 검증 왕복 합 ≥ 30. **미달이면 다른 항목과 무관하게 "보류"**(판정 불가, 탈락 아님).
+   - C6 모든 검증 구간 일수익률 평균 ÷ 모든 학습 구간 일수익률 평균 ≥ 0.6(학습 평균 ≤ 0이면 탈락). C7 전략 프로필의 `study.key-param` ±20% 변형의 학습 수익률(구간 평균)이 원래의 50% 이상이고 이은 PF ≥ 1.0. C8 가장 좋은 달을 빼도 수익. C9d 슬리피지 2배 검증도 수익, PF ≥ 1.0.
+   - C10 같은 선정 + 스타일 무작위 대조군(시드 = 실험 시드 + i)의 왕복당 순손익 대비 경험적 p = (k+1)/(N+1) ≤ 0.05/m. N은 왕복이 1건 이상인 완료된 대조군 수(0건 시드는 제외하고 개수를 기록)이며, N + 1 < 20m이면 "판정 불가"(보류). 후보 수 m = 10이면 N ≥ 199가 필요하다.
+   - 합성: C5 미달 → 보류, 아니면 탈락이 하나라도 있으면 탈락, 판정 불가가 있으면 보류, 전부 통과면 통과.
+6. **해석 주의**
+   - 구간 끝 정리(WINDOW_END): 학습·검증 구간 끝에 든 포지션은 마지막 거래일에 비용을 내고 팔았다고 보고 왕복에 넣는다. 결과 파일에 구간별 수와 손익 합이 따로 나오니 정리 왕복이 성과의 큰 몫이면 의심한다. 구간 경계마다 전량 현금화하므로 구간을 넘는 장기 보유 효과는 보지 못한다.
+   - 상장폐지 종목의 폐지 뒤 손실은 일봉에 없어 지수와 계좌 모두에 반영되지 않는다(낙관 방향). 지수는 가격 지수(배당 없음, 비용 없음).
+   - 구간·데이터셋마다 가격 기준은 그 데이터셋의 첫 일봉이라 구간 사이 가격 단위가 다르다(D-061과 같은 한계).
+   - 사용자 결정 전에 이 표만으로 승격하지 않는다. 승격은 D-045와 승격 기준을 따른다.

@@ -113,45 +113,16 @@ public final class CombinationExperiment {
             throw new IllegalArgumentException("일봉 조합 실험은 국내(KRX)만 지원합니다: " + plan.market());
         }
         ExchangeCalendar calendar = ExchangeCalendar.bundled(Market.KRX);
-        gate.check(); // 힙을 크게 쓰는 스냅샷 읽기 전에 먼저 본다
-
-        Path barsDir = snapshotsRoot.resolve("krx-daily").resolve(plan.barsSnapshot());
-        log.accept("일봉 스냅샷 읽기: " + barsDir);
-        SnapshotDailyBarSource bars = SnapshotDailyBarSource.load(barsDir);
-        if (!bars.snapshotId().equals(plan.barsSnapshot())) {
-            throw new IllegalArgumentException("폴더 이름과 manifest 스냅샷 ID가 다릅니다: " + plan.barsSnapshot() + " ≠ "
-                    + bars.snapshotId());
-        }
-        SnapshotManifest manifest = bars.manifest();
-        SnapshotManifest.Coverage coverage = manifest.coverage();
-        if (coverage == null || coverage.firstDate() == null || coverage.lastTradingDate() == null) {
-            throw new IllegalArgumentException("일봉 스냅샷 manifest에 coverage(firstDate, lastTradingDate)가 없습니다: "
-                    + plan.barsSnapshot() + ". 수집기(ADR-008)로 다시 만드세요");
-        }
-        LocalDate first = LocalDate.parse(coverage.firstDate());
-        LocalDate last = LocalDate.parse(coverage.lastTradingDate());
-        if (plan.from().isBefore(first) || plan.to().isAfter(last)) {
-            throw new IllegalArgumentException("실험 기간이 스냅샷 범위 밖입니다: " + plan.from() + " ~ " + plan.to() + ", 스냅샷 "
-                    + first + " ~ " + last);
-        }
-        gate.check(); // 준비 단계(스냅샷 적재·이벤트 변환)도 단계마다 본다(PR #52 QA F1)
-        SnapshotListedShares shares = manifest.files().stream()
-                .anyMatch(f -> f.name().equals(SnapshotManifest.LISTED_SHARES)) ? SnapshotListedShares.load(barsDir) : null;
-        SnapshotFinancials financials = null;
-        if (plan.financialsSnapshot().isPresent()) {
-            Path dir = snapshotsRoot.resolve("dart-financials").resolve(plan.financialsSnapshot().get());
-            log.accept("재무 스냅샷 읽기: " + dir);
-            financials = SnapshotFinancials.load(dir);
-            if (!financials.manifest().snapshotId().equals(plan.financialsSnapshot().get())) {
-                throw new IllegalArgumentException("폴더 이름과 manifest 스냅샷 ID가 다릅니다: " + plan.financialsSnapshot().get());
-            }
-        }
-
-        gate.check();
-        SnapshotTradingDays.Derived days = SnapshotTradingDays.derive(bars, bars.snapshotId(), Market.KRX, first, last,
-                calendar);
-        SnapshotSelectionData selectionData = new SnapshotSelectionData(Market.KRX, bars, shares, financials, days.days(),
-                days.digest(), calendar.zone());
+        SnapshotInputs in = SnapshotInputs.load(Market.KRX, plan.barsSnapshot(), plan.financialsSnapshot(), snapshotsRoot,
+                calendar, gate, log, (first, last) -> {
+                    if (plan.from().isBefore(first) || plan.to().isAfter(last)) {
+                        throw new IllegalArgumentException("실험 기간이 스냅샷 범위 밖입니다: " + plan.from() + " ~ " + plan.to()
+                                + ", 스냅샷 " + first + " ~ " + last);
+                    }
+                });
+        SnapshotDailyBarSource bars = in.bars();
+        SnapshotSelectionData selectionData = in.selectionData();
+        SnapshotTradingDays.Derived days = in.days();
         CalculatedSelectionSource selections = new CalculatedSelectionSource(new SelectionCalculator(selectionData));
 
         log.accept("일봉 → 리플레이 이벤트: " + plan.from() + " ~ " + plan.to());
@@ -163,12 +134,8 @@ public final class CombinationExperiment {
 
         Map<Symbol, InstrumentPeriod> periods = new HashMap<>();
         data.lastBarDates().forEach((s, d) -> bars.instrumentOn(s, d).ifPresent(p -> periods.put(s, p)));
-        Function<Symbol, InstrumentKind> kinds = s -> {
-            InstrumentPeriod p = periods.get(s);
-            return p == null ? InstrumentKind.STOCK : p.kind();
-        };
-        KrxMarketRules rules = new KrxMarketRules(calendar, kinds);
-        CostModel cost = CostModels.krDefault(s -> board(periods.get(s), s));
+        KrxMarketRules rules = SnapshotInputs.rules(calendar, periods);
+        CostModel cost = SnapshotInputs.krCost(periods);
         CatalogStrategyFactory factory = new CatalogStrategyFactory(rules);
 
         List<Combination> combinations = new ArrayList<>();
@@ -279,7 +246,7 @@ public final class CombinationExperiment {
     }
 
     /** 소속부 → 비용 표 구분. "KOSDAQ/우량기업부"처럼 세부 소속부가 붙으면 앞부분을 쓴다(ADR-008 2.3). */
-    static KrxBoard board(InstrumentPeriod p, Symbol s) {
+    public static KrxBoard board(InstrumentPeriod p, Symbol s) {
         if (p == null) {
             throw new IllegalStateException("종목 이력이 없어 소속부를 알 수 없습니다: " + s);
         }
@@ -291,7 +258,7 @@ public final class CombinationExperiment {
         }
     }
 
-    static StrategyProfile loadStrategy(Path root, CombinationPlan.Ref ref) {
+    public static StrategyProfile loadStrategy(Path root, CombinationPlan.Ref ref) {
         Path file = root.resolve("strategies").resolve(ref.id()).resolve("v" + ref.version() + ".yaml");
         StrategyProfile p = ProfileYaml.parse(read(file), file.toString());
         if (!p.id().equals(ref.id()) || p.version() != ref.version()) {
@@ -300,7 +267,7 @@ public final class CombinationExperiment {
         return p;
     }
 
-    static SelectionProfile loadSelection(Path root, CombinationPlan.Ref ref) {
+    public static SelectionProfile loadSelection(Path root, CombinationPlan.Ref ref) {
         Path file = root.resolve("selections").resolve(ref.id()).resolve("v" + ref.version() + ".yaml");
         SelectionProfile s = SelectionProfileYaml.parse(read(file), file.toString());
         if (!s.id().equals(ref.id()) || s.version() != ref.version()) {

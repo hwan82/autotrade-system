@@ -107,6 +107,28 @@ class ExperimentGateTest {
     }
 
     @Test
+    void 워크포워드_판정도_정지_요청과_장_시간에는_시작하지_않고_결과를_쓰지_않는다(@TempDir Path root) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261020-WF01"));
+        Files.writeString(dir.resolve("study.yaml"), "id: EXP-20261020-WF01\n");
+        String[] tail = {root.toString(), "abc", "false", "EXP-20261020-WF01"};
+
+        // 장 시간(보호 구간)에는 4
+        assertThat(ExperimentMain.run(concat("walkforward", null, tail), Clock.fixed(Instant.parse(KRX_SESSION),
+                ZoneOffset.UTC), config)).isEqualTo(4);
+        // 정지 요청이 있으면 해제 옵션이 있어도 4
+        stopRequest();
+        assertThat(ExperimentMain.run(concat("walkforward", "--allow-during-session", tail),
+                Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC), config)).isEqualTo(4);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).extracting(p -> p.getFileName().toString()).containsExactly("study.yaml");
+        }
+        // 등록 파일이 없으면(정지 요청 없을 때) 입력 오류
+        Files.delete(config.resolve(ExperimentGate.STOP_REQUEST));
+        assertThat(ExperimentMain.run(new String[] {"walkforward", root.toString(), "abc", "false", "EXP-20261020-NONE"},
+                Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC), config)).isEqualTo(1);
+    }
+
+    @Test
     void 정지_요청이_있으면_녹화_실험을_시작하지_않고_결과를_쓰지_않는다(@TempDir Path root) throws IOException {
         Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261013-REC01"));
         Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261013-REC01\n");

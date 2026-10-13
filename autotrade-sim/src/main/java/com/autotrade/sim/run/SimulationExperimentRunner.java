@@ -27,6 +27,7 @@ import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.account.VirtualAccount;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.exchange.ExecutionSettings;
+import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.exchange.OrderRejectedReason;
 import com.autotrade.sim.exchange.VirtualExchange;
 import com.autotrade.sim.metrics.EquityPoint;
@@ -45,7 +46,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.RandomAccess;
 import java.util.TreeSet;
@@ -88,6 +92,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final RunGate gate;
     private final Symbol benchmark;
     private final SelectionSource selections;
+    private final int warmupDays;
+    private final boolean settleAtWindowEnd;
 
     /**
      * 실험 하나의 조합 수 상한(SIM-14 실험실 자원 상한, STR-17 "조합 수가 상한을 넘으면 시작 거부") `[가정]`. 조합마다 계좌·
@@ -126,6 +132,39 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
             SelectionSource selections, RunGate gate) {
+        this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, selections, gate, 0);
+    }
+
+    /**
+     * @param warmupDays 예열 거래일 수(4단계 워크포워드). 실험 시작일 앞 이 일수의 시세를 전략에만 준다. 예열 이벤트로는
+     *     거래소 체결·주문·자산 곡선·선정 판정이 없고(전략이 낸 신호는 버리며, 전략에는 현금 0의 빈 계좌를 보여 줘 내부
+     *     한도 상태도 쌓이지 않는다), 시세는 실험 시작일 이전 것뿐이라 미래 정보가 들어가지 않는다. 데이터에 그만큼의 앞선
+     *     거래일이 없으면 실험을 시작하지 않는다. 0이면 이전과 같다. 비용 표 검사({@code cost.covers})는 거래 구간에만 한다
+     */
+    public SimulationExperimentRunner(
+            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
+            SelectionSource selections, RunGate gate, int warmupDays) {
+        this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, selections, gate, warmupDays,
+                false);
+    }
+
+    /**
+     * @param settleAtWindowEnd true면 실험 기간 마지막 거래일 마감에 아직 든 포지션을 그날 마지막 체결가(상장폐지 종목은 마지막
+     *     거래일 종가)에 팔았다고 보고 수수료·거래세·슬리피지를 빼 왕복으로 넣는다(4단계 워크포워드: 평가손익이 PF·왕복 수·C10에서
+     *     빠지지 않게 같은 대상을 센다). 정리 체결은 원장에 {@code EXIT}로 남고 {@link RunReport#windowEndLots()}에 표시된다.
+     *     현금에 이자가 없어 상장폐지 종목을 폐지일이 아니라 구간 끝에 정리해도 최종 평가금액은 같다(자산 곡선 중간값은 비용만큼
+     *     다를 수 있다)
+     */
+    public SimulationExperimentRunner(
+            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
+            SelectionSource selections, RunGate gate, int warmupDays, boolean settleAtWindowEnd) {
+        this.settleAtWindowEnd = settleAtWindowEnd;
+        if (warmupDays < 0 || warmupDays > 5000) {
+            throw new IllegalArgumentException("warmupDays는 0~5000이어야 합니다: " + warmupDays);
+        }
+        this.warmupDays = warmupDays;
         this.gate = Objects.requireNonNull(gate, "gate");
         this.data = Objects.requireNonNull(data, "data");
         this.rules = Objects.requireNonNull(rules, "rules");
@@ -153,7 +192,9 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      */
     public SimulationReport runDetailed(ExperimentSpec spec) {
         Objects.requireNonNull(spec, "spec");
-        List<MarketEvent> events = validateAndSlice(spec);
+        Slice slice = validateAndSlice(spec);
+        List<MarketEvent> events = slice.events();
+        List<MarketEvent> warmup = slice.warmup();
         BigDecimal benchmarkReturn = benchmarkReturn(events);
         gate.check(); // 선정 일정 계산(모든 선정 × 거래일) 전에 본다. 계산 중에도 공급자 호출마다 본다(PR #52 QA F1)
         SelectionSchedule schedule = selectionSchedule(spec, events);
@@ -168,7 +209,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 int index = i;
                 futures.add(pool.submit(() -> {
                     checkGate(stopped);
-                    return runOne(spec, index, events, benchmarkReturn, schedule, stopped);
+                    return runOne(spec, index, warmup, events, benchmarkReturn, schedule, stopped);
                 }));
             }
             try {
@@ -200,7 +241,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         return new SimulationReport(result, reports, gaps);
     }
 
-    private List<MarketEvent> validateAndSlice(ExperimentSpec spec) {
+    private Slice validateAndSlice(ExperimentSpec spec) {
         if (spec.combinations().size() > MAX_COMBINATIONS) {
             throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size()
                     + " > " + MAX_COMBINATIONS);
@@ -226,14 +267,19 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException(
                     "실험 기간이 비용 표 밖입니다(SIM-07): " + spec.from() + " ~ " + spec.to() + ", " + cost.id());
         }
+        List<MarketEvent> all = data.events();
+        List<LocalDate> days = data.tradingDays();
+        if (!days.isEmpty()) {
+            return sliceByDayIndex(spec, all, days);
+        }
         // 기간 안 이벤트가 이어져 있으면(거래일이 sequence 순으로 느는 보통의 경우) 복사하지 않고 그 구간만 넘긴다.
         // 일봉 데이터셋(DailyBarMarketDataSet)은 이벤트를 읽을 때 만들므로 복사하면 메모리가 이벤트 수에 비례해진다.
         // 이어져 있지 않으면 예전처럼 기간 안 이벤트만 모은다. 어느 쪽이든 Run이 보는 이벤트 순서와 내용은 같다.
-        List<MarketEvent> all = data.events();
         int first = -1;
         int last = -1;
         boolean contiguous = true;
         long prev = Long.MIN_VALUE;
+        TreeSet<LocalDate> before = new TreeSet<>();
         for (int i = 0; i < all.size(); i++) {
             MarketEvent e = all.get(i);
             if (e.sequence() <= prev) {
@@ -241,7 +287,11 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             }
             prev = e.sequence();
             LocalDate d = rules.tradingDate(e.exchangeTime());
-            if (!d.isBefore(spec.from()) && !d.isAfter(spec.to())) {
+            if (d.isBefore(spec.from())) {
+                if (warmupDays > 0) {
+                    before.add(d);
+                }
+            } else if (!d.isAfter(spec.to())) {
                 if (first < 0) {
                     first = i;
                 } else if (last != i - 1) {
@@ -250,11 +300,23 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 last = i;
             }
         }
+        List<MarketEvent> warmup = List.of();
+        if (warmupDays > 0) {
+            LocalDate warmFrom = warmupFrom(spec, before);
+            List<MarketEvent> w = new ArrayList<>();
+            for (MarketEvent e : all) {
+                LocalDate d = rules.tradingDate(e.exchangeTime());
+                if (!d.isBefore(warmFrom) && d.isBefore(spec.from())) {
+                    w.add(e);
+                }
+            }
+            warmup = List.copyOf(w);
+        }
         if (first < 0) {
-            return List.of();
+            return new Slice(warmup, List.of());
         }
         if (contiguous && all instanceof RandomAccess) {
-            return Collections.unmodifiableList(all.subList(first, last + 1));
+            return new Slice(warmup, Collections.unmodifiableList(all.subList(first, last + 1)));
         }
         List<MarketEvent> out = new ArrayList<>();
         for (MarketEvent e : all) {
@@ -263,7 +325,77 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 out.add(e);
             }
         }
-        return List.copyOf(out);
+        return new Slice(warmup, List.copyOf(out));
+    }
+
+    private LocalDate warmupFrom(ExperimentSpec spec, TreeSet<LocalDate> before) {
+        if (before.size() < warmupDays) {
+            throw new IllegalArgumentException("예열 거래일이 모자랍니다: " + spec.from() + " 앞에 거래일이 " + before.size()
+                    + "일뿐인데 " + warmupDays + "일이 필요합니다");
+        }
+        LocalDate d = null;
+        java.util.Iterator<LocalDate> it = before.descendingIterator();
+        for (int i = 0; i < warmupDays; i++) {
+            d = it.next();
+        }
+        return d;
+    }
+
+    /** 데이터셋이 거래일 색인을 주면 이벤트를 훑지 않고 자른다(sequence 순서는 데이터셋이 보장). */
+    private Slice sliceByDayIndex(ExperimentSpec spec, List<MarketEvent> all, List<LocalDate> days) {
+        int fromIdx = lowerBound(days, spec.from());
+        int toIdx = lowerBound(days, spec.to().plusDays(1));
+        List<MarketEvent> warmup = List.of();
+        if (warmupDays > 0) {
+            if (fromIdx < warmupDays) {
+                throw new IllegalArgumentException("예열 거래일이 모자랍니다: " + spec.from() + " 앞에 거래일이 " + fromIdx
+                        + "일뿐인데 " + warmupDays + "일이 필요합니다");
+            }
+            warmup = Collections.unmodifiableList(
+                    all.subList(data.firstEventIndex(fromIdx - warmupDays), data.firstEventIndex(fromIdx)));
+        }
+        List<MarketEvent> events = fromIdx >= toIdx ? List.of()
+                : Collections.unmodifiableList(all.subList(data.firstEventIndex(fromIdx), data.firstEventIndex(toIdx)));
+        return new Slice(warmup, events);
+    }
+
+    private static int lowerBound(List<LocalDate> days, LocalDate date) {
+        int lo = 0;
+        int hi = days.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (days.get(mid).isBefore(date)) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    /**
+     * 예열 이벤트를 전략에만 준다. 전략에는 현금 0의 빈 계좌를 보여 줘 신호가 수량 0으로 사라지고(내부 진입 한도·예약 상태가
+     * 쌓이지 않는다), 나온 신호는 어떤 경우에도 버린다. 거래소·계좌·리스크 체인·자산 곡선은 건드리지 않는다.
+     */
+    private void feedWarmup(Strategy strategy, List<MarketEvent> warmup, AccountId accountId, Money seed) {
+        if (warmup.isEmpty()) {
+            return;
+        }
+        Money none = Money.zero(seed.currency());
+        for (MarketEvent e : warmup) {
+            AccountSnapshot empty = new AccountSnapshot(accountId, e.receivedAt(), none, new java.util.TreeMap<>());
+            strategy.onEvent(e, new WarmupContext(e.receivedAt(), empty));
+        }
+    }
+
+    private record Slice(List<MarketEvent> warmup, List<MarketEvent> events) {
+    }
+
+    private record WarmupContext(Instant now, AccountSnapshot account) implements StrategyContext {
+        @Override
+        public boolean hasOpenOrder(Symbol symbol) {
+            return false;
+        }
     }
 
     /**
@@ -312,7 +444,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     }
 
     private RunReport runOne(
-            ExperimentSpec spec, int index, List<MarketEvent> events, BigDecimal benchmarkReturn,
+            ExperimentSpec spec, int index, List<MarketEvent> warmup, List<MarketEvent> events, BigDecimal benchmarkReturn,
             SelectionSchedule schedule, AtomicReference<ExperimentStoppedException> stopped) {
         Combination combination = spec.combinations().get(index);
         String runId = spec.id().value() + String.format("-A%02d", index + 1);
@@ -332,6 +464,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     data.exchangeTimed());
             Strategy strategy = strategies.create(combination.profile(), runSeed);
             SimOrderKeys keys = new SimOrderKeys();
+            feedWarmup(strategy, warmup, accountId, spec.seedCapital());
             LocalDate day = null;
             Instant dayLastTime = null;
             for (MarketEvent e : events) {
@@ -361,7 +494,11 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     submit(s, d, e, accountId, keys, exchange, account, clock, state);
                 }
             }
+            Set<String> endLots = new HashSet<>();
             if (day != null) {
+                if (settleAtWindowEnd) {
+                    settleAtEnd(day, dayLastTime, keys, exchange, account, state, endLots);
+                }
                 closeDay(day, dayLastTime, exchange, account, state);
             }
             state.closeSelectionDay();
@@ -370,7 +507,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             RunResult summary = new RunResult(runId, accountId, profileHash, selectionHash, combinationHash, runSeed,
                     seedScheme, RunStatus.COMPLETED, metrics.finalEquity(), "", metrics);
             return new RunReport(summary, combination, account.ledger(), state.equity, account.roundTrips(),
-                    state.rejections, state.selectionDays);
+                    state.rejections, state.selectionDays, endLots);
         } catch (ExperimentStoppedException e) {
             throw e; // Run 실패가 아니라 실험 전체 정지다(결과에 남기지 않음)
         } catch (RuntimeException e) {
@@ -414,6 +551,33 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         Money equity = account.equity(exchange::markPrice);
         state.equity.add(new EquityPoint(day, lastTime, equity, account.cash()));
         account.verifyInvariants();
+    }
+
+    /** 구간 끝 정리({@code settleAtWindowEnd}): 남은 포지션을 마지막 체결가 − 슬리피지(호가 단위 내림)에 팔고 비용을 뺀다. */
+    private void settleAtEnd(
+            LocalDate day, Instant lastTime, SimOrderKeys keys, VirtualExchange exchange, VirtualAccount account,
+            RunState state, Set<String> endLots) {
+        AccountSnapshot snap = account.snapshot(lastTime);
+        for (Map.Entry<Symbol, Long> q : account.quantities().entrySet()) {
+            Symbol s = q.getKey();
+            long qty = q.getValue();
+            BigDecimal mark = exchange.markPrice(s);
+            if (mark == null) {
+                mark = snap.positions().get(s).averagePrice().amount();
+            }
+            BigDecimal price = rules.roundToTick(s, mark.multiply(BigDecimal.ONE.subtract(cost.slippageRate())),
+                    java.math.RoundingMode.FLOOR);
+            if (price.signum() <= 0) {
+                price = mark;
+            }
+            Money slippage = new Money(mark.subtract(price).multiply(BigDecimal.valueOf(qty)), account.currency())
+                    .rounded(4, java.math.RoundingMode.HALF_EVEN);
+            Fill fill = new Fill(keys.next(day, s, com.autotrade.domain.order.Side.SELL), 1, s,
+                    com.autotrade.domain.order.Side.SELL, OrderIntent.EXIT, qty, price,
+                    cost.fees(com.autotrade.domain.order.Side.SELL, s, day, price, qty), slippage, state.lastSeq,
+                    state.lastSeq + 1, lastTime, lastTime, day);
+            endLots.add(account.apply(fill).lotId());
+        }
     }
 
     private static String failureReason(RuntimeException e) {

@@ -19,7 +19,8 @@ import org.junit.jupiter.api.Test;
 /**
  * 저장소 {@code strategies/}의 모든 프로필이 카탈로그 검증을 통과하고, 스타일별 보유 기간 규칙(STR-18, D-043)을 지키는지.
  * 스윙의 최대 보유일(2~20거래일)은 카탈로그에서는 선택 키라 기존 v1 프로필이 그대로 돌고, "새 프로필 버전부터 필수"는
- * 여기서 강제한다(D-057). 예외는 아래 목록의 기존 버전뿐이며 늘리지 않는다.
+ * 여기서 강제한다(D-057). 예외는 아래 목록의 기존 버전뿐이며 늘리지 않는다. 프로필의 {@code study.warmup-days}는 로직이
+ * 첫 판단 전에 받아야 하는 거래일 수보다 작으면 안 된다.
  */
 class RepositoryProfilesTest {
 
@@ -41,6 +42,11 @@ class RepositoryProfilesTest {
             if (p.style() == TradingStyle.SWING && !SWING_WITHOUT_MAX_HOLD.contains(key)) {
                 assertThat(p.parameters()).as(key + ": 새 스윙 프로필은 exit.max-hold-days(2~20) 필수")
                         .containsKey("exit.max-hold-days");
+            }
+            String warmup = p.parameters().get("study.warmup-days");
+            if (warmup != null) {
+                assertThat(Integer.parseInt(warmup)).as(key + ": study.warmup-days는 로직의 예열 필요량 이상(PR #79 검토 M1)")
+                        .isGreaterThanOrEqualTo(factory.requiredHistoryDays(p));
             }
         }
         assertThat(files).extracting(f -> f.getParent().getFileName().toString())

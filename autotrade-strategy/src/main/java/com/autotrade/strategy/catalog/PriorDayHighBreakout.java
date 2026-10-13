@@ -26,6 +26,11 @@ final class PriorDayHighBreakout extends ManagedStrategy {
     }
 
     @Override
+    protected int requiredHistoryDays() {
+        return 1;
+    }
+
+    @Override
     protected void onNewDay(SymbolState s) {
         firedToday.remove(s.symbol());
     }
