@@ -35,3 +35,34 @@
 
 ## 판정
 수정 필요(B6, M1, M2)
+
+## 재검토 2026-10-13
+- 대상: PR #79 / 브랜치 `claude/project-thread-pb3vv4` 새 헤드 `fc7e4fc`(직전 검토 `6ee1698` 뒤 커밋 1개, 25파일 +881 −39) / main `98354fb` 대비 전체 diff(`git diff 98354fb...HEAD`)를 다시 봄
+- 점검표: B
+- 직접 실행한 것: 복제본에서 `git fetch /home/claude/autotrade-system claude/project-thread-pb3vv4 && git checkout FETCH_HEAD` 뒤 `./gradlew build --no-daemon` → **BUILD SUCCESSFUL (1m 40s), 종료 코드 0**. 테스트 1004건, 실패 0, 오류 0, 건너뜀 0(직전 994건 + 10). 새·바뀐 테스트: DailySlicePathTest 3, WalkForwardJudgeEvaluateTest 4, WalkForwardStudyTest 5(+1), DailyCloseLogicsTest 13(+2), RepositoryProfilesTest 1(검사 추가). 보호·기존: ArchitectureTest 18, ModuleOwnershipTest 13, SimulationExperimentRunnerTest 11, WindowWarmupSettleTest 5, CombinationExperimentTest 5, ExperimentGateTest 15 통과.
+- 참고: 커밋에 들어간 이 파일(`docs/reviews/pr-79/architect.md`)의 직전 내용은 내가 쓴 원문과 바이트까지 같음을 확인했다(diff 없음). 커밋 메시지·PR 본문은 판정 근거로 쓰지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 직접 실행, BUILD SUCCESSFUL, 1004건 실패 0 |
+| B2 | 통과 | 새 운영 클래스 `EntryFunnel`은 `com.autotrade.strategy.catalog`(autotrade-strategy 소유), sim은 기존 의존(strategy)만 사용. 빌드 스크립트·의존 변경 없음. ArchitectureTest 18·ModuleOwnershipTest 13 통과. 실전 엔진·게이트웨이·감시·risk·broker·domain 모듈 diff 없음 |
+| B3 | 통과 | 새 공개 API `CatalogStrategyFactory.requiredHistoryDays`, `ManagedStrategy.requiredHistoryDays()/entryFunnel()`, `runs.tsv` 열 5개, results.md "진입 한도 영향" 표, 종료 코드 2에 대조군 실패 포함이 ADR-009 2.1·2.3·2.7·2.8·5장과 combination-experiments.md·stage-4-plan.md에 반영됨. ADR-009 2.2가 "주문이 아니라 평가용 정리 체결이며 가상 거래소·상태머신·리스크 체인을 지나지 않는다"로 고쳐짐(직전 R1 해소) |
+| B4 | 통과 | 추가된 `now()`·`new Random`·`double`·`float` 없음(grep). `EntryFunnel`은 TreeMap, 판정에 쓰지 않는 측정이고 전략 신호·수량에 영향 없음(ManagedStrategy.entry에서 카운트만 추가). `FunnelCapture`는 ConcurrentHashMap에 (프로필 해시, Run 시드)로 넣고 Run 종료 뒤 읽음, Run 시드는 실행기와 같은 `RunSeeds.derive(spec.randomSeed(), combination)`(SimulationExperimentRunner.java:455). 골든 테스트와 WalkForwardStudyTest 병렬 1 vs N 바이트 일치·두 번 실행 일치 통과 |
+| B5 | 통과 | 새 금액 계산 없음. 비율 표기는 BigDecimal(WalkForwardReport.funnelRow) |
+| B6 | 통과 | 삭제된 테스트 파일·`@Test`·단언 없음, `@Disabled` 없음(98354fb 대비 grep). 직전 M2: `DailySlicePathTest#일_색인_경로와_선형_경로의_보고서가_바이트까지_같다`(같은 DailyBarMarketDataSet을 색인 숨긴 래퍼와 원본으로, 예열 0·21일 ReportWriter 출력 동일, `tradingDays()`가 실제로 채워져 있음을 단언), `#일_색인_경로에서도_예열은_전략만_보고_체결과_평가는_시작일부터이며_구간_끝_뒤_시세는_없다`, `#일_색인_경로에서도_앞선_거래일이_모자라면_시작하지_않는다` 추가. 직전 M1: `WalkForwardStudyTest#예열_일수가_후보나_변형의_필요량보다_작으면_모자란_프로필을_적고_시작하지_않는다`, `DailyCloseLogicsTest#예열_필요량은_로직이_판단을_시작하는_종가_수와_같다`, RepositoryProfilesTest의 `study.warmup-days ≥ requiredHistoryDays` 검사 추가. 판정식 손 계산 `WalkForwardJudgeEvaluateTest` 4건, 깔때기 집계 `DailyCloseLogicsTest#진입_깔때기는_진입_한도_막힘_수량_0을_거래일별로_센다` |
+| B7 | 해당 없음 | 실전 주문 경로, RealTradingGuard, 블랙리스트 코드, 리스크 한도, 장애 대응, 증권사 주문 연동, 보호 테스트 변경 없음(해당 모듈 diff 없음). 실험 정지 관문(D-063)은 그대로 |
+| B8 | 통과 | 추가 줄에 appkey·secret·token·password 패턴 없음(이 검토 원문의 점검표 문구만 걸림) |
+
+## 직전 지적 처리 확인
+- **M1 해소.** `WalkForwardStudy.requireWarmup`(WalkForwardStudy.java:259에서 호출)이 후보·대조군·±20% 변형마다 `factory.requiredHistoryDays`를 구해 `warmup-days`보다 큰 프로필을 모두 적고 거부한다. 로직별 필요량은 판단 조건과 같은 값(`DonchianBreakout` lookback+1이 entryCondition과 같은 `requiredCloses()`를 씀, `NearHigh` L, `ShortReversal` max(M, K+1, X), `MovingAverageTrend` slow로 `trendUp`의 `closes.size() < slow`와 일치, `PriorDayHighBreakout` 1). `kr-donchian-swing/v1.yaml`의 `study.warmup-days`가 21로 바로잡힘. 문서 예시는 `warmup-days: "300"`(52주 고가 k120 300일 충족).
+- **M2 해소.** 위 B6 근거.
+- **R1 해소**(ADR-009 2.2 문구). **R2 해소**(대조군 실패도 `anyFailed`, WalkForwardStudy.java:384, ADR 2.8 반영). **R5 일부 해소**(`-W12-N1234` 주석, sequence 설명을 ADR에 적음).
+- **R3 미처리**: ADR-009 상태와 docs/adr/README.md가 여전히 "채택(D-072)". 이 재검토로 architect 교차 검토가 승인되므로 남은 문제는 아니다(strategy-researcher 검토 상태는 그 원문을 따른다).
+- **R4 미처리**(헬퍼 public 확대). 머지를 막지 않는다.
+
+## 점검표 밖 발견(권고, 머지를 막지 않음)
+- **R6 깔때기 연결이 0으로 조용히 떨어질 수 있음.** `FunnelCapture.totals`는 키가 맞지 않으면 `Totals.ZERO`를 돌려준다. WalkForwardStudyTest는 표 머리와 열 이름만 확인하고 값이 0이 아님은 확인하지 않는다. 판정에 쓰지 않는 측정이라 결과 판정에는 영향이 없지만, 실행기의 Run 시드 파생이 바뀌면 표가 소리 없이 0이 된다. 합성 통합 테스트에 후보 검증 `signals > 0` 단언 하나를 더하거나, 키를 못 찾으면 예외로 바꿀 것을 권한다.
+- **R7** `CatalogStrategyFactory.requiredHistoryDays`는 전략 인스턴스를 하나 만들어 값을 읽는다(create 비용이 작아 문제는 아님). 장중 로직이 지난 날 종가를 쓰게 되면 해당 클래스가 `requiredHistoryDays()`를 함께 올려야 한다는 점을 ManagedStrategy 주석이 이미 적고 있다. 추가 조치 불필요.
+
+## 판정
+승인
