@@ -16,11 +16,11 @@
 - 실행 PC: 사용자 Windows PC, JDK 21.0.12(Eclipse Adoptium), 저장소 main `b69d57c`(PR #74 머지).
 - 명령(두 번, 2026-10-13 22시대 KST): `.\gradlew :autotrade-app-experiment:runRecordingExperiment -Pexperiment=EXP-20261013-REC01 -PverifyDeterminism -PallowDuringSession`. 미국 정규장 보호 구간이라 첫 시도는 종료 코드 4로 멈췄고(결과 파일 없음, D-063 동작 확인), 실전 엔진이 이 PC에서 돌지 않으므로(7단계 전) 해제 옵션으로 다시 돌렸다.
 - 녹화 위치: 기본값 `~\.autotrade\recordings\KRX\2026-10-12`.
-- 코드 표시 `b69d57c… dirty`: 실행 PC 저장소에 `experiments/` 밖 커밋하지 않은 변경이 있었다는 표시다. 내용은 아래 절.
+- 코드 표시 `b69d57c… dirty`: 실행 PC 저장소에 `experiments/` 밖 커밋하지 않은 변경이 있었다는 표시다. 내용은 아래 절(추적하지 않는 보고서 파일 하나, 코드 변경 없음).
 
 ## 실행 PC 작업 트리(dirty 표시)
 
-확인 중: 사용자에게 `git status --short -- . ":!experiments"` 출력을 요청했다.
+[사실, 사용자 제공 2026-10-13 22:49 KST] `git status --short -- . ":!experiments"` 출력은 `?? replay-2026-10-12.md` 한 줄이다. 저장소 루트에 남은, 추적하지 않는 2단계 리플레이 보고서 파일이며 빌드 입력(소스·빌드 스크립트·리소스)이 아니다. 수정된 추적 파일은 없으므로 실행한 코드는 main `b69d57c`와 같다. 이 파일은 저장소에 올리지 않는다.
 
 ## 파일
 
