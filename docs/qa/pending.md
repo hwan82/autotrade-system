@@ -11,3 +11,4 @@
 | 2026-10-13 | PR #65 검토해줘 | docs/reviews/pr-65/qa.md | 실전 관련 PR(장애 대응: 장 시간 보호 판정 입력의 갱신 절차) |
 | 2026-10-13 | main 기준으로 2단계 완료 재판정해줘 | docs/reviews/gates/stage-2.md | 단계 완료 판정(재검토 2026-10-12 (2) 완료 조건 1~5) |
 | 2026-10-13 | main 기준으로 3단계 완료 판정해줘 | docs/reviews/gates/stage-3.md | 단계 완료 판정(3단계 실험실 MVP, D-068 머지 후 main) |
+| 2026-10-13 | main 기준으로 3단계 완료 재판정해줘 | docs/reviews/gates/stage-3.md(재검토 절) | 단계 완료 재판정(1차 수정 필요 C1 → D-069 BOOK-V3·녹화 실험 명령 PR #74, 실녹화 실험 두 번 실행 experiments/EXP-20261013-REC01/run-check.md) |

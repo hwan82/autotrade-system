@@ -1,0 +1,28 @@
+# EXP-20261013-REC01 실녹화 실험 두 번 실행 확인 (3단계 QA C1 증거)
+
+등록 파일: [experiment.yaml](experiment.yaml)(main `b69d57c`에 커밋된 그대로, SHA-256 `d155cf88…e5c33071`가 실행 PC 파일과 같음). 녹화 파일 자체는 올리지 않는다(개인 연구용 저장, 재배포 금지, ADR-003·PR #72 architect O2).
+
+## 결론
+
+- [사실] 같은 녹화·등록 파일로 두 번 실행한 `detail.txt` SHA-256이 같다: `68d2fd3d429fcc3fabf11d4f4dbdc43bed36f9e4c0bc0263e15333703288d806`(1회차 사본 `detail.run1.txt`, 2회차 `detail.txt`, 둘 다 12,559바이트). 각 실행 안에서도 병렬 2와 병렬 1 결과가 바이트까지 같다(`inputs.yaml` `determinism`).
+- [사실] 9개 프로필 Run이 모두 `COMPLETED`로 끝났다(`results.md`). 체결 0건인 Run 4개(orb-30, pdh-breakout, volume-surge, ma-trend)는 하루 안에 진입 조건이 서지 않은 것이다(ma-trend는 이동평균에 여러 날이 필요).
+- [사실] 입력: 녹화 2026-10-12 1일, 528,156건 + 표시 없는 재기동 경계(seq 410641)에 끼운 RECORDER_RESTART 3건 = 528,159건, `complete: true`, `truncated: false`, 구간 2개, 시세 공백 9건(재기동 3 + 끊김 6). 녹화 파일 SHA-256 `860da4e7…b400eeeb64`.
+- [사실] 시가 단일가 처리(QA S2): 장전(08:50~) 신호로 낸 매수 기준선(A01) 주문 3건이 모두 그 종목 첫 체결가로 슬리피지 0에 체결됐고, 그 값이 그날 KRX 단독 시가와 같다: 035420 182,400, 000660 1,640,000, 005930 260,000(시가는 [2026-10-12.md](../stage-2-replay/2026-10-12.md) 원본 대조표). BOOK-V2였다면 08:50 예상 호가로 체결됐을 주문이다.
+- [사실] 지표: 관측 1일이라 모든 Run의 샤프·CAGR이 `-`(판정 불가, QA R1)다.
+- 이 결과는 3단계 완료 기준의 증거일 뿐이며 성과 비교·기법 선택에 쓰지 않는다(관측 1일, 74분 녹화 공백). 투자 자문이 아니다.
+
+## 실행 환경
+
+- 실행 PC: 사용자 Windows PC, JDK 21.0.12(Eclipse Adoptium), 저장소 main `b69d57c`(PR #74 머지).
+- 명령(두 번, 2026-10-13 22시대 KST): `.\gradlew :autotrade-app-experiment:runRecordingExperiment -Pexperiment=EXP-20261013-REC01 -PverifyDeterminism -PallowDuringSession`. 미국 정규장 보호 구간이라 첫 시도는 종료 코드 4로 멈췄고(결과 파일 없음, D-063 동작 확인), 실전 엔진이 이 PC에서 돌지 않으므로(7단계 전) 해제 옵션으로 다시 돌렸다.
+- 녹화 위치: 기본값 `~\.autotrade\recordings\KRX\2026-10-12`.
+- 코드 표시 `b69d57c… dirty`: 실행 PC 저장소에 `experiments/` 밖 커밋하지 않은 변경이 있었다는 표시다. 내용은 아래 절.
+
+## 실행 PC 작업 트리(dirty 표시)
+
+확인 중: 사용자에게 `git status --short -- . ":!experiments"` 출력을 요청했다.
+
+## 파일
+
+- `inputs.yaml`, `results.md`, `detail.txt`: 2회차 실행 원 출력(실행기가 쓴 그대로, 줄바꿈 LF).
+- 1회차 `detail.txt`는 2회차와 SHA-256이 같아 따로 올리지 않는다.

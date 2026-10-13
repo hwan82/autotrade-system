@@ -1,0 +1,30 @@
+# 실험 입력(실행기가 씀, D-069). 녹화 파일은 저장소에 넣지 않는다(ADR-003 4장).
+experiment: EXP-20261013-REC01
+code: "b69d57c8a4a396c8ed73f7739f20b43abb8fdf8e dirty"
+data-set: "REC-KRX-2026-10-12..2026-10-12-e973fb9fc953d6eb"
+adapter: REC-ADAPTER-V1
+market: KRX
+events: 528159
+symbols: "000660,005930,035420"
+recording-days:
+  - date: 2026-10-12
+    file-sha256: 860da4e76dac6401665e772b50f28411f8fc97a3103f150b63ae38b400eeeb64
+    recorded-events: 528156
+    complete: true
+    truncated: false
+    segments: 2
+    unmarked-restarts: "410641"
+    inserted-gaps: 3
+data-gaps: 9
+cost-model: KR-DEFAULT-d24932dfcccd
+cost-table-hash: e80cdaff200f2b572c61effa9866c59b84596ec9834656b249314470f94d2019
+execution-model: "BOOK-V3;latency=PT0.5S"
+boards: "000660 KOSPI,005930 KOSPI,035420 KOSPI"
+blacklist:
+  fingerprint: d440d658ac63642d81077f4ec0d9010566aa9f9804957123bd8c88b3bcebbd31
+  size: 0
+benchmark: 005930
+seed: 20261013
+seed-capital: "10000000 KRW"
+determinism: "같음(병렬 2 vs 1, 상세 보고서 바이트 일치)"
+detail-sha256: 68d2fd3d429fcc3fabf11d4f4dbdc43bed36f9e4c0bc0263e15333703288d806

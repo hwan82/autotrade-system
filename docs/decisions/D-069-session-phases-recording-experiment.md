@@ -63,4 +63,4 @@
 - 골든 `krx-golden.report`: 체결·손익 줄은 그대로이고 머리 줄 `BOOK-V3`, 지표 줄 `observation-days=2`, `cagr=-`, `sharpe=-`만 바뀜. 녹화 형식 재실행도 같은 골든과 바이트 일치.
 - `RecordingExperimentTest`: 같은 녹화로 두 번 돌려 결과 파일 바이트 일치, 입력 품질 기록, 소속부·벤치마크·기간 오류 거절, 등록 파일 형식.
 - `./gradlew build` 통과(컨테이너, `--offline`, ArchUnit 포함).
-- 실녹화 결과: `experiments/EXP-20261013-REC01/`(사용자 PC 실행 뒤 커밋).
+- 실녹화 결과(2026-10-13, 사용자 PC, main `b69d57c`): 두 번 실행한 `detail.txt` SHA-256 `68d2fd3d…3288d806` 일치, 9개 Run 모두 COMPLETED, 장전 신호 매수 3건이 그날 KRX 단독 시가(182,400 / 1,640,000 / 260,000)로 슬리피지 0 체결. 원 출력과 확인 기록: [run-check.md](../../experiments/EXP-20261013-REC01/run-check.md).

@@ -1,0 +1,109 @@
+experiment EXP-20261013-REC01
+code b69d57c8a4a396c8ed73f7739f20b43abb8fdf8e dirty
+cost-table-hash e80cdaff200f2b572c61effa9866c59b84596ec9834656b249314470f94d2019
+execution-model BOOK-V3;latency=PT0.5S
+data-gap seq=410641 KRX:000660 RECORDER_RESTART 2026-10-12T04:05:41.655652800Z..2026-10-12T05:19:47.345795700Z
+data-gap seq=410642 KRX:005930 RECORDER_RESTART 2026-10-12T04:05:41.655652800Z..2026-10-12T05:19:47.345795700Z
+data-gap seq=410643 KRX:035420 RECORDER_RESTART 2026-10-12T04:05:41.655652800Z..2026-10-12T05:19:47.345795700Z
+data-gap seq=411741 KRX:000660 DISCONNECTED 2026-10-12T05:20:46.369360900Z..2026-10-12T05:20:48.772560100Z
+data-gap seq=411742 KRX:005930 DISCONNECTED 2026-10-12T05:20:46.369360900Z..2026-10-12T05:20:48.772560100Z
+data-gap seq=411743 KRX:035420 DISCONNECTED 2026-10-12T05:20:46.369360900Z..2026-10-12T05:20:48.772560100Z
+data-gap seq=528151 KRX:000660 DISCONNECTED 2026-10-12T06:41:26.046103400Z..2026-10-12T06:43:03.676519500Z
+data-gap seq=528152 KRX:005930 DISCONNECTED 2026-10-12T06:41:26.046103400Z..2026-10-12T06:43:03.676519500Z
+data-gap seq=528153 KRX:035420 DISCONNECTED 2026-10-12T06:41:26.046103400Z..2026-10-12T06:43:03.676519500Z
+
+run EXP-20261013-REC01-A01 status=COMPLETED profile=kr-bh-baseline@1 hash=a60529e48721164db947a26ada101800082845e84ebda249a5a64bce19a6152d seed=7590326021629135863
+  metrics observation-days=1 final-equity=9853848 KRW total-return=-0.014615 cagr=- mdd=0.014615 sharpe=-
+  metrics win-rate=- profit-factor=- avg-holding-days=- fills=3 round-trips=0 turnover=0.322270
+  metrics costs=952 KRW cost-share=- benchmark=-0.036538 excess=0.021923
+  fill 20261012-035420-BUY-1 #1 ENTRY 13 @ 182400 commission=355 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A01-035420-1 realized=- signal-seq=3 fill-seq=7712 date=2026-10-12
+  fill 20261012-000660-BUY-1 #1 ENTRY 1 @ 1640000 commission=246 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A01-000660-2 realized=- signal-seq=1 fill-seq=8061 date=2026-10-12
+  fill 20261012-005930-BUY-1 #1 ENTRY 9 @ 260000 commission=351 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A01-005930-3 realized=- signal-seq=2 fill-seq=8452 date=2026-10-12
+  equity 2026-10-12 9853848 KRW cash=3647848 KRW
+
+run EXP-20261013-REC01-A02 status=COMPLETED profile=kr-orb-30@1 hash=5d0975f8e04383406b2d03eef222cf33094e6689801e5a5f6be35ee8d95616a5 seed=-2076899066593258417
+  metrics observation-days=1 final-equity=10000000 KRW total-return=0.000000 cagr=- mdd=0.000000 sharpe=-
+  metrics win-rate=- profit-factor=- avg-holding-days=- fills=0 round-trips=0 turnover=0.000000
+  metrics costs=0 KRW cost-share=- benchmark=-0.036538 excess=0.036538
+  equity 2026-10-12 10000000 KRW cash=10000000 KRW
+
+run EXP-20261013-REC01-A03 status=COMPLETED profile=kr-vwap-reclaim@1 hash=2b7152d753bc199765d82e766b8f0c2c00f27111f75d83798b6479a447f71eb8 seed=-6230654703318630463
+  metrics observation-days=1 final-equity=9975141 KRW total-return=-0.002486 cagr=- mdd=0.002486 sharpe=-
+  metrics win-rate=0.000000 profit-factor=0.000000 avg-holding-days=0.000000 fills=4 round-trips=2 turnover=0.343454
+  metrics costs=7859 KRW cost-share=- benchmark=-0.036538 excess=0.034053
+  fill 20261012-000660-BUY-1 #1 ENTRY 1 @ 1632000 commission=244 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A03-000660-1 realized=- signal-seq=177769 fill-seq=177786 date=2026-10-12
+  fill 20261012-005930-BUY-1 #1 ENTRY 7 @ 257500 commission=270 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A03-005930-2 realized=- signal-seq=180670 fill-seq=180690 date=2026-10-12
+  fill 20261012-000660-SELL-1 #1 EXIT 1 @ 1629000 commission=244 KRW tax=3257 KRW slippage=0 KRW lot=EXP-20261013-REC01-A03-000660-1 realized=-6745 KRW signal-seq=270715 fill-seq=270728 date=2026-10-12
+  fill 20261012-005930-SELL-1 #1 EXIT 7 @ 255500 commission=268 KRW tax=3576 KRW slippage=0 KRW lot=EXP-20261013-REC01-A03-005930-2 realized=-18114 KRW signal-seq=273608 fill-seq=273628 date=2026-10-12
+  round-trip EXP-20261013-REC01-A03-000660-1 KRX:000660 2026-10-12..2026-10-12 pnl=-6745 KRW
+  round-trip EXP-20261013-REC01-A03-005930-2 KRX:005930 2026-10-12..2026-10-12 pnl=-18114 KRW
+  equity 2026-10-12 9975141 KRW cash=9975141 KRW
+
+run EXP-20261013-REC01-A04 status=COMPLETED profile=kr-pdh-breakout@1 hash=a3129be1f675581934b1501b7c8fab64287ac2227f91e29a53c7a18a59fb8919 seed=-2925114498212882854
+  metrics observation-days=1 final-equity=10000000 KRW total-return=0.000000 cagr=- mdd=0.000000 sharpe=-
+  metrics win-rate=- profit-factor=- avg-holding-days=- fills=0 round-trips=0 turnover=0.000000
+  metrics costs=0 KRW cost-share=- benchmark=-0.036538 excess=0.036538
+  equity 2026-10-12 10000000 KRW cash=10000000 KRW
+
+run EXP-20261013-REC01-A05 status=COMPLETED profile=kr-volume-surge@1 hash=2318269b67f36112852a3a804f86f37b12037328fe857248a5b5154d80dcc280 seed=-1452976348723824329
+  metrics observation-days=1 final-equity=10000000 KRW total-return=0.000000 cagr=- mdd=0.000000 sharpe=-
+  metrics win-rate=- profit-factor=- avg-holding-days=- fills=0 round-trips=0 turnover=0.000000
+  metrics costs=0 KRW cost-share=- benchmark=-0.036538 excess=0.036538
+  equity 2026-10-12 10000000 KRW cash=10000000 KRW
+
+run EXP-20261013-REC01-A06 status=COMPLETED profile=kr-book-imbalance@1 hash=dc6a7f8ad699504748e18ec062b91c739dcec8a6282ee0ccb1932edbe99cb4a2 seed=-1974695988139443317
+  metrics observation-days=1 final-equity=9937385 KRW total-return=-0.006262 cagr=- mdd=0.006262 sharpe=-
+  metrics win-rate=0.000000 profit-factor=0.000000 avg-holding-days=0.000000 fills=12 round-trips=6 turnover=1.057144
+  metrics costs=24115 KRW cost-share=- benchmark=-0.036538 excess=0.030277
+  fill 20261012-035420-BUY-1 #1 ENTRY 10 @ 184400 commission=276 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-035420-1 realized=- signal-seq=62150 fill-seq=62173 date=2026-10-12
+  fill 20261012-005930-BUY-1 #1 ENTRY 7 @ 260000 commission=273 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-005930-2 realized=- signal-seq=63760 fill-seq=63776 date=2026-10-12
+  fill 20261012-000660-BUY-1 #1 ENTRY 1 @ 1641000 commission=246 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-000660-3 realized=- signal-seq=71218 fill-seq=71238 date=2026-10-12
+  fill 20261012-035420-SELL-1 #1 EXIT 10 @ 183300 commission=274 KRW tax=3665 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-035420-1 realized=-15215 KRW signal-seq=78562 fill-seq=78577 date=2026-10-12
+  fill 20261012-005930-SELL-1 #1 EXIT 7 @ 258500 commission=271 KRW tax=3618 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-005930-2 realized=-14662 KRW signal-seq=79718 fill-seq=79749 date=2026-10-12
+  fill 20261012-000660-SELL-1 #1 EXIT 1 @ 1638000 commission=245 KRW tax=3276 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-000660-3 realized=-6767 KRW signal-seq=86454 fill-seq=86467 date=2026-10-12
+  fill 20261012-005930-BUY-2 #1 ENTRY 7 @ 255500 commission=268 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-005930-4 realized=- signal-seq=132195 fill-seq=132211 date=2026-10-12
+  fill 20261012-035420-BUY-2 #1 ENTRY 10 @ 181500 commission=272 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-035420-5 realized=- signal-seq=136987 fill-seq=137008 date=2026-10-12
+  fill 20261012-000660-BUY-2 #1 ENTRY 1 @ 1616000 commission=242 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-000660-6 realized=- signal-seq=142518 fill-seq=142529 date=2026-10-12
+  fill 20261012-005930-SELL-2 #1 EXIT 7 @ 255500 commission=268 KRW tax=3576 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-005930-4 realized=-4112 KRW signal-seq=148912 fill-seq=148934 date=2026-10-12
+  fill 20261012-035420-SELL-2 #1 EXIT 10 @ 180900 commission=271 KRW tax=3617 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-035420-5 realized=-10160 KRW signal-seq=153240 fill-seq=153250 date=2026-10-12
+  fill 20261012-000660-SELL-2 #1 EXIT 1 @ 1608000 commission=241 KRW tax=3216 KRW slippage=0 KRW lot=EXP-20261013-REC01-A06-000660-6 realized=-11699 KRW signal-seq=159349 fill-seq=159363 date=2026-10-12
+  round-trip EXP-20261013-REC01-A06-035420-1 KRX:035420 2026-10-12..2026-10-12 pnl=-15215 KRW
+  round-trip EXP-20261013-REC01-A06-005930-2 KRX:005930 2026-10-12..2026-10-12 pnl=-14662 KRW
+  round-trip EXP-20261013-REC01-A06-000660-3 KRX:000660 2026-10-12..2026-10-12 pnl=-6767 KRW
+  round-trip EXP-20261013-REC01-A06-005930-4 KRX:005930 2026-10-12..2026-10-12 pnl=-4112 KRW
+  round-trip EXP-20261013-REC01-A06-035420-5 KRX:035420 2026-10-12..2026-10-12 pnl=-10160 KRW
+  round-trip EXP-20261013-REC01-A06-000660-6 KRX:000660 2026-10-12..2026-10-12 pnl=-11699 KRW
+  equity 2026-10-12 9937385 KRW cash=9937385 KRW
+
+run EXP-20261013-REC01-A07 status=COMPLETED profile=kr-pullback@1 hash=3ad7628851e0a63c7dd8729ca590dec19336a4e25ce28a9a2bbba4e28c67296c seed=-7333232864425066248
+  metrics observation-days=1 final-equity=9947681 KRW total-return=-0.005232 cagr=- mdd=0.005232 sharpe=-
+  metrics win-rate=0.000000 profit-factor=0.000000 avg-holding-days=0.000000 fills=4 round-trips=2 turnover=0.365613
+  metrics costs=8319 KRW cost-share=- benchmark=-0.036538 excess=0.031307
+  fill 20261012-035420-BUY-1 #1 ENTRY 10 @ 183700 commission=275 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A07-035420-1 realized=- signal-seq=81041 fill-seq=81062 date=2026-10-12
+  fill 20261012-035420-SELL-1 #1 STOP_LOSS 10 @ 181500 commission=272 KRW tax=3629 KRW slippage=0 KRW lot=EXP-20261013-REC01-A07-035420-1 realized=-26176 KRW signal-seq=131128 fill-seq=131154 date=2026-10-12
+  fill 20261012-035420-BUY-2 #1 ENTRY 10 @ 182200 commission=273 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A07-035420-2 realized=- signal-seq=183029 fill-seq=183043 date=2026-10-12
+  fill 20261012-035420-SELL-2 #1 STOP_LOSS 10 @ 180000 commission=270 KRW tax=3600 KRW slippage=0 KRW lot=EXP-20261013-REC01-A07-035420-2 realized=-26143 KRW signal-seq=452432 fill-seq=452487 date=2026-10-12
+  round-trip EXP-20261013-REC01-A07-035420-1 KRX:035420 2026-10-12..2026-10-12 pnl=-26176 KRW
+  round-trip EXP-20261013-REC01-A07-035420-2 KRX:035420 2026-10-12..2026-10-12 pnl=-26143 KRW
+  equity 2026-10-12 9947681 KRW cash=9947681 KRW
+
+run EXP-20261013-REC01-A08 status=COMPLETED profile=kr-ma-trend@1 hash=503edb7c5a7b5315a617410a75ff4a9a9a0bc315f49541a72124280a1374cf91 seed=-9106380095243230223
+  metrics observation-days=1 final-equity=10000000 KRW total-return=0.000000 cagr=- mdd=0.000000 sharpe=-
+  metrics win-rate=- profit-factor=- avg-holding-days=- fills=0 round-trips=0 turnover=0.000000
+  metrics costs=0 KRW cost-share=- benchmark=-0.036538 excess=0.036538
+  equity 2026-10-12 10000000 KRW cash=10000000 KRW
+
+run EXP-20261013-REC01-A09 status=COMPLETED profile=kr-random-control@1 hash=1a98ec22f9d032c8e34770b77d44770617601ce2a67cddd92e7b6eb6aa9f5da0 seed=-3979253981273277710
+  metrics observation-days=1 final-equity=9905975 KRW total-return=-0.009402 cagr=- mdd=0.009402 sharpe=-
+  metrics win-rate=0.000000 profit-factor=0.000000 avg-holding-days=0.000000 fills=6 round-trips=3 turnover=0.531497
+  metrics costs=12025 KRW cost-share=- benchmark=-0.036538 excess=0.027136
+  fill 20261012-005930-BUY-1 #1 ENTRY 7 @ 260000 commission=273 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A09-005930-1 realized=- signal-seq=62646 fill-seq=62670 date=2026-10-12
+  fill 20261012-035420-BUY-1 #1 ENTRY 10 @ 184400 commission=276 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A09-035420-2 realized=- signal-seq=63700 fill-seq=63724 date=2026-10-12
+  fill 20261012-000660-BUY-1 #1 ENTRY 1 @ 1642000 commission=246 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261013-REC01-A09-000660-3 realized=- signal-seq=64977 fill-seq=64996 date=2026-10-12
+  fill 20261012-005930-SELL-1 #1 STOP_LOSS 7 @ 256000 commission=268 KRW tax=3584 KRW slippage=0 KRW lot=EXP-20261013-REC01-A09-005930-1 realized=-32125 KRW signal-seq=95165 fill-seq=95218 date=2026-10-12
+  fill 20261012-000660-SELL-1 #1 STOP_LOSS 1 @ 1616000 commission=242 KRW tax=3232 KRW slippage=0 KRW lot=EXP-20261013-REC01-A09-000660-3 realized=-29720 KRW signal-seq=103071 fill-seq=103101 date=2026-10-12
+  fill 20261012-035420-SELL-1 #1 STOP_LOSS 10 @ 181600 commission=272 KRW tax=3632 KRW slippage=0 KRW lot=EXP-20261013-REC01-A09-035420-2 realized=-32180 KRW signal-seq=129924 fill-seq=129951 date=2026-10-12
+  round-trip EXP-20261013-REC01-A09-005930-1 KRX:005930 2026-10-12..2026-10-12 pnl=-32125 KRW
+  round-trip EXP-20261013-REC01-A09-000660-3 KRX:000660 2026-10-12..2026-10-12 pnl=-29720 KRW
+  round-trip EXP-20261013-REC01-A09-035420-2 KRX:035420 2026-10-12..2026-10-12 pnl=-32180 KRW
+  equity 2026-10-12 9905975 KRW cash=9905975 KRW
