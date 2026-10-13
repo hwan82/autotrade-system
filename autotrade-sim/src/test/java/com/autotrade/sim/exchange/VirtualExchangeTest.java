@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.Money;
 import com.autotrade.domain.account.AccountId;
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.InstrumentStatus;
 import com.autotrade.domain.market.InstrumentStatusChanged;
 import com.autotrade.domain.market.MarketEvent;
@@ -267,6 +268,44 @@ class VirtualExchangeTest {
 
     // ---- 도우미 ----
 
+    @Test
+    void 시세_공백_뒤에는_그_종목_호가를_버려_새_시장가_매수의_기준_가격이_없다() {
+        event(book(1000, asks("70100x60"), bids("70000x400")));
+        event(gap(2000));
+        // 공백 전 호가로 예약 현금을 잡지 않는다. 체결가도 마지막 체결도 없으니 기준 가격이 없다(D-068)
+        assertThat(ack(Side.BUY, OrderType.MARKET, null, 10).state()).isEqualTo(OrderState.REJECTED);
+        event(book(3000, asks("70100x60"), bids("70000x400")));
+        submit(Side.BUY, OrderType.MARKET, null, 10);
+    }
+
+    @Test
+    void 시세_공백은_대기_지정가의_앞선_잔량을_모름으로_되돌리고_다음_호가로_다시_잡는다() {
+        event(book(1000, asks("70100x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.LIMIT, "70000", 10);
+        event(book(2000, asks("70100x60"), bids("70000x400"))); // 대기 시작, 앞선 400
+        event(gap(3000));
+        // 공백이 없었다면 450 − 400 = 50이 넘쳐 10주 체결. 공백 뒤에는 앞선 잔량을 모르므로 같은 가격 체결로는 체결하지 않는다
+        assertThat(event(trade(4000, "70000", 450))).isEmpty();
+        event(book(5000, asks("70100x60"), bids("70000x30"))); // 앞선 잔량을 30으로 다시 잡음
+        assertThat(event(trade(6000, "70000", 35))).singleElement()
+                .satisfies(a -> assertThat(a.fill().quantity()).isEqualTo(5));
+        // 지정가보다 유리한 체결은 공백과 무관하게 체결된다
+        assertThat(event(trade(7000, "69900", 100))).singleElement()
+                .satisfies(a -> assertThat(a.fill().quantity()).isEqualTo(5));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+    }
+
+    @Test
+    void 다른_종목의_시세_공백은_이_종목_체결에_영향이_없다() {
+        event(book(1000, asks("70100x60"), bids("70000x400")));
+        submit(Side.BUY, OrderType.LIMIT, "70000", 10);
+        event(book(2000, asks("70100x60"), bids("70000x400")));
+        Instant t = T0.plusMillis(3000);
+        event(new DataGap(Symbol.krx("000660"), ++seq, t, t, t.minusSeconds(1), t, DataGap.GapReason.RECORDER_RESTART));
+        assertThat(event(trade(4000, "70000", 450))).singleElement()
+                .satisfies(a -> assertThat(a.fill().quantity()).isEqualTo(10));
+    }
+
     private List<AppliedFill> event(MarketEvent e) {
         clock.advanceToAtLeast(e.receivedAt());
         return ex.onEvent(e);
@@ -307,6 +346,11 @@ class VirtualExchangeTest {
     private OrderBookSnapshot book(long ms, List<PriceLevel> asks, List<PriceLevel> bids) {
         Instant t = T0.plusMillis(ms);
         return new OrderBookSnapshot(S, ++seq, t, t.plusMillis(50), asks, bids);
+    }
+
+    private DataGap gap(long ms) {
+        Instant t = T0.plusMillis(ms);
+        return new DataGap(S, ++seq, t, t, t.minusSeconds(1), t, DataGap.GapReason.DISCONNECTED);
     }
 
     private TradeTick trade(long ms, String price, long qty) {

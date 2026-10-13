@@ -1,5 +1,6 @@
 package com.autotrade.sim.testing;
 
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.InstrumentStatus;
 import com.autotrade.domain.market.InstrumentStatusChanged;
 import com.autotrade.domain.market.Market;
@@ -28,8 +29,8 @@ import java.util.List;
  *   <li>TRADE: {@code 가격x수량}</li>
  *   <li>STATUS: {@link InstrumentStatus} 이름</li>
  * </ul>
- * {@code #}으로 시작하는 줄과 빈 줄은 건너뛴다. 2단계 녹화 형식(gzip JSON Lines)과는 다르며, 2단계 PR 머지 후
- * 녹화 형식 어댑터 테스트로 같은 데이터를 다시 읽는다(ADR-004 4장).
+ * {@code #}으로 시작하는 줄과 빈 줄은 건너뛴다. 2단계 녹화 형식(gzip JSON Lines)과는 다르며, 같은 데이터를
+ * {@link FixtureRecordings}로 녹화 형식에 써서 녹화 어댑터로 다시 읽는다(ADR-004 4장, D-068).
  */
 public final class FixtureEvents {
 
@@ -55,6 +56,16 @@ public final class FixtureEvents {
             throw new UncheckedIOException(e);
         }
         return out;
+    }
+
+    /** 순번만 바꾼 사본. */
+    public static MarketEvent withSequence(MarketEvent e, long seq) {
+        return switch (e) {
+            case TradeTick t -> new TradeTick(t.symbol(), seq, t.exchangeTime(), t.receivedAt(), t.price(), t.quantity());
+            case OrderBookSnapshot b -> new OrderBookSnapshot(b.symbol(), seq, b.exchangeTime(), b.receivedAt(), b.asks(), b.bids());
+            case InstrumentStatusChanged s -> new InstrumentStatusChanged(s.symbol(), seq, s.exchangeTime(), s.receivedAt(), s.status());
+            case DataGap g -> new DataGap(g.symbol(), seq, g.exchangeTime(), g.receivedAt(), g.gapStart(), g.gapEnd(), g.reason());
+        };
     }
 
     private static MarketEvent parse(String line, Market market, ZoneId zone) {

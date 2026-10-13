@@ -103,7 +103,7 @@
 
 | 항목 | 담당 | 비고 |
 |---|---|---|
-| 녹화 형식 어댑터(`RecordedDay` → `MarketDataSet`)와 같은 골든을 녹화 형식으로 다시 돌리는 테스트 | sim-engine | PR #10 머지 후. 3단계 완료 기록(결정 로그)은 이 작업 뒤에 한다 |
+| 녹화 형식 어댑터(`RecordedDay` → `MarketDataSet`)와 같은 골든을 녹화 형식으로 다시 돌리는 테스트 | sim-engine | **[D-068](../decisions/D-068-recording-adapter-gap-handling.md)으로 끝남**(`RecordedMarketDataSet`, 녹화 형식 골든 바이트 일치). 실험 명령에서 녹화를 입력으로 고르는 옵션은 남음. 3단계 완료 기록(결정 로그)은 독립 QA 판정 뒤에 한다 |
 | 실제 `KrxMarketRules`·`UsMarketRules`로 실행 | sim-engine | PR #10 머지 후. 테스트는 같은 호가 단위표의 테스트 규칙을 쓴다 |
 | 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)을 가상·실전이 공유(SIM-12), ORD-06 신호 경과 폐기, ORD-07 상태머신 | risk-ops | 실행기는 공통 체인 `RiskChain`(D-032)만 받아 모든 모의 주문에 적용한다(블랙리스트·리스크 단계 반영됨, 멱등 키·상태머신 단계는 남음). 가상 거래소 상태는 domain `OrderState` 값만 쓴다 |
 | 일봉(다음 날 시가)·분봉(다음 봉 시가) 체결 해상도(SIM-06) | sim-engine | **일봉은 [D-061](../decisions/D-061-daily-replay-combination-runner.md)으로 끝남**(`DailyBarMarketDataSet`, 경로 모델 `DAILY-PATH-V1`). 분봉은 분봉 데이터가 생기면 |
@@ -114,7 +114,7 @@
 | 실험 진행 보고·취소, 실험실 자원 상한(SIM-14) | sim-engine, app-lab | `lab.max-parallel-runs`를 `parallelism`으로 넘긴다 |
 | 실시간 모의 대 리플레이 차이 측정(SIM-13), 실시간 실행기 | sim-engine | 6단계 |
 | 장 시작·마감 단일가 구간(KRX 08:30~09:00, 15:20~15:30) 처리. 체결 없음 또는 단일가 일괄 체결, `InstrumentStatus` 상태 추가와 `RULES_VERSION` 상향 | sim-engine, data-engineer, architect | 실제 녹화 데이터 첫 실험 전. 장 마감 청산 단타가 지금은 연속 매매로 체결된다(strategy-researcher 검토 3) |
-| PR #10 `DataGap` 처리: 그 종목 앞선 잔량·호가 무효화, Run 보고서에 공백 표시, 거래일 판정에서 제외 | sim-engine | PR #10 머지 후(architect 검토 3). 지금은 모르는 이벤트로 무시한다 |
+| PR #10 `DataGap` 처리: 그 종목 앞선 잔량·호가 무효화, Run 보고서에 공백 표시, 거래일 판정에서 제외 | sim-engine | **호가·앞선 잔량 무효화(`BOOK-V2`)와 보고서 `data-gap` 줄은 [D-068](../decisions/D-068-recording-adapter-gap-handling.md)으로 끝남.** 남은 것: 공백이 있는 거래일을 거래일 판정·지표에서 다루는 방법, 실험실 결과 묶음(D-062)에 공백 표시 |
 | 체결 모델 ID를 `ExperimentSpec.executionModelId`로 옮겨 명세만으로 재현, 벤치마크 종목도 결과에 기록 | sim-engine, architect | DB 저장 작업과 함께(architect 검토 2) |
 | 장 마감 시 VI·정지 상태와 호가 초기화 여부, 유효 시점·비용 날짜 기준 통일(`receivedAt + latency`, `exchangeTime`) | sim-engine | architect 검토 4·5. 동작이 바뀌므로 `RULES_VERSION` 상향과 함께 |
 | 지표 보강: 관측 일수와 짧은 기간 샤프·CAGR 판정 불가 표시, 장중 MDD와 최장 회복 기간, 미청산 포지션 수·평가손익, 평균 손익비, 충격 금액 합계와 비율, 왕복별 참여율 경고 | sim-engine, strategy-researcher | strategy-researcher 검토 4~8. 4단계 전략 비교 전 필요 |

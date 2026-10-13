@@ -5,7 +5,7 @@ import com.autotrade.domain.market.MarketEvent;
 import java.util.List;
 import java.util.Objects;
 
-/** 메모리에 든 시세 스냅샷. 테스트 데이터와 녹화 어댑터가 쓴다. */
+/** 메모리에 든 시세 스냅샷. 테스트 데이터가 쓴다. */
 public record InMemoryMarketDataSet(String version, Market market, List<MarketEvent> events) implements MarketDataSet {
 
     public InMemoryMarketDataSet {

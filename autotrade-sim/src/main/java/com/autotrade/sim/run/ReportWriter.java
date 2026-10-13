@@ -1,5 +1,6 @@
 package com.autotrade.sim.run;
 
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.account.AppliedFill;
@@ -26,6 +27,12 @@ public final class ReportWriter {
         sb.append("code ").append(r.codeCommit()).append(r.codeDirty() ? " dirty" : "").append('\n');
         sb.append("cost-table-hash ").append(r.costTableHash()).append('\n');
         sb.append("execution-model ").append(r.executionModelId()).append('\n');
+        // 입력 시세 공백(D-068). 공백 없는 실험은 이전과 같은 보고서다
+        for (DataGap g : report.dataGaps()) {
+            sb.append("data-gap seq=").append(g.sequence()).append(' ').append(g.symbol())
+                    .append(' ').append(g.reason()).append(' ').append(g.gapStart()).append("..").append(g.gapEnd())
+                    .append('\n');
+        }
         for (RunReport run : report.runs()) {
             RunResult s = run.summary();
             sb.append('\n').append("run ").append(s.runId())
