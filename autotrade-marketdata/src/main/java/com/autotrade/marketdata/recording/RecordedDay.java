@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedReader;
 import java.io.EOFException;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +28,8 @@ import java.util.zip.ZipException;
  * <ul>
  *   <li>순번은 1부터 빈틈없이 1씩 늘어야 한다. 아니면 파일 손상으로 보고 예외.</li>
  *   <li>메타가 {@code complete}이면 SHA-256이 맞아야 한다. 아니면 예외.</li>
- *   <li>정상 종료가 아니면(메타 없음 또는 미완료) 마지막 잘린 줄은 버리고 {@link #truncated()}로 알린다.</li>
+ *   <li>정상 종료가 아니면(메타 없음 또는 미완료) 끝나지 않은 gzip 멤버를 풀린 바이트 끝까지 읽고, 마지막 잘린 줄은 버리고
+ *       {@link #truncated()}로 알린다.</li>
  * </ul>
  */
 public final class RecordedDay {
@@ -75,18 +78,15 @@ public final class RecordedDay {
         RecordingCodec codec = new RecordingCodec();
         boolean truncated = false;
         List<String> raw = new ArrayList<>();
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(
-                new GZIPInputStream(Files.newInputStream(events), 64 * 1024), StandardCharsets.UTF_8))) {
+        EndTolerantInputStream gz = new EndTolerantInputStream(
+                new GZIPInputStream(Files.newInputStream(events), 64 * 1024), !complete);
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(gz, StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
                 raw.add(line);
             }
-        } catch (EOFException | ZipException e) {
-            if (complete) {
-                throw e;
-            }
-            truncated = true;
         }
+        truncated = gz.cutShort();
         long expected = 1;
         for (int i = 0; i < raw.size(); i++) {
             RecordingCodec.Line l;
@@ -106,6 +106,62 @@ public final class RecordedDay {
             out.add(l);
         }
         return truncated;
+    }
+
+    /**
+     * 끝나지 않은 gzip 멤버(비정상 종료)를 파일 끝으로 읽는다. 끝에서 나는 {@link EOFException}·{@link ZipException}을
+     * 리더 위로 올리면 디코더·버퍼가 이미 받은 글자를 줄로 돌려주지 못하고 버린다(QA H-4: 끝 수십 줄 손실).
+     * 바이트 단위에서 끝으로 바꾸면 그 앞까지 풀린 바이트는 모두 줄이 되고, 잘린 마지막 줄은 형식 검사에서 걸러진다.
+     */
+    private static final class EndTolerantInputStream extends FilterInputStream {
+        private final boolean tolerate;
+        private boolean cutShort;
+
+        EndTolerantInputStream(InputStream in, boolean tolerate) {
+            super(in);
+            this.tolerate = tolerate;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (cutShort) {
+                return -1;
+            }
+            try {
+                return super.read();
+            } catch (EOFException | ZipException e) {
+                return cut(e);
+            }
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (cutShort) {
+                return -1;
+            }
+            try {
+                return super.read(b, off, len);
+            } catch (EOFException | ZipException e) {
+                return cut(e);
+            }
+        }
+
+        @Override
+        public int available() throws IOException {
+            return cutShort ? 0 : super.available();
+        }
+
+        private int cut(IOException e) throws IOException {
+            if (!tolerate) {
+                throw e;
+            }
+            cutShort = true;
+            return -1;
+        }
+
+        boolean cutShort() {
+            return cutShort;
+        }
     }
 
     public Path dir() {

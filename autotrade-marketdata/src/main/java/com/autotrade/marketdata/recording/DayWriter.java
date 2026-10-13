@@ -31,7 +31,10 @@ import java.util.zip.GZIPOutputStream;
  * 하루치 녹화 파일 하나에 쓴다. 한 스레드(녹화기의 쓰기 스레드)에서만 쓴다.
  *
  * <p>같은 날 폴더가 이미 있으면(프로세스 재기동) 기존 파일 뒤에 새 gzip 멤버를 이어 붙이고 순번을 이어 간다.
- * gzip은 {@code syncFlush}로 열어 {@link #flush()} 시점까지의 줄은 비정상 종료 뒤에도 읽을 수 있다.
+ * gzip은 {@code syncFlush}로 열어 {@link #flush()} 시점까지 디스크에 내려간 줄은 비정상 종료 뒤에도
+ * {@link RecordedDay}가 모두 읽는다. 마지막 {@code flush()} 뒤에 쓴 줄(게이트웨이 기준 최대 1초 분량)은 남지 않을 수 있다.
+ * 비정상 종료 뒤 재기동하면 끝나지 않은 멤버를 읽힌 줄까지 닫힌 멤버로 다시 쓰는데, 그 전에 원본을
+ * {@link #restartBackupName(int)}로 보관한다(QA H-4).
  *
  * <p>이어 쓸 때는 새 구간 첫 이벤트 앞에 앞 구간에 나온 종목마다 {@link DataGap}(RECORDER_RESTART)을 남긴다(D-065).
  * 구간은 앞 프로세스가 살아 있던 마지막 시각(앞 구간 끝과 마지막 수신 중 늦은 쪽)부터 새 구간 첫 이벤트 수신 시각까지다.
@@ -86,7 +89,12 @@ final class DayWriter implements AutoCloseable {
                     segments.addAll(closeOpenSegments(m.segments(), previous.lastReceivedAt()));
                     recorderDropped = m.recorderDropped();
                 });
-                // 비정상 종료로 끝난 gzip 멤버 뒤에 이어 쓰면 읽을 수 없으므로, 읽힌 줄까지 닫힌 멤버로 다시 쓴다
+                // 비정상 종료로 끝난 gzip 멤버 뒤에 이어 쓰면 읽을 수 없으므로, 읽힌 줄까지 닫힌 멤버로 다시 쓴다.
+                // 정상 종료가 아니었으면 다시 쓰기 전에 원본을 보관한다(되돌리기 어려운 녹화 손실 방지).
+                if (!previous.meta().map(RecordingMeta::complete).orElse(false)) {
+                    int segmentNo = previous.meta().map(m -> m.segments().size()).orElse(0) + 1;
+                    Files.copy(events, dir.resolve(restartBackupName(segmentNo)), StandardCopyOption.REPLACE_EXISTING);
+                }
                 rewrite(events, previous);
                 for (RecordingCodec.Line l : previous.lines()) {
                     restartSymbols.add(l.event().symbol());
@@ -136,6 +144,14 @@ final class DayWriter implements AutoCloseable {
             alive = alive == null || ended.isAfter(alive) ? ended : alive;
         }
         return alive;
+    }
+
+    /**
+     * 비정상 종료 뒤 {@code segmentNo}번째 구간을 열 때 다시 쓰기 전 원본을 보관하는 파일 이름.
+     * 리플레이는 읽지 않는다. 사용자가 녹화를 확인한 뒤 지운다.
+     */
+    static String restartBackupName(int segmentNo) {
+        return RecordingLayout.EVENTS_FILE + ".before-segment-" + segmentNo;
     }
 
     LocalDate date() {

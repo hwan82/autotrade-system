@@ -1,0 +1,26 @@
+{
+  "formatVersion" : 1,
+  "market" : "KRX",
+  "date" : "2026-10-12",
+  "zone" : "Asia/Seoul",
+  "sources" : {
+    "GATEWAY" : "소스 전환 공백 표시",
+    "KIWOOM-WS" : "실시간 체결·호가 KRX"
+  },
+  "license" : "증권사 Open API 시세. 개인 연구용 저장만, 재배포 금지(ADR-003 4장)",
+  "segments" : [ {
+    "startedAt" : "2026-10-11T23:50:00.701977900Z",
+    "endedAt" : "2026-10-12T04:05:41.655652800Z",
+    "firstSeq" : 1
+  }, {
+    "startedAt" : "2026-10-12T05:19:47.350795200Z",
+    "endedAt" : "2026-10-12T06:43:28.140302300Z",
+    "firstSeq" : 410641
+  } ],
+  "lastSeq" : 528156,
+  "eventCount" : 528156,
+  "gapCount" : 6,
+  "recorderDropped" : 0,
+  "complete" : true,
+  "eventsSha256" : "860da4e76dac6401665e772b50f28411f8fc97a3103f150b63ae38b400eeeb64"
+}
