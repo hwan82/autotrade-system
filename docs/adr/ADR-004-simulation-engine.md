@@ -27,9 +27,9 @@
 
 멱등 키는 전략이 아니라 실행기가 붙인다. 전략이 키를 만들면 "새 키는 발급기만 만든다"(IdempotencyKey 주석)를 어기게 된다.
 
-### 2.2 가상 체결 규칙 `BOOK-V2` (`autotrade-sim`, `exchange.VirtualExchange`)
+### 2.2 가상 체결 규칙 `BOOK-V3` (`autotrade-sim`, `exchange.VirtualExchange`)
 
-`BOOK-V1`(1~10번)에 시세 공백 처리(11번)를 더한 것이 `BOOK-V2`다([D-068](../decisions/D-068-recording-adapter-gap-handling.md)). 공백이 없는 데이터의 결과는 두 버전이 같다.
+`BOOK-V1`(1~10번)에 시세 공백 처리(11번)를 더한 것이 `BOOK-V2`다([D-068](../decisions/D-068-recording-adapter-gap-handling.md)). 공백이 없는 데이터의 결과는 두 버전이 같다. 여기에 매매 단계(12번)를 더한 것이 `BOOK-V3`다([D-069](../decisions/D-069-session-phases-recording-experiment.md)). 단일가 구간이 없는 규칙(정규장 내내 접속 매매)으로 돌린 결과는 BOOK-V2와 같다.
 
 `VirtualExchange`는 계좌 하나의 `OrderGateway` 가상 구현이다. 증권사 주문 API를 호출하지 않는다(SIM-01, ArchUnit `시뮬레이션은_증권사_플러그인을_모른다`).
 
@@ -44,6 +44,7 @@
 9. **슬리피지 기록**: 호가 기반 체결은 체결가에 이미 시장 충격이 들어 있으므로 D-021의 고정 0.15%를 더하지 않는다. 기록용 `slippage` 열에는 최우선 호가 대비 더 먹은 금액을 남긴다. 고정 슬리피지는 4번(호가 없는 데이터)에만 쓴다.
 10. **주문 지연 기본값 0.5초** `[가정]`. 체결 규칙 버전과 지연은 `ExecutionSettings.id()`(예: `BOOK-V2;latency=PT0.5S`)로 결과에 남기고 같은 ID끼리만 비교한다.
 11. **시세 공백**(`DataGap`, 원인 무관, RECORDER_RESTART 포함): 그 종목의 마지막 호가 스냅샷을 체결과 시장가 매수 예약에 쓰지 않고, 그 종목 대기 지정가의 앞선 잔량을 "모름"으로 되돌린다. 공백 자체로는 체결하지 않는다. 다음 스냅샷 전까지 그 종목 시장가는 체결되지 않고 대기 지정가는 지정가보다 유리한 체결로만 체결되며, 새 스냅샷의 같은 가격 잔량으로 앞선 잔량을 다시 잡는다. 주문은 남기고, 평가 가격(마지막 체결가, 없으면 마지막 스냅샷 최우선 매수 호가)과 거래 상태는 그대로 쓴다.
+12. **매매 단계**(`MarketRules.sessionPhase`, 이벤트의 거래소 시각 기준): 접속 매매(`CONTINUOUS`) 이벤트로만 1~11번대로 체결한다. 단일가 접수 구간(`OPENING_AUCTION`, `CLOSING_AUCTION`) 이벤트는 체결에 쓰지 않고(예상 호가), 그때 유효한 그 종목 미체결 주문을 그 단일가 참여 주문으로 표시한다. 구간이 끝난 뒤 그 종목 첫 체결(시가는 접속 매매 첫 체결, 종가는 폐장 뒤 첫 체결)을 단일가 체결로 보고 참여 주문을 접수 순서대로 그 체결가 하나로, 그 체결 수량 안에서 체결한다(시장가는 무조건, 지정가는 체결가가 지정가 이내일 때, 슬리피지 0). 시가 단일가에서 남은 수량은 접속 매매 주문으로 이어지고 종가 단일가에서 남은 수량은 장 마감에 만료된다. 장 밖(`CLOSED`) 이벤트로는 단일가 체결 말고는 체결하지 않는다. 단일가 구간 중 그 종목 시세 공백이 오면 참여 표시를 지운다. 시가 단일가로 여는 시장(`MarketRules.opensWithAuction`, KRX)은 단일가 접수 마감이 임의로 늦춰지므로(랜덤 엔드 `[가정]`), 개장 시각이 지나도 그 종목 그날 첫 체결 전까지의 이벤트를 시가 단일가 접수로 본다: 호가로 체결하지 않고, 그 사이 새 주문도 참여하며, 첫 체결 직전까지 유효해진 주문은 모두 그 체결가로 체결된다. 그 사이 시세 공백이 오면 열린 것으로 보고 공백 뒤 새 호가부터 접속 매매로 체결한다. 이벤트 시각이 합성인 데이터(`MarketDataSet.exchangeTimed() == false`, 일봉 경로)는 매매 단계를 보지 않는다(BOOK-V2와 같음): 칸 시각이 그날 실제 개장 시각을 따르지 않고 캘린더 수록 범위 밖 과거도 있기 때문이다.
 
 ### 2.3 비용 모델 (`autotrade-sim`, `cost`)
 
@@ -64,6 +65,7 @@
 - Run마다 새로 만드는 것: `VirtualAccount`, `VirtualExchange`, `ReplayClock`, `Strategy`, 멱등 키 발급기. 공유하는 것은 불변 입력과 스레드 안전 계약을 가진 팩토리·정책뿐이다. 그래서 병렬 수가 결과에 영향을 주지 않는다(테스트로 확인).
 - 이벤트 처리 순서: (거래일이 바뀌면 전날 마감) → 시계 이동 → 거래소가 기존 주문 체결 → 전략 신호 → 신호마다 키 발급 → `RiskChain` → 거래소 접수.
 - 거래일 마감: 남은 주문 취소, 자산 곡선 한 점(평가 가격은 마지막 체결가, 없으면 최우선 매수 호가, 없으면 원가), 계좌 불변식 검사(SIM-15, `LedgerCheck`). 위반이면 그 Run만 FAILED.
+- 녹화 실험 명령(`recording.RecordingExperiment`, D-069): `runRecordingExperiment`가 등록 파일(`input: "recording"`)의 기간·프로필·소속부·제외 종목으로 실녹화를 실제 `KrxMarketRules` 위에서 돌리고, `inputs.yaml`에 녹화일별 입력 품질(`DayInfo`)과 `detail.txt` SHA-256을 남긴다.
 - 녹화 입력(`recording.RecordedMarketDataSet`, D-068): 기간 안 녹화일을 날짜 오름차순으로 잇는다. sequence는 녹화일 → 녹화 순번 순의 데이터셋 위치(1부터)이고 `origin(sequence)`가 (녹화일, 녹화 순번)을 돌려준다(끼워 넣은 줄은 0). 리플레이 소스의 "sequence = 녹화 순번"(ADR-003 2.4)은 그대로다. 공백 표시 없는 이전 녹화의 재기동 경계에는 녹화기와 같은 규칙으로 `RECORDER_RESTART` 공백을 끼운다. 버전은 `REC-<시장>-<첫 날>..<끝 날>-<해시 16자>`(어댑터 버전 `REC-ADAPTER-V1`, 시장, 날짜별 events 파일 SHA-256)이고, 읽는 동안 파일이 바뀌면 열지 않는다.
 - 식별자: `runId = accountId = <실험ID>-A01, -A02 …`(프로필 목록 순서).
 - Run 시드: `SHA-256("run-seed-v1|" + randomSeed + "|" + profileHash)` 앞 8바이트(big-endian long). 바꾸면 접두어 버전을 올린다.
@@ -107,8 +109,8 @@
 
 | 항목 | 담당 | 비고 |
 |---|---|---|
-| 녹화 형식 어댑터(`RecordedDay` → `MarketDataSet`)와 같은 골든을 녹화 형식으로 다시 돌리는 테스트 | sim-engine | **[D-068](../decisions/D-068-recording-adapter-gap-handling.md)으로 끝남**(`RecordedMarketDataSet`, 녹화 형식 골든 바이트 일치). 실험 명령에서 녹화를 입력으로 고르는 옵션은 남음. 3단계 완료 기록(결정 로그)은 독립 QA 판정 뒤에 한다 |
-| 실제 `KrxMarketRules`·`UsMarketRules`로 실행 | sim-engine | PR #10 머지 후. 테스트는 같은 호가 단위표의 테스트 규칙을 쓴다 |
+| 녹화 형식 어댑터(`RecordedDay` → `MarketDataSet`)와 같은 골든을 녹화 형식으로 다시 돌리는 테스트 | sim-engine | **[D-068](../decisions/D-068-recording-adapter-gap-handling.md)으로 끝남**(`RecordedMarketDataSet`, 녹화 형식 골든 바이트 일치). 실험 명령의 녹화 입력 옵션은 **[D-069](../decisions/D-069-session-phases-recording-experiment.md)로 끝남**(`runRecordingExperiment`). 3단계 완료 기록(결정 로그)은 독립 QA 판정 뒤에 한다 |
+| 실제 `KrxMarketRules`·`UsMarketRules`로 실행 | sim-engine | **KRX는 녹화 실험(D-069)과 조합 실험(D-061)에서 끝남.** US는 미국 녹화·일봉이 생기면. 골든 테스트는 같은 호가 단위표의 테스트 규칙을 쓴다 |
 | 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)을 가상·실전이 공유(SIM-12), ORD-06 신호 경과 폐기, ORD-07 상태머신 | risk-ops | 실행기는 공통 체인 `RiskChain`(D-032)만 받아 모든 모의 주문에 적용한다(블랙리스트·리스크 단계 반영됨, 멱등 키·상태머신 단계는 남음). 가상 거래소 상태는 domain `OrderState` 값만 쓴다 |
 | 일봉(다음 날 시가)·분봉(다음 봉 시가) 체결 해상도(SIM-06) | sim-engine | **일봉은 [D-061](../decisions/D-061-daily-replay-combination-runner.md)으로 끝남**(`DailyBarMarketDataSet`, 경로 모델 `DAILY-PATH-V1`). 분봉은 분봉 데이터가 생기면 |
 | 실험 단발 명령(`runCombinationExperiment`, `runStrategyStudy`)의 장 시간 보호·정지 요청 파일(D-058) | risk-ops, sim-engine | **[D-063](../decisions/D-063-experiment-command-stop-gate.md)으로 끝남**(`autotrade-app-experiment`, `RunGate`). 감시 쪽 파일 생성·해제는 D-058 ④ 감시 구현 후속 과제 |
@@ -117,11 +119,11 @@
 | 비용 표 설정 키(`cost.profiles.*`, Q-004 조사 4장) | architect | 지금은 `CostModels`의 코드 기본값. 설정에서 읽어도 `CostModel` 구조는 같다 |
 | 실험 진행 보고·취소, 실험실 자원 상한(SIM-14) | sim-engine, app-lab | `lab.max-parallel-runs`를 `parallelism`으로 넘긴다 |
 | 실시간 모의 대 리플레이 차이 측정(SIM-13), 실시간 실행기 | sim-engine | 6단계 |
-| 장 시작·마감 단일가 구간(KRX 08:30~09:00, 15:20~15:30) 처리. 체결 없음 또는 단일가 일괄 체결, `InstrumentStatus` 상태 추가와 `RULES_VERSION` 상향 | sim-engine, data-engineer, architect | 실제 녹화 데이터 첫 실험 전. 장 마감 청산 단타가 지금은 연속 매매로 체결된다(strategy-researcher 검토 3) |
+| 장 시작·마감 단일가 구간(KRX 08:30~09:00, 15:20~15:30) 처리 | sim-engine, data-engineer, architect | **[D-069](../decisions/D-069-session-phases-recording-experiment.md)로 끝남**(`MarketRules.sessionPhase`, `BOOK-V3` 단일가 일괄 체결). 시간외 매매 모의, 특별 운영일 단일가 시간 공지 대조는 남음 |
 | PR #10 `DataGap` 처리: 그 종목 앞선 잔량·호가 무효화, Run 보고서에 공백 표시, 거래일 판정에서 제외 | sim-engine | **호가·앞선 잔량 무효화(`BOOK-V2`)와 보고서 `data-gap` 줄은 [D-068](../decisions/D-068-recording-adapter-gap-handling.md)으로 끝남.** 남은 것: 공백이 있는 거래일을 거래일 판정·지표에서 다루는 방법, 실험실 결과 묶음(D-062)에 공백 표시 |
 | 체결 모델 ID를 `ExperimentSpec.executionModelId`로 옮겨 명세만으로 재현, 벤치마크 종목도 결과에 기록 | sim-engine, architect | DB 저장 작업과 함께(architect 검토 2) |
 | 장 마감 시 VI·정지 상태와 호가 초기화 여부, 유효 시점·비용 날짜 기준 통일(`receivedAt + latency`, `exchangeTime`) | sim-engine | architect 검토 4·5. 동작이 바뀌므로 `RULES_VERSION` 상향과 함께 |
-| 지표 보강: 관측 일수와 짧은 기간 샤프·CAGR 판정 불가 표시, 장중 MDD와 최장 회복 기간, 미청산 포지션 수·평가손익, 평균 손익비, 충격 금액 합계와 비율, 왕복별 참여율 경고 | sim-engine, strategy-researcher | strategy-researcher 검토 4~8. 4단계 전략 비교 전 필요 |
+| 지표 보강: ~~관측 일수와 짧은 기간 샤프·CAGR 판정 불가 표시~~(D-069로 끝남: 20일·60일 미만 null, 보고서 `observation-days`), 장중 MDD와 최장 회복 기간, 미청산 포지션 수·평가손익, 평균 손익비, 충격 금액 합계와 비율, 왕복별 참여율 경고 | sim-engine, strategy-researcher | strategy-researcher 검토 4~8. 4단계 전략 비교 전 필요 |
 
 ## 5. 위험과 한계
 
@@ -143,4 +145,4 @@
 - 손 계산: Q-004 조사 5장(국내 23,000원, 미국 50.21달러), TAF 구간·상한, 국내 항목별 절사(`CostModelTest`). 시장가 호가 소진, 앞선 잔량, VI 정지, 체결 시점 현금 부족(`VirtualExchangeTest`). 평균 원가 실현 손익(`VirtualAccountTest`). 지표(`MetricsCalculatorTest`, 기대값은 Python `decimal`로 별도 계산).
 - 골든: 손으로 만든 이틀치 KRX 녹화(`fixtures/krx-golden.events`) + 고정 프로필 3개 → `golden/krx-golden.report`와 바이트 단위 일치. 주요 수치는 `손_계산과_맞는다` 테스트가 따로 확인한다.
 - 결정론: 같은 실험 두 번, 병렬 수 1·3 결과 동일. 계좌 격리: 실패 Run을 섞어도 다른 Run의 체결·요약이 혼자 돌린 결과와 같음.
-- 검증하지 못한 것: 실제 녹화 데이터(키 등록 전이라 없음), 실전 체결 기록과의 오차.
+- 검증하지 못한 것: 실전 체결 기록과의 오차. (실제 녹화 데이터: 어댑터 읽기는 2026-10-12 녹화로 D-068 "검증"에서 확인. 실녹화 실험 두 번 실행은 아직 하지 않았다. 사용자 PC 실행 뒤 `experiments/EXP-20261013-REC01/`에 결과를 커밋할 예정이며 그 전까지 미검증이다.)

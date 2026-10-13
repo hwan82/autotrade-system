@@ -51,7 +51,7 @@ public final class ReportWriter {
                 sb.append("  failure ").append(s.failureReason()).append('\n');
             }
             if (s.metrics() != null) {
-                metrics(sb, s.metrics());
+                metrics(sb, s.metrics(), run.equityCurve().size());
             }
             for (AppliedFill a : run.fills()) {
                 Fill f = a.fill();
@@ -92,8 +92,10 @@ public final class ReportWriter {
         return sb.toString();
     }
 
-    private static void metrics(StringBuilder sb, RunMetrics m) {
-        sb.append("  metrics final-equity=").append(m.finalEquity())
+    /** @param observationDays 자산 곡선 점 수(관측 거래일). 이보다 짧은 기간의 샤프·CAGR은 "-"(판정 불가, D-069) */
+    private static void metrics(StringBuilder sb, RunMetrics m, int observationDays) {
+        sb.append("  metrics observation-days=").append(observationDays)
+                .append(" final-equity=").append(m.finalEquity())
                 .append(" total-return=").append(d(m.totalReturn()))
                 .append(" cagr=").append(d(m.cagr()))
                 .append(" mdd=").append(d(m.maxDrawdown()))

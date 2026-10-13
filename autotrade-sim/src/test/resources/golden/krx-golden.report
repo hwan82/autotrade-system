@@ -1,10 +1,10 @@
 experiment EXP-20261008-GOLD
 code test
 cost-table-hash e80cdaff200f2b572c61effa9866c59b84596ec9834656b249314470f94d2019
-execution-model BOOK-V2;latency=PT0.5S
+execution-model BOOK-V3;latency=PT0.5S
 
 run EXP-20261008-GOLD-A01 status=COMPLETED profile=mkt-hold@1 hash=0af599999cc0652f6bd0d67be9cbc3dcf4ca3d64ac54437e3c6d72846514f9b5 seed=-74931971884477194
-  metrics final-equity=10055715 KRW total-return=0.005572 cagr=1.756541 mdd=0.000000 sharpe=18.254078
+  metrics observation-days=2 final-equity=10055715 KRW total-return=0.005572 cagr=- mdd=0.000000 sharpe=-
   metrics win-rate=1.000000 profit-factor=- avg-holding-days=1.000000 fills=4 round-trips=1 turnover=0.701469
   metrics costs=16285 KRW cost-share=0.226181 benchmark=0.009986 excess=-0.004414
   fill 20260303-005930-BUY-1 #1 ENTRY 60 @ 70100 commission=630 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261008-GOLD-A01-005930-1 realized=- signal-seq=2 fill-seq=4 date=2026-03-03
@@ -16,7 +16,7 @@ run EXP-20261008-GOLD-A01 status=COMPLETED profile=mkt-hold@1 hash=0af599999cc06
   equity 2026-03-04 10055715 KRW cash=10055715 KRW
 
 run EXP-20261008-GOLD-A02 status=COMPLETED profile=limit-maker@1 hash=5ede10bcb626f4ba5c45f06284572c97db5d63eca34c9d0b3e6469932684f45c seed=-1282160161834992474
-  metrics final-equity=10033793 KRW total-return=0.003379 cagr=0.850920 mdd=0.000000 sharpe=11.224972
+  metrics observation-days=2 final-equity=10033793 KRW total-return=0.003379 cagr=- mdd=0.000000 sharpe=-
   metrics win-rate=1.000000 profit-factor=- avg-holding-days=0.000000 fills=3 round-trips=1 turnover=0.700134
   metrics costs=16207 KRW cost-share=0.324140 benchmark=0.009986 excess=-0.006606
   fill 20260303-005930-BUY-1 #1 ENTRY 70 @ 70000 commission=735 KRW tax=0 KRW slippage=0 KRW lot=EXP-20261008-GOLD-A02-005930-1 realized=- signal-seq=2 fill-seq=6 date=2026-03-03
@@ -27,7 +27,7 @@ run EXP-20261008-GOLD-A02 status=COMPLETED profile=limit-maker@1 hash=5ede10bcb6
   equity 2026-03-04 10033793 KRW cash=10033793 KRW
 
 run EXP-20261008-GOLD-A03 status=COMPLETED profile=probe@1 hash=742b0868c582205b9614156344686aeebdafe2fa7a5b7fd0839b6f9a3d9035f9 seed=1319716067403523090
-  metrics final-equity=10000000 KRW total-return=0.000000 cagr=0.000000 mdd=0.000000 sharpe=-
+  metrics observation-days=2 final-equity=10000000 KRW total-return=0.000000 cagr=- mdd=0.000000 sharpe=-
   metrics win-rate=- profit-factor=- avg-holding-days=- fills=0 round-trips=0 turnover=0.000000
   metrics costs=0 KRW cost-share=- benchmark=0.009986 excess=-0.009986
   equity 2026-03-03 10000000 KRW cash=10000000 KRW

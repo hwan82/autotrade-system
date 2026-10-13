@@ -107,6 +107,59 @@ class ExperimentGateTest {
     }
 
     @Test
+    void 정지_요청이_있으면_녹화_실험을_시작하지_않고_결과를_쓰지_않는다(@TempDir Path root) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261013-REC01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261013-REC01\n");
+        stopRequest();
+
+        int code = ExperimentMain.run(new String[] {"recording", "--allow-during-session", root.toString(), "abc", "false",
+                "EXP-20261013-REC01", "--recordings-dir", root.resolve("rec").toString(), "--verify-determinism"},
+                Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC), config);
+
+        assertThat(code).isEqualTo(4);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).extracting(p -> p.getFileName().toString()).containsExactly("experiment.yaml");
+        }
+    }
+
+    @Test
+    void 장_시간에는_녹화_실험을_시작하지_않는다(@TempDir Path root) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261013-REC01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261013-REC01\n");
+
+        int code = ExperimentMain.run(new String[] {"recording", root.toString(), "abc", "false", "EXP-20261013-REC01"},
+                Clock.fixed(Instant.parse(KRX_SESSION), ZoneOffset.UTC), config);
+
+        assertThat(code).isEqualTo(4);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).hasSize(1);
+        }
+    }
+
+    @Test
+    void 녹화_실험_인자가_틀리면_입력_오류다(@TempDir Path root) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261013-REC01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261013-REC01\n");
+        Clock weekend = Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC);
+        String r = root.toString();
+
+        assertThat(ExperimentMain.run(new String[] {"recording", r, "abc", "false"}, weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"recording", r, "abc", "false", "../EXP"}, weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"recording", r, "abc", "false", "EXP-20261013-REC01", "--recordings-dir"},
+                weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"recording", r, "abc", "false", "EXP-20261013-REC01", "--verify"},
+                weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"recording", r, "abc", "false", "EXP-20261013-NONE"}, weekend, config))
+                .isEqualTo(1);
+        // 등록 파일이 녹화 입력이 아니면(input 키 없음) 해석 단계의 입력 오류
+        assertThat(ExperimentMain.run(new String[] {"recording", r, "abc", "false", "EXP-20261013-REC01", "--recordings-dir",
+                root.resolve("rec").toString()}, weekend, config)).isEqualTo(1);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).hasSize(1);
+        }
+    }
+
+    @Test
     void 정지_요청이_있으면_합성_시세_비교_실험도_시작하지_않는다(@TempDir Path root) throws IOException {
         stopRequest();
 

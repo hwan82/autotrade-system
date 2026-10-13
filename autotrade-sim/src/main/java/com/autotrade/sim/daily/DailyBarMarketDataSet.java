@@ -100,6 +100,12 @@ public final class DailyBarMarketDataSet implements MarketDataSet {
         this.events = new Events();
     }
 
+    /** 칸 시각은 합성이라 매매 단계를 보지 않는다(D-069, {@link MarketDataSet#exchangeTimed}). */
+    @Override
+    public boolean exchangeTimed() {
+        return false;
+    }
+
     /**
      * {@code [from, to]}에 그날 상장돼 있던 모든 종목(나중에 상장폐지된 종목 포함, 생존편향 제거)의 일봉으로 만든다.
      *

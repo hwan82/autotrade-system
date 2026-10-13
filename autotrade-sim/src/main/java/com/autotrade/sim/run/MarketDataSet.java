@@ -23,4 +23,13 @@ public interface MarketDataSet {
     Market market();
 
     List<MarketEvent> events();
+
+    /**
+     * 이벤트 시각이 실제 거래소 시각인가(D-069). 그렇지 않은 데이터(일봉 경로처럼 칸 시각을 합성한 것)는 가상 거래소가 매매
+     * 단계(단일가·장 밖)를 보지 않고 모든 이벤트를 접속 매매로 체결한다. 합성 시각은 그날 실제 개장 시각을 따르지 않고(10:00 개장일에도
+     * 09:00 칸), 캘린더 수록 범위 밖 과거도 있기 때문이다. 기본 true.
+     */
+    default boolean exchangeTimed() {
+        return true;
+    }
 }

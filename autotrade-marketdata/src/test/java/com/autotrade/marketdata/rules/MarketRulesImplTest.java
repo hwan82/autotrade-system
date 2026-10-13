@@ -3,6 +3,7 @@ package com.autotrade.marketdata.rules;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.autotrade.domain.SessionPhase;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
@@ -28,6 +29,41 @@ class MarketRulesImplTest {
     })
     void KRX_주식_호가_단위(String price, String tick) {
         assertThat(krx.tickSize(Symbol.krx("005930"), new BigDecimal(price))).isEqualByComparingTo(tick);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        // 2026-10-12(월) 평일 정규장, KST
+        "2026-10-12T08:29:59.999+09:00, CLOSED", "2026-10-12T08:30:00+09:00, OPENING_AUCTION",
+        "2026-10-12T08:50:00+09:00, OPENING_AUCTION", "2026-10-12T09:00:00+09:00, CONTINUOUS",
+        "2026-10-12T15:19:59.999+09:00, CONTINUOUS", "2026-10-12T15:20:00+09:00, CLOSING_AUCTION",
+        "2026-10-12T15:29:59.999+09:00, CLOSING_AUCTION", "2026-10-12T15:30:00+09:00, CLOSED",
+        "2026-10-12T15:40:00+09:00, CLOSED",
+        // 휴장일(2026-10-10 토요일)
+        "2026-10-10T10:00:00+09:00, CLOSED",
+        // 수능일 특별 운영 10:00~16:30: 단일가 구간도 같은 길이로 늦춰 잡는다
+        "2026-11-19T09:00:00+09:00, CLOSED", "2026-11-19T09:30:00+09:00, OPENING_AUCTION",
+        "2026-11-19T10:00:00+09:00, CONTINUOUS", "2026-11-19T16:20:00+09:00, CLOSING_AUCTION",
+        "2026-11-19T16:30:00+09:00, CLOSED",
+    })
+    void KRX_매매_단계는_단일가_구간을_나눈다(String at, SessionPhase phase) {
+        Instant instant = java.time.OffsetDateTime.parse(at).toInstant();
+        assertThat(krx.sessionPhase(instant)).isEqualTo(phase);
+        assertThat(krx.isRegularSession(instant)).isEqualTo(phase == SessionPhase.CONTINUOUS
+                || phase == SessionPhase.CLOSING_AUCTION);
+    }
+
+    @Test
+    void 미국은_단일가_구간을_따로_두지_않는다() {
+        Instant open = java.time.OffsetDateTime.parse("2026-10-12T09:30:00-04:00").toInstant();
+        assertThat(us.sessionPhase(open)).isEqualTo(SessionPhase.CONTINUOUS);
+        assertThat(us.sessionPhase(open.minusSeconds(1))).isEqualTo(SessionPhase.CLOSED);
+    }
+
+    @Test
+    void KRX만_시가_단일가로_연다() {
+        assertThat(krx.opensWithAuction()).isTrue();
+        assertThat(us.opensWithAuction()).isFalse();
     }
 
     @Test

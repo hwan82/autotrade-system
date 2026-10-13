@@ -66,6 +66,32 @@ val runCombinationExperiment by tasks.registering(JavaExec::class) {
     })
 }
 
+// 녹화 실험(D-069): ./gradlew :autotrade-app-experiment:runRecordingExperiment -Pexperiment=<실험ID>
+//     [-PrecordingsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-Pheap=3g]
+// experiments/<실험ID>/experiment.yaml(input: recording)을 읽어 녹화 폴더(기본 <설정 폴더>/recordings)의 실녹화 위에서 장중
+// 프로필을 돌리고 결과를 같은 폴더에 쓴다. 녹화 파일은 결과 폴더에 쓰지 않는다(재배포 금지).
+val runRecordingExperiment by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "전략 프로필을 실녹화 위에서 돌려 experiments/<실험ID>/에 결과를 쓴다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "3g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val recordingsDir = providers.gradleProperty("recordingsDir")
+    val verify = providers.gradleProperty("verifyDeterminism")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            add("recording")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            recordingsDir.orNull?.let { addAll(listOf("--recordings-dir", it)) }
+            if (verify.isPresent) add("--verify-determinism")
+        }
+    })
+}
+
 // 4단계 첫 다중 전략 비교 실험(합성 시세): ./gradlew :autotrade-app-experiment:runStrategyStudy [-PallowDuringSession]
 // 결과는 experiments/EXP-20261008-STR01/에 쓴다.
 val runStrategyStudy by tasks.registering(JavaExec::class) {

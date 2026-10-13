@@ -9,9 +9,11 @@ import java.util.Objects;
  * 정의할 수 없는 지표(예: 손실 거래가 없을 때 손익비)는 null이다. 정의는 ADR-004 2.5.
  *
  * @param totalReturn 최종 평가금액 / 시드 − 1
- * @param cagr 연환산 수익률. 기간은 실험 시작일~종료일 달력 일수 / 365
+ * @param cagr 연환산 수익률. 기간은 실험 시작일~종료일 달력 일수 / 365. 관측 거래일이 {@link MetricsCalculator#MIN_CAGR_DAYS}
+ *     미만이면 null(판정 불가, D-069)
  * @param maxDrawdown 일별 평가금액의 고점 대비 최대 하락률(양수)
- * @param sharpe 일별 수익률 평균 / 표본 표준편차 × √252, 무위험 수익률 0 `[가정]`. 거래일 2일 미만이거나 변동이 없으면 null
+ * @param sharpe 일별 수익률 평균 / 표본 표준편차 × √252, 무위험 수익률 0 `[가정]`. 관측 거래일이
+ *     {@link MetricsCalculator#MIN_SHARPE_DAYS} 미만이거나(판정 불가, D-069) 변동이 없으면 null
  * @param winRate 수익 왕복 거래 수 / 왕복 거래 수
  * @param profitFactor 수익 왕복 손익 합 / |손실 왕복 손익 합|
  * @param avgHoldingDays 왕복 거래의 진입일~청산일 달력 일수 평균(당일 청산은 0)

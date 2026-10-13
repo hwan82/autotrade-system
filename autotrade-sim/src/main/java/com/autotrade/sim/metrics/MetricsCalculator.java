@@ -17,6 +17,13 @@ public final class MetricsCalculator {
     /** 연환산 거래일 수 `[가정]`(KRX·NYSE 모두 연 250~252일). */
     static final int TRADING_DAYS = 252;
     static final int SCALE = 6;
+    /**
+     * 샤프를 내는 최소 관측 거래일 수(자산 곡선 점 수) `[가정]`. 이보다 짧으면 null(판정 불가, D-069). strategy-researcher PR #12
+     * 검토 R4의 기준값이며, 하루 수익률 20개 미만의 표본 표준편차는 연환산하면 크게 흔들린다(이틀 골든에서 18.25가 나옴).
+     */
+    public static final int MIN_SHARPE_DAYS = 20;
+    /** CAGR을 내는 최소 관측 거래일 수 `[가정]`(같은 검토 R4). 석 달보다 짧은 기간의 연환산은 판단에 쓰지 않는다. */
+    public static final int MIN_CAGR_DAYS = 60;
     private static final BigDecimal DAYS_PER_YEAR = BigDecimal.valueOf(365);
 
     private MetricsCalculator() {
@@ -37,7 +44,7 @@ public final class MetricsCalculator {
         BigDecimal totalReturn = growth.subtract(BigDecimal.ONE);
 
         BigDecimal years = BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to) + 1).divide(DAYS_PER_YEAR, DecimalMath.MC);
-        BigDecimal cagr = growth.signum() <= 0
+        BigDecimal cagr = equity.size() < MIN_CAGR_DAYS ? null : growth.signum() <= 0
                 ? BigDecimal.ONE.negate()
                 : DecimalMath.exp(DecimalMath.ln(growth).divide(years, DecimalMath.MC)).subtract(BigDecimal.ONE);
 
@@ -60,7 +67,7 @@ public final class MetricsCalculator {
             }
         }
 
-        BigDecimal sharpe = sharpe(returns);
+        BigDecimal sharpe = equity.size() < MIN_SHARPE_DAYS ? null : sharpe(returns);
 
         int wins = 0;
         BigDecimal gains = BigDecimal.ZERO;
