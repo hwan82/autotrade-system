@@ -211,8 +211,8 @@ class SimulationExperimentRunnerTest {
         assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), FROM, TO, 7,
                 Money.of(10_000_000, Money.KRW), "KR-DEFAULT-000000000000", DATA.version(), ClockMode.REPLAY, ps)))
                 .hasMessageContaining("비용 모델 ID");
-        // 비용 표가 2025-01-01부터라 2024년 데이터 실험은 거부(SIM-07)
-        assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), LocalDate.of(2024, 12, 30),
+        // 비용 표가 2010-01-01부터라 2009년이 걸친 실험은 거부(SIM-07)
+        assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), LocalDate.of(2009, 12, 30),
                 TO, 7, Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY, ps)))
                 .hasMessageContaining("비용 표 밖");
         assertThatThrownBy(() -> runner.run(ExperimentSpec.ofProfiles(new ExperimentId("EXP-X"), FROM, TO, 7,
