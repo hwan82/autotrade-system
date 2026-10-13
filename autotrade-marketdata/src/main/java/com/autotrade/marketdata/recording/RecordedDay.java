@@ -78,15 +78,25 @@ public final class RecordedDay {
         RecordingCodec codec = new RecordingCodec();
         boolean truncated = false;
         List<String> raw = new ArrayList<>();
-        EndTolerantInputStream gz = new EndTolerantInputStream(
-                new GZIPInputStream(Files.newInputStream(events), 64 * 1024), !complete);
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(gz, StandardCharsets.UTF_8))) {
+        try (InputStream file = Files.newInputStream(events)) {
+            GZIPInputStream gzip;
+            try {
+                gzip = new GZIPInputStream(file, 64 * 1024);
+            } catch (EOFException | ZipException e) {
+                // gzip 머리도 다 쓰기 전에 멈춘 녹화(빈 파일, 깨진 머리): 읽을 줄이 없다
+                if (complete) {
+                    throw e;
+                }
+                return true;
+            }
+            EndTolerantInputStream gz = new EndTolerantInputStream(gzip, !complete);
+            BufferedReader r = new BufferedReader(new InputStreamReader(gz, StandardCharsets.UTF_8));
             String line;
             while ((line = r.readLine()) != null) {
                 raw.add(line);
             }
+            truncated = gz.cutShort();
         }
-        truncated = gz.cutShort();
         long expected = 1;
         for (int i = 0; i < raw.size(); i++) {
             RecordingCodec.Line l;

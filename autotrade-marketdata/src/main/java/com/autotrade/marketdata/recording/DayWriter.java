@@ -93,7 +93,11 @@ final class DayWriter implements AutoCloseable {
                 // 정상 종료가 아니었으면 다시 쓰기 전에 원본을 보관한다(되돌리기 어려운 녹화 손실 방지).
                 if (!previous.meta().map(RecordingMeta::complete).orElse(false)) {
                     int segmentNo = previous.meta().map(m -> m.segments().size()).orElse(0) + 1;
-                    Files.copy(events, dir.resolve(restartBackupName(segmentNo)), StandardCopyOption.REPLACE_EXISTING);
+                    Path backup = dir.resolve(restartBackupName(segmentNo));
+                    // 이미 있으면 앞 재기동이 다시 쓰기와 메타 기록 사이에서 멈춘 것이다. 먼저 보관한 원본을 지킨다
+                    if (!Files.exists(backup)) {
+                        Files.copy(events, backup);
+                    }
                 }
                 rewrite(events, previous);
                 for (RecordingCodec.Line l : previous.lines()) {
