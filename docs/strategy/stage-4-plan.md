@@ -22,8 +22,8 @@
 | 순서 | 과제 | 담당 | 왜 먼저인가 |
 |---|---|---|---|
 | 1 | 국내 비용 표 2010년부터(이 PR) | sim-engine 코드, strategy-researcher 자료 | 표가 2025년부터라 2019년 이후 워크포워드 실행이 거부된다(SIM-07) |
-| 2 | 일봉 워크포워드 판정 명령 `runWalkForwardStudy`(3장) | sim-engine | 조합 실험 명령에는 학습·검증 분할, ±20%, 대조군 분포, 선발 판정이 없다 `[사실]`(`CombinationReport.java` 125~127행 안내문) |
-| 3 | 일봉 후보 프로필 3개(4장) | strategy-researcher(로직 코드는 sim-engine·architect 검토) | 일봉 후보가 지금 2개(`kr-ma-trend`, `kr-ma-trend-position`)라 5개에 못 미친다 |
+| 2 | 일봉 워크포워드 판정 명령 `runWalkForwardStudy`(3장, D-072·ADR-009로 구현) | sim-engine | 조합 실험 명령에는 학습·검증 분할, ±20%, 대조군 분포, 선발 판정이 없다 `[사실]`(`CombinationReport.java` 125~127행 안내문) |
+| 3 | 일봉 후보 프로필 3개(5장, D-072로 추가) | strategy-researcher(로직 코드는 sim-engine·architect 검토) | 일봉 후보가 지금 2개(`kr-ma-trend`, `kr-ma-trend-position`)라 5개에 못 미친다 |
 | 4 | 사용자 PC에서 일봉·재무 전체 수집([수집기 runbook](../runbooks/collector.md) 3장) | 사용자 | 실데이터. 키 발급·수집은 무료 |
 | 5 | 사전 등록 → 실행 두 번(결정론) → 리포트 | strategy-researcher(실행은 사용자 PC) | |
 
