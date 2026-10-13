@@ -7,6 +7,7 @@ import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.cost.KrxBoard;
+import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ExperimentStoppedException;
 import com.autotrade.sim.run.RunGate;
@@ -169,7 +170,7 @@ public final class StudyMain {
         sb.append("seed: ").append(c.randomSeed()).append('\n');
         sb.append("seed-capital: \"").append(c.seedCapital()).append("\"\n");
         sb.append("cost-model: ").append(costModelId).append('\n');
-        sb.append("execution:\n  rules: BOOK-V1\n  base-latency-ms: ").append(c.baseLatency().toMillis()).append('\n');
+        sb.append("execution:\n  rules: ").append(ExecutionSettings.RULES_VERSION).append("\n  base-latency-ms: ").append(c.baseLatency().toMillis()).append('\n');
         sb.append("  latencies-ms: \"").append(String.join(",", c.latencies().stream().map(d -> Long.toString(d.toMillis())).toList()))
                 .append("\"\n");
         sb.append("profiles:\n");

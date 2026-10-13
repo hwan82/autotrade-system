@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.Money;
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.risk.BlacklistEntry;
 import com.autotrade.risk.BlacklistSnapshot;
 import com.autotrade.risk.BlacklistType;
@@ -21,7 +23,9 @@ import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.exchange.ExecutionSettings;
+import com.autotrade.sim.recording.RecordedMarketDataSet;
 import com.autotrade.sim.testing.FixtureEvents;
+import com.autotrade.sim.testing.FixtureRecordings;
 import com.autotrade.sim.testing.FixtureStrategies;
 import com.autotrade.sim.testing.TestKrxRules;
 import com.autotrade.strategy.StrategyProfile;
@@ -31,10 +35,13 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * 3단계 완료 기준(TST-02): 고정 녹화 데이터 + 고정 프로필 → 거래 내역·지표가 골든 스냅샷과 정확히 일치.
@@ -71,6 +78,49 @@ class SimulationExperimentRunnerTest {
         assertThat(actual).isEqualTo(read(GOLDEN));
     }
 
+    /**
+     * 3단계 완료 기준(로드맵 6장 "녹화 데이터로 골든 테스트 통과", ADR-004 4장): 같은 이틀치를 2단계 녹화기로 실제 녹화 형식에
+     * 쓰고 녹화 어댑터로 읽어 돌리면 같은 골든과 바이트 단위로 같다.
+     */
+    @Test
+    void 녹화_형식으로_다시_돌려도_같은_골든과_일치한다(@TempDir Path root) throws IOException {
+        FixtureRecordings.record(root, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        RecordedMarketDataSet recorded = RecordedMarketDataSet.open(new RecordingLayout(root), Market.KRX, FROM, TO);
+        assertThat(recorded.days()).extracting(RecordedMarketDataSet.DayInfo::recordedEvents).containsExactly(14L, 3L);
+
+        String actual = ReportWriter.render(runner(recorded, 2).runDetailed(spec(recorded, List.of(MKT_HOLD, LIMIT_MAKER, PROBE))));
+        assertThat(actual).isEqualTo(read(GOLDEN));
+    }
+
+    @Test
+    void 입력_시세의_공백은_보고서에_남고_공백_뒤_같은_가격_체결로는_대기_지정가가_체결되지_않는다() {
+        // 골든 1일차 seq 4(대기 시작) 뒤에 005930 끊김을 넣는다. 원래는 seq 6에서 70주가 체결된다
+        List<MarketEvent> withGap = new ArrayList<>();
+        for (MarketEvent e : EVENTS) {
+            withGap.add(e);
+            if (e.sequence() == 4) {
+                Instant t = e.receivedAt().plusMillis(100);
+                withGap.add(new DataGap(SAMSUNG, 0, t, t, e.receivedAt(), t, DataGap.GapReason.DISCONNECTED));
+            }
+        }
+        List<MarketEvent> renumbered = new ArrayList<>();
+        for (MarketEvent e : withGap) {
+            renumbered.add(FixtureEvents.withSequence(e, renumbered.size() + 1L));
+        }
+        MarketDataSet data = new InMemoryMarketDataSet("FIXTURE-KRX-GOLDEN-GAP", Market.KRX, renumbered);
+        SimulationReport r = runner(data, 1).runDetailed(spec(data, List.of(LIMIT_MAKER)));
+
+        assertThat(r.dataGaps()).singleElement().satisfies(g -> assertThat(g.sequence()).isEqualTo(5));
+        assertThat(ReportWriter.render(r)).contains("data-gap seq=5 KRX:005930 DISCONNECTED ");
+        // 공백으로 앞선 잔량(350)을 모르게 돼 seq 6·7(70,000 체결)로는 체결되지 않는다. 지정가보다 유리한 69,900 체결 중
+        // seq 9는 VI 중이라 막히고, VI 해제 뒤 seq 11(69,900 × 40)에서 처음 40주가 지정가로 체결된다
+        assertThat(r.runs().get(0).fills()).first().satisfies(a -> {
+            assertThat(a.fill().fillEventSeq()).isEqualTo(11L);
+            assertThat(a.fill().quantity()).isEqualTo(40L);
+            assertThat(a.fill().price().toPlainString()).isEqualTo("70000");
+        });
+    }
+
     @Test
     void 손_계산과_맞는다() {
         SimulationReport r = runner(1).runDetailed(spec(List.of(MKT_HOLD, LIMIT_MAKER, PROBE)));
@@ -105,7 +155,7 @@ class SimulationExperimentRunnerTest {
         // 벤치마크(005930 매수 후 보유): 70,100 → 70,800
         assertThat(hold.summary().metrics().benchmarkReturn()).isEqualByComparingTo("0.009986");
         assertThat(r.result().costTableHash()).isEqualTo(COST.tableHash(FROM, TO));
-        assertThat(r.result().executionModelId()).isEqualTo("BOOK-V1;latency=PT0.5S");
+        assertThat(r.result().executionModelId()).isEqualTo("BOOK-V2;latency=PT0.5S");
     }
 
     @Test
@@ -196,7 +246,11 @@ class SimulationExperimentRunnerTest {
     // ---- 도우미 ----
 
     private static SimulationExperimentRunner runner(int parallelism) {
-        return new SimulationExperimentRunner(DATA, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
+        return runner(DATA, parallelism);
+    }
+
+    private static SimulationExperimentRunner runner(MarketDataSet data, int parallelism) {
+        return new SimulationExperimentRunner(data, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
                 RiskChain.builder(BlacklistSnapshot.of(List.of(new BlacklistEntry(HYNIX, BlacklistType.MANUAL, "테스트"))))
                         .build(),
                 ExecutionSettings.defaults(), new CodeVersion("test", false),
@@ -204,8 +258,12 @@ class SimulationExperimentRunnerTest {
     }
 
     private static ExperimentSpec spec(List<StrategyProfile> profiles) {
+        return spec(DATA, profiles);
+    }
+
+    private static ExperimentSpec spec(MarketDataSet data, List<StrategyProfile> profiles) {
         return ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD"), FROM, TO, 7, Money.of(10_000_000, Money.KRW),
-                COST.id(), DATA.version(), ClockMode.REPLAY, profiles);
+                COST.id(), data.version(), ClockMode.REPLAY, profiles);
     }
 
     private static StrategyProfile profile(String id, String... kv) {

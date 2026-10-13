@@ -11,8 +11,12 @@ import java.util.Objects;
  */
 public record ExecutionSettings(Duration orderLatency) {
 
-    /** 체결 규칙 버전. 규칙을 바꾸면 올린다(같은 데이터·프로필이라도 결과가 달라지므로). */
-    public static final String RULES_VERSION = "BOOK-V1";
+    /**
+     * 체결 규칙 버전. 규칙을 바꾸면 올린다(같은 데이터·프로필이라도 결과가 달라지므로).
+     * BOOK-V2(D-068): 시세 공백({@code DataGap})에서 그 종목 호가와 대기 지정가의 앞선 잔량을 버린다. 공백 없는 데이터의
+     * 결과는 BOOK-V1과 같다(골든 테스트로 확인).
+     */
+    public static final String RULES_VERSION = "BOOK-V2";
 
     /**
      * 기본 주문 지연 0.5초 `[가정]`. 실측 근거가 없어 MON-04 목표(1.5초)보다 낙관적인 값으로 두고,
@@ -31,7 +35,7 @@ public record ExecutionSettings(Duration orderLatency) {
         return new ExecutionSettings(DEFAULT_LATENCY);
     }
 
-    /** 예: {@code BOOK-V1;latency=PT0.5S}. */
+    /** 예: {@code BOOK-V2;latency=PT0.5S}. */
     public String id() {
         return RULES_VERSION + ";latency=" + orderLatency;
     }

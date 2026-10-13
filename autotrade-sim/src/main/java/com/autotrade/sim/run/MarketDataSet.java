@@ -12,7 +12,7 @@ import java.util.List;
  * <ul>
  *   <li>{@link #events()}는 sequence 오름차순(중복 없음)이고 불변이다. 실행기가 확인하고 어기면 실험을 시작하지 않는다.</li>
  *   <li>같은 {@link #version()}이면 같은 이벤트다.</li>
- *   <li>2단계 녹화(RecordedReplaySource, ADR-003 시세)는 어댑터로 이 계약에 맞춘다(ADR-004 4장).</li>
+ *   <li>2단계 녹화(ADR-003 시세)는 {@code RecordedMarketDataSet}이 이 계약에 맞춘다(ADR-004 4장, D-068).</li>
  * </ul>
  */
 public interface MarketDataSet {

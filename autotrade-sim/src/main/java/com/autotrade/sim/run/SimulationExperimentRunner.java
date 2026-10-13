@@ -4,6 +4,7 @@ import com.autotrade.domain.MarketRules;
 import com.autotrade.domain.Money;
 import com.autotrade.domain.account.AccountId;
 import com.autotrade.domain.account.AccountSnapshot;
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
@@ -190,7 +191,13 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         List<RunResult> summaries = reports.stream().map(RunReport::summary).toList();
         ExperimentResult result = new ExperimentResult(spec.id(), code.commit(), code.dirty(),
                 cost.tableHash(spec.from(), spec.to()), execution.id(), summaries);
-        return new SimulationReport(result, reports);
+        List<DataGap> gaps = new ArrayList<>();
+        for (MarketEvent e : events) {
+            if (e instanceof DataGap g) {
+                gaps.add(g);
+            }
+        }
+        return new SimulationReport(result, reports, gaps);
     }
 
     private List<MarketEvent> validateAndSlice(ExperimentSpec spec) {
