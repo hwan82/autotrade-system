@@ -1,7 +1,7 @@
 # D-071 4단계(전략 탐색) 범위·순서와 국내 비용 표 2010년 연혁
 
 - 날짜: 2026-10-13
-- 상태: 추천안 채택(자율). 4번(스윙 구간)만 사용자 확인 대기(Q-051)
+- 상태: 추천안 채택(자율). 4번(스윙 구간)은 사용자 결정으로 확정([D-073](D-073-swing-walkforward-criteria.md), Q-051 닫힘)
 - 담당: strategy-researcher(비용 표 코드는 sim-engine 영역, 같은 PR에서 architect 검토)
 - 근거: [4단계 계획](../strategy/stage-4-plan.md), [Q-004 조사](../research/q-004-trading-costs.md) 1.3절, D-027, D-066, D-070
 
