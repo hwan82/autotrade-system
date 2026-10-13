@@ -248,6 +248,156 @@ class RecordingReplayTest {
         assertThat(day.lines()).hasSize(2);
     }
 
+    /**
+     * 쓰기 스레드가 {@code flush()}까지 한 뒤 닫지 못하고 죽은 녹화(창 닫힘, 전원 꺼짐)를 만든다.
+     * flush 직후 파일 두 개를 떠 두고, 쓰기를 닫은 뒤 그 사본으로 되돌린다(열린 핸들을 남기지 않아 Windows에서도 같다).
+     */
+    private Path crashAfterFlush(List<Object[]> in) throws IOException {
+        Path dir = new RecordingLayout(root).dayDir(Market.KRX, LocalDate.of(2026, 10, 8));
+        DayWriter w = new DayWriter(dir, Market.KRX, LocalDate.of(2026, 10, 8), SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"),
+                "", OPEN);
+        for (Object[] row : in) {
+            w.write((String) row[0], (MarketEvent) row[1]);
+        }
+        crash(w, dir);
+        return dir;
+    }
+
+    private static void crash(DayWriter w, Path dir) throws IOException {
+        w.flush();
+        byte[] events = Files.readAllBytes(dir.resolve(RecordingLayout.EVENTS_FILE));
+        byte[] meta = Files.readAllBytes(dir.resolve(RecordingLayout.META_FILE));
+        w.close();
+        Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), events);
+        Files.write(dir.resolve(RecordingLayout.META_FILE), meta);
+    }
+
+    @Test
+    void gzip_머리도_다_쓰기_전에_멈춘_녹화는_빈_녹화로_읽고_이어_쓴다() throws IOException {
+        byte[][] broken = {new byte[0], {0x1f}, {0x1f, (byte) 0x8b, 8, 0}, {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09}};
+        for (byte[] head : broken) {
+            Path dir = new RecordingLayout(root).dayDir(Market.KRX, LocalDate.of(2026, 10, 8));
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), head);
+            RecordedDay day = RecordedDay.open(dir);
+            assertThat(day.lines()).as("머리 %d바이트", head.length).isEmpty();
+            assertThat(day.truncated()).as("머리 %d바이트", head.length).isTrue();
+
+            record(samsungTicks(3));
+            assertThat(RecordedDay.open(dir).lines()).as("머리 %d바이트", head.length).hasSize(3);
+            deleteDay(dir);
+        }
+    }
+
+    @Test
+    void 정상_종료_녹화의_gzip_머리가_깨졌으면_손상으로_본다() throws IOException {
+        Path dir = record(samsungTicks(3));
+        Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), new byte[] {0x1f});
+        assertThatThrownBy(() -> RecordedDay.open(dir)).isInstanceOf(IllegalStateException.class); // 해시 불일치
+    }
+
+    @Test
+    void 재기동이_다시_쓰기_뒤_메타_기록_전에_또_멈춰도_처음_보관한_원본을_덮지_않는다() throws IOException {
+        Path dir = crashAfterFlush(samsungTicks(10));
+        byte[] original = Files.readAllBytes(dir.resolve(RecordingLayout.EVENTS_FILE));
+        Path backup = dir.resolve(DayWriter.restartBackupName(2));
+        Files.write(backup, original);
+        Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), new byte[] {0x1f, (byte) 0x8b}); // 다시 쓰다 멈춘 파일
+        record(samsungTicks(1));
+        assertThat(backup).hasBinaryContent(original);
+    }
+
+    private static List<Object[]> samsungTicks(int n) {
+        List<Object[]> in = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            Instant t = OPEN.plusMillis(i * 37L);
+            in.add(new Object[] {"KIWOOM-WS", new TradeTick(SAMSUNG, i + 1, t, t, new BigDecimal(71000 + (i % 13) * 100), 1)});
+        }
+        return in;
+    }
+
+    @Test
+    void 비정상_종료_전_flush한_줄은_줄_수와_무관하게_모두_읽힌다() throws IOException {
+        for (int n : new int[] {1, 2, 10, 100, 1_000}) {
+            Path dir = crashAfterFlush(samsungTicks(n));
+            RecordedDay day = RecordedDay.open(dir);
+            assertThat(day.lines()).as("N=%d", n).hasSize(n);
+            assertThat(day.truncated()).as("N=%d", n).isTrue();
+            deleteDay(dir);
+        }
+    }
+
+    @Test
+    void 비정상_종료_뒤_재기동하면_flush한_줄을_지우지_않고_재기동_공백을_남긴다() throws IOException {
+        for (int n : new int[] {1, 100}) {
+            List<Object[]> first = samsungTicks(n);
+            Path dir = crashAfterFlush(first);
+            Instant lastAlive = ((MarketEvent) first.get(n - 1)[1]).receivedAt();
+            Instant resumed = lastAlive.plusSeconds(60);
+            record(List.<Object[]>of(new Object[] {"KIWOOM-WS",
+                    new TradeTick(SAMSUNG, n + 1, resumed, resumed, new BigDecimal("71000"), 1)}));
+
+            RecordedDay day = RecordedDay.open(dir);
+            assertThat(day.truncated()).as("N=%d", n).isFalse();
+            assertThat(day.lines()).as("N=%d", n).hasSize(n + 2);
+            for (int i = 0; i < n; i++) {
+                assertThat(day.lines().get(i).event())
+                        .isEqualTo(EventSequences.withSequence((MarketEvent) first.get(i)[1], i + 1));
+            }
+            assertThat(day.lines().get(n).event()).isEqualTo(
+                    new DataGap(SAMSUNG, n + 1, resumed, resumed, lastAlive, resumed, DataGap.GapReason.RECORDER_RESTART));
+            assertThat(day.unmarkedRestarts()).isEmpty();
+            deleteDay(dir);
+        }
+    }
+
+    @Test
+    void 비정상_종료_뒤_재기동은_다시_쓰기_전_원본을_보관한다() throws IOException {
+        Path dir = crashAfterFlush(samsungTicks(10));
+        byte[] original = Files.readAllBytes(dir.resolve(RecordingLayout.EVENTS_FILE));
+        record(List.<Object[]>of(new Object[] {"KIWOOM-WS",
+                new TradeTick(SAMSUNG, 11, OPEN.plusSeconds(60), OPEN.plusSeconds(60), new BigDecimal("71000"), 1)}));
+        assertThat(dir.resolve(DayWriter.restartBackupName(2))).hasBinaryContent(original);
+    }
+
+    @Test
+    void 정상_종료_뒤_재기동은_보관본을_만들지_않는다() {
+        Path dir = record(scriptedDay().subList(0, 10));
+        record(scriptedDay().subList(10, 20));
+        assertThat(dir.resolve(DayWriter.restartBackupName(2))).doesNotExist();
+    }
+
+    @Test
+    void 비정상_종료가_두_번_이어져도_세_번째_기동까지_줄과_재기동_공백이_모두_남는다() throws IOException {
+        Path dir = crashAfterFlush(samsungTicks(2));
+        Instant t2 = OPEN.plusSeconds(60);
+        DayWriter second = new DayWriter(dir, Market.KRX, LocalDate.of(2026, 10, 8), SEOUL,
+                Map.of("KIWOOM-WS", "KRX_REALTIME"), "", t2);
+        second.write("KIWOOM-WS", new TradeTick(SAMSUNG, 3, t2, t2, new BigDecimal("71000"), 1));
+        second.write("KIWOOM-WS", new TradeTick(HYNIX, 1, t2, t2, new BigDecimal("120000"), 1));
+        crash(second, dir);
+        Instant t3 = OPEN.plusSeconds(120);
+        record(List.<Object[]>of(new Object[] {"KIWOOM-WS", new TradeTick(SAMSUNG, 4, t3, t3, new BigDecimal("71100"), 1)}));
+
+        RecordedDay day = RecordedDay.open(dir);
+        // 1구간 2줄, 2구간 공백 1(005930) + 2줄, 3구간 공백 2(000660, 005930) + 1줄
+        assertThat(day.lines()).hasSize(8);
+        assertThat(day.lines()).filteredOn(l -> l.event() instanceof DataGap g && g.reason() == DataGap.GapReason.RECORDER_RESTART)
+                .extracting(l -> l.event().symbol()).containsExactly(SAMSUNG, HYNIX, SAMSUNG);
+        assertThat(day.meta().orElseThrow().segments()).extracting(RecordingMeta.Segment::firstSeq).containsExactly(1L, 3L, 6L);
+        assertThat(day.unmarkedRestarts()).isEmpty();
+        assertThat(dir.resolve(DayWriter.restartBackupName(2))).exists();
+        assertThat(dir.resolve(DayWriter.restartBackupName(3))).exists();
+    }
+
+    private static void deleteDay(Path dir) throws IOException {
+        try (var files = Files.list(dir)) {
+            for (Path f : files.toList()) {
+                Files.delete(f);
+            }
+        }
+    }
+
     @Test
     void 순번이_끊긴_녹화는_손상으로_본다() throws IOException {
         Path dir = root.resolve("KRX/2026-10-08");
