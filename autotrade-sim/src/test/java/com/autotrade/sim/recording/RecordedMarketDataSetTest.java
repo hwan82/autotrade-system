@@ -23,9 +23,11 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.function.UnaryOperator;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -99,7 +101,8 @@ class RecordedMarketDataSetTest {
         Path marked = root.resolve("marked");
         recordDay1WithRestart(marked);
         Path legacyRoot = root.resolve("legacy");
-        writeLegacyCopy(new RecordingLayout(marked).dayDir(Market.KRX, D1), new RecordingLayout(legacyRoot).dayDir(Market.KRX, D1));
+        writeLegacyCopy(new RecordingLayout(marked).dayDir(Market.KRX, D1), new RecordingLayout(legacyRoot).dayDir(Market.KRX, D1),
+                segs -> segs);
 
         RecordedMarketDataSet expected = RecordedMarketDataSet.open(new RecordingLayout(marked), Market.KRX, D1, D1);
         RecordedMarketDataSet legacy = RecordedMarketDataSet.open(new RecordingLayout(legacyRoot), Market.KRX, D1, D1);
@@ -115,6 +118,34 @@ class RecordedMarketDataSetTest {
         assertThat(legacy.origin(15)).isEqualTo(new RecordedMarketDataSet.Origin(D1, 0));
         assertThat(legacy.origin(16)).isEqualTo(new RecordedMarketDataSet.Origin(D1, 14));
         assertThat(legacy.version()).isNotEqualTo(expected.version());
+    }
+
+    /**
+     * 이전 녹화기에서 줄 없이 끝난 구간이 끼면 같은 firstSeq 경계가 둘이다. 녹화기처럼 공백은 한 번만 넣고, 시작은 마지막
+     * 경계 직전 구간(줄 없는 구간)의 끝이 경계 직전 줄 수신보다 늦으면 그 끝으로 잡는다.
+     */
+    @Test
+    void 줄_없이_끝난_구간이_낀_이전_녹화는_공백을_한_번만_넣고_그_구간_끝부터_잡는다() throws IOException {
+        Path marked = root.resolve("marked");
+        recordDay1WithRestart(marked);
+        Instant lastRx = EVENTS.get(12).receivedAt();
+        Instant emptyEnded = lastRx.plusSeconds(10);
+        Path legacyRoot = root.resolve("legacy");
+        writeLegacyCopy(new RecordingLayout(marked).dayDir(Market.KRX, D1), new RecordingLayout(legacyRoot).dayDir(Market.KRX, D1),
+                segs -> List.of(segs.get(0),
+                        new RecordingMeta.Segment(lastRx.plusSeconds(5).toString(), emptyEnded.toString(), 14),
+                        segs.get(1)));
+
+        RecordedMarketDataSet legacy = RecordedMarketDataSet.open(new RecordingLayout(legacyRoot), Market.KRX, D1, D1);
+        RecordedMarketDataSet.DayInfo day = legacy.days().get(0);
+        assertThat(day.unmarkedRestarts()).containsExactly(14L, 14L);
+        assertThat(day.insertedGaps()).isEqualTo(2);
+        assertThat(legacy.events().subList(13, 15)).allSatisfy(e -> {
+            DataGap g = (DataGap) e;
+            assertThat(g.gapStart()).isEqualTo(emptyEnded);
+            assertThat(g.gapEnd()).isEqualTo(EVENTS.get(13).receivedAt());
+        });
+        assertThat(legacy.events()).hasSize(16);
     }
 
     @Test
@@ -138,7 +169,8 @@ class RecordedMarketDataSetTest {
     }
 
     /** 녹화에서 RECORDER_RESTART 줄만 빼고 순번을 다시 매긴 이전 형식 녹화(D-065 이전 녹화기가 남겼을 녹화)를 쓴다. */
-    private static void writeLegacyCopy(Path from, Path to) throws IOException {
+    private static void writeLegacyCopy(Path from, Path to, UnaryOperator<List<RecordingMeta.Segment>> segments)
+            throws IOException {
         RecordedDay day = RecordedDay.open(from);
         RecordingCodec codec = new RecordingCodec();
         Files.createDirectories(to);
@@ -160,7 +192,7 @@ class RecordedMarketDataSetTest {
         RecordingMeta m = day.meta().orElseThrow();
         // 새 구간 firstSeq는 공백 줄을 빼도 같은 번호(새 구간 첫 이벤트)를 가리킨다
         StringBuilder segs = new StringBuilder();
-        for (RecordingMeta.Segment s : m.segments()) {
+        for (RecordingMeta.Segment s : segments.apply(m.segments())) {
             if (!segs.isEmpty()) {
                 segs.append(',');
             }

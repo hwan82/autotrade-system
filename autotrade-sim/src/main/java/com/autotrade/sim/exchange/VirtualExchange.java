@@ -57,11 +57,11 @@ import java.util.Set;
  *   <li><b>거래 상태</b>: 종목 상태가 TRADING이 아니면(VI, LULD, 정지) 체결하지 않는다(OVS-06). 주문은 유지한다.</li>
  *   <li><b>현금</b>: 매수 체결 직전 (현금 − 다른 주문의 예약 현금)으로 살 수 있는 수량까지만 체결하고, 모자란 잔량은 취소한다.</li>
  *   <li><b>당일 유효</b>: {@link #endOfDay}에서 남은 주문을 만료시킨다({@code EXPIRED}, ORD-07).</li>
- *   <li><b>시세 공백</b>({@link DataGap}, 원인 무관, D-068): 그 종목의 마지막 호가 스냅샷을 버리고, 대기 중인 지정가 주문의
+ *   <li><b>시세 공백</b>({@link DataGap}, 원인 무관, D-068): 그 종목의 마지막 호가 스냅샷을 체결·예약에 쓰지 않고, 대기 중인 지정가 주문의
  *       앞선 잔량을 "모름"으로 되돌린다. 공백 동안 무엇이 체결됐는지 모르므로 공백 자체로는 체결하지 않는다. 다음 호가
  *       스냅샷이 오기 전까지 그 종목 시장가는 체결되지 않고(호가가 있는 종목은 스냅샷으로만 체결), 대기 지정가는 지정가보다
  *       유리한 체결로만 체결된다. 새 스냅샷이 오면 앞선 잔량을 그 스냅샷의 같은 가격 잔량으로 다시 잡는다(공백 동안 뒤에 줄 선
- *       주문까지 앞에 둔 셈이라 보수적). 마지막 체결가와 거래 상태는 평가·판단용으로 그대로 둔다.</li>
+ *       주문까지 앞에 둔 셈이라 보수적). 평가 가격(마지막 체결가, 없으면 마지막 스냅샷 최우선 매수 호가)과 거래 상태는 그대로 둔다.</li>
  *   <li>우리 주문이 시장에 준 영향(소진한 잔량)은 다음 스냅샷에 이어지지 않는다 `[가정]`: 실제 스냅샷이 시장 상태다.
  *       주문 규모가 호가 잔량보다 충분히 작다는 전제이며, 큰 주문의 성과는 과대평가될 수 있다.</li>
  * </ul>
@@ -84,6 +84,8 @@ public final class VirtualExchange implements OrderGateway {
     private final Map<Symbol, BigDecimal> lastTrade = new HashMap<>();
     private final Map<Symbol, InstrumentStatus> status = new HashMap<>();
     private final Set<Symbol> booksSeen = new HashSet<>();
+    /** 시세 공백 뒤 아직 새 스냅샷이 오지 않은 종목. 그 종목의 마지막 스냅샷은 평가에만 쓰고 체결·예약에는 쓰지 않는다. */
+    private final Set<Symbol> staleBooks = new HashSet<>();
     private final List<AppliedFill> newFills = new ArrayList<>();
     private long currentSeq = Long.MIN_VALUE;
     private Instant currentReceivedAt;
@@ -130,6 +132,7 @@ public final class VirtualExchange implements OrderGateway {
             booksSeen.add(book.symbol());
             matchBook(book);
             books.put(book.symbol(), book);
+            staleBooks.remove(book.symbol());
         } else if (event instanceof TradeTick tick) {
             matchTrade(tick);
             lastTrade.put(tick.symbol(), tick.price());
@@ -214,7 +217,7 @@ public final class VirtualExchange implements OrderGateway {
         return o == null ? null : o.reason;
     }
 
-    /** 평가 가격: 마지막 체결가, 없으면 최우선 매수 호가, 둘 다 없으면 null. */
+    /** 평가 가격: 마지막 체결가, 없으면 최우선 매수 호가(시세 공백 전 스냅샷이어도), 둘 다 없으면 null. */
     public BigDecimal markPrice(Symbol symbol) {
         BigDecimal last = lastTrade.get(symbol);
         if (last != null) {
@@ -229,9 +232,9 @@ public final class VirtualExchange implements OrderGateway {
         return lastTrade.get(symbol);
     }
 
-    /** 시세 공백: 그 종목 호가와 대기 지정가의 앞선 잔량을 버린다(D-068). */
+    /** 시세 공백: 그 종목 호가를 체결·예약에 쓰지 않게 하고 대기 지정가의 앞선 잔량을 버린다(D-068). */
     private void invalidate(Symbol symbol) {
-        books.remove(symbol);
+        staleBooks.add(symbol);
         for (VirtualOrder o : open.values()) {
             if (o.request.symbol().equals(symbol)) {
                 o.queueAhead = null;
@@ -278,7 +281,7 @@ public final class VirtualExchange implements OrderGateway {
             return o.request.limitPrice();
         }
         Symbol s = o.request.symbol();
-        OrderBookSnapshot book = books.get(s);
+        OrderBookSnapshot book = staleBooks.contains(s) ? null : books.get(s);
         BigDecimal base = book != null && !book.asks().isEmpty() ? book.asks().get(0).price() : lastTrade.get(s);
         return base == null ? null : base.multiply(BigDecimal.ONE.add(cost.slippageRate()));
     }

@@ -43,6 +43,7 @@ import java.util.TreeSet;
  * 녹화({@link RecordedDay#unmarkedRestarts()}가 비어 있지 않음)는 그 구간 경계 바로 앞에 녹화기와 같은 규칙으로 공백을
  * 끼워 넣는다: 경계 앞에 나온 종목마다(종목 정렬 순) 하나씩, 시작은 앞 프로세스가 살아 있던 마지막 시각(앞 구간 끝과
  * 경계 직전 줄 수신 시각 중 늦은 쪽), 끝은 경계 첫 줄 수신 시각, 시작이 끝보다 늦으면 끝에 맞춘다(DayWriter와 같음).
+ * 줄 없이 끝난 구간 때문에 같은 줄 앞에 경계가 여럿이면 한 번만 넣고 마지막 경계 직전 구간 끝으로 시작을 잡는다.
  * 끼워 넣은 줄의 {@link Origin#recordingSeq()}는 0이다. 녹화 파일은 고치지 않는다(D-065 3번).
  *
  * <p><b>버전</b>: {@value #ADAPTER_VERSION}, 시장, 날짜 범위와, 읽은 녹화 파일들의 SHA-256을 이어 해시한 값이다. 같은 파일이면
@@ -142,9 +143,15 @@ public final class RecordedMarketDataSet implements MarketDataSet {
             for (int i = 0; i < lines.size(); i++) {
                 RecordingCodec.Line line = lines.get(i);
                 if (nextBoundary < unmarked.size() && unmarked.get(nextBoundary).firstSeq() == line.seq()) {
-                    // 공백 표시 없는 구간 경계(D-065 이전 녹화): 녹화기와 같은 규칙으로 앞 구간 종목마다 공백을 넣는다
+                    // 공백 표시 없는 구간 경계(D-065 이전 녹화): 녹화기와 같은 규칙으로 앞 구간 종목마다 공백을 넣는다.
+                    // 줄 없이 끝난 구간이 끼면 같은 firstSeq 경계가 여럿이다. 녹화기는 이벤트를 받은 마지막 기동에서만
+                    // 공백을 쓰고 그 직전 구간 끝으로 시작을 잡으므로, 한 번만 넣고 마지막 경계로 시작을 잡는다
+                    RecordingMeta.Segment boundary = unmarked.get(nextBoundary);
+                    while (nextBoundary + 1 < unmarked.size() && unmarked.get(nextBoundary + 1).firstSeq() == line.seq()) {
+                        boundary = unmarked.get(++nextBoundary);
+                    }
                     Instant resumed = line.event().receivedAt();
-                    Instant start = lastAlive(day.meta().orElseThrow().segments(), unmarked.get(nextBoundary),
+                    Instant start = lastAlive(day.meta().orElseThrow().segments(), boundary,
                             lines.get(i - 1).event().receivedAt());
                     if (start.isAfter(resumed)) {
                         start = resumed;

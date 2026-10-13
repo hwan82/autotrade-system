@@ -274,6 +274,8 @@ class VirtualExchangeTest {
         event(gap(2000));
         // 공백 전 호가로 예약 현금을 잡지 않는다. 체결가도 마지막 체결도 없으니 기준 가격이 없다(D-068)
         assertThat(ack(Side.BUY, OrderType.MARKET, null, 10).state()).isEqualTo(OrderState.REJECTED);
+        // 평가는 공백 전 마지막 스냅샷의 최우선 매수 호가를 그대로 쓴다
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70000");
         event(book(3000, asks("70100x60"), bids("70000x400")));
         submit(Side.BUY, OrderType.MARKET, null, 10);
     }
