@@ -45,7 +45,8 @@ public final class CostModels {
     public static CostModel krDefault(Function<Symbol, KrxBoard> boardOf) {
         Levy commission = Levy.RateLevy.flat(
                 "commission", CostCategory.COMMISSION, null, RoundingMode.FLOOR, KR_TABLE_START, "0.00015");
-        // 경계 체결일(결제일 T+2가 시행일 이후가 되는 첫 거래일). 연말 휴장일(12-31 또는 그 주 금요일)은 결제도 없다 `[추론]`
+        // 경계 체결일: 결제일(T+2)이 시행일 이후가 되는 첫 체결 거래일. T+2는 KRX 휴장일을 빼고 센다. 연말 휴장일(12-31,
+        // 12-31이 주말이면 그 직전 평일)에는 결제도 없다고 본다 `[추론]`
         LocalDate c2019 = LocalDate.of(2019, 5, 30);  // 2019-06-03 양도분부터
         LocalDate c2021 = LocalDate.of(2020, 12, 29); // 2021-01-04 결제
         LocalDate c2023 = LocalDate.of(2022, 12, 28); // 2023-01-02 결제

@@ -59,6 +59,15 @@ class CostModelTest {
         // 2019-05-30 체결분부터 인하(2019-06-03 양도분)
         assertThat(sttOn(kosdaq, LocalDate.of(2019, 5, 29), price)).isEqualTo(krw(3000));
         assertThat(sttOn(kosdaq, LocalDate.of(2019, 5, 30), price)).isEqualTo(krw(2500));
+        // 2020-12-29(화) 체결분은 12-31 연말 휴장을 건너 2021-01-04 결제
+        assertThat(sttOn(kosdaq, LocalDate.of(2020, 12, 28), price)).isEqualTo(krw(2500));
+        assertThat(sttOn(kosdaq, LocalDate.of(2020, 12, 29), price)).isEqualTo(krw(2300));
+        // 2022-12-28(수) 체결분은 12-30(금) 연말 휴장을 건너 2023-01-02 결제
+        assertThat(sttOn(kosdaq, LocalDate.of(2022, 12, 27), price)).isEqualTo(krw(2300));
+        assertThat(sttOn(kosdaq, LocalDate.of(2022, 12, 28), price)).isEqualTo(krw(2000));
+        // 2023-12-27(수) 체결분은 12-29(금) 연말 휴장을 건너 2024-01-02 결제
+        assertThat(sttOn(kosdaq, LocalDate.of(2023, 12, 26), price)).isEqualTo(krw(2000));
+        assertThat(sttOn(kosdaq, LocalDate.of(2023, 12, 27), price)).isEqualTo(krw(1800));
     }
 
     @Test
