@@ -35,3 +35,37 @@
 
 ## 판정
 수정 필요(M1, M2)
+
+## 재검토 2026-10-13
+- 대상: PR #75 / 커밋 `3802a96` / main 대비 diff(`git diff origin/main...HEAD`, merge-base `b69d57c`). 10파일(+353/-2): 앞 검토 범위에 `detail.run1.txt` 추가, `run-check.md` → `report.md` 이름 변경, `experiments/README.md` 목록 한 줄, `docs/reviews/pr-75/architect.md`(이 검토 원문) 추가. docs/·experiments/ 밖 변경 없음(`git diff --name-only`로 확인).
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --offline --rerun-tasks` BUILD SUCCESSFUL, 130 tasks 전부 실행, JUnit XML 합계 952 tests 실패·오류·건너뜀 0.
+  - `sha256sum experiments/EXP-20261013-REC01/detail*.txt`: 두 파일 모두 `68d2fd3d429fcc3fabf11d4f4dbdc43bed36f9e4c0bc0263e15333703288d806`, 각각 12,559바이트, `cmp` 동일.
+  - `grep -rn run-check`(build·.git 제외): 이 검토 원문 밖에 남은 옛 이름 참조 없음. ADR-004:148, D-069:66, docs/qa/pending.md 마지막 줄이 모두 `report.md`를 가리키고 링크 경로가 실제 파일과 맞음.
+  - 저장소의 이 원문 앞부분(첫 검토)이 내가 쓴 내용과 같고 고쳐지지 않았음을 diff로 확인.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `--rerun-tasks` 빌드, 952 tests 실패 0 |
+| B2 | 해당 없음 | 코드·빌드 스크립트·ArchUnit 규칙 변경 없음. ArchitectureTest 18건 통과 |
+| B3 | 해당 없음 | 계약 변경 없음. ADR-004:148은 검증 문장의 링크·서술 갱신만 |
+| B4 | 통과 | 코드 변경 없음, 골든·RecordingExperimentTest 재실행 통과. 회차 간 일치는 이제 저장소의 두 파일로 확인 가능(M1 해소) |
+| B5 | 해당 없음 | 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 없음, 테스트 삭제·비활성 없음 |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·장애 대응 변경 없음 |
+| B8 | 통과 | 추가 파일(detail.run1.txt, report.md, README 한 줄)에 비밀값 없음. 해시·종목코드·금액만 있음 |
+
+### 앞 검토 항목 처리
+- M1 해소: `detail.run1.txt`가 커밋됐고 해시·바이트가 `detail.txt`와 같다(직접 확인). report.md 결론 첫 줄이 재확인 명령을 적고, D-069:66도 "둘 다 커밋"으로 맞췄다. 남은 한계(막지 않음): 1회차 파일이 별도 실행에서 나왔다는 출처는 report.md가 "실행 직후 사용자가 복사한 사본"이라고 밝힌 사용자 진술에 기댄다. 내용이 같으면 바이트로는 회차를 구별할 수 없으므로 이 이상의 저장소 증거는 만들 수 없다고 본다 [추론]. 1회차 inputs.yaml·results.md가 남지 않은 점과 그 동일성이 [추론]임도 report.md에 표시돼 있어 적절하다.
+- M2 해소: report.md "시가 단일가 처리" 줄과 D-069:66이 출처를 "키움 ka11081 KRX 단독 일봉"으로 바꾸고, 같은 키움 출처·G-1 조건부·005930 영웅문 시가 엇갈림(260,500·260,000)을 한계로 적었으며, 결론을 "시가 단일가 체결 가정과 맞는다는 정도의 근거"로 낮췄다. `experiments/stage-2-replay/2026-10-12.md:9-10`과 일치한다.
+- m1 반영: `experiments/README.md` 목록에 REC01 줄 추가.
+- m2 반영: `run-check.md` → `report.md`로 README 12줄 규칙과 맞춤.
+- m3 반영: report.md "파일" 절에 다음 실험은 깨끗한 작업 트리에서 돌린다고 적음. 이번 결과의 `dirty` 표시는 그대로이며 설명이 build.gradle.kts:35-38 동작과 맞는다(앞 검토와 같음).
+- m4: 해당 없음(머지 뒤 독립 QA가 stage-3 재판정에서 C1을 본다. M1이 해소돼 QA도 저장소만으로 해시를 확인할 수 있다).
+
+### 새 발견
+- 없음.
+
+### 판정
+승인
