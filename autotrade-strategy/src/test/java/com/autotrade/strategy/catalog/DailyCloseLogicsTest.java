@@ -169,6 +169,56 @@ class DailyCloseLogicsTest {
                 .as("신호가 한 번도 없으면 결정론 검사가 의미 없다").isNotEmpty();
     }
 
+    // ---- 예열 필요량(PR #79 검토 M1) ----
+
+    @Test
+    void 예열_필요량은_로직이_판단을_시작하는_종가_수와_같다() {
+        Map<String, String> b = breakout(Map.of("signal.lookback-days", "3"));
+        assertThat(FACTORY.requiredHistoryDays(profile(TradingStyle.SWING, b))).isEqualTo(4);
+        assertThat(enters(b, 10000, 11000, 12000, 13000)).as("필요량(4개)이면 판단한다").isTrue();
+        assertThat(enters(b, 11000, 12000, 13000)).as("하나 모자라면 판단하지 않는다").isFalse();
+
+        Map<String, String> n = nearHigh(Map.of());
+        assertThat(FACTORY.requiredHistoryDays(profile(TradingStyle.POSITION, n))).isEqualTo(5);
+        assertThat(enters(n, 10000, 10000, 10000, 10000, 10000)).isTrue();
+        assertThat(enters(n, 10000, 10000, 10000, 10000)).isFalse();
+
+        // 단기 반전: max(M=6, K+1=3, X=3)
+        assertThat(FACTORY.requiredHistoryDays(profile(TradingStyle.SWING, reversal(Map.of())))).isEqualTo(6);
+        assertThat(FACTORY.requiredHistoryDays(profile(TradingStyle.SWING,
+                reversal(Map.of("signal.trend-days", "5", "signal.exit-days", "9"))))).as("청산 X가 가장 길면 X").isEqualTo(9);
+    }
+
+    // ---- 진입 깔때기 측정(PR #79 검토 M3) ----
+
+    @Test
+    void 진입_깔때기는_진입_한도_막힘_수량_0을_거래일별로_센다() {
+        long[] closes = {10000, 12000, 11000, 13000};
+        LocalDate d = START.plusDays(closes.length);
+        // 진입: 확인 통과 1, 진입 1
+        EntryFunnel.Totals entered = funnelOn(Map.of("signal.lookback-days", "3"), closes, t -> { }, d);
+        assertThat(entered).isEqualTo(new EntryFunnel.Totals(1, 1, 0, 0, 0, 1));
+        // 동시 보유 1종목 한도에 이미 다른 종목을 들고 있으면 한도로 막힌다
+        EntryFunnel.Totals limited = funnelOn(Map.of("signal.lookback-days", "3", "sizing.max-positions", "1"), closes,
+                t -> t.hold(com.autotrade.domain.market.Symbol.krx("900002"), 1, 10000), d);
+        assertThat(limited).isEqualTo(new EntryFunnel.Totals(1, 0, 1, 0, 1, 1));
+        // 현금이 없으면 수량 0으로 막힌다(한도는 아님)
+        EntryFunnel.Totals noCash = funnelOn(Map.of("signal.lookback-days", "3"), closes, t -> t.cash(0), d);
+        assertThat(noCash).isEqualTo(new EntryFunnel.Totals(1, 0, 0, 1, 0, 1));
+    }
+
+    private static EntryFunnel.Totals funnelOn(Map<String, String> extra, long[] closes,
+            java.util.function.Consumer<Tape> setup, LocalDate day) {
+        Strategy strategy = FACTORY.create(profile(TradingStyle.SWING, breakout(extra)), 42L);
+        Tape tape = new Tape(strategy);
+        for (int i = 0; i < closes.length; i++) {
+            tape.day(START.plusDays(i)).trade("09:10:00", closes[i], 100);
+        }
+        setup.accept(tape);
+        tape.day(day).trade("09:10:00", TODAY, 100);
+        return ((ManagedStrategy) strategy).entryFunnel().totals(day, day);
+    }
+
     // ---- 도우미 ----
 
     private static boolean enters(Map<String, String> params, long... closes) {

@@ -10,6 +10,7 @@ import com.autotrade.sim.walkforward.WalkForwardResult.Candidate;
 import com.autotrade.sim.walkforward.WalkForwardResult.NullSummary;
 import com.autotrade.sim.walkforward.WalkForwardResult.WindowInfo;
 import com.autotrade.sim.walkforward.WalkForwardWindows.Window;
+import com.autotrade.strategy.catalog.EntryFunnel;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -233,6 +234,26 @@ final class WalkForwardReport {
         }
         sb.append('\n');
 
+        sb.append("## 진입 한도 영향 (검증 구간 측정, 판정에 쓰지 않음)\n\n");
+        sb.append("일봉 경로는 그날 칸마다 종목 코드 순으로 이벤트를 준다. 하루 진입 신호가 한도(하루 진입 수·동시 보유 수 등)를 넘으면")
+                .append(" 코드가 작은 종목부터 들어가고 나머지 신호는 버려진다. 한도에 걸린 날의 비율이 높을수록 성과에 코드 순 표본 추출이")
+                .append(" 섞여 있고, 같은 한도를 쓰는 무작위 대조군도 같은 방식으로 쏠린다. 그래서 C10은 \"같은 선정·같은 한도에서 무작위")
+                .append(" 진입보다 나은가\"로만 읽고 신호 전체의 엣지로 읽지 않는다. 신호 순서를 시드로 섞는 방법은 실행기 계약 변경이라")
+                .append(" 후속 과제다(사전 등록 문구, PR #79 strategy-researcher 검토 M3).\n\n");
+        sb.append("| 조합 | 진입 시도(확인 통과) | 진입 | 한도로 막힘 | 수량 0으로 막힘 | 한도에 걸린 날 / 관측일 |\n");
+        sb.append("|---|---:|---:|---:|---:|---:|\n");
+        for (int i = 0; i < r.candidates().size(); i++) {
+            EntryFunnel.Totals f = EntryFunnel.Totals.ZERO;
+            for (WindowRun wr : r.validationRuns().get(i)) {
+                f = f.plus(wr.funnel());
+            }
+            funnelRow(sb, "`" + r.candidates().get(i).text() + "`", f);
+        }
+        for (NullSummary n : r.nulls().values()) {
+            funnelRow(sb, "`" + n.pairKey() + "` (대조군, 모든 시드 합)", n.funnel());
+        }
+        sb.append('\n');
+
         sb.append("## 계산량 추정\n\n");
         int pairs = r.nulls().size();
         long variants = r.candidates().stream().filter(c -> c.low() != null).count() * 2;
@@ -282,6 +303,14 @@ final class WalkForwardReport {
         sb.append("- 대조군 `random-daily` 계열은 예열 구간에서도 난수를 쓰므로 예열 일수가 바뀌면 같은 시드의 진입 일이 달라진다(결정론에는 영향 없음).\n");
         sb.append("- 이 표만으로 승격을 결정하지 않는다. 승격은 사용자 결정이다.\n");
         return sb.toString();
+    }
+
+    private static void funnelRow(StringBuilder sb, String name, EntryFunnel.Totals f) {
+        String ratio = f.days() == 0 ? "-" : ScreeningCriteria.pct(BigDecimal.valueOf(f.limitDays())
+                .divide(BigDecimal.valueOf(f.days()), 6, java.math.RoundingMode.HALF_EVEN));
+        sb.append("| ").append(name).append(" | ").append(f.signals()).append(" | ").append(f.entries()).append(" | ")
+                .append(f.limitBlocked()).append(" | ").append(f.sizeBlocked()).append(" | ").append(f.limitDays())
+                .append(" / ").append(f.days()).append(" (").append(ratio).append(") |\n");
     }
 
     private static String won(BigDecimal v) {

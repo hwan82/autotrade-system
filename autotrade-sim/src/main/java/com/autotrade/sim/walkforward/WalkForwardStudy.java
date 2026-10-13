@@ -23,6 +23,7 @@ import com.autotrade.sim.daily.DailyBarMarketDataSet;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
+import com.autotrade.sim.run.RunSeeds;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationExperimentRunner;
@@ -34,9 +35,13 @@ import com.autotrade.sim.walkforward.WalkForwardResult.Candidate;
 import com.autotrade.sim.walkforward.WalkForwardResult.NullSummary;
 import com.autotrade.sim.walkforward.WalkForwardResult.WindowInfo;
 import com.autotrade.sim.walkforward.WalkForwardWindows.Window;
+import com.autotrade.strategy.Strategy;
+import com.autotrade.strategy.StrategyFactory;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.TradingStyle;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
+import com.autotrade.strategy.catalog.EntryFunnel;
+import com.autotrade.strategy.catalog.ManagedStrategy;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
@@ -51,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -250,7 +256,32 @@ public final class WalkForwardStudy {
             }
             out.add(new Candidate(e.text(), combo, pairKey, control, low, high, key == null ? "" : key, note));
         }
+        requireWarmup(plan, factory, out);
         return out;
+    }
+
+    /**
+     * 후보·±20% 변형·대조군이 첫 판단 전에 받아야 하는 거래일 수({@link CatalogStrategyFactory#requiredHistoryDays})가
+     * 등록 파일의 {@code warmup-days}보다 크면 시작하지 않는다. 모자라면 구간 앞부분에 신호가 나지 않아 학습·검증 성과와
+     * C7(변형끼리 비교)이 조회 기간이 긴 쪽으로 기운다(PR #79 검토 M1). 모자란 프로필을 모두 적어 한 번에 거부한다.
+     */
+    static void requireWarmup(WalkForwardPlan plan, CatalogStrategyFactory factory, List<Candidate> candidates) {
+        Map<String, Integer> need = new TreeMap<>();
+        for (Candidate c : candidates) {
+            for (Combination combo : new Combination[] {c.combination(), c.control(), c.low(), c.high()}) {
+                if (combo != null) {
+                    StrategyProfile p = combo.profile();
+                    need.putIfAbsent(p.id() + "@" + p.version(), factory.requiredHistoryDays(p));
+                }
+            }
+        }
+        List<String> lacking = need.entrySet().stream().filter(x -> x.getValue() > plan.warmupDays())
+                .map(x -> x.getKey() + "=" + x.getValue() + "일").toList();
+        if (!lacking.isEmpty()) {
+            int max = need.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+            throw new IllegalArgumentException("warmup-days " + plan.warmupDays() + "일이 프로필의 예열 필요량보다 작습니다: "
+                    + String.join(", ", lacking) + ". warmup-days를 " + max + " 이상으로 등록하십시오");
+        }
     }
 
     // ---------------------------------------------------------------- 계산
@@ -289,8 +320,9 @@ public final class WalkForwardStudy {
 
         StringBuilder runs = new StringBuilder("phase\twindow\tnull_seed\tselection\tstrategy\tstatus\tfinal_equity"
                 + "\ttotal_return\tmax_drawdown\tsharpe\tprofit_factor\tround_trips\ttrading_days\ttotal_costs"
-                + "\tcombination_hash\tfailure\n");
+                + "\tsignals\tentries\tlimit_blocked\tsize_blocked\tlimit_days\tcombination_hash\tfailure\n");
         StringBuilder detail = new StringBuilder();
+        Map<String, EntryFunnel.Totals> funnels = new HashMap<>(); // Run ID → 구간 안 진입 깔때기
         List<WindowInfo> infos = new ArrayList<>();
         boolean anyFailed = false;
 
@@ -307,12 +339,12 @@ public final class WalkForwardStudy {
             int trainDays = (int) trainData.tradingDays().stream()
                     .filter(d -> !d.isBefore(win.trainFrom()) && !d.isAfter(win.trainTo())).count();
             for (SimulationReport rep : runAll(c, trainData, c.cost(), trainCombos, plan.seed(), win.trainFrom(),
-                    win.trainTo(), "W" + k + "-TRN", parallelism, selections)) {
+                    win.trainTo(), "W" + k + "-TRN", parallelism, selections, funnels)) {
                 for (RunReport r : rep.runs()) {
-                    WindowRun wr = WindowRun.of(k, r, false);
+                    WindowRun wr = WindowRun.of(k, r, false, funnels.get(r.summary().runId()));
                     anyFailed |= !wr.completed();
                     trainBy.computeIfAbsent(r.summary().combinationHash(), x -> new ArrayList<>()).add(wr);
-                    row(runs, phaseOfTrain(r, candidateCombos), k, "", r);
+                    row(runs, phaseOfTrain(r, candidateCombos), k, "", r, funnels.get(r.summary().runId()));
                 }
             }
             String trainVersion = trainData.version();
@@ -325,33 +357,34 @@ public final class WalkForwardStudy {
             detail.append("## 구간 ").append(k).append(" 검증 ").append(win.testFrom()).append(" ~ ").append(win.testTo())
                     .append(" (기본 비용, 데이터셋 ").append(testData.version()).append(")\n");
             for (SimulationReport rep : runAll(c, testData, c.cost(), candidateCombos, plan.seed(), win.testFrom(),
-                    win.testTo(), "W" + k + "-VAL", parallelism, selections)) {
+                    win.testTo(), "W" + k + "-VAL", parallelism, selections, funnels)) {
                 detail.append(ReportWriter.render(rep)).append('\n');
                 for (RunReport r : rep.runs()) {
-                    WindowRun wr = WindowRun.of(k, r, true);
+                    WindowRun wr = WindowRun.of(k, r, true, funnels.get(r.summary().runId()));
                     anyFailed |= !wr.completed();
                     valBy.computeIfAbsent(r.summary().combinationHash(), x -> new ArrayList<>()).add(wr);
-                    row(runs, "VALIDATION", k, "", r);
+                    row(runs, "VALIDATION", k, "", r, funnels.get(r.summary().runId()));
                 }
             }
             for (SimulationReport rep : runAll(c, testData, c.stressCost(), candidateCombos, plan.seed(), win.testFrom(),
-                    win.testTo(), "W" + k + "-STR", parallelism, selections)) {
+                    win.testTo(), "W" + k + "-STR", parallelism, selections, funnels)) {
                 for (RunReport r : rep.runs()) {
-                    WindowRun wr = WindowRun.of(k, r, false);
+                    WindowRun wr = WindowRun.of(k, r, false, funnels.get(r.summary().runId()));
                     anyFailed |= !wr.completed();
                     stressBy.computeIfAbsent(r.summary().combinationHash(), x -> new ArrayList<>()).add(wr);
-                    row(runs, "STRESS", k, "", r);
+                    row(runs, "STRESS", k, "", r, funnels.get(r.summary().runId()));
                 }
             }
             for (int i = 1; i <= plan.nullSeeds(); i++) {
                 c.gate().check();
                 for (SimulationReport rep : runAll(c, testData, c.cost(), controlCombos, plan.seed() + i, win.testFrom(),
-                        win.testTo(), "W" + k + "-N" + i, parallelism, selections)) {
+                        win.testTo(), "W" + k + "-N" + i, parallelism, selections, funnels)) {
                     for (RunReport r : rep.runs()) {
-                        WindowRun wr = WindowRun.of(k, r, false);
+                        WindowRun wr = WindowRun.of(k, r, false, funnels.get(r.summary().runId()));
+                        anyFailed |= !wr.completed(); // 대조군 실패도 종료 코드 2(PR #79 architect R2)
                         String pair = pairOf(r, controlByPair);
                         nullBy.get(pair).get(i - 1).add(wr);
-                        row(runs, "NULL", k, Integer.toString(i), r);
+                        row(runs, "NULL", k, Integer.toString(i), r, funnels.get(r.summary().runId()));
                     }
                 }
                 if (i % 50 == 0) {
@@ -382,7 +415,11 @@ public final class WalkForwardStudy {
             List<BigDecimal> values = new ArrayList<>();
             int failed = 0;
             int zeroTrip = 0;
+            EntryFunnel.Totals funnel = EntryFunnel.Totals.ZERO;
             for (List<WindowRun> perSeed : e.getValue()) {
+                for (WindowRun wr : perSeed) {
+                    funnel = funnel.plus(wr.funnel());
+                }
                 if (perSeed.size() != windows.size() || !perSeed.stream().allMatch(WindowRun::completed)) {
                     failed++;
                     continue;
@@ -398,7 +435,7 @@ public final class WalkForwardStudy {
             nullPerTrip.put(e.getKey(), values);
             nullSummaries.put(e.getKey(), new NullSummary(e.getKey(), values.size(), failed, zeroTrip,
                     values.isEmpty() ? null : values.get(0), values.isEmpty() ? null : values.get(values.size() / 2),
-                    values.isEmpty() ? null : values.get(values.size() - 1)));
+                    values.isEmpty() ? null : values.get(values.size() - 1), funnel));
         }
         List<WalkForwardJudge.Judgement> judgements = new ArrayList<>();
         for (Candidate cand : c.candidates()) {
@@ -449,7 +486,7 @@ public final class WalkForwardStudy {
     /** 한 번의 실행기 호출(조합이 128개를 넘으면 순서대로 나눠 호출. 조합은 서로 독립이라 결과가 같다). */
     private static List<SimulationReport> runAll(Context c, DailyBarMarketDataSet data, CostModel costModel,
             List<Combination> combos, long seed, LocalDate from, LocalDate to, String idSuffix, int parallelism,
-            CalculatedSelectionSource selections) {
+            CalculatedSelectionSource selections, Map<String, EntryFunnel.Totals> funnels) {
         List<SimulationReport> out = new ArrayList<>();
         int max = SimulationExperimentRunner.MAX_COMBINATIONS;
         for (int start = 0, chunk = 0; start < combos.size(); start += max, chunk++) {
@@ -457,14 +494,48 @@ public final class WalkForwardStudy {
             ExperimentId id = new ExperimentId(c.plan().id().value() + "-" + idSuffix + (chunk == 0 ? "" : "-C" + (chunk + 1)));
             ExperimentSpec spec = new ExperimentSpec(id, from, to, seed, c.plan().seedCapital(), costModel.id(),
                     data.version(), ClockMode.REPLAY, part);
-            out.add(new SimulationExperimentRunner(data, c.rules(), costModel, c.factory(), c.risk(),
+            FunnelCapture capture = new FunnelCapture(c.factory());
+            SimulationReport rep = new SimulationExperimentRunner(data, c.rules(), costModel, capture, c.risk(),
                     ExecutionSettings.defaults(), c.code(), Math.min(parallelism, part.size()), null, selections, c.gate(),
-                    c.plan().warmupDays(), true).runDetailed(spec));
+                    c.plan().warmupDays(), true).runDetailed(spec);
+            for (RunReport r : rep.runs()) {
+                funnels.put(r.summary().runId(), capture.totals(r, seed, from, to));
+            }
+            out.add(rep);
         }
         return out;
     }
 
-    private static void row(StringBuilder sb, String phase, int window, String nullSeed, RunReport r) {
+    /**
+     * 실행기에 넘기는 전략 팩토리 래퍼: Run마다 만든 전략의 진입 깔때기 측정만 붙잡는다(전략 자체는 붙잡지 않아 Run이 끝나면
+     * 시세 상태를 놓아준다). Run은 (프로필 해시, Run 시드)로 찾는다. 한 실행기 호출 안에서 조합은 서로 달라 Run 시드가 겹치지
+     * 않는다({@link RunSeeds}).
+     */
+    private static final class FunnelCapture implements StrategyFactory {
+        private final CatalogStrategyFactory factory;
+        private final Map<String, EntryFunnel> byRun = new ConcurrentHashMap<>();
+
+        FunnelCapture(CatalogStrategyFactory factory) {
+            this.factory = factory;
+        }
+
+        @Override
+        public Strategy create(StrategyProfile profile, long runSeed) {
+            Strategy s = factory.create(profile, runSeed);
+            if (s instanceof ManagedStrategy m) {
+                byRun.put(profile.profileHash() + "|" + runSeed, m.entryFunnel());
+            }
+            return s;
+        }
+
+        EntryFunnel.Totals totals(RunReport r, long specSeed, LocalDate from, LocalDate to) {
+            EntryFunnel f = byRun.get(r.profile().profileHash() + "|" + RunSeeds.derive(specSeed, r.combination()));
+            return f == null ? EntryFunnel.Totals.ZERO : f.totals(from, to);
+        }
+    }
+
+    private static void row(StringBuilder sb, String phase, int window, String nullSeed, RunReport r,
+            EntryFunnel.Totals f) {
         var s = r.summary();
         var m = s.metrics();
         sb.append(phase).append('\t').append(window).append('\t').append(nullSeed).append('\t')
@@ -478,6 +549,8 @@ public final class WalkForwardStudy {
                     .append(plain(m.profitFactor())).append('\t').append(m.roundTripCount()).append('\t')
                     .append(r.equityCurve().size()).append('\t').append(m.totalCosts().amount().toPlainString());
         }
+        sb.append('\t').append(f.signals()).append('\t').append(f.entries()).append('\t').append(f.limitBlocked())
+                .append('\t').append(f.sizeBlocked()).append('\t').append(f.limitDays());
         sb.append('\t').append(s.combinationHash()).append('\t').append(s.failureReason().replace('\t', ' ')).append('\n');
     }
 

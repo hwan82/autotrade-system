@@ -22,20 +22,21 @@
 - `warmupDays = 0`(기본)이면 기존 동작과 바이트까지 같다(기존 골든 테스트가 증거).
 - `warmupDays = N > 0`이면 `spec.from` 직전 N개 거래일의 이벤트를 **전략에만** 준다. 이 이벤트는 거래소 모델·가상 계좌·평가금액·선정·자산 곡선에 가지 않는다. 전략 컨텍스트는 현금 0, 포지션·미체결 없음의 빈 `AccountSnapshot`이라 예열 중 나온 신호는 수량 0이 되고 모두 버린다(진입·체결·평가 금지).
 - 예열이 필요한 만큼 앞선 거래일이 데이터셋에 없으면 `IllegalArgumentException`("예열 거래일이 모자랍니다")으로 시작하지 않는다.
+- **예열 충분성 검사(PR #79 검토 M1)**: 로직마다 첫 판단 전에 받아야 하는 거래일 수를 `CatalogStrategyFactory.requiredHistoryDays(profile)`가 알려 준다(`ManagedStrategy.requiredHistoryDays()`, 일봉 로직은 판단을 시작하는 종가 수와 같다: `breakout-days` N+1, `near-high` L, `short-reversal` max(M, K+1, X), `ma-trend` 장기 일수). 워크포워드는 후보·±20% 변형·대조군 중 하나라도 등록 파일의 `warmup-days`보다 많이 필요하면 모자란 프로필을 모두 적고 시작하지 않는다. 모자란 채로 돌면 구간 앞부분에 신호가 나지 않아 조회 기간이 긴 변형 쪽으로 C7이 기운다. 저장소 프로필의 `study.warmup-days`도 이 값 이상이어야 한다(`RepositoryProfilesTest`).
 - 비용 표 범위 검사(SIM-07)는 거래 구간(`spec.from` ~ `spec.to`)만 받는다. 예열 시세는 비용을 쓰지 않는다.
 - 미래 정보 금지: `spec.to` 뒤 이벤트는 전략에 가지 않는다.
 - 대안: ① 구간 앞에 전략 상태를 따로 "달궈" 직렬화하기(전략 인터페이스를 바꿔야 해 버림) ② 예열 일수만큼 `spec.from`을 당기고 결과에서 앞부분을 자르기(예열 중 진입이 막히지 않고 비용·체결이 생겨 버림). 되돌릴 조건: 전략이 시세 이력을 스스로 조회하는 인터페이스가 생기면 이 계약을 닫는다.
 
 ### 2.2 구간 끝 정리 `settleAtWindowEnd`
 
-- true이면 마지막 거래일 마감 직전 남은 포지션을 그날 마지막 체결가 × (1 − 슬리피지)를 호가 단위로 내림한 가격으로 팔고, `cost.fees(SELL, ...)`로 수수료·거래세를 뺀 `OrderIntent.EXIT` 체결을 `VirtualAccount.apply`로 적용한다(실전과 같은 비용 모델, 가상 전용 우회 없음). 왕복 원장의 해당 lot id는 `RunReport.windowEndLots`에 남고 보고서에서 `window-end`로 표시된다. 기본값 false이면 기존 출력은 그대로다.
+- true이면 마지막 거래일 마감 직전 남은 포지션을 그날 마지막 체결가 × (1 − 슬리피지)를 호가 단위로 내림한 가격으로 팔고, `cost.fees(SELL, ...)`로 수수료·거래세를 뺀 `OrderIntent.EXIT` 체결을 `VirtualAccount.apply`로 적용한다. 비용 모델은 실전과 같지만 **주문이 아니라 성과 집계용 평가 정리 체결**이라 가상 거래소·주문 상태머신·리스크 체인을 지나지 않는다(PR #79 architect R1). 진입이 이미 리스크 체인과 블랙리스트를 지났으므로 블랙리스트 종목 보유는 생기지 않고, 정리 체결의 신호·체결 sequence는 마지막 이벤트 다음 번호(실제 이벤트 없음)다. 왕복 원장의 해당 lot id는 `RunReport.windowEndLots`에 남고 보고서에서 `window-end`로 표시된다. 기본값 false이면 기존 출력은 그대로다.
 - 구간 중간에 상장폐지된 종목도 구간 끝에 같은 방식으로 정리한다(현금에 이자가 없어 최종 평가는 같고, 중간 평가 곡선은 정리 비용만큼 다르다). 폐지 뒤 손실은 일봉에 없어 반영하지 못한다.
 - 결과 파일에 후보·구간별 정리 왕복 수와 손익 합을 따로 적는다(정리 왕복이 성과의 큰 몫이면 판정 해석에서 의심하도록).
 - 대안: 구간 끝 평가손익만 남기고 왕복에서 빼기(PF·C5·C10이 보유 중 손익을 못 보고, 청산 비용을 숨김). 구간을 넘어 포지션을 이월(계좌를 새로 만들지 않으면 구간 간 상태가 섞여 구간 독립성이 깨짐).
 
 ### 2.3 `MarketDataSet` 일 인덱스
 
-- `MarketDataSet`에 기본 메서드 `tradingDays()`(기본 빈 목록)와 `firstEventIndex(int dayIndex)`(기본 `UnsupportedOperationException`)를 더한다. `DailyBarMarketDataSet`이 구현하고, 실행기는 이를 있으면 구간 이벤트를 이분 탐색으로 자른다(없으면 기존 선형 경로). 같은 입력에서 두 경로의 결과는 같다.
+- `MarketDataSet`에 기본 메서드 `tradingDays()`(기본 빈 목록)와 `firstEventIndex(int dayIndex)`(기본 `UnsupportedOperationException`)를 더한다. `DailyBarMarketDataSet`이 구현하고, 실행기는 이를 있으면 구간 이벤트를 이분 탐색으로 자른다(없으면 기존 선형 경로). 같은 입력에서 두 경로의 결과는 같다: `DailySlicePathTest`가 같은 `DailyBarMarketDataSet`을 거래일 색인을 숨긴 래퍼(선형 경로)와 원본(일 색인 경로)으로 돌려 예열 0일·21일 모두 보고서가 바이트까지 같음을, 일 색인 경로에서도 2.1의 예열 계약(전략만 봄, 체결·평가는 시작일부터, 구간 끝 뒤 시세 없음, 부족하면 거부)을 확인한다.
 - `DailyBarMarketDataSet.warmupStart(allTradingDays, from, warmupDays)`가 예열 시작일을 계산한다. 구간·단계마다 데이터셋을 따로 만든다(전체 기간을 한 데이터셋으로 만들면 이벤트 3천만 개 이상이라 메모리가 크다). 따라서 가격 기준(첫 일봉)이 데이터셋마다 다르다(D-061과 같은 한계).
 
 ### 2.4 등록 파일 `experiments/<실험ID>/study.yaml`
@@ -59,9 +60,11 @@
 
 `results.md`, `runs.tsv`, `windows.tsv`, `inputs.yaml`, `detail.txt`. 타임스탬프를 쓰지 않고 정렬을 고정해 같은 입력이면 바이트까지 같다. `inputs.yaml`에 데이터 버전(스냅샷 ID·해시·구간별 데이터셋 ID), 후보 조합·변형 해시, 비용 모델과 비용 표 해시, 체결 모델, 블랙리스트 지문, 시드, 코드 커밋, 결정론 확인 결과를 남긴다. 결과 묶음(`result-bundle.jsonl.gz`)은 만들지 않는다(실험실 화면 연동은 후속).
 
+**진입 한도 영향(PR #79 strategy-researcher 검토 M3)**: 일봉 경로는 칸마다 종목 코드 순으로 이벤트를 주므로 하루 신호가 한도(하루 진입 수·동시 보유 수 등)를 넘으면 코드가 작은 종목부터 들어간다. `ManagedStrategy`가 거래일별 진입 깔때기(`EntryFunnel`: 확인 통과 신호, 진입, 한도로 막힘, 수량 0으로 막힘)를 세고, 워크포워드가 Run마다 구간 안(예열 제외) 합계를 `runs.tsv` 열(`signals`, `entries`, `limit_blocked`, `size_blocked`, `limit_days`)과 `results.md` "진입 한도 영향" 표(후보 검증 합, 대조군 시드 합, 한도에 걸린 날 비율)로 낸다. 판정에는 쓰지 않는다. 해석 한계는 결과 파일에 고정 문구로 사전 등록한다: C10은 "같은 선정·같은 한도에서 무작위 진입보다 나은가"로만 읽는다. 신호 순서를 시드로 섞는 방법은 실행기 계약 변경이라 후속 과제다.
+
 ### 2.8 명령과 종료 코드
 
-`./gradlew :autotrade-app-experiment:runWalkForwardStudy -Pexperiment=<ID> [-PverifyDeterminism] [-PallowDuringSession] [-PsnapshotsDir=...]`, 별칭 `:autotrade-sim:runWalkForwardStudy`. `ExperimentMain walkforward`가 D-063 정지 확인(장 시간 보호, 정지 요청 파일)을 넣는다. 종료 코드 0 완료, 1 입력 오류, 2 Run 실패나 결정론 불일치, 4 정지(결과 파일 없음). `WalkForwardMain`에는 `main`이 없어 정지 확인 없이 돌릴 길이 없다. 자원 부족 시 가장 먼저 멈추는 실험실 계열이며 실전 엔진 자원을 쓰지 않는다.
+`./gradlew :autotrade-app-experiment:runWalkForwardStudy -Pexperiment=<ID> [-PverifyDeterminism] [-PallowDuringSession] [-PsnapshotsDir=...]`, 별칭 `:autotrade-sim:runWalkForwardStudy`. `ExperimentMain walkforward`가 D-063 정지 확인(장 시간 보호, 정지 요청 파일)을 넣는다. 종료 코드 0 완료, 1 입력 오류, 2 Run 실패(대조군 포함, PR #79 architect R2)나 결정론 불일치, 4 정지(결과 파일 없음). `WalkForwardMain`에는 `main`이 없어 정지 확인 없이 돌릴 길이 없다. 자원 부족 시 가장 먼저 멈추는 실험실 계열이며 실전 엔진 자원을 쓰지 않는다.
 
 ## 3. 대안 검토
 
@@ -78,11 +81,12 @@
 - 상장폐지 뒤 손실 미반영(지수·계좌 모두 낙관), 가격 지수(배당 없음), 구간 경계 전량 현금화, 데이터셋마다 다른 가격 기준, 종목 이력 소속부를 마지막 일봉일 기준 한 구간으로 단순화(Q-012).
 - 번들 거래소 캘린더는 2026~2027년만 수록한다. 스냅샷 날짜가 그보다 앞서면 거래일은 일봉 날짜로 정하고(대조는 겹치는 기간만) 합성 테스트로 2022~2025 구간이 도는 것은 확인했지만 실제 수집 스냅샷(2010~)으로는 검증하지 못했다.
 - `random-daily` 대조군은 예열 구간에서도 난수를 쓰므로 `warmup-days`가 바뀌면 같은 시드의 진입일이 달라진다(결정론에는 영향 없음).
+- 한도에 걸린 날의 진입은 종목 코드 순이다(2.7 "진입 한도 영향"). 측정만 하고 고치지 않았다.
 - 검증하지 못한 것: 실제 KRX 스냅샷 전체 규모 실행(메모리·시간), 대조군 400 규모의 C10 통과 가능성.
 
 ## 5. 검증
 
-- 단위: 파서(모르는 키·중복·구간 수 하한), 구간 계산(윤년·휴장 경계·범위 밖), 예열(전략만 봄, 체결·평가 없음, 미래 누출 없음, 0이면 동일, 부족하면 거부), 구간 끝 정리 손 계산, 벤치마크 손 계산, 판정 경계값(3/4 올림, C3 20% 경계, C5 29·30건, C10 N + 1 = 20m, p 경계).
+- 단위: 파서(모르는 키·중복·구간 수 하한), 구간 계산(윤년·휴장 경계·범위 밖), 예열(전략만 봄, 체결·평가 없음, 미래 누출 없음, 0이면 동일, 부족하면 거부), 구간 끝 정리 손 계산, 벤치마크 손 계산, 판정 경계값(3/4 올림, C3 20% 경계, C5 29·30건, C10 N + 1 = 20m, p 경계). 판정식 손 계산(`WalkForwardJudgeEvaluateTest`: 이은 곡선·왕복당 순손익, C1·C1w·C6·C7·C8·C9d·C10 값과 경계 바로 밖, C6 60% 경계). 예열 충분성 거부, 진입 깔때기 집계, 일 색인·선형 경로 동등성(2.3).
 - 통합: 합성 스냅샷(2021-10~2025-12, 3종목)으로 등록 파일 → 결과 파일, 병렬 1과 N의 결과 바이트 일치, 같은 입력 두 번 실행 일치, 정지 확인 시 결과 파일 없음, 범위 밖 구간 거부.
 - 기존 골든·조합 실험·합성 실험 테스트와 ArchUnit 통과(패키지 `com.autotrade.sim.walkforward`는 `autotrade-sim` 소유).
 

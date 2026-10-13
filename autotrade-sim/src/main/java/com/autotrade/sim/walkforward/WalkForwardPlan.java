@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
  * train-years: "3"
  * test-years: "1"
  * windows: "4"                    # 3 이상(D-066)
- * warmup-days: "260"              # 각 구간 앞에 시세만 주고 진입은 막는 거래일 수
+ * warmup-days: "300"              # 각 구간 앞에 시세만 주고 진입은 막는 거래일 수(후보·±20% 변형 예열 필요량 이상, 모자라면 시작 거부)
  * null-seeds: "400"               # 조합마다 무작위 대조군 시드 수. C10은 N + 1 &ge; 20m 필요
  * combinations:                   # 후보(선정 x 전략), CombinationPlan과 같은 형식
  *   - "none x kr-ma-trend@1"
@@ -86,7 +86,7 @@ public record WalkForwardPlan(
     private static final Pattern CONTROL = Pattern.compile("(SWING|POSITION) ([a-z0-9][a-z0-9-]*@[1-9][0-9]*)");
     private static final Pattern SNAPSHOT = Pattern.compile("[a-z0-9][a-z0-9-]{0,127}");
     private static final Pattern CODE = Pattern.compile("[0-9A-Z]{6}");
-    /** 구간·시드별 실험 ID 접미어({@code -W12-NULL1234}) 때문에 실험 ID는 짧아야 한다(ExperimentId 48자). */
+    /** 구간·시드별 실험 ID 접미어({@code -W12-N1234}) 때문에 실험 ID는 짧아야 한다(ExperimentId 48자). */
     private static final int MAX_ID_LENGTH = 30;
 
     public WalkForwardPlan {

@@ -61,6 +61,11 @@ final class MovingAverageTrend extends ManagedStrategy {
         return todayTrend.get(s.symbol());
     }
 
+    @Override
+    protected int requiredHistoryDays() {
+        return slow;
+    }
+
     /** 종가가 모자라면 null(판단 불가). */
     private Boolean trendUp(SymbolState s) {
         List<BigDecimal> closes = s.dailyCloses();

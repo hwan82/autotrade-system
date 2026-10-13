@@ -23,6 +23,12 @@ final class ShortReversal extends DailyCloseStrategy {
         this.exitDays = p.count("signal.exit-days", 2, 60);
     }
 
+    /** 진입은 max(M, K+1)개, 청산은 X개부터 판단한다. 둘 다 판단할 수 있는 개수. */
+    @Override
+    protected int requiredCloses() {
+        return Math.max(Math.max(trendDays, downDays + 1), exitDays);
+    }
+
     @Override
     protected boolean entryCondition(List<BigDecimal> closes) {
         if (closes.size() < Math.max(trendDays, downDays + 1) || exitCondition(closes)) {

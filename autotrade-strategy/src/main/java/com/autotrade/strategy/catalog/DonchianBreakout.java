@@ -19,8 +19,13 @@ final class DonchianBreakout extends DailyCloseStrategy {
     }
 
     @Override
+    protected int requiredCloses() {
+        return lookback + 1;
+    }
+
+    @Override
     protected boolean entryCondition(List<BigDecimal> closes) {
-        if (closes.size() < lookback + 1) {
+        if (closes.size() < requiredCloses()) {
             return false;
         }
         return last(closes).compareTo(highest(closes, lookback, 1)) > 0;

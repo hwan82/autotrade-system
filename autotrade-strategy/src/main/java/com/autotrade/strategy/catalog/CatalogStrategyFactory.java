@@ -68,6 +68,14 @@ public final class CatalogStrategyFactory implements StrategyFactory {
         create(profile, 0L);
     }
 
+    /**
+     * 이 프로필이 첫 판단 전에 받아야 하는 끝난 거래일 수(예열 필요량). 프로필 검증도 함께 한다. 워크포워드가 후보·±20% 변형·
+     * 대조군마다 등록 파일의 예열 일수와 비교한다(ADR-009 2.3).
+     */
+    public int requiredHistoryDays(StrategyProfile profile) {
+        return create(profile, 0L) instanceof ManagedStrategy m ? m.requiredHistoryDays() : 0;
+    }
+
     private static TradingRules intraday(ProfileParams p) {
         requireStyle(p, TradingStyle.INTRADAY);
         return TradingRules.from(p);

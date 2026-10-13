@@ -83,6 +83,10 @@ class WalkForwardStudyTest {
     }
 
     private Path experiment(String windows) throws IOException {
+        return experiment(windows, "30");
+    }
+
+    private Path experiment(String windows, String warmup) throws IOException {
         Path dir = Files.createDirectories(tmp.resolve("experiments").resolve(ID));
         write(dir, "study.yaml", """
                 id: "%s"
@@ -96,13 +100,13 @@ class WalkForwardStudyTest {
                 train-years: "1"
                 test-years: "1"
                 windows: "%s"
-                warmup-days: "30"
+                warmup-days: "%s"
                 null-seeds: "20"
                 combinations:
                   - "none x kr-ma-trend@1"
                 controls:
                   - "SWING kr-random-daily-swing@1"
-                """.formatted(ID, SNAPSHOT, windows));
+                """.formatted(ID, SNAPSHOT, windows, warmup));
         return dir;
     }
 
@@ -138,6 +142,11 @@ class WalkForwardStudyTest {
         // 타임스탬프가 없다: 파일 내용에 실행 시각 흔적이 없어야 바이트 비교가 의미 있다
         assertThat(results).doesNotContainPattern("20\\d\\d-\\d\\d-\\d\\dT\\d\\d:\\d\\d");
         assertThat(out.files().get("windows.tsv").lines().count()).isEqualTo(4); // 헤더 + 구간 3
+        // 진입 한도 영향 측정(검토 M3): 결과 파일 표와 runs.tsv 열
+        assertThat(results).contains("## 진입 한도 영향").contains("`none x kr-ma-trend@1` |")
+                .contains("(대조군, 모든 시드 합)");
+        assertThat(out.files().get("runs.tsv").lines().findFirst().orElseThrow())
+                .contains("\tsignals\tentries\tlimit_blocked\tsize_blocked\tlimit_days\t");
     }
 
     @Test
@@ -163,6 +172,18 @@ class WalkForwardStudyTest {
         assertThatThrownBy(() -> WalkForwardStudy.runAndWrite(dir, Path.of(".."), snapshots, new CodeVersion("t", false),
                 false, s -> { }, RunGate.NONE)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("스냅샷 범위 밖");
+        assertThat(dir.resolve("results.md")).doesNotExist();
+    }
+
+    @Test
+    void 예열_일수가_후보나_변형의_필요량보다_작으면_모자란_프로필을_적고_시작하지_않는다() throws IOException {
+        Path snapshots = snapshots();
+        // kr-ma-trend@1은 장기 8일, ±20% 변형 k120은 장기 10일(반올림)이 필요하다
+        Path dir = experiment("3", "8");
+        assertThatThrownBy(() -> WalkForwardStudy.runAndWrite(dir, Path.of(".."), snapshots, new CodeVersion("t", false),
+                false, s -> { }, RunGate.NONE)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("warmup-days 8일").hasMessageContaining("kr-ma-trend-k120@1")
+                .hasMessageNotContaining("kr-ma-trend@1=");
         assertThat(dir.resolve("results.md")).doesNotExist();
     }
 }

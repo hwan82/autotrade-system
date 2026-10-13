@@ -26,6 +26,11 @@ final class NearHigh extends DailyCloseStrategy {
     }
 
     @Override
+    protected int requiredCloses() {
+        return lookback;
+    }
+
+    @Override
     protected boolean entryCondition(List<BigDecimal> closes) {
         return closes.size() >= lookback
                 && last(closes).compareTo(highest(closes, lookback, 0).multiply(entryRatio)) >= 0;

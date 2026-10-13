@@ -66,6 +66,7 @@ public abstract class ManagedStrategy implements Strategy {
     private int consecutiveStops;
     private boolean haltedToday;
     private BigDecimal dayStartEquity;
+    private final EntryFunnel funnel = new EntryFunnel();
 
     protected ManagedStrategy(TradingRules rules, MarketRules market) {
         this.rules = rules;
@@ -85,6 +86,19 @@ public abstract class ManagedStrategy implements Strategy {
      * 매수한다. 한 번 켜진 신호는 만료되거나 주문이 나갈 때까지 유지된다.
      */
     protected abstract boolean trigger(SymbolState s, MarketEvent event, LocalTime time);
+
+    /**
+     * 첫 판단 전에 받아야 하는 끝난 거래일 수(예열 필요량). 이보다 적은 거래일만 받은 동안은 신호를 내지 않는다. 기본은 0
+     * (지난 거래일이 필요 없음). 워크포워드는 등록 파일의 예열 일수가 이 값보다 작으면 시작하지 않는다(ADR-009 2.3).
+     */
+    protected int requiredHistoryDays() {
+        return 0;
+    }
+
+    /** 이 전략의 진입 깔때기 측정. Run이 끝난 뒤 읽는다(판정에는 쓰지 않음). */
+    public final EntryFunnel entryFunnel() {
+        return funnel;
+    }
 
     /** 로직 청산 신호(예: 추세 이탈). 기본은 없음. */
     protected boolean logicExit(SymbolState s, MarketEvent event, LocalTime time) {
@@ -106,6 +120,7 @@ public abstract class ManagedStrategy implements Strategy {
             consecutiveStops = 0;
             haltedToday = false;
             dayStartEquity = equity(account);
+            funnel.day(date);
         }
         SymbolState s = states.computeIfAbsent(symbol, SymbolState::new);
         if (s.roll(date)) {
@@ -224,18 +239,23 @@ public abstract class ManagedStrategy implements Strategy {
             return List.of();
         }
         armedAt.remove(symbol);
+        funnel.signal(today);
         if (!allowedByLimits(symbol, now, account, ctx)) {
+            funnel.limitBlocked(today);
             return List.of();
         }
         BigDecimal price = s.entryReference();
         if (price == null || price.compareTo(rules.minPrice()) < 0) {
+            funnel.sizeBlocked(today);
             return List.of();
         }
         long qty = quantity(price, account);
         if (qty < market.quantityStep()) {
+            funnel.sizeBlocked(today);
             return List.of();
         }
         entriesToday++;
+        funnel.entry(today);
         pendingEntryNotional.put(symbol, price.multiply(BigDecimal.valueOf(qty)));
         return List.of(TradeSignal.marketBuy(symbol, qty));
     }

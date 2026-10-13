@@ -7,6 +7,7 @@ import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.daily.SnapshotTradingDays;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.walkforward.WalkForwardWindows.Window;
+import com.autotrade.strategy.catalog.EntryFunnel;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -48,8 +49,9 @@ record WalkForwardResult(
             Combination high, String perturbKey, String perturbNote) {
     }
 
-    /** 대조군 분포 요약. 값은 시드별 왕복당 순손익(원). */
-    record NullSummary(String pairKey, int usable, int failed, int zeroTrip, BigDecimal min, BigDecimal median, BigDecimal max) {
+    /** 대조군 분포 요약. 값은 시드별 왕복당 순손익(원). {@code funnel}은 모든 시드·검증 구간 Run의 진입 깔때기 합. */
+    record NullSummary(String pairKey, int usable, int failed, int zeroTrip, BigDecimal min, BigDecimal median, BigDecimal max,
+            EntryFunnel.Totals funnel) {
     }
 
     /** 구간별 데이터 정보. */

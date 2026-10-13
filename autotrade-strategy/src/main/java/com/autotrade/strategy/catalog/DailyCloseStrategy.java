@@ -34,6 +34,14 @@ abstract class DailyCloseStrategy extends ManagedStrategy {
     /** 이 종목의 오늘 진입 조건. {@code closes}는 전일까지 종가(오래된 것부터). 종가가 모자라면 false. */
     protected abstract boolean entryCondition(List<BigDecimal> closes);
 
+    /** 진입·청산 판단에 필요한 끝난 거래일 종가 수. 아래 두 조건이 판단을 시작하는 개수와 같아야 한다. */
+    protected abstract int requiredCloses();
+
+    @Override
+    protected final int requiredHistoryDays() {
+        return requiredCloses();
+    }
+
     /** 이 종목의 오늘 로직 청산 조건. 종가가 모자라면 false. */
     protected abstract boolean exitCondition(List<BigDecimal> closes);
 
