@@ -38,12 +38,63 @@ class CostModelTest {
     void 국내_세율은_체결_거래일로_구간을_고른다() {
         BigDecimal price = new BigDecimal("50000");
         // 2025년 코스피: 거래세 0 + 농특세 0.15%
-        FeeBreakdown y2025 = KR.fees(Side.SELL, SAMSUNG, LocalDate.of(2025, 12, 31), price, 200);
+        FeeBreakdown y2025 = KR.fees(Side.SELL, SAMSUNG, LocalDate.of(2025, 12, 26), price, 200);
         assertThat(y2025.items()).containsEntry("stt", krw(0)).containsEntry("rural", krw(15000));
         // 코스닥 2026: 거래세 0.20%, 농특세 없음
         CostModel kosdaq = CostModels.krDefault(s -> KrxBoard.KOSDAQ);
-        FeeBreakdown k = kosdaq.fees(Side.SELL, SAMSUNG, LocalDate.of(2026, 1, 1), price, 200);
+        FeeBreakdown k = kosdaq.fees(Side.SELL, SAMSUNG, LocalDate.of(2026, 1, 2), price, 200);
         assertThat(k.items()).containsEntry("stt", krw(20000)).containsEntry("rural", krw(0));
+    }
+
+    @Test
+    void 국내_세율_경계는_결제일이_새_해에_들어가는_첫_체결일이다() {
+        // 양도(결제, T+2)일 기준 시행(D-071). 2024-12-27(금) 체결분은 2025-01-02 결제라 2025년 세율(증권사 공지)
+        CostModel kosdaq = CostModels.krDefault(s -> KrxBoard.KOSDAQ);
+        BigDecimal price = new BigDecimal("10000");
+        assertThat(sttOn(kosdaq, LocalDate.of(2024, 12, 26), price)).isEqualTo(krw(1800));
+        assertThat(sttOn(kosdaq, LocalDate.of(2024, 12, 27), price)).isEqualTo(krw(1500));
+        // 2025-12-29(월) 체결분은 2026-01-02 결제라 2026년 세율
+        assertThat(sttOn(kosdaq, LocalDate.of(2025, 12, 26), price)).isEqualTo(krw(1500));
+        assertThat(sttOn(kosdaq, LocalDate.of(2025, 12, 29), price)).isEqualTo(krw(2000));
+        // 2019-05-30 체결분부터 인하(2019-06-03 양도분)
+        assertThat(sttOn(kosdaq, LocalDate.of(2019, 5, 29), price)).isEqualTo(krw(3000));
+        assertThat(sttOn(kosdaq, LocalDate.of(2019, 5, 30), price)).isEqualTo(krw(2500));
+        // 2020-12-29(화) 체결분은 12-31 연말 휴장을 건너 2021-01-04 결제
+        assertThat(sttOn(kosdaq, LocalDate.of(2020, 12, 28), price)).isEqualTo(krw(2500));
+        assertThat(sttOn(kosdaq, LocalDate.of(2020, 12, 29), price)).isEqualTo(krw(2300));
+        // 2022-12-28(수) 체결분은 12-30(금) 연말 휴장을 건너 2023-01-02 결제
+        assertThat(sttOn(kosdaq, LocalDate.of(2022, 12, 27), price)).isEqualTo(krw(2300));
+        assertThat(sttOn(kosdaq, LocalDate.of(2022, 12, 28), price)).isEqualTo(krw(2000));
+        // 2023-12-27(수) 체결분은 12-29(금) 연말 휴장을 건너 2024-01-02 결제
+        assertThat(sttOn(kosdaq, LocalDate.of(2023, 12, 26), price)).isEqualTo(krw(2000));
+        assertThat(sttOn(kosdaq, LocalDate.of(2023, 12, 27), price)).isEqualTo(krw(1800));
+    }
+
+    @Test
+    void 국내_세율_연혁_2010부터() {
+        BigDecimal price = new BigDecimal("10000");
+        CostModel kosdaq = CostModels.krDefault(s -> KrxBoard.KOSDAQ);
+        CostModel konex = CostModels.krDefault(s -> KrxBoard.KONEX);
+        // 1,000,000원 매도의 거래세(원). 코스피는 농특세 0.15%가 따로 붙는다
+        assertThat(sttOn(KR, LocalDate.of(2010, 1, 4), price)).isEqualTo(krw(1500));
+        assertThat(sttOn(KR, LocalDate.of(2020, 6, 1), price)).isEqualTo(krw(1000));
+        assertThat(sttOn(KR, LocalDate.of(2022, 6, 1), price)).isEqualTo(krw(800));
+        assertThat(sttOn(KR, LocalDate.of(2023, 6, 1), price)).isEqualTo(krw(500));
+        assertThat(sttOn(KR, LocalDate.of(2024, 6, 3), price)).isEqualTo(krw(300));
+        assertThat(sttOn(kosdaq, LocalDate.of(2018, 6, 1), price)).isEqualTo(krw(3000));
+        assertThat(sttOn(kosdaq, LocalDate.of(2021, 6, 1), price)).isEqualTo(krw(2300));
+        assertThat(sttOn(kosdaq, LocalDate.of(2023, 6, 1), price)).isEqualTo(krw(2000));
+        assertThat(sttOn(kosdaq, LocalDate.of(2024, 6, 3), price)).isEqualTo(krw(1800));
+        assertThat(sttOn(konex, LocalDate.of(2018, 6, 1), price)).isEqualTo(krw(3000));
+        assertThat(sttOn(konex, LocalDate.of(2020, 6, 1), price)).isEqualTo(krw(1000));
+        assertThat(KR.fees(Side.SELL, SAMSUNG, LocalDate.of(2012, 3, 2), price, 100).items())
+                .containsEntry("rural", krw(1500));
+        assertThat(kosdaq.fees(Side.SELL, SAMSUNG, LocalDate.of(2012, 3, 2), price, 100).items())
+                .containsEntry("rural", krw(0));
+    }
+
+    private static Money sttOn(CostModel m, LocalDate d, BigDecimal price) {
+        return m.fees(Side.SELL, SAMSUNG, d, price, 100).items().get("stt");
     }
 
     @Test
@@ -100,13 +151,13 @@ class CostModelTest {
 
     @Test
     void 실험_기간이_표_밖이면_덮지_않는다() {
-        assertThat(KR.covers(LocalDate.of(2025, 1, 1), LocalDate.of(2026, 12, 31))).isTrue();
-        assertThat(KR.covers(LocalDate.of(2024, 12, 31), LocalDate.of(2025, 1, 10))).isFalse();
+        assertThat(KR.covers(LocalDate.of(2010, 1, 1), LocalDate.of(2026, 12, 31))).isTrue();
+        assertThat(KR.covers(LocalDate.of(2009, 12, 30), LocalDate.of(2010, 1, 10))).isFalse();
         assertThat(US.covers(LocalDate.of(2025, 6, 1), LocalDate.of(2026, 2, 1))).isFalse();
         // TAF 표는 Q-004에서 확인한 2028-12-31까지만 덮는다
         assertThat(US.covers(LocalDate.of(2028, 12, 1), LocalDate.of(2028, 12, 31))).isTrue();
         assertThat(US.covers(LocalDate.of(2028, 12, 1), LocalDate.of(2029, 1, 2))).isFalse();
-        assertThatThrownBy(() -> KR.fees(Side.SELL, SAMSUNG, LocalDate.of(2024, 6, 3), BigDecimal.TEN, 1))
+        assertThatThrownBy(() -> KR.fees(Side.SELL, SAMSUNG, LocalDate.of(2009, 12, 30), BigDecimal.TEN, 1))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -116,9 +167,11 @@ class CostModelTest {
         LocalDate to = LocalDate.of(2025, 6, 30);
         // 2025년 구간만 쓰는 실험: 2026년 구간 값이 달라도 해시가 같다
         Levy other2026 = new Levy.RateLevy("stt", CostCategory.TAX, Side.SELL, RoundingMode.FLOOR, PeriodTable.of(
-                Period.closed(LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31),
+                Period.closed(LocalDate.of(2010, 1, 1), LocalDate.of(2024, 12, 26),
+                        SegmentRates.of("KOSPI", "0.0015", "KOSDAQ", "0.0030", "KONEX", "0.0030")),
+                Period.closed(LocalDate.of(2024, 12, 27), LocalDate.of(2025, 12, 28),
                         SegmentRates.of("KOSPI", "0", "KOSDAQ", "0.0015", "KONEX", "0.0010")),
-                Period.open(LocalDate.of(2026, 1, 1), SegmentRates.of("KOSPI", "0.0009", "KOSDAQ", "0.0020",
+                Period.open(LocalDate.of(2025, 12, 29), SegmentRates.of("KOSPI", "0.0009", "KOSDAQ", "0.0020",
                         "KONEX", "0.0010"))));
         CostModel changed = new CostModel("KR-DEFAULT", KR.market(),
                 List.of(KR.levies().get(0), other2026, KR.levies().get(2)), KR.slippageRate(), s -> "KOSPI");
