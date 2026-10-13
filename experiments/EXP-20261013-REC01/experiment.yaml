@@ -1,0 +1,27 @@
+# 녹화 실험 등록 파일(사전 등록, D-069). 실행 전에 커밋하고 결과를 본 뒤 고치지 않는다. 바꾸려면 새 실험 ID를 쓴다.
+# 실행: ./gradlew :autotrade-app-experiment:runRecordingExperiment -Pexperiment=EXP-20261013-REC01 -PverifyDeterminism
+# 녹화 파일은 사용자 PC에만 있고 저장소에 넣지 않는다(ADR-003 4장).
+id: "EXP-20261013-REC01"
+question: "실녹화(2026-10-12 KRX 3종목) 하루에서 BOOK-V3 체결 규칙으로 STR01과 같은 9개 프로필이 실패 없이 끝까지 돌고, 같은 입력으로 다시 돌린 결과가 바이트까지 같은가(3단계 완료 기준 증거. 하루라 성과 비교·기법 선택에는 쓰지 않는다)"
+input: "recording"
+market: "KRX"
+from: "2026-10-12"
+to: "2026-10-12"
+seed: "20261013"
+seed-capital: "10000000"
+benchmark: "005930"
+parallelism: "2"
+profiles:
+  - "kr-bh-baseline@1"
+  - "kr-orb-30@1"
+  - "kr-vwap-reclaim@1"
+  - "kr-pdh-breakout@1"
+  - "kr-volume-surge@1"
+  - "kr-book-imbalance@1"
+  - "kr-pullback@1"
+  - "kr-ma-trend@1"
+  - "kr-random-control@1"
+boards:
+  - "000660 KOSPI"
+  - "005930 KOSPI"
+  - "035420 KOSPI"

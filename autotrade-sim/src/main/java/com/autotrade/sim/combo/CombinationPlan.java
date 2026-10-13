@@ -3,10 +3,10 @@ package com.autotrade.sim.combo;
 import com.autotrade.domain.Money;
 import com.autotrade.domain.market.Market;
 import com.autotrade.sim.ExperimentId;
+import com.autotrade.sim.run.RegistrationYaml;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,9 +39,8 @@ import java.util.regex.Pattern;
  *   - "005930"
  * </pre>
  *
- * <p>프로필 파일과 같은 이유로 YAML 전체가 아니라 이 모양만 읽고, 벗어나면 줄 번호와 함께 거절한다: 최상위 {@code 키: 값},
- * {@code combinations:}·{@code blacklist:} 아래 공백 2칸 + {@code - 값} 목록. 값은 큰따옴표로 감쌀 수 있고, 따옴표 없는 값은
- * 공백 뒤 {@code #}부터 주석이다. 같은 키 두 번, 모르는 키, 같은 조합 두 번은 거절한다.
+ * <p>읽는 모양은 {@link RegistrationYaml}(최상위 {@code 키: 값}, {@code combinations:}·{@code blacklist:} 아래 공백 2칸 +
+ * {@code - 값} 목록)이고, 같은 키 두 번, 모르는 키, 같은 조합 두 번은 거절한다.
  *
  * @param combinations 조합 {@code 선정 id@버전 x 전략 id@버전}(선정 없으면 {@code none}). 이 순서로 계좌 번호를 매긴다
  * @param benchmark 매수 후 보유 비교 종목 코드. 없으면 빈 값
@@ -65,8 +64,6 @@ public record CombinationPlan(
     private static final Set<String> SCALARS = Set.of("id", "question", "market", "from", "to", "seed", "seed-capital",
             "bars-snapshot", "financials-snapshot", "benchmark", "parallelism");
     private static final Set<String> LISTS = Set.of("combinations", "blacklist");
-    private static final Pattern TOP = Pattern.compile("([a-z][a-z-]*):(.*)");
-    private static final Pattern ITEM = Pattern.compile(" {2}- (.*)");
     private static final Pattern REF = Pattern.compile("([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)");
     private static final Pattern ENTRY = Pattern.compile("(none|[a-z0-9][a-z0-9-]*@[1-9][0-9]*) x ([a-z0-9][a-z0-9-]*@[1-9][0-9]*)");
     private static final Pattern SNAPSHOT = Pattern.compile("[a-z0-9][a-z0-9-]{0,127}");
@@ -131,48 +128,9 @@ public record CombinationPlan(
      * @throws IllegalArgumentException 형식이 틀렸거나 필수 키가 없을 때. 메시지에 줄 번호가 있다
      */
     public static CombinationPlan parse(String text, String source) {
-        Map<String, String> scalars = new LinkedHashMap<>();
-        Map<String, List<String>> lists = new LinkedHashMap<>();
-        String currentList = null;
-        String[] lines = text.split("\n", -1);
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].stripTrailing();
-            int no = i + 1;
-            if (line.isBlank() || line.stripLeading().startsWith("#")) {
-                continue;
-            }
-            Matcher item = ITEM.matcher(line);
-            if (item.matches()) {
-                if (currentList == null) {
-                    throw fail(source, no, "목록 항목이 목록 키 아래에 있지 않습니다");
-                }
-                lists.get(currentList).add(value(item.group(1), source, no));
-                continue;
-            }
-            Matcher top = TOP.matcher(line);
-            if (!top.matches()) {
-                throw fail(source, no, "읽을 수 없는 줄입니다(최상위 키: 값, 또는 공백 2칸 + '- 값')");
-            }
-            String key = top.group(1);
-            if (scalars.containsKey(key) || lists.containsKey(key)) {
-                throw fail(source, no, "같은 키가 두 번 있습니다: " + key);
-            }
-            String rest = value(top.group(2).strip(), source, no);
-            if (LISTS.contains(key)) {
-                if (!rest.isEmpty()) {
-                    throw fail(source, no, key + "는 다음 줄부터 '  - 값' 목록으로 씁니다");
-                }
-                lists.put(key, new ArrayList<>());
-                currentList = key;
-            } else if (SCALARS.contains(key)) {
-                scalars.put(key, rest);
-                currentList = null;
-            } else {
-                throw fail(source, no, "모르는 키입니다: " + key);
-            }
-        }
+        RegistrationYaml raw = RegistrationYaml.parse(text, source, SCALARS, LISTS);
         try {
-            return build(scalars, lists);
+            return build(raw.scalars(), raw.lists());
         } catch (IllegalArgumentException | DateTimeParseException e) {
             throw new IllegalArgumentException(source + ": " + e.getMessage(), e);
         }
@@ -229,41 +187,5 @@ public record CombinationPlan(
             throw new IllegalArgumentException("종목 코드 형식이 아닙니다: " + v);
         }
         return v;
-    }
-
-    /** 큰따옴표 값(\" 이스케이프만) 또는 따옴표 없는 값(공백 뒤 # 주석 제거). */
-    private static String value(String raw, String source, int line) {
-        String v = raw.strip();
-        if (v.startsWith("#")) {
-            return "";
-        }
-        if (v.startsWith("\"")) {
-            StringBuilder sb = new StringBuilder();
-            int i = 1;
-            for (; i < v.length(); i++) {
-                char c = v.charAt(i);
-                if (c == '\\' && i + 1 < v.length() && (v.charAt(i + 1) == '"' || v.charAt(i + 1) == '\\')) {
-                    sb.append(v.charAt(++i));
-                } else if (c == '"') {
-                    break;
-                } else {
-                    sb.append(c);
-                }
-            }
-            if (i >= v.length()) {
-                throw fail(source, line, "닫는 큰따옴표가 없습니다");
-            }
-            String after = v.substring(i + 1).strip();
-            if (!after.isEmpty() && !after.startsWith("#")) {
-                throw fail(source, line, "큰따옴표 값 뒤에 다른 글자가 있습니다");
-            }
-            return sb.toString();
-        }
-        int hash = v.indexOf(" #");
-        return (hash >= 0 ? v.substring(0, hash) : v).strip();
-    }
-
-    private static IllegalArgumentException fail(String source, int line, String message) {
-        return new IllegalArgumentException(source + ":" + line + ": " + message);
     }
 }

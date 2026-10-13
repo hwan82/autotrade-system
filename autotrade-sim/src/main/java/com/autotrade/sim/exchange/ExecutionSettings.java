@@ -15,8 +15,11 @@ public record ExecutionSettings(Duration orderLatency) {
      * 체결 규칙 버전. 규칙을 바꾸면 올린다(같은 데이터·프로필이라도 결과가 달라지므로).
      * BOOK-V2(D-068): 시세 공백({@code DataGap})에서 그 종목 호가와 대기 지정가의 앞선 잔량을 버린다. 공백 없는 데이터의
      * 결과는 BOOK-V1과 같다(골든 테스트로 확인).
+     * BOOK-V3(D-069): 매매 단계({@code MarketRules.sessionPhase})를 따른다. 접속 매매 이벤트로만 연속 체결하고, 단일가 접수 구간
+     * 주문은 구간이 끝난 뒤 첫 체결가로 일괄 체결하며, 장 밖 이벤트로는 체결하지 않는다. 단일가 구간이 없는 규칙(정규장 내내
+     * 접속 매매)으로 돌린 결과는 BOOK-V2와 같다(골든 테스트로 확인).
      */
-    public static final String RULES_VERSION = "BOOK-V2";
+    public static final String RULES_VERSION = "BOOK-V3";
 
     /**
      * 기본 주문 지연 0.5초 `[가정]`. 실측 근거가 없어 MON-04 목표(1.5초)보다 낙관적인 값으로 두고,
@@ -35,7 +38,7 @@ public record ExecutionSettings(Duration orderLatency) {
         return new ExecutionSettings(DEFAULT_LATENCY);
     }
 
-    /** 예: {@code BOOK-V2;latency=PT0.5S}. */
+    /** 예: {@code BOOK-V3;latency=PT0.5S}. */
     public String id() {
         return RULES_VERSION + ";latency=" + orderLatency;
     }

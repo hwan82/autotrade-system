@@ -20,8 +20,8 @@ import java.util.Currency;
  *       전환일을 하드코딩하지 않는다.</li>
  *   <li>호가 단위·거래 시간 같은 수치는 공식 출처를 구현 클래스 주석에 남긴다.</li>
  * </ul>
- * 구현(KRX, US)은 2단계(데이터)와 3단계(실험실)에서 추가한다. 가격 제한(상하한가·LULD), 세션 구분(단일가·장외),
- * 허용 주문 유형, 거래일 캘린더(개장·폐장 시각) 조회는 그 단계의 ADR에서 이 계약에 더한다.
+ * 구현(KRX, US)은 2단계(데이터)와 3단계(실험실)에서 추가한다. 세션 구분(단일가·장외)은 {@link #sessionPhase}(D-069)로
+ * 더했다. 가격 제한(상하한가·LULD), 허용 주문 유형, 거래일 캘린더(개장·폐장 시각) 조회는 그 단계의 ADR에서 이 계약에 더한다.
  */
 public interface MarketRules {
 
@@ -37,6 +37,14 @@ public interface MarketRules {
 
     /** 정규장 시간인지. 휴장일·조기 폐장일은 캘린더로 판단한다. */
     boolean isRegularSession(Instant instant);
+
+    /**
+     * 그 순간의 매매 단계(D-069). 기본 구현은 단일가 구간을 따로 두지 않고 정규장이면 {@link SessionPhase#CONTINUOUS},
+     * 아니면 {@link SessionPhase#CLOSED}다. 단일가 구간이 있는 시장(KRX)은 재정의한다. 정규장 안이면 CLOSED가 아니어야 한다.
+     */
+    default SessionPhase sessionPhase(Instant instant) {
+        return isRegularSession(instant) ? SessionPhase.CONTINUOUS : SessionPhase.CLOSED;
+    }
 
     /**
      * 종목·가격대의 호가 단위. 가격은 0보다 커야 한다. 종목을 받는 이유: 같은 가격대라도 상품 유형(ETF 등)이나

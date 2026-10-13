@@ -8,6 +8,7 @@ import com.autotrade.sim.account.RoundTrip;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -19,20 +20,46 @@ class MetricsCalculatorTest {
 
     @Test
     void 수익률_MDD_CAGR_샤프() {
-        List<EquityPoint> eq = List.of(point(D1, 1100), point(D1.plusDays(1), 990), point(D1.plusDays(2), 1210));
+        // 1100, 990, 1210을 20번 되풀이한 60거래일(샤프 20일, CAGR 60일 최소 관측 일수를 채움)
+        List<EquityPoint> eq = new ArrayList<>();
+        long[] cycle = {1100, 990, 1210};
+        for (int i = 0; i < 60; i++) {
+            eq.add(point(D1.plusDays(i), cycle[i % 3]));
+        }
         // 기간 365일이면 CAGR = 총수익률
         RunMetrics m = MetricsCalculator.compute(SEED, D1, D1.plusDays(364), eq, List.of(), List.of(), null);
         assertThat(m.totalReturn()).isEqualByComparingTo("0.21");
         assertThat(m.cagr()).isEqualByComparingTo("0.21");
-        assertThat(m.maxDrawdown()).isEqualByComparingTo("0.1"); // (1100 − 990) / 1100
-        // 일별 수익률 0.1, −0.1, 0.2222…: 평균 0.0740741, 표본 표준편차 0.1626… → × √252
-        assertThat(m.sharpe()).isEqualByComparingTo("7.228766");
+        assertThat(m.maxDrawdown()).isEqualByComparingTo("0.181818"); // (1210 − 990) / 1210
+        // 일별 수익률 0.1, 그 뒤 −0.1, 0.2222…, −0.0909…를 되풀이: 평균 / 표본 표준편차 × √252(Python decimal로 계산)
+        assertThat(m.sharpe()).isEqualByComparingTo("1.432721");
         assertThat(m.finalEquity()).isEqualTo(krw(1210));
         assertThat(m.turnover()).isEqualByComparingTo("0");
 
         // 2년(730일)이면 √1.21 − 1 = 0.1
         RunMetrics two = MetricsCalculator.compute(SEED, D1, D1.plusDays(729), eq, List.of(), List.of(), null);
         assertThat(two.cagr()).isEqualByComparingTo("0.1");
+    }
+
+    @Test
+    void 관측_일수가_짧으면_샤프와_CAGR은_판정_불가다() {
+        List<EquityPoint> eq = new ArrayList<>();
+        long[] cycle = {1100, 990, 1210};
+        for (int i = 0; i < MetricsCalculator.MIN_CAGR_DAYS - 1; i++) {
+            eq.add(point(D1.plusDays(i), cycle[i % 3]));
+        }
+        RunMetrics m59 = MetricsCalculator.compute(SEED, D1, D1.plusDays(364), eq, List.of(), List.of(), null);
+        assertThat(m59.cagr()).isNull();
+        assertThat(m59.sharpe()).isNotNull();
+        assertThat(m59.totalReturn()).isEqualByComparingTo("-0.01"); // 59번째 점은 990
+
+        List<EquityPoint> short19 = eq.subList(0, MetricsCalculator.MIN_SHARPE_DAYS - 1);
+        RunMetrics m19 = MetricsCalculator.compute(SEED, D1, D1.plusDays(18), short19, List.of(), List.of(), null);
+        assertThat(m19.sharpe()).isNull();
+        assertThat(m19.cagr()).isNull();
+        assertThat(m19.maxDrawdown()).isEqualByComparingTo("0.181818");
+        assertThat(MetricsCalculator.compute(SEED, D1, D1.plusDays(19), eq.subList(0, 20), List.of(), List.of(), null)
+                .sharpe()).isNotNull();
     }
 
     @Test
