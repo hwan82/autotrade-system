@@ -186,4 +186,67 @@ class WalkForwardStudyTest {
                 .hasMessageNotContaining("kr-ma-trend@1=");
         assertThat(dir.resolve("results.md")).doesNotExist();
     }
+
+    @Test
+    void 사전_등록할_4단계_10조합은_시작_전_검증과_예열_300일을_통과한다() {
+        // docs/runbooks/stage-4-walkforward.md 4장 등록 파일(스냅샷 ID만 자리표시자)
+        WalkForwardPlan plan = WalkForwardPlan.parse("""
+                id: "EXP-20261013-WF01"
+                question: "q"
+                market: "KRX"
+                bars-snapshot: "krx-daily-placeholder"
+                financials-snapshot: "dart-financials-placeholder"
+                seed: "1"
+                seed-capital: "10000000"
+                parallelism: "4"
+                first-test-from: "2022-04-01"
+                train-years: "3"
+                test-years: "1"
+                windows: "4"
+                warmup-days: "300"
+                null-seeds: "400"
+                combinations:
+                  - "none x kr-ma-trend@1"
+                  - "kr-vol-surge-quiet@1 x kr-ma-trend@1"
+                  - "none x kr-donchian-swing@1"
+                  - "kr-vol-surge-quiet@1 x kr-donchian-swing@1"
+                  - "none x kr-short-reversal-swing@1"
+                  - "kr-vol-surge-quiet@1 x kr-short-reversal-swing@1"
+                  - "none x kr-ma-trend-position@1"
+                  - "kr-fin-quality-growth@1 x kr-ma-trend-position@1"
+                  - "none x kr-52w-high-position@1"
+                  - "kr-fin-quality-growth@1 x kr-52w-high-position@1"
+                controls:
+                  - "SWING kr-random-daily-swing@1"
+                  - "POSITION kr-random-daily-position@1"
+                """, "runbook");
+        var factory = new com.autotrade.strategy.catalog.CatalogStrategyFactory(
+                com.autotrade.sim.synthetic.SyntheticKrxRules.INSTANCE);
+        List<WalkForwardResult.Candidate> c = WalkForwardStudy.candidates(plan, Path.of(".."), factory);
+        assertThat(plan.m()).isEqualTo(10);
+        assertThat(c).hasSize(10).allSatisfy(x -> assertThat(x.low()).as(x.text() + " " + x.perturbNote()).isNotNull());
+        assertThat(WalkForwardJudge.c10Possible(plan.nullSeeds(), plan.m())).isTrue();
+        // 52주 고가 ×1.2 변형이 300일을 요구하므로 299일이면 거부된다
+        WalkForwardPlan short299 = WalkForwardPlan.parse("""
+                id: "EXP-20261013-WF01"
+                question: "q"
+                market: "KRX"
+                bars-snapshot: "krx-daily-placeholder"
+                seed: "1"
+                seed-capital: "10000000"
+                parallelism: "4"
+                first-test-from: "2022-04-01"
+                train-years: "3"
+                test-years: "1"
+                windows: "4"
+                warmup-days: "299"
+                null-seeds: "400"
+                combinations:
+                  - "none x kr-52w-high-position@1"
+                controls:
+                  - "POSITION kr-random-daily-position@1"
+                """, "runbook-299");
+        assertThatThrownBy(() -> WalkForwardStudy.candidates(short299, Path.of(".."), factory))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("kr-52w-high-position-k120@1=300일");
+    }
 }
