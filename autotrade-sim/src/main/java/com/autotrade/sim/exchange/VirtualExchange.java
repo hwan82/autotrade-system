@@ -28,6 +28,7 @@ import com.autotrade.sim.cost.FeeBreakdown;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -73,7 +74,12 @@ import java.util.Set;
  *       (그 사이 단일가 체결을 놓쳤을 수 있어 다음 체결을 단일가로 보지 않는다). 시가 단일가로 여는 시장
  *       ({@link MarketRules#opensWithAuction}, KRX)은 단일가 접수 마감이 임의로 늦춰지므로, 개장 시각이 지나도 그 종목 그날 첫
  *       체결 전까지의 이벤트는 시가 단일가 접수로 보고(호가로 체결하지 않음, 새 주문도 참여) 첫 체결을 시가 단일가 체결로 본다.
- *       그 체결 직전까지 유효해진 주문은 모두 참여한다. 이벤트 시각이 합성인 데이터(일봉 경로)는 매매 단계를 보지 않는다.</li>
+ *       그 체결 직전까지 유효해진 주문은 모두 참여한다. 다만 그날 그 종목 첫 이벤트가 개장 뒤 {@link #AUCTION_PRINT_GRACE}보다 늦게
+ *       오면(녹화가 장중에 시작) 시가 단일가 체결은 이미 지난 것으로 보고 바로 접속 매매로 본다. 종가 단일가 체결은 종가 단일가
+ *       구간이 끝나고 {@link #AUCTION_PRINT_GRACE} 안의 첫 체결로만 보고, 그보다 늦은 장 밖 체결(시간외 단일가 등)로는 종가 참여
+ *       주문을 체결하지 않는다(D-074). 이벤트 시각이 합성인 데이터(일봉 경로)는 매매 단계를 보지 않는다.</li>
+ *   <li><b>평가 가격</b>({@link #markPrice}): 정규장 체결(접속 매매 체결, 시가·종가 단일가 체결)로만 마지막 체결가를 갱신한다.
+ *       장전·장후 시간외 체결과 단일가 접수 구간의 체결 이벤트는 쓰지 않는다(D-074).</li>
  *   <li>우리 주문이 시장에 준 영향(소진한 잔량)은 다음 스냅샷에 이어지지 않는다 `[가정]`: 실제 스냅샷이 시장 상태다.
  *       주문 규모가 호가 잔량보다 충분히 작다는 전제이며, 큰 주문의 성과는 과대평가될 수 있다.</li>
  * </ul>
@@ -81,6 +87,13 @@ import java.util.Set;
  * <p>Run 하나 전용, 단일 스레드. {@link #onEvent}를 이벤트 sequence 순서대로 불러야 한다.
  */
 public final class VirtualExchange implements OrderGateway {
+
+    /**
+     * 단일가 접수 마감 뒤 단일가 체결 틱이 올 수 있는 시간: 랜덤 엔드 상한 30초 `[가정]`(D-069)에 수신·녹화 지연 여유 30초.
+     * 종가 단일가 구간이 끝나고 이 시간 안의 첫 체결만 종가 단일가 체결로 보고, 그날 그 종목 첫 이벤트가 개장 뒤 이 시간보다
+     * 늦으면 시가 단일가 체결이 이미 지난 것으로 본다(D-074).
+     */
+    static final Duration AUCTION_PRINT_GRACE = Duration.ofSeconds(60);
 
     private final AccountId account;
     private final MarketRules rules;
@@ -102,6 +115,10 @@ public final class VirtualExchange implements OrderGateway {
     private final Set<Symbol> staleBooks = new HashSet<>();
     /** 종목별로 시가 단일가 체결(그날 첫 체결)이 지난 거래일. {@link MarketRules#opensWithAuction} 시장만 쓴다. */
     private final Map<Symbol, LocalDate> opened = new HashMap<>();
+    /** 종목별로 이벤트를 마지막으로 본 거래일. 그날 첫 이벤트인지 가린다. */
+    private final Map<Symbol, LocalDate> seen = new HashMap<>();
+    /** 종목별로 종가 단일가 체결을 본 거래일. */
+    private final Map<Symbol, LocalDate> closePrinted = new HashMap<>();
     private final List<AppliedFill> newFills = new ArrayList<>();
     private long currentSeq = Long.MIN_VALUE;
     private Instant currentReceivedAt;
@@ -177,13 +194,18 @@ public final class VirtualExchange implements OrderGateway {
             if (phase == SessionPhase.CONTINUOUS) {
                 matchTrade(tick, left);
             }
-            lastTrade.put(tick.symbol(), tick.price());
+            // 평가 가격은 정규장 체결(접속 매매, 시가·종가 단일가 체결)로만 갱신한다. 장전·장후 시간외 체결은 쓰지 않는다
+            if (phase == SessionPhase.CONTINUOUS || closingPrint) {
+                lastTrade.put(tick.symbol(), tick.price());
+            }
         }
         return List.copyOf(newFills);
     }
 
     /** 이 이벤트로 판단한 {@link #phase}가 그 종목 시가 단일가 체결인가. */
     private boolean openingPrint;
+    /** 이 이벤트가 그 종목 종가 단일가 체결인가({@link #phase}가 정한다). */
+    private boolean closingPrint;
 
     /**
      * 이벤트의 매매 단계. 시가 단일가로 여는 시장은 개장 시각이 지났어도 그 종목 그날 첫 체결 전까지를 시가 단일가 접수로 보고,
@@ -192,15 +214,31 @@ public final class VirtualExchange implements OrderGateway {
      */
     private SessionPhase phase(MarketEvent event) {
         openingPrint = false;
+        closingPrint = false;
         if (!phases) {
             return SessionPhase.CONTINUOUS;
         }
-        SessionPhase phase = rules.sessionPhase(event.exchangeTime());
+        Instant t = event.exchangeTime();
+        SessionPhase phase = rules.sessionPhase(t);
+        LocalDate day = rules.tradingDate(t);
+        boolean firstToday = !day.equals(seen.put(event.symbol(), day));
+        if (phase == SessionPhase.CLOSED) {
+            closingPrint = event instanceof TradeTick && !day.equals(closePrinted.get(event.symbol()))
+                    && rules.sessionPhase(t.minus(AUCTION_PRINT_GRACE)) == SessionPhase.CLOSING_AUCTION;
+            if (closingPrint) {
+                closePrinted.put(event.symbol(), day);
+            }
+            return phase;
+        }
         if (phase != SessionPhase.CONTINUOUS || !rules.opensWithAuction()) {
             return phase;
         }
-        LocalDate day = rules.tradingDate(event.exchangeTime());
         if (day.equals(opened.get(event.symbol()))) {
+            return phase;
+        }
+        if (firstToday && rules.sessionPhase(t.minus(AUCTION_PRINT_GRACE)) == SessionPhase.CONTINUOUS) {
+            // 그날 그 종목 첫 이벤트가 개장 뒤 한참 지나 왔다(녹화가 장중에 시작): 시가 단일가 체결은 이미 지나갔다
+            opened.put(event.symbol(), day);
             return phase;
         }
         if (event instanceof TradeTick) {
@@ -339,11 +377,11 @@ public final class VirtualExchange implements OrderGateway {
             if (!o.request.symbol().equals(s) || o.auction == null || o.auction == phase) {
                 continue;
             }
-            // 시가 단일가는 접속 매매 첫 체결, 종가 단일가는 폐장 뒤 첫 체결로만 체결한다. 그 밖(시가 참여 주문이 폐장 뒤 체결을
-            // 처음 만남 등)은 단일가 체결을 놓친 것이므로 표시만 지운다
-            SessionPhase expected = o.auction == SessionPhase.OPENING_AUCTION ? SessionPhase.CONTINUOUS : SessionPhase.CLOSED;
+            // 시가 단일가는 접속 매매 첫 체결, 종가 단일가는 폐장 직후 첫 체결({@link #closingPrint})로만 체결한다. 그 밖(시가
+            // 참여 주문이 폐장 뒤 체결을 처음 만남, 종가 체결 틱 없이 시간외 체결이 옴 등)은 단일가 체결을 놓친 것이므로 표시만 지운다
+            boolean print = o.auction == SessionPhase.OPENING_AUCTION ? phase == SessionPhase.CONTINUOUS : closingPrint;
             o.auction = null;
-            if (phase != expected || !tradable || tickLeft <= 0) {
+            if (!print || !tradable || tickLeft <= 0) {
                 continue;
             }
             boolean buy = o.request.side() == Side.BUY;
