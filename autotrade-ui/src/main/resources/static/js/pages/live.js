@@ -86,8 +86,9 @@ window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/l
 // ---- 세션이 없을 때: 등록 파일 고르기 ----
 
 function idleView(view, regs, act) {
+  // 경고 색은 서버가 준 종류로 고른다(문구를 비교하지 않음, PR #96 R5)
   const last = view.stopReason
-    ? h('div', { class: `notice${view.stopReason === '끝냄' || view.stopReason === '화면에서 멈춤' ? '' : ' warn'}` },
+    ? h('div', { class: `notice${view.stopKind === 'NORMAL' ? '' : ' warn'}` },
       h('p', {}, `마지막 세션: ${view.stopReason}`))
     : null;
   const start = (r) => act(`${r.id} 시작`, async () => {
@@ -157,17 +158,19 @@ function sessionView(view, gaps, act) {
     warn.push(`실험실 받는 큐가 차서 이벤트 ${number(view.inboxDropped)}건을 버렸습니다(그 구간은 공백으로 남음). 실험실이 실전 엔진·녹화보다 먼저 양보한 결과입니다.`);
   }
   const failed = s.failures.filter(f => f).length;
+  // 시각은 세션 시장의 현지 시간으로(서버가 시장을 준다, PR #96 R4). 모르면 국내로
+  const market = view.market || 'KRX';
   return h('div', {}, head,
     warn.length ? h('div', { class: 'notice warn' }, warn.map(w => h('p', {}, w))) : null,
     h('div', { class: 'tiles' },
       tile('계좌', `${s.runs.length - failed}/${s.runs.length} 정상`, failed ? `실패 ${failed}` : '실패 없음'),
       tile('받은 이벤트', number(s.events), `되살린 ${number(s.restored)}`),
       tile('공백', number(s.dataGaps), '빠진 구간(아래 표)'),
-      tile('마지막 이벤트', s.lastEventAt ? time(s.lastEventAt, 'KRX') : '–', `기록일 ${s.journalDate || '–'}`)),
+      tile('마지막 이벤트', s.lastEventAt ? time(s.lastEventAt, market) : '–', `기록일 ${s.journalDate || '–'}`)),
     h('h2', {}, '계좌'),
     accountsTable(view, s),
     h('h2', {}, '최근 공백'),
-    gapsSection(gaps),
+    gapsSection(gaps, market),
     h('h2', {}, '세션 정보'),
     h('dl', { class: 'facts' },
       fact('기간', `${s.from} ~ ${s.to}`),
@@ -202,7 +205,7 @@ function accountsTable(view, s) {
   ], rows, { rowClass: r => r.failure ? 'urgent' : null });
 }
 
-function gapsSection(gaps) {
+function gapsSection(gaps, market) {
   if (!gaps) return h('p', { class: 'muted' }, '공백 정보를 아직 읽지 않았습니다.');
   if (gaps.error) return h('p', { class: 'notice warn' }, `공백을 읽지 못했습니다: ${gaps.error}`);
   if (gaps.total === 0) return h('p', { class: 'muted' }, '공백이 없습니다. 받은 시세가 빠짐없이 계좌에 갔습니다.');
@@ -213,8 +216,8 @@ function gapsSection(gaps) {
     table([
       { label: '종목', render: g => g.symbol },
       { label: '사유', render: g => GAP_REASON[g.reason] || g.reason },
-      { label: '빠진 구간', render: g => `${time(g.gapStart, 'KRX')} ~ ${time(g.gapEnd, 'KRX')}` },
-      { label: '받은 시각', render: g => time(g.receivedAt, 'KRX') },
+      { label: '빠진 구간', render: g => `${time(g.gapStart, market)} ~ ${time(g.gapEnd, market)}` },
+      { label: '받은 시각', render: g => time(g.receivedAt, market) },
     ], gaps.items));
 }
 

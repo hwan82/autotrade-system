@@ -83,6 +83,7 @@ public class LiveLabService implements AutoCloseable {
     /** 멈춘 세션의 되살리기 스레드(아직 끝나지 않았으면 세션 잠금을 쥐고 있을 수 있다). */
     private Thread lingering;
     private String lastStopReason = "";
+    private StopKind lastStopKind = StopKind.NONE;
 
     /**
      * @param experimentsRoot 등록 파일과 결과가 있는 {@code experiments/}
@@ -159,6 +160,7 @@ public class LiveLabService implements AutoCloseable {
         Running r = new Running(plan);
         running = r;
         lastStopReason = "";
+        lastStopKind = StopKind.NONE;
         r.starter = Thread.ofPlatform().name("live-restore").daemon(true).priority(Thread.MIN_PRIORITY)
                 .start(() -> openAndConnect(r));
         log.info("실시간 모의 세션 시작 요청: {} (계좌 {}개, 입력 기록 되살리는 중)", id, plan.profiles().size());
@@ -172,6 +174,7 @@ public class LiveLabService implements AutoCloseable {
             session = LiveSession.open(r.plan, repoRoot, sessionsRoot, clock, m -> log.info("실시간 모의: {}", m), () -> {
                 Optional<String> stop = r.cancelled ? Optional.of("되살리는 중 멈춤") : stopReason();
                 if (stop.isPresent()) {
+                    r.gateStop = stop.get();
                     throw new IllegalStateException(stop.get());
                 }
             });
@@ -179,8 +182,13 @@ public class LiveLabService implements AutoCloseable {
             synchronized (this) {
                 if (running == r) {
                     running = null;
-                    lastStopReason = "시작 실패: " + e.getMessage();
-                    log.warn("실시간 모의 세션을 열지 못했습니다: {} ({})", r.plan.id(), e.getClass().getSimpleName());
+                    // 정지 점검이 멈춘 것이면 그 사유(이 클래스가 만든 문구)를, 그 밖의 예외는 종류만 화면에 남긴다.
+                    // 기록·잠금 파일 예외 메시지에는 절대 경로가 들어 있을 수 있다(PR #96 N2). 메시지 전체는 로그에만
+                    lastStopReason = r.gateStop != null ? "시작 실패: " + r.gateStop
+                            : "시작 실패(" + e.getClass().getSimpleName() + "). 실험실 로그를 확인하세요";
+                    lastStopKind = StopKind.PROBLEM;
+                    log.warn("실시간 모의 세션을 열지 못했습니다: {} ({}: {})", r.plan.id(), e.getClass().getSimpleName(),
+                            e.getMessage());
                 }
             }
             return;
@@ -199,8 +207,15 @@ public class LiveLabService implements AutoCloseable {
         }
     }
 
-    /** 세션을 멈춘다(입력 기록을 닫음). 다시 시작하면 기록으로 계좌를 되살린다. 돌고 있지 않으면 아무것도 하지 않는다. */
+    /**
+     * 사용자가 세션을 멈춘다(입력 기록을 닫음, {@link StopKind#NORMAL}). 다시 시작하면 기록으로 계좌를 되살린다. 돌고 있지 않으면
+     * 아무것도 하지 않는다.
+     */
     public synchronized void stop(String reason) {
+        stop(reason, StopKind.NORMAL);
+    }
+
+    private synchronized void stop(String reason, StopKind kind) {
         if (running == null) {
             return;
         }
@@ -212,6 +227,7 @@ public class LiveLabService implements AutoCloseable {
         }
         lingering = r.starter;
         lastStopReason = reason;
+        lastStopKind = kind;
         log.info("실시간 모의 세션 멈춤: {} ({})", r.plan.id(), reason);
     }
 
@@ -238,6 +254,7 @@ public class LiveLabService implements AutoCloseable {
         } catch (RuntimeException e) {
             // 마감이나 입력 기록 닫기 실패(메시지에 절대 경로가 있을 수 있어 사유에는 종류만 남김). 기록이 정상 종료로 닫혔는지 모른다
             lastStopReason = "끝내기 실패(" + e.getClass().getSimpleName() + "). 실험실 로그를 확인하세요";
+            lastStopKind = StopKind.PROBLEM;
             log.warn("실시간 모의 세션을 끝내지 못했습니다: {} ({})", r.plan.id(), e.getClass().getSimpleName());
             throw e;
         }
@@ -248,11 +265,13 @@ public class LiveLabService implements AutoCloseable {
         } catch (IOException e) {
             // 세션은 이미 끝났고(기록은 정상 종료로 닫힘) 보고서만 못 썼다. 다시 시작하면 기록으로 되살린 뒤 끝내기를 다시 할 수 있다
             lastStopReason = "끝냈지만 보고서를 쓰지 못했습니다(" + e.getClass().getSimpleName() + "): " + shown;
+            lastStopKind = StopKind.PROBLEM;
             log.warn("실시간 보고서를 쓸 수 없습니다: {} ({})", target, e.getClass().getSimpleName());
             throw new ReportNotWrittenException(
                     lastStopReason + ". 공간·권한을 확인한 뒤 세션을 다시 시작하고 끝내기를 다시 하세요", e);
         }
         lastStopReason = "끝냄";
+        lastStopKind = StopKind.NORMAL;
         log.info("실시간 모의 세션 끝: {} → {}", r.plan.id(), target);
         long failed = report.runs().stream().filter(x -> !x.summary().failureReason().isEmpty()).count();
         return new Finished(r.plan.id().value(), shown, report.runs().size(), (int) failed);
@@ -273,30 +292,48 @@ public class LiveLabService implements AutoCloseable {
     /** 화면용 상태. 돌고 있는 세션이 없으면 experimentId가 빈 문자열이고 session은 비어 있다. */
     public synchronized View status() {
         if (running == null) {
-            return new View("", List.of(), false, Optional.empty(), ConnectionState.CLOSED, "", 0, 0, 0, lastStopReason);
+            return new View("", "", List.of(), false, Optional.empty(), ConnectionState.CLOSED, "", 0, 0, 0,
+                    lastStopReason, lastStopKind);
         }
         Running r = running;
+        String market = r.plan.market().name();
         List<String> profiles = r.plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList();
         if (r.session == null) {
-            return new View(r.plan.id().value(), profiles, true, Optional.empty(), ConnectionState.NEW, "", 0, 0, 0, "");
+            return new View(r.plan.id().value(), market, profiles, true, Optional.empty(), ConnectionState.NEW, "", 0, 0,
+                    0, "", StopKind.NONE);
         }
-        return new View(r.plan.id().value(), profiles, false, Optional.of(r.session.status()), r.client.state(),
-                r.client.lastError(), r.client.reconnectCount(), r.inbox.size(), r.inboxDropped.get(),
-                r.session.status().stopReason());
+        String reason = r.session.status().stopReason();
+        return new View(r.plan.id().value(), market, profiles, false, Optional.of(r.session.status()), r.client.state(),
+                r.client.lastError(), r.client.reconnectCount(), r.inbox.size(), r.inboxDropped.get(), reason,
+                reason.isEmpty() ? StopKind.NONE : StopKind.PROBLEM);
+    }
+
+    /**
+     * 멈춘 이유의 종류. 화면은 문구가 아니라 이것으로 경고 색을 고른다(PR #96 R5).
+     */
+    public enum StopKind {
+        /** 멈춘 적 없음(이번 실험실 실행에서 세션을 끝내거나 멈추지 않았음). */
+        NONE,
+        /** 사용자가 끝냈거나 멈춤(화면의 멈춤·끝내기, 실험실 종료). */
+        NORMAL,
+        /** 문제로 멈춤(감시 정지 요청, 디스크 부족, 기록 실패, 시작·끝내기 실패, 보고서 쓰기 실패). 경고로 보인다. */
+        PROBLEM
     }
 
     /**
      * @param experimentId 돌고 있는(되살리는 중 포함) 세션의 실험 ID, 없으면 빈 문자열
+     * @param market 돌고 있는 세션의 시장({@code KRX}, {@code US}), 없으면 빈 문자열. 화면은 이 시장의 현지 시간으로 시각을 보인다
      * @param profiles 계좌 순서대로 전략 프로필({@code id@버전}). {@code session.runs()}의 같은 자리 계좌가 이 프로필로 돈다
      * @param restoring 입력 기록으로 계좌를 되살리는 중(아직 게이트웨이에 연결하지 않음)
      * @param feedState 게이트웨이 시세 전달 연결 상태
      * @param inboxQueued 받는 큐에 남은 수
      * @param inboxDropped 받는 큐가 차서 버린 수(공백으로 남음)
      * @param stopReason 마지막 멈춘 이유(감시 정지 요청, 디스크 부족, 기록 실패, 시작 실패 등)
+     * @param stopKind {@code stopReason}의 종류. 세션이 도는 중에는 세션이 스스로 멈췄을 때만 {@link StopKind#PROBLEM}
      */
-    public record View(String experimentId, List<String> profiles, boolean restoring, Optional<LiveSession.Status> session,
-            ConnectionState feedState, String feedError, long feedReconnects, int inboxQueued, long inboxDropped,
-            String stopReason) {
+    public record View(String experimentId, String market, List<String> profiles, boolean restoring,
+            Optional<LiveSession.Status> session, ConnectionState feedState, String feedError, long feedReconnects,
+            int inboxQueued, long inboxDropped, String stopReason, StopKind stopKind) {
         public View {
             profiles = List.copyOf(profiles);
         }
@@ -446,6 +483,8 @@ public class LiveLabService implements AutoCloseable {
         private Thread pump;
         private volatile boolean halted;
         private volatile boolean cancelled;
+        /** 되살리기 정지 점검이 세션 열기를 멈춘 사유(되살리기 스레드만 쓰고 읽음). */
+        private String gateStop;
 
         Running(LivePlan plan) {
             this.plan = plan;
@@ -501,7 +540,7 @@ public class LiveLabService implements AutoCloseable {
             Thread.ofPlatform().daemon(true).start(() -> {
                 synchronized (LiveLabService.this) {
                     if (running == this) {
-                        stop(reason);
+                        stop(reason, StopKind.PROBLEM);
                     }
                 }
             });
