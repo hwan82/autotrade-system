@@ -37,3 +37,35 @@
 
 ## 판정
 수정 필요(B1 확인 못 함: 검토자 직접 빌드가 Maven Central 429로 실행 불가, 환경 회복 또는 PR 헤드 CI Gradle build success 확인 후 재검토 / 발견 1: OVS-02 행·G4에 `DailyBarQualityCheck.java:222`, `SelectionCriteria.java:231` 추가 / 발견 2: CFG-06 행에 "실행 중 Run 파라미터 변경 시도 실패 테스트" 대응 근거 또는 부재 명시)
+
+## 재검토 2026-10-14
+- 대상: PR #81 / 커밋 10d7f57 / main(7cb71a9) 대비 diff 전체(`git diff origin/main...HEAD`: `docs/qa/pending.md` +1, `docs/qa/stage-1-completion-check.md` +79, `docs/reviews/pr-81/architect.md` +39. 코드·설정·스키마 변경 없음)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon`(HEAD 10d7f57, 작업 트리 깨끗함): Maven Central 429로 의존성 내려받기가 여러 번 끊겨 재시도했고, 캐시가 채워진 뒤 마지막 실행 **BUILD SUCCESSFUL**(130 actionable tasks). 테스트 결과 XML 집계 1005건, 실패 0, 오류 0, 건너뜀 0. `ArchitectureTest`, `ModuleOwnershipTest`, `RealTradingGuardTest` 결과 파일 있음
+  - `gh api .../commits/10d7f57/check-runs`: Gradle build success, DB schema success, Secret scan and collector boundary success(run 38487934854). 1차 헤드 42affd9의 Gradle build도 이후 success
+  - 커밋된 `docs/reviews/pr-81/architect.md`가 검토자가 쓴 원문과 같은지 확인: md5 일치(d6b43df1…), 메인 Claude가 원문을 고치지 않았다
+  - 새 인용 대조: `StrategyProfile.java:25`(record), `:41`(TreeMap 복사, `:48` `Collections.unmodifiableSortedMap`), `ExperimentSpec.java:34`(record), `:59`(`List.copyOf`) 일치. `autotrade-config/src/main`에 audit·감사 기록 코드 없음(grep 결과 없음) 확인
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 실행 `./gradlew build` BUILD SUCCESSFUL(10d7f57), 테스트 1005건 실패 0. PR 헤드 CI Gradle build success(run 38487934854) |
+| B2 | 해당 없음 | 코드·빌드 스크립트·ArchUnit 규칙 변경 없음(diff 3개 파일 모두 `docs/`) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 코드·골든 데이터 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 없음, 테스트 삭제·비활성화 없음 |
+| B7 | 해당 없음 | 실전 경로 변경 없음. 4장 이연(CFG-05·06 실전 관련 검증의 7단계 이동)을 기획서에 반영하는 후속 PR은 risk-ops 검토 필요. 문서 4장 마지막 문단에 이 조건이 들어갔다 |
+| B8 | 통과 | diff에 API Key·계좌번호·토큰 없음(육안), CI gitleaks 전 이력 success |
+
+### 1차 지적 처리
+- 발견 1(OVS-02): 해소. OVS-02 행에 `DailyBarQualityCheck.java:222`(실제 시장 분기)와 `SelectionCriteria.java:231`(입구 거절)을 넣었고, G4에 `DailyBarQualityCheck` 임계를 `MarketRules`로 옮길 후보로 적었다. grep 재실행 결과와 일치
+- 발견 2(CFG-06): 해소. "없는 것"을 ① Run 파라미터 변경 실패 테스트(설계 근거 `StrategyProfile`·`ExperimentSpec` 불변, 전용 테스트 없음) ② 운영 설정 감사 로그 ③ 실전 한도 2차 확인으로 나눴고, ①②는 이연이 아닌 1단계 후속 과제(architect)로 분리했다. 인용 위치 확인함
+- 발견 3(G1 근거의 리뷰 폴더): 참고 사항이라 고치지 않았다. 결론에 영향 없음
+
+### 재검토 점검표 밖 발견
+- [참고] CFG-06 ①②를 "1단계 후속 과제"로 두면서도 1단계 판단 칸은 "부분 → 이연 제안" 그대로다. 4장 선택지 A가 ①②를 1단계 완료 뒤에 남기는 것까지 포함하므로 QA·사용자가 A를 고르면 일관된다. 다만 ①은 지금 바로 만들 수 있는 작은 테스트라, 완료 기록 PR 전에 채우는 편이 QA 지적을 줄인다(권고, 차단 아님)
+- [참고] OVS-02 행의 grep 명령이 1차의 `-rln`에서 `-rn`으로 바뀌었다. 결과 해석에는 영향 없음
+
+### 판정
+승인
