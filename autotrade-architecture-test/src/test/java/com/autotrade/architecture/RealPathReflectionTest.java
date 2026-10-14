@@ -7,6 +7,7 @@ import com.autotrade.app.engine.archfixture.DataBoundConfirmation;
 import com.autotrade.app.engine.archfixture.DynamicCode;
 import com.autotrade.app.engine.archfixture.GuardAsData;
 import com.autotrade.app.engine.archfixture.JacksonObjectAccess;
+import com.autotrade.app.engine.archfixture.NameToClassBinding;
 import com.autotrade.app.engine.archfixture.PolymorphicJson;
 import com.autotrade.app.engine.archfixture.ReflectionFreeEngineCode;
 import com.autotrade.app.engine.archfixture.ReflectiveRaiser;
@@ -67,6 +68,8 @@ import qa.probe.OutsideReflective;
  *       불러오는 클래스 하나를 넣는 PR은 보호 테스트 변경이라 risk-ops 검토 뒤 사용자가 머지한다.</li>
  *   <li>Jackson이 JSON 내용으로 만들 클래스를 고르게 하는 설정(기본 타입 지정, {@code @JsonTypeInfo}의
  *       {@code CLASS·MINIMAL_CLASS·CUSTOM}).</li>
+ *   <li>이름 문자열로 클래스를 얻는 데이터 바인딩({@code Class.class}, {@code Class} 속성, 독립 QA PR #108 F1)과 허용 목록 밖 타입.
+ *       허용 목록은 의존 목록에 더해 클래스 파일 상수 풀 전체(형변환·호출 서술자)로 대조한다({@link ClassFileTypes}, QA F2).</li>
  * </ol>
  * 그리고 모든 운영 코드에서 {@link SecondConfirmation}을 필드·매개변수·클래스 객체·제네릭 인자로 다루는 곳은 Guard 패키지와
  * {@link OperatorAuthenticator}뿐이다({@link #SECOND_CONFIRMATION_IS_NOT_DATA}). Jackson 같은 외부 라이브러리는 리플렉션으로
@@ -238,7 +241,7 @@ class RealPathReflectionTest {
     static final Set<String> ALLOWED_JDK_PACKAGES = Set.of(
             "java.math", "java.net.http",
             "java.nio", "java.nio.channels", "java.nio.charset", "java.nio.file", "java.nio.file.attribute",
-            "java.text", "java.time", "java.time.format",
+            "java.security.spec", "java.text", "java.time", "java.time.chrono", "java.time.format", "java.time.temporal",
             "java.util.concurrent", "java.util.concurrent.atomic", "java.util.function", "java.util.regex",
             "java.util.stream", "java.util.zip", "javax.crypto", "javax.crypto.spec");
 
@@ -254,6 +257,10 @@ class RealPathReflectionTest {
     static final Set<String> ALLOWED_JDK_CLASSES = Set.of(
             "java.util.Base64", "java.util.Base64$Decoder", "java.util.Base64$Encoder",
             "java.io.BufferedReader", "java.io.BufferedWriter", "java.io.ByteArrayOutputStream", "java.io.Console",
+            "java.io.EOFException", "java.io.File", "java.io.Reader", "java.io.Writer",
+            "java.lang.ArithmeticException", "java.lang.Iterable", "java.lang.NoSuchFieldError", "java.lang.NumberFormatException",
+            "java.lang.Thread$Builder", "java.net.ProtocolFamily", "java.net.SocketAddress",
+            "java.security.GeneralSecurityException", "java.security.NoSuchAlgorithmException",
             "java.io.FilterInputStream", "java.io.IOException", "java.io.InputStream", "java.io.InputStreamReader",
             "java.io.OutputStream", "java.io.OutputStreamWriter", "java.io.PrintStream",
             "java.io.UncheckedIOException", "java.lang.AutoCloseable", "java.lang.Boolean", "java.lang.CharSequence",
@@ -290,6 +297,9 @@ class RealPathReflectionTest {
             "com.fasterxml.jackson.annotation.JsonCreator$Mode",
             "com.fasterxml.jackson.annotation.JsonIgnore",
             "com.fasterxml.jackson.core.JsonGenerator",
+            "com.fasterxml.jackson.core.JsonParser",
+            "com.fasterxml.jackson.core.JsonProcessingException",
+            "com.fasterxml.jackson.core.TreeNode",
             "com.fasterxml.jackson.core.JsonParser$Feature",
             "com.fasterxml.jackson.core.StreamReadFeature",
             "com.fasterxml.jackson.core.json.JsonReadFeature",
@@ -297,13 +307,17 @@ class RealPathReflectionTest {
             "com.fasterxml.jackson.databind.JsonMappingException",
             "com.fasterxml.jackson.databind.JsonMappingException$Reference",
             "com.fasterxml.jackson.databind.JsonNode",
+            "com.fasterxml.jackson.databind.JsonSerializer",
+            "com.fasterxml.jackson.databind.Module",
             "com.fasterxml.jackson.databind.ObjectMapper",
             "com.fasterxml.jackson.databind.PropertyNamingStrategies",
             "com.fasterxml.jackson.databind.PropertyNamingStrategies$KebabCaseStrategy",
+            "com.fasterxml.jackson.databind.PropertyNamingStrategy",
             "com.fasterxml.jackson.databind.SerializationFeature",
             "com.fasterxml.jackson.databind.SerializerProvider",
             "com.fasterxml.jackson.databind.cfg.CoercionAction",
             "com.fasterxml.jackson.databind.cfg.CoercionInputShape",
+            "com.fasterxml.jackson.databind.cfg.MapperBuilder",
             "com.fasterxml.jackson.databind.cfg.MutableCoercionConfig",
             "com.fasterxml.jackson.databind.json.JsonMapper",
             "com.fasterxml.jackson.databind.json.JsonMapper$Builder",
@@ -314,24 +328,107 @@ class RealPathReflectionTest {
             "com.fasterxml.jackson.databind.ser.std.StdSerializer",
             "com.fasterxml.jackson.databind.type.LogicalType");
 
-    /** 허용 목록 밖 JDK·외부 타입에 대한 의존(우리 타입과 기본 타입은 제외). */
+    /** 허용 목록 안의 JDK·외부 타입인지(우리 타입과 기본 타입은 늘 허용). */
+    static boolean allowedType(String n) {
+        if (n.startsWith("com.autotrade.")) {
+            return true;
+        }
+        String pkg = n.lastIndexOf('.') < 0 ? "" : n.substring(0, n.lastIndexOf('.'));
+        return n.startsWith("com.fasterxml.jackson.")
+                ? JACKSON_ALLOWLIST.contains(n)
+                : CLASS_LEVEL_JDK_PACKAGES.contains(pkg) ? ALLOWED_JDK_CLASSES.contains(n)
+                : ALLOWED_JDK_PACKAGES.contains(pkg) || ALLOWED_REFLECT_TYPES.contains(n);
+    }
+
+    /**
+     * javac가 람다·문자열 연결·레코드·패턴 switch를 위해 클래스 파일에 넣는 부트스트랩 타입. 소스에서 직접 쓰면 {@link #reflective}
+     * ({@code java.lang.invoke} 전체)와 의존 검사가 잡으므로, 클래스 파일 상수 검사에서만 뺀다.
+     */
+    static final Set<String> JAVAC_BOOTSTRAP_TYPES = Set.of(
+            "java.lang.invoke.LambdaMetafactory", "java.lang.invoke.StringConcatFactory",
+            "java.lang.invoke.MethodHandles", "java.lang.invoke.MethodHandles$Lookup", "java.lang.invoke.MethodHandle",
+            "java.lang.invoke.MethodType", "java.lang.invoke.CallSite", "java.lang.invoke.TypeDescriptor",
+            "java.lang.runtime.ObjectMethods", "java.lang.runtime.SwitchBootstraps");
+
+    /**
+     * 허용 목록 밖 JDK·외부 타입에 대한 의존(우리 타입과 기본 타입은 제외). ArchUnit 의존 목록에 더해, 부른 메서드·읽은 필드의
+     * 매개변수·반환 타입과 클래스 파일 상수 풀에 이름이 나오는 모든 타입(형변환 대상 포함)을 본다(독립 QA PR #108 F2).
+     */
     static List<String> outsideAllowlist(JavaClass c) {
         List<String> out = new ArrayList<>();
+        Set<String> reported = new TreeSet<>();
         for (com.tngtech.archunit.core.domain.Dependency d : c.getDirectDependenciesFromSelf()) {
             JavaClass t = d.getTargetClass().getBaseComponentType();
-            String n = t.getName();
-            if (t.isPrimitive() || n.startsWith("com.autotrade.")) {
-                continue;
-            }
-            boolean allowed = n.startsWith("com.fasterxml.jackson.")
-                    ? JACKSON_ALLOWLIST.contains(n)
-                    : CLASS_LEVEL_JDK_PACKAGES.contains(t.getPackageName()) ? ALLOWED_JDK_CLASSES.contains(n)
-                    : ALLOWED_JDK_PACKAGES.contains(t.getPackageName()) || ALLOWED_REFLECT_TYPES.contains(n);
-            if (!allowed) {
-                out.add("허용 목록 밖 타입 " + n + ": " + d.getDescription());
+            if (!t.isPrimitive() && !allowedType(t.getName())) {
+                reported.add(t.getName());
+                out.add("허용 목록 밖 타입 " + t.getName() + ": " + d.getDescription());
             }
         }
+        for (JavaAccess<?> a : c.getAccessesFromSelf()) {
+            List<JavaClass> signature = new ArrayList<>();
+            if (a.getTarget() instanceof AccessTarget.CodeUnitAccessTarget u) {
+                signature.addAll(u.getRawParameterTypes());
+                signature.add(u.getRawReturnType());
+            } else if (a.getTarget() instanceof AccessTarget.FieldAccessTarget f) {
+                signature.add(f.getRawType());
+            }
+            signature.stream().map(JavaClass::getBaseComponentType)
+                    .filter(t -> !t.isPrimitive() && !allowedType(t.getName()) && reported.add(t.getName()))
+                    .forEach(t -> out.add("허용 목록 밖 타입 " + t.getName() + ": " + a.getDescription() + "의 매개변수·반환 타입"));
+        }
+        c.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).stream()
+                .filter(n -> !allowedType(n) && !JAVAC_BOOTSTRAP_TYPES.contains(n) && reported.add(n))
+                .forEach(n -> out.add("허용 목록 밖 타입 " + n + ": " + c.getName() + " 클래스 파일 상수(형변환·서술자)")));
         return out;
+    }
+
+    /**
+     * 실전 경로가 부를 수 있는 {@code java.lang.Class} 메서드(지금 운영 코드가 쓰는 것). 다른 클래스 객체를 돌려주는 메서드
+     * ({@code getDeclaredClasses}, {@code getNestMembers}, {@code getPermittedSubclasses} 등)는 정적 의존 없이 Guard 타입에
+     * 닿는 길이라 목록 밖이다(독립 QA PR #108 F1).
+     */
+    static final Set<String> ALLOWED_CLASS_METHODS = Set.of(
+            "getName", "getSimpleName", "isRecord", "getRecordComponents", "isEnum", "getEnumConstants",
+            "isInstance", "isAssignableFrom", "cast", "desiredAssertionStatus",
+            // 자원 파일(기본 설정, 거래소 캘린더) 읽기. 클래스가 아니라 바이트를 돌려준다
+            "getResourceAsStream");
+
+    /**
+     * 이름 문자열로 클래스를 얻는 데이터 바인딩(독립 QA PR #108 F1): Jackson은 {@code Class} 타입 값을 이름 문자열에서
+     * {@code Class.forName}처럼 만든다. 그래서 {@code Class.class} 클래스 객체({@code readValue(.., Class.class)}), {@code Class}가
+     * 들어간 필드·생성자 매개변수·제네릭 인자(바인딩 대상의 속성), Jackson 주석이 붙은 메서드나 설정자({@code set*})의 {@code Class}
+     * 매개변수를 막는다. 일반 메서드의 {@code Class<T> type} 매개변수(ControlCodec·ProfileParams)는 호출하는 쪽이 클래스 객체를 넘기므로
+     * 허용한다. 허용 목록 밖 {@code Class} 메서드도 여기서 잡는다.
+     */
+    static List<String> classAsData(JavaClass c) {
+        List<String> out = new ArrayList<>();
+        c.getReferencedClassObjects().stream()
+                .filter(r -> r.getRawType().getName().equals("java.lang.Class"))
+                .forEach(r -> out.add(r.getOwner().getFullName() + "가 클래스 객체 Class.class를 참조 (" + r.getSourceCodeLocation() + ")"));
+        c.getFields().stream()
+                .filter(f -> involvesClass(f.getType()))
+                .forEach(f -> out.add(f.getFullName() + " 필드 타입에 Class"));
+        for (com.tngtech.archunit.core.domain.JavaCodeUnit u : c.getCodeUnits()) {
+            boolean binding = u.isConstructor() || u.getName().startsWith("set")
+                    || u.getAnnotations().stream().anyMatch(a -> a.getRawType().getPackageName().startsWith("com.fasterxml.jackson"));
+            for (com.tngtech.archunit.core.domain.JavaParameter p : u.getParameters()) {
+                boolean classArgument = p.getType() instanceof com.tngtech.archunit.core.domain.JavaParameterizedType pt
+                        && !pt.toErasure().getName().equals("java.lang.Class")
+                        && pt.getActualTypeArguments().stream().anyMatch(RealPathReflectionTest::involvesClass);
+                if (binding && involvesClass(p.getType()) || classArgument) {
+                    out.add(u.getFullName() + " 매개변수 타입에 Class");
+                }
+            }
+        }
+        c.getAccessesFromSelf().stream()
+                .filter(a -> a.getTarget().getOwner().getName().equals("java.lang.Class")
+                        && !ALLOWED_CLASS_METHODS.contains(a.getTarget().getName()))
+                .forEach(a -> out.add("허용 목록 밖 Class 메서드: " + a.getDescription()));
+        return out;
+    }
+
+    private static boolean involvesClass(com.tngtech.archunit.core.domain.JavaType t) {
+        return t.getAllInvolvedRawTypes().stream().anyMatch(k -> k.getName().equals("java.lang.Class"));
     }
 
     static ArchRule noReflectionIn(DescribedPredicate<JavaClass> scope) {
@@ -344,6 +441,12 @@ class RealPathReflectionTest {
                     @Override
                     public void check(JavaClass c, ConditionEvents events) {
                         outsideAllowlist(c).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
+                    }
+                })
+                .orShould(new ArchCondition<JavaClass>("이름 문자열로 클래스를 얻는 데이터 바인딩을 연다") {
+                    @Override
+                    public void check(JavaClass c, ConditionEvents events) {
+                        classAsData(c).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
                     }
                 })
                 .orShould(new ArchCondition<JavaClass>("native 메서드를 선언한다") {
@@ -420,7 +523,7 @@ class RealPathReflectionTest {
     /**
      * Guard 패키지 타입을 데이터 바인딩 대상으로 넘기는 표지: 클래스 객체({@code RealTradingGuard.class}), 제네릭 상위 타입 인자
      * ({@code new TypeReference<GuardState>() {}}), 주석 값의 클래스({@code @JsonDeserialize(as = ...)}). 이것이 없으면 Jackson
-     * 같은 라이브러리가 Guard 타입 객체를 새로 만들 수 없다(문자열로 클래스를 찾는 API는 실전 경로에서 금지, risk-ops PR #108 F1).
+     * 같은 라이브러리가 Guard 타입 객체를 새로 만들 수 없다(문자열로 클래스를 찾는 API와 Jackson의 {@code Class} 역직렬화는 실전 경로에서 금지, risk-ops PR #108 F1, 독립 QA F1).
      */
     static List<String> guardTypeAsData(JavaClass c) {
         List<String> out = new ArrayList<>();
@@ -628,6 +731,23 @@ class RealPathReflectionTest {
                 "ProcessBuilder.<init>", "ProcessBuilder.start", "Runtime.exec",
                 "허용 목록 밖 타입 java.security.Provider", "Provider$Service.newInstance", "허용 목록 밖 타입 java.security.Security",
                 "System.setProperty", "System.setProperties", "System.clearProperty");
+
+        // 이름 문자열로 클래스 얻기(QA F1)와 형변환·호출 인자로만 쓴 허용 목록 밖 타입(QA F2), 독립 QA PR #108 Q16
+        EvaluationResult byName = rule.evaluate(new ClassFileImporter().importClasses(NameToClassBinding.class,
+                NameToClassBinding.TypedCommand.class, NameToClassBinding.Bean.class));
+        String byNameDetails = String.join("\n", byName.getFailureReport().getDetails());
+        assertThat(byNameDetails).contains(
+                "NameToClassBinding.byName(java.lang.String, java.util.Map)가 클래스 객체 Class.class를 참조",
+                "허용 목록 밖 타입 com.fasterxml.jackson.databind.MapperFeature",
+                "TypedCommand.type 필드 타입에 Class",
+                "Bean.setTarget(java.lang.Class) 매개변수 타입에 Class",
+                "Bean.count(java.util.List) 매개변수 타입에 Class",
+                "Class.getDeclaredClasses");
+        // 형변환만 한 메서드도 클래스 파일 상수로 잡힌다(호출이 없으므로 ArchUnit 의존 목록에는 없다)
+        assertThat(ClassFileTypes.of(new ClassFileImporter().importClasses(NameToClassBinding.class)
+                .get(NameToClassBinding.class).getSource().orElseThrow().getUri()))
+                .contains("com.fasterxml.jackson.databind.MapperFeature", "java.lang.Class")
+                .doesNotContain("com.autotrade.risk.guard.SecondConfirmation");
     }
 
     @Test
