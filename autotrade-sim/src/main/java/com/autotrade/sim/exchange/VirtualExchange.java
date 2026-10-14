@@ -74,8 +74,8 @@ import java.util.Set;
  *       (그 사이 단일가 체결을 놓쳤을 수 있어 다음 체결을 단일가로 보지 않는다). 시가 단일가로 여는 시장
  *       ({@link MarketRules#opensWithAuction}, KRX)은 단일가 접수 마감이 임의로 늦춰지므로, 개장 시각이 지나도 그 종목 그날 첫
  *       체결 전까지의 이벤트는 시가 단일가 접수로 보고(호가로 체결하지 않음, 새 주문도 참여) 첫 체결을 시가 단일가 체결로 본다.
- *       그 체결 직전까지 유효해진 주문은 모두 참여한다. 다만 그날 그 종목 첫 정규장 이벤트(장 밖 이벤트는 세지 않음, D-087)가
- *       개장 뒤 {@link #AUCTION_PRINT_GRACE} 이상 지나 오면(녹화가 장중에 시작) 시가 단일가 체결은 이미 지난 것으로 보고 바로
+ *       그 체결 직전까지 유효해진 주문은 모두 참여한다. 다만 그날 그 종목 첫 정규장 이벤트(장 밖 이벤트와 단일가 접수 구간의
+ *       체결 이벤트는 세지 않음, D-087)가 개장 뒤 {@link #AUCTION_PRINT_GRACE} 이상 지나 오면(녹화가 장중에 시작) 시가 단일가 체결은 이미 지난 것으로 보고 바로
  *       접속 매매로 본다. 종가 단일가 체결은 종가 단일가 구간이 끝나고 {@link #AUCTION_PRINT_GRACE} 안(끝 시각 제외)의 그 종목
  *       그날 첫 체결로만 보고, 그 밖의 장 밖 체결(창 안 두 번째 체결, 시간외 단일가 등)로는 종가 참여 주문을 체결하지 않는다(D-075).
  *       종가 단일가 구간이 없는 시장(미국 기본 규칙)은 접속 매매가 끝나고 같은 창 안의 첫 체결을 종가 체결(종가 크로스)로 보되
@@ -117,7 +117,7 @@ public final class VirtualExchange implements OrderGateway {
     private final Set<Symbol> staleBooks = new HashSet<>();
     /** 종목별로 시가 단일가 체결(그날 첫 체결)이 지난 거래일. {@link MarketRules#opensWithAuction} 시장만 쓴다. */
     private final Map<Symbol, LocalDate> opened = new HashMap<>();
-    /** 종목별로 장 밖이 아닌(단일가 접수 구간 포함) 이벤트를 마지막으로 본 거래일. 그날 첫 정규장 이벤트인지 가린다. */
+    /** 종목별로 정규장 이벤트(단일가 접수 구간의 호가 포함, 장 밖 이벤트와 접수 구간의 체결 이벤트 제외)를 마지막으로 본 거래일. */
     private final Map<Symbol, LocalDate> seen = new HashMap<>();
     /** 종목별로 종가 단일가 체결을 본 거래일. */
     private final Map<Symbol, LocalDate> closePrinted = new HashMap<>();
@@ -234,8 +234,11 @@ public final class VirtualExchange implements OrderGateway {
             }
             return phase;
         }
-        // 그날 첫 이벤트는 장 밖 이벤트를 세지 않는다: 장전 시간외 체결만 오고 장중에야 다음 이벤트가 오면 장중 시작이다(D-087)
-        boolean firstToday = !day.equals(seen.put(event.symbol(), day));
+        // 그날 첫 정규장 이벤트는 장 밖 이벤트와 단일가 접수 구간의 체결 이벤트를 세지 않는다. 접수 구간에는 정규장 체결이 없으니
+        // 그 체결은 장전 시간외 체결이다(KRX 08:30~08:40은 시가 단일가 접수 구간과 겹친다). 장전 시간외 체결만 오고 장중에야 다음
+        // 이벤트가 오면 장중 시작이다(D-087)
+        boolean counted = !(event instanceof TradeTick && phase.isAuction());
+        boolean firstToday = !day.equals(counted ? seen.put(event.symbol(), day) : seen.get(event.symbol()));
         if (phase != SessionPhase.CONTINUOUS || !rules.opensWithAuction()) {
             return phase;
         }
