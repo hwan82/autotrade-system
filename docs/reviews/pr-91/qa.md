@@ -58,3 +58,28 @@
 
 ## 판정
 수정 필요(F1: main과 충돌로 이 헤드는 머지 불가, 이 헤드의 CI 없음)
+
+## 재검토 2026-10-14
+- 대상: PR #91 / 커밋 81ecd6d70753cfe9f7baddb018b65107f1e2e0aa / main 대비 diff 전체. 새 커밋은 병합 커밋 74f7937(부모 9a24fe5, c21faa9)과 81ecd6d(R2 경계값 시험)
+- 요청 문구("F1은 74f7937로 처리, R2는 81ecd6d, 대상 헤드 81ecd6d")는 확인할 주장으로만 봤다
+- 직접 실행한 것:
+  - `git show --remerge-diff 74f7937`: 자동 병합과 다른 곳은 `docs/qa-out-status.md`, `docs/qa/pending.md` 두 표뿐이고, 두 곳 모두 main 줄과 이 PR 줄을 **둘 다 남겼다**(main 줄 다음에 이 PR 줄). 그 밖에 병합 커밋이 새로 넣은 내용 없음. `git diff c21faa9 74f7937 --stat`은 1차 검토한 PR 내용(12파일, QA 보고서 포함)과 같다
+  - `git show 81ecd6d`: `LiveLabServiceTest.diskFloorMustBeAtLeastOneGb`에 1과 `MAX_MIN_FREE_GB`로 생성·close가 성공하는 반복을 더했고, ADR-010 6장 시험 설명에 경계값 허용을 적었다. 운영 코드 변경 없음
+  - **main과 병합 시험(다시)**: 현재 origin/main은 `5f7c2a1`(#92 "5단계(UI) 완료 기록(D-080)", 2026-10-14 03:22:38Z 머지)이다. 이 PR 병합 커밋의 main 부모 `c21faa9`보다 한 커밋 앞서 있다. `git merge-tree --write-tree origin/main 81ecd6d` → `docs/qa-out-status.md` **CONFLICT (content)**. #92가 같은 표 끝에 "stage-5.md 재검토 … PASS | D-080 5단계 완료 기록" 줄을 더했기 때문이다. `pending.md`는 충돌 없음. #92는 74f7937 병합과 CI 실행(03:18~03:20Z) 뒤, 재검토 요청(03:29Z) 전에 머지됐다
+  - `./gradlew build --no-daemon`(head 81ecd6d): 1회째 **BUILD SUCCESSFUL**(130 tasks). 테스트 결과 XML 합계 tests 1,058, failures 0, errors 0, skipped 0(경계값 확인은 기존 시험 메서드 안에 들어가 건수는 같음)
+  - CI(head 81ecd6d, check-runs): Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary 모두 completed/success(03:18~03:20Z). 1차의 "이 헤드에서 CI 없음"은 해소
+  - QA 변이 탐침(같은 방식, 확인 뒤 원복): M1 `< 0`, M2 상한 삭제, M3 `<= 1`, M4 `>= MAX` → **넷 다 `diskFloorMustBeAtLeastOneGb()` FAILED로 잡힘**. 1차의 M3·M4 생존 해소
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| A1~A13, B1, B6, 과금 | 1차와 같음(통과·해당 없음) | 1차 이후 바뀐 코드는 시험 한 곳(81ecd6d)뿐이고 운영 코드·보호 영역 변경 없음(`git diff 9a24fe5 81ecd6d --stat`에서 병합으로 들어온 main 내용을 빼면 시험 1파일·ADR-010 1줄). 빌드·CI 위와 같이 통과 |
+| A14 | 통과 | ADR-010 6장 `LiveLabServiceTest`(6) 설명이 81ecd6d 시험과 일치. 병합으로 들어온 main 문서(D-079, ADR-001·002·005, 기획서)는 이 PR의 변경과 겹치는 줄 없음(remerge-diff) |
+| F1 | **해소 안 됨** | 74f7937의 충돌 해소 자체는 올바르다(위 remerge-diff). 그러나 그 뒤 main에 #92가 머지되어 `docs/qa-out-status.md`가 다시 충돌하고, 이 헤드는 지금 머지할 수 없다(`git merge-tree` CONFLICT) |
+| R2 | 해소 | 81ecd6d 경계값 허용 시험, 변이 M3·M4 잡힘 |
+| R1 | 열림(권고, 이 PR을 막지 않음) | 날짜를 넘긴 재기동의 1일차 남은 구간 공백 표시는 이번 커밋에 없음. 6단계 결과를 승격 근거로 쓰기 전 과제로 남음 |
+
+### 점검표 밖 발견(재검토)
+- F1 재발 원인은 문서 표 끝 덧붙이기가 여러 PR에서 동시에 일어나는 것이다. 다시 병합할 때 `qa-out-status.md`에 #92의 D-080 줄과 이 PR의 PR #87 줄을 둘 다 남겨야 한다. 병합 커밋이 표 두 곳 외 다른 줄을 바꾸지 않으면, 다음 재검토는 remerge-diff·빌드·CI 확인으로 끝난다.
+
+### 판정
+수정 필요(F1: main `5f7c2a1`과 `docs/qa-out-status.md` 충돌로 이 헤드는 머지 불가)
