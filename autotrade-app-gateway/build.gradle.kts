@@ -25,13 +25,20 @@ dependencies {
 }
 
 // 녹화일 두 번 리플레이 확인(2단계 완료 기준 MD-06). 녹화 파일만 읽고 네트워크·주문을 쓰지 않는다.
-// 사용: ./gradlew :autotrade-app-gateway:replayCheck --args="2026-10-12 replay-2026-10-12.md"
+// 사용: ./gradlew :autotrade-app-gateway:replayCheck --args="2026-10-12 replay-2026-10-12.md" [-PallowDuringSession]
+// 실험 명령(D-063)과 같은 관문(D-085, Q-050): 감시의 정지 요청 파일(<설정 폴더>/experiment-state/stop-request)이 있거나 장 시간
+// 보호 구간이면 시작하지 않고, 실행 중이면 멈춘다(종료 코드 4, 보고서 안 씀). -PallowDuringSession은 실전 엔진을 끈 날에만 쓰며
+// 장 시간 보호만 푼다. 값은 그대로 ReplayCheck에 넘겨 거기서 판단한다(값 없음·true만 해제, 그 밖의 값은 입력 오류).
+val replayAllowDuringSession = providers.gradleProperty("allowDuringSession")
 tasks.register<JavaExec>("replayCheck") {
     group = "verification"
-    description = "녹화일을 두 번 리플레이해 결과가 같은지 보고 종목별 체결 요약을 낸다"
+    description = "녹화일을 두 번 리플레이해 결과가 같은지 보고 종목별 체결 요약을 낸다(장 시간 보호·정지 요청 확인)"
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("com.autotrade.app.gateway.ReplayCheck")
+    mainClass.set("com.autotrade.app.gateway.ReplayCheckMain")
     workingDir = rootProject.projectDir // 보고서 상대 경로는 저장소 루트 기준
+    argumentProviders.add(CommandLineArgumentProvider {
+        replayAllowDuringSession.orNull?.let { listOf("--allow-during-session=$it") } ?: emptyList()
+    })
 }
 
 // 종목명 표 만들기: 한국투자 공개 종목 마스터 파일을 받아 <설정 폴더>/symbols/KRX.csv를 만든다(키·주문 API 안 씀).

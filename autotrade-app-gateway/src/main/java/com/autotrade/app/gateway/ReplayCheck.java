@@ -1,6 +1,5 @@
 package com.autotrade.app.gateway;
 
-import com.autotrade.config.ConfigPaths;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.InstrumentStatusChanged;
 import com.autotrade.domain.market.Market;
@@ -26,12 +25,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -56,51 +57,110 @@ import java.util.TreeSet;
  * 또는 녹화일 폴더 경로. 두 번째 인자로 보고서 파일 경로를 주면 같은 내용을 Markdown으로 쓴다.
  * 표의 종목명은 설정 폴더의 {@code symbols/KRX.csv}({@link SymbolMasterUpdate}로 만듦)에서 읽으며, 없으면 "–"로 둔다.
  * 종목명은 표시용이라 두 회차 비교와 해시에 들어가지 않는다.
- * 종료 코드 0: 동일하고 녹화 완전, 1: 다름, 2: 읽기 실패, 3: 동일하나 녹화 불완전.
+ *
+ * <p><b>정지 확인(D-085, Q-050)</b>: 실험 실행 명령(D-063)과 같은 관문({@link ReplayCheckGate})을 시작 때, 회차마다, 회차 안에서
+ * {@value #CHECK_EVERY}줄마다 묻는다. 감시의 정지 요청 파일이 있거나 장 시간 보호 구간이면 시작하지 않고, 실행 중이면 멈춘다. 멈추면
+ * 보고서를 출력하지도 쓰지도 않는다(이전 보고서 파일은 그대로). 장 시간 보호는 실전 엔진을 끈 날에만 {@code -PallowDuringSession}
+ * (인자 {@code --allow-during-session}, 값이 없거나 {@code true}만)으로 푼다. 정지 요청 파일은 풀리지 않는다.
+ * 종료 코드 0: 동일하고 녹화 완전, 1: 다름, 2: 읽기 실패·입력 오류, 3: 동일하나 녹화 불완전, 4: 정지 확인으로 멈춤(결과 없음).
  */
 public final class ReplayCheck {
 
     /** 종가 단일가 체결 시각이 마감 시각과 같거나 조금 뒤로 찍히는 경우를 정규장으로 본다 {@code [가정]}(Q-015 실측 후 조정). */
     static final Duration CLOSING_PRINT_GRACE = Duration.ofMinutes(1);
 
+    /** 회차 안에서 정지 확인을 묻는 간격(녹화 줄 수). 2026-10-12 실녹화 52만 줄 기준 회차마다 10번 남짓이다. */
+    static final int CHECK_EVERY = 50_000;
+
+    /** 정지 요청으로 멈춤. */
+    static final int EXIT_STOPPED = 4;
+
+    /** 정지 확인. 멈춰야 하면 이유를 돌려준다. */
+    @FunctionalInterface
+    interface StopCheck {
+        StopCheck NONE = Optional::empty;
+
+        Optional<String> stopReason();
+    }
+
+    /** 정지 확인이 멈추라고 해서 점검을 끝냄. 보고서를 쓰지 않는다. */
+    static final class StoppedException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        StoppedException(String reason) {
+            super(reason, null, false, false);
+        }
+    }
+
     private ReplayCheck() {}
 
-    public static void main(String[] args) {
-        System.exit(run(args, System.out, System.err));
-    }
-
-    static int run(String[] args, PrintStream out, PrintStream err) {
-        Path config = ConfigPaths.defaultLocation().runtimeFile().toAbsolutePath().getParent();
+    /**
+     * 명령 진입({@link ReplayCheckMain}). 인자에서 {@code --allow-during-session[=true]}를 떼어 정지 확인을 만들고, 시작 전에 묻는다.
+     *
+     * @param config 설정 폴더(녹화 폴더, 종목명 표, 정지 요청 파일의 기준)
+     */
+    static int run(String[] args, Clock clock, Path config, PrintStream out, PrintStream err) {
+        List<String> rest = new ArrayList<>();
+        boolean allow = false;
+        for (String a : args) {
+            if (List.of("--allow-during-session", "--allow-during-session=", "--allow-during-session=true").contains(a)) {
+                allow = true;
+            } else if (a.startsWith("--allow-during-session")) {
+                err.println("--allow-during-session은 값이 없거나 true여야 합니다(풀지 않으려면 옵션을 빼세요): " + a);
+                return 2;
+            } else {
+                rest.add(a);
+            }
+        }
+        ReplayCheckGate gate = ReplayCheckGate.of(clock, config, allow);
+        // 표준 출력은 보고서 본문이라 안내는 표준 오류로 낸다
+        err.println("[replayCheck] 정지 요청 파일 확인 위치: " + gate.stopRequest());
+        if (allow) {
+            err.println("[replayCheck] 장 시간 보호 해제됨(실전 엔진을 끈 날만). 정지 요청 파일은 계속 확인합니다");
+        }
+        Optional<String> stop = gate.stopReason();
+        if (stop.isPresent()) {
+            err.println("리플레이 점검을 시작하지 않습니다: " + stop.get());
+            return EXIT_STOPPED;
+        }
         SymbolNameFiles.Loaded loaded = SymbolNameFiles.load(config);
         loaded.warnings().forEach(err::println);
-        return run(args, loaded.names(), out, err);
+        return run(rest.toArray(String[]::new), config, gate, loaded.names(), out, err);
     }
 
-    static int run(String[] args, SymbolNames names, PrintStream out, PrintStream err) {
+    static int run(String[] args, Path config, StopCheck gate, SymbolNames names, PrintStream out, PrintStream err) {
         if (args.length < 1 || args.length > 2) {
-            err.println("사용법: replayCheck <yyyy-MM-dd | 녹화일 폴더> [보고서 파일]");
+            err.println("사용법: replayCheck <yyyy-MM-dd | 녹화일 폴더> [보고서 파일] [--allow-during-session]");
             return 2;
         }
         try {
-            Report report = check(resolveDay(args[0]), names);
+            Report report = check(resolveDay(args[0], config), names, gate);
             String text = report.toMarkdown();
             out.print(text);
             if (args.length == 2) {
                 Files.writeString(Path.of(args[1]), text, StandardCharsets.UTF_8);
             }
             return report.verdict().exitCode;
+        } catch (StoppedException e) {
+            err.println("리플레이 점검을 멈췄습니다(보고서를 쓰지 않음): " + e.getMessage());
+            return EXIT_STOPPED;
         } catch (IOException | RuntimeException e) {
             err.println("녹화 확인 실패: " + e.getMessage());
             return 2;
         }
     }
 
-    private static Path resolveDay(String arg) {
+    private static Path resolveDay(String arg, Path config) {
         if (arg.matches("\\d{4}-\\d{2}-\\d{2}")) {
-            Path config = ConfigPaths.defaultLocation().runtimeFile().toAbsolutePath().getParent();
             return new RecordingLayout(config.resolve(GatewayMain.RECORDINGS_DIR)).dayDir(Market.KRX, LocalDate.parse(arg));
         }
         return Path.of(arg);
+    }
+
+    private static void ensureNotStopped(StopCheck gate) {
+        gate.stopReason().ifPresent(reason -> {
+            throw new StoppedException(reason);
+        });
     }
 
     enum Verdict {
@@ -123,12 +183,21 @@ public final class ReplayCheck {
     }
 
     static Report check(Path dayDir, SymbolNames names) {
+        return check(dayDir, names, StopCheck.NONE);
+    }
+
+    /** 정지 확인을 회차 시작마다, 회차 안에서 {@link #CHECK_EVERY}줄마다 묻는다. 멈추라면 {@link StoppedException}. */
+    static Report check(Path dayDir, SymbolNames names, StopCheck gate) {
+        return check(dayDir, names, gate, CHECK_EVERY);
+    }
+
+    static Report check(Path dayDir, SymbolNames names, StopCheck gate, int checkEvery) {
         Market market = Market.valueOf(dayDir.getParent().getFileName().toString());
         LocalDate date = LocalDate.parse(dayDir.getFileName().toString());
         Optional<TradingSession> session = regularSession(market, date);
 
-        Run first = replayOnce(dayDir, session);
-        Run second = replayOnce(dayDir, session);
+        Run first = replayOnce(dayDir, session, gate, checkEvery);
+        Run second = replayOnce(dayDir, session, gate, checkEvery);
         return new Report(dayDir, first.meta(), first.truncated(), first.eventCount(), first.gapCount(), session,
                 first.digest(), second.digest(), first.replayed(), second.replayed(), first.symbols(), names,
                 first.unmarkedRestarts());
@@ -145,12 +214,18 @@ public final class ReplayCheck {
     private record Run(Optional<RecordingMeta> meta, boolean truncated, long eventCount, long gapCount, String digest,
             long replayed, Map<Symbol, SymbolSummary> symbols, List<RecordingMeta.Segment> unmarkedRestarts) {}
 
-    private static Run replayOnce(Path dayDir, Optional<TradingSession> session) {
+    private static Run replayOnce(Path dayDir, Optional<TradingSession> session, StopCheck gate, int checkEvery) {
+        ensureNotStopped(gate);
         RecordedDay day = RecordedDay.open(dayDir);
         Set<Symbol> symbols = new TreeSet<>();
+        long read = 0;
         for (RecordingCodec.Line line : day.lines()) {
             symbols.add(line.event().symbol());
+            if (++read % checkEvery == 0) {
+                ensureNotStopped(gate);
+            }
         }
+        ensureNotStopped(gate);
         ZoneId zone = day.meta().map(m -> ZoneId.of(m.zone()))
                 .orElse(session.map(TradingSession::zone).orElse(ZoneId.of("UTC")));
         Map<Symbol, SymbolSummary> summaries = new TreeMap<>();
@@ -158,7 +233,9 @@ public final class ReplayCheck {
         long[] count = {0};
         RecordedReplaySource source = new RecordedReplaySource(day);
         source.subscribe(symbols, e -> {
-            count[0]++;
+            if (++count[0] % checkEvery == 0) {
+                ensureNotStopped(gate);
+            }
             sha.update((e + "\n").getBytes(StandardCharsets.UTF_8));
             summaries.computeIfAbsent(e.symbol(), s -> new SymbolSummary(zone, session)).add(e);
         });
