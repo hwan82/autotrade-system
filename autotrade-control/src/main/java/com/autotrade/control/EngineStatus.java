@@ -10,14 +10,29 @@ import java.util.List;
  * @param accounts 실전 계좌별 상태(설정 순서)
  * @param configWarning 엔진이 기동할 때 runtime-config.json·secrets.json을 버렸거나 일부를 무시한 이유(ConfigLoader 경고: 파일 이름,
  *     JSON 경로와 규칙만, 값은 없음). 문제가 없으면 빈 문자열. 파일을 버리면 실전 계좌·비밀번호 해시도 같이 빠지므로 운영 화면이
- *     계좌 상태와 함께 보인다(1단계 QA 권고 R3). 이 필드가 없는 옛 엔진의 응답은 빈 문자열로 읽는다
+ *     계좌 상태와 함께 보인다(1단계 QA 권고 R3). 이 필드가 없는 옛 엔진의 응답은 빈 문자열로 읽는다.
+ *     {@value #MAX_CONFIG_WARNING}자를 넘으면 자르고 {@link #TRUNCATED_MARK}를 붙인다: 모든 명령 응답이 상태를 싣는데
+ *     한 메시지는 {@link ControlCodec#MAX_BYTES}를 넘을 수 없어, 긴 경고가 상태 조회·내리기·PANIC 응답을 모두 끊지 않게 한다
+ *     (PR #100 QA Q1)
  */
 public record EngineStatus(boolean passwordConfigured, String lockedUntil, List<AccountStatus> accounts,
         String configWarning) {
 
+    /** 설정 경고 최대 길이(UTF-16 문자 수). 한글 3바이트로 쳐도 응답 한도의 10분의 1이다. */
+    public static final int MAX_CONFIG_WARNING = 2_000;
+    /** 잘린 경고 끝에 붙는 표시. */
+    public static final String TRUNCATED_MARK = " …(잘림, 전체는 실전 엔진 로그)";
+
     public EngineStatus {
         accounts = accounts == null ? List.of() : List.copyOf(accounts);
         configWarning = configWarning == null ? "" : configWarning;
+        if (configWarning.length() > MAX_CONFIG_WARNING) {
+            int end = MAX_CONFIG_WARNING;
+            if (Character.isHighSurrogate(configWarning.charAt(end - 1))) {
+                end--;
+            }
+            configWarning = configWarning.substring(0, end) + TRUNCATED_MARK;
+        }
     }
 
     /** 설정 경고가 없는 상태. */

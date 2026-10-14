@@ -241,7 +241,21 @@ class ConfigLoaderTest {
         LoadedConfig loaded = loader.load(paths);
 
         assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
-        assertThat(loaded.warning()).contains("real-trading/account-numbers/KIS-US-1").doesNotContain(FAKE_SECRET);
+        // 키 이름(별칭)도 남기지 않는다: 별칭 자리에 계좌번호를 잘못 적었을 수 있다(PR #100 QA R2). 경로 패턴과 개수만
+        assertThat(loaded.warning()).contains("real-trading/account-numbers/* 1개")
+                .doesNotContain(FAKE_SECRET).doesNotContain("KIS-US-1");
+    }
+
+    @Test
+    void runtime_config의_계좌번호_키_자리에_적은_값도_경고에_남기지_않는다() throws IOException {
+        runtime("""
+                { "real-trading": { "account-numbers": { "%s": "x", "%s-2": "y" } } }
+                """.formatted(FAKE_SECRET, FAKE_SECRET));
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
+        assertThat(loaded.warning()).contains("real-trading/account-numbers/* 2개").doesNotContain(FAKE_SECRET);
     }
 
     @Test

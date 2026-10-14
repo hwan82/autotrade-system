@@ -126,6 +126,30 @@ class EngineMainTest {
     }
 
     @Test
+    void 경고가_아주_길어도_상태_조회와_내리기는_응답한다() throws Exception {
+        // PR #100 QA Q1: secrets.json에 비밀값 아닌 키가 많으면 경고가 수만 자가 된다. 잘라서 명령 채널 응답 한도 안에 둔다
+        ConfigPaths paths = ConfigPaths.in(dir);
+        StringBuilder keys = new StringBuilder("{ \"lab\": {");
+        for (int i = 0; i < 6000; i++) {
+            keys.append(i == 0 ? "" : ",").append("\"not-a-secret-key-").append(i).append("\": \"x\"");
+        }
+        Files.writeString(paths.secretsFile(), keys.append("} }").toString());
+        assertThat(new ConfigLoader().load(paths).warning().length()).isGreaterThan(64 * 1024);
+
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED);
+                ControlClient client = new ControlClient(ControlSocket.path(paths), Duration.ofSeconds(5))) {
+            ControlResponse status = client.send(ControlRequest.status());
+            assertThat(status.status().configWarning())
+                    .hasSize(com.autotrade.control.EngineStatus.MAX_CONFIG_WARNING
+                            + com.autotrade.control.EngineStatus.TRUNCATED_MARK.length())
+                    .startsWith("secrets.json을(를) 쓰지 않고").endsWith(com.autotrade.control.EngineStatus.TRUNCATED_MARK);
+            ControlResponse deactivate = client.send(ControlRequest.deactivate("KIS-US-1", null));
+            assertThat(deactivate.status().configWarning()).endsWith(com.autotrade.control.EngineStatus.TRUNCATED_MARK);
+            assertThat(engine.guard().accounts()).isEmpty();
+        }
+    }
+
+    @Test
     void 소켓_파일을_지워도_두_번째_엔진은_잠금_때문에_뜨지_않는다() throws Exception {
         ConfigPaths paths = ConfigPaths.in(dir);
         Path socket = ControlSocket.path(paths);

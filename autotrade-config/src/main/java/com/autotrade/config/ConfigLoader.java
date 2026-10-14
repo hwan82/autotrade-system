@@ -62,7 +62,8 @@ public final class ConfigLoader {
                 runtime = readObject(paths.runtimeFile());
                 List<String> leaked = SecretPaths.presentIn(runtime);
                 if (!leaked.isEmpty()) {
-                    throw new InvalidConfigException("비밀값은 " + ConfigPaths.SECRETS_FILE + "에만 둡니다: " + leaked);
+                    throw new InvalidConfigException("비밀값은 " + ConfigPaths.SECRETS_FILE + "에만 둡니다: "
+                            + SecretPaths.forWarning(leaked));
                 }
             } catch (IOException | RuntimeException e) {
                 runtime = null;

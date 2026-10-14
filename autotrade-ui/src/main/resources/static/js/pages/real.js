@@ -63,12 +63,13 @@ function body(view, refresh, result) {
   const lockOnly = !(st.passwordConfigured && !st.lockedUntil);
   const configWarning = st.configWarning || '';
   return h('div', {},
-    // 엔진이 기동할 때 설정 파일을 버렸으면 실전 계좌·비밀번호 해시도 같이 빠졌을 수 있다(1단계 QA 권고 R3).
-    // 경고 문구는 엔진이 준 것(파일 이름·JSON 경로·규칙만, 값 없음)을 그대로 보인다
+    // 엔진이 기동할 때 설정 파일을 버렸거나 일부를 무시했으면 그 사실을 계좌 상태 위에 보인다(1단계 QA 권고 R3).
+    // 버린 경우 실전 계좌·비밀번호 해시도 같이 빠졌을 수 있다. 경고 문구는 엔진이 준 것(파일 이름·JSON 경로·규칙만, 값 없음)을
+    // 그대로 보인다. 일부만 무시한 경우도 있어 "거부"로 단정하지 않는다(PR #100 QA R1)
     configWarning ? h('div', { class: 'notice warn', role: 'alert' },
-      h('h2', {}, '실전 엔진이 설정 파일을 거부하고 기동했습니다'),
+      h('h2', {}, '실전 엔진이 기동할 때 설정 파일에 문제가 있었습니다'),
       h('p', {}, configWarning),
-      h('p', { class: 'small' }, '거부된 파일의 실전 계좌 목록이나 비밀번호 해시는 이번 기동에 쓰이지 않았습니다. 아래 계좌 목록이 기대와 다르면 파일을 고친 뒤 실전 엔진을 다시 시작하세요. 다시 시작하면 모든 실전 계좌는 꺼진 상태로 시작합니다. 엔진에서 빠진 계좌는 이 화면에서 내리기·PANIC SELL도 할 수 없으니, 그 계좌에 보유가 있으면 증권사 화면에서 직접 확인하세요.')) : null,
+      h('p', { class: 'small' }, '"쓰지 않고"로 시작하는 경고는 그 파일 전체를 버렸다는 뜻이라, 그 파일의 실전 계좌 목록이나 비밀번호 해시가 이번 기동에 쓰이지 않았습니다. "무시했습니다"는 그 항목만 뺐다는 뜻입니다. 아래 계좌 목록이 기대와 다르면 파일을 고친 뒤 실전 엔진을 다시 시작하세요. 다시 시작하면 모든 실전 계좌는 꺼진 상태로 시작합니다. 엔진에서 빠진 계좌는 이 화면에서 내리기·PANIC SELL도 할 수 없으니, 그 계좌에 보유가 있으면 증권사 화면에서 직접 확인하세요.')) : null,
     unknown ? h('div', { class: 'notice warn' },
       h('p', {}, `실전 엔진 상태를 확인하지 못했습니다(${view.message}). 아래는 ${new Date(lastUp.asOf).toLocaleTimeString('en-GB')}에 마지막으로 확인한 상태입니다.`),
       h('p', { class: 'small' }, '지금 상태와 다를 수 있습니다. 활성화는 막아 두었습니다. PANIC SELL과 내리기 버튼은 남아 있지만 엔진에 닿지 못하면 반영되지 않고, 닿았는지는 엔진이 다시 응답해야 알 수 있습니다. 급하면 실전 엔진 터미널과 증권사 화면을 직접 확인하세요.')) : null,
@@ -79,7 +80,7 @@ function body(view, refresh, result) {
       h('p', {}, `2차 확인을 여러 번 틀려 ${new Date(st.lockedUntil).toLocaleTimeString('ko-KR')}까지 잠겼습니다. 내리기는 그대로 할 수 있고, PANIC SELL은 보호 모드 고정(신규 주문 차단)까지만 됩니다.`)) : null,
     st.accounts.length === 0
       ? h('div', { class: 'empty' }, h('p', {}, configWarning
-        ? '실전 계좌가 없습니다. 위 경고대로 설정 파일이 거부돼 real-trading.accounts가 빠졌을 수 있습니다.'
+        ? '실전 계좌가 없습니다. 위 경고대로 설정 파일을 버려 real-trading.accounts가 빠졌을 수 있습니다.'
         : '실전 계좌가 설정되지 않았습니다(runtime-config.json의 real-trading.accounts).'))
       : h('div', {},
         h('div', { class: 'panic-all' },
