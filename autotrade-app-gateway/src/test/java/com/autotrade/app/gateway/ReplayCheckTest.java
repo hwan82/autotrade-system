@@ -316,6 +316,18 @@ class ReplayCheckTest {
     }
 
     @Test
+    void 리플레이_도중에_정지_요청이_오면_그_회차에서_멈춘다() {
+        Path day = recordDay();
+        int[] calls = {0};
+        // 1회차: 시작(1), 수집 2·4·6·8줄(2~5), 수집 뒤(6), 리플레이 2건째(7)에서 멈춘다
+        ReplayCheck.StopCheck stopsInReplay = () -> ++calls[0] >= 7 ? Optional.of("리플레이 중 정지") : Optional.empty();
+
+        assertThatThrownBy(() -> ReplayCheck.check(day, SymbolNames.empty(), stopsInReplay, 2))
+                .isInstanceOf(ReplayCheck.StoppedException.class).hasMessage("리플레이 중 정지");
+        assertThat(calls[0]).isEqualTo(7);
+    }
+
+    @Test
     void 정지_확인은_회차_시작과_정해진_줄마다_묻고_멈추지_않으면_결과가_같다() {
         Path day = recordDay();
         int[] calls = {0};
