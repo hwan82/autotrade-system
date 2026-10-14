@@ -21,3 +21,31 @@
 
 ## 판정
 승인 (B7은 risk-ops 검토와 사용자 머지·독립 QA가 별도로 필요. 이 승인은 architect 범위 한정)
+
+## 재검토 2026-10-14
+- 대상: PR #100 / 커밋 e298e7b(앞선 검토 dd80a1d 이후 fa50f3f·e298e7b 추가) / `git diff origin/main...HEAD` 전체와 `git diff dd80a1d..HEAD`
+- 점검표: B
+- 직접 실행한 것: 내 worktree에서 `./gradlew build` -> BUILD SUCCESSFUL (130 tasks, 테스트·verifyPureDependencies·ArchUnit 포함). PR 본문·커밋 메시지·QA 보고서는 확인할 주장으로만 봤고 코드와 시험으로 대조했다. 보호 영역(autotrade-architecture-test, autotrade-risk, autotrade-broker*) diff 0줄, 추가된 @Disabled 없음.
+- QA 권고 대조:
+  - Q1(길이 상한): `EngineStatus` 컴팩트 생성자가 2,000자에서 자르고 표시를 붙인다(EngineStatus.java, 서로게이트 쌍 보호 포함). 모든 생성자가 컴팩트 생성자를 거쳐 우회 경로 없음. 시험 ControlChannelTest#긴_설정_경고는_잘라서_응답_한도_안에_둔다(100,000자와 이모지 경계, 소켓 왕복), EngineMainTest#경고가_아주_길어도_상태_조회와_내리기는_응답한다(QA 탐침 P1과 같은 6,000키 입력, status·deactivate 응답 확인). 전체 경고는 ProcessStartup이 로그에 남긴다(ProcessStartup.java:20-21). 엔진도 이를 거친다(EngineMain.java:83).
+  - R1(배너 문구): real.js 제목을 "기동할 때 설정 파일에 문제가 있었습니다"로 넓히고 "쓰지 않고"/"무시했습니다" 구분을 설명. 문구는 ConfigLoader 경고 접두와 맞는다(EngineMainTest가 "secrets.json을(를) 쓰지 않고" 접두를 단언).
+  - R2(맵 키 이름): ConfigLoader.java:64-66이 SecretPaths.forWarning을 쓰고 패턴과 개수만 낸다. 시험 ConfigLoaderTest 2건(별칭, 계좌번호 형태 키 모두 미노출).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 직접 실행, 성공 |
+| B2 | 통과 | 새 모듈·의존 없음. ArchUnit·verifyPureDependencies 통과 |
+| B3 | 통과 | ADR-006 2.3 절에 2,000자 상한·잘림 표시·맵 키 이름 생략 규칙 반영. 설정 키·스키마·REST 경로 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음, now()·난수 추가 없음 |
+| B5 | 해당 없음 | 금액 코드 없음 |
+| B6 | 통과 | 위 시험 4건 추가, 삭제·건너뜀 없음 |
+| B7 | 확인 필요 | 실전 엔진 응답 구성(EngineStatus는 모든 명령 응답에 실림)과 제어 채널 계약을 건드린다. **risk-ops 검토 필요**, 머지는 사용자 확인. 내가 본 범위: 잘림은 표시 필드에만 적용, Guard 전이·인증·검증 경로 불변, Guard 기본 OFF·재기동 OFF 코드는 diff에 없음 |
+| B8 | 통과 | 맵 비밀값 키 이름이 경고·화면에서 빠짐. 새 로그·커밋에 비밀값 없음 |
+
+## 점검표 밖 발견
+- (낮음) secrets.json의 "비밀값이 아닌 키가 있습니다: [경로]"(ConfigLoader.java:78-80)는 여전히 사용자가 적은 키 이름이 든 JSON 경로를 낸다. QA R2는 account-numbers 맵에 한정돼 이번 수정 범위는 맞지만, secrets 쪽 임의 키는 이름이 노출된다. 길이는 이제 2,000자로 제한된다. 후속 검토 대상.
+- (낮음) real.js 배너 문구는 자동 시험이 없고 화면은 직접 확인하지 못했다(QA R3 참고 사항 그대로).
+- 한계 유지: 설정을 버리면 해당 계좌가 엔진에서 빠져 화면에서 내리기·PANIC이 안 된다. 배너가 알림으로만 다룬다. 이 PR 범위 밖.
+
+## 판정
+승인 (QA 권고 Q1·R1·R2 반영 확인. B7은 risk-ops 검토와 사용자 머지·독립 QA가 별도로 필요. 이 승인은 architect 범위 한정)
