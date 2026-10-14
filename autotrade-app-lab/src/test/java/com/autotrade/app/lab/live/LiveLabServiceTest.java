@@ -152,6 +152,22 @@ class LiveLabServiceTest {
     }
 
     @Test
+    void diskFloorMustBeAtLeastOneGb() {
+        // 0이면 하한이 꺼지므로 설정 단계에서 거부한다(QA PR #87 R2)
+        for (long bad : new long[] {0, -1, LiveLabService.MAX_MIN_FREE_GB + 1}) {
+            assertThatThrownBy(() -> new LiveLabService(experiments, REPO, config.resolve("live-sessions"),
+                    FeedSocket.path(config), stopRequest, new CodeVersion("abc", false), Clock.systemUTC(),
+                    dir -> Long.MAX_VALUE, bad)).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("min-free-gb");
+        }
+        // 경계값은 받아들인다(QA PR #91 R2)
+        for (long ok : new long[] {1, LiveLabService.MAX_MIN_FREE_GB}) {
+            new LiveLabService(experiments, REPO, config.resolve("live-sessions"), FeedSocket.path(config), stopRequest,
+                    new CodeVersion("abc", false), Clock.systemUTC(), dir -> Long.MAX_VALUE, ok).close();
+        }
+    }
+
+    @Test
     void restoreCanBeStoppedAndResumesFromTheJournal() throws Exception {
         // 하루치 기록을 남긴다
         gateway = FeedServer.open(FeedSocket.path(config));

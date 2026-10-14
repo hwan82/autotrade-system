@@ -91,6 +91,9 @@ public class LiveLabService implements AutoCloseable {
                 DEFAULT_MIN_FREE_GB);
     }
 
+    /** 디스크 여유 하한 설정의 상한(GB, 1PB). */
+    static final long MAX_MIN_FREE_GB = 1_000_000L;
+
     /** @param minFreeGb 세션 폴더 디스크 여유 하한(GB). 이보다 적으면 시작하지 않고 돌던 세션을 멈춘다 */
     public LiveLabService(Path experimentsRoot, Path repoRoot, Path sessionsRoot, Path feedSocket, Path stopRequest,
             CodeVersion code, Clock clock, FreeSpace freeSpace, long minFreeGb) {
@@ -102,8 +105,10 @@ public class LiveLabService implements AutoCloseable {
         this.code = Objects.requireNonNull(code, "code");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.freeSpace = Objects.requireNonNull(freeSpace, "freeSpace");
-        if (minFreeGb < 0) {
-            throw new IllegalArgumentException("디스크 여유 하한은 0 이상이어야 합니다: " + minFreeGb);
+        // 0이면 하한이 꺼져 실전 엔진 기록과 같은 디스크를 채울 수 있다(QA PR #87 R2). 위 한도는 바이트 환산 넘침을 막는다
+        if (minFreeGb < 1 || minFreeGb > MAX_MIN_FREE_GB) {
+            throw new IllegalArgumentException(
+                    "디스크 여유 하한(autotrade.lab.live.min-free-gb)은 1~" + MAX_MIN_FREE_GB + "GB여야 합니다: " + minFreeGb);
         }
         this.minFreeBytes = minFreeGb * 1024L * 1024L * 1024L;
     }
