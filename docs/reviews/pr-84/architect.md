@@ -30,3 +30,32 @@
 
 ## 판정
 수정 필요(1: 사용자 결정 출처를 저장소에서 확인할 수 있게 할 것 — 사용자의 PR 확인 댓글 등. 2는 권고)
+
+## 재검토 2026-10-14
+- 대상: PR #84 / 커밋 e6d4173 / main(0bf0d46) 대비 diff (`git diff origin/main...HEAD`: `docs/qa/stage-1-completion-check.md` +7 −5, `docs/reviews/pr-84/architect.md` +32. 코드·설정·스키마·테스트 변경 없음)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon -q` (PR 헤드 e6d4173, 작업 트리 깨끗): **종료 코드 0, BUILD 성공**. 테스트 보고서 `TEST-*.xml`에 `<failure`·`<error` 없음.
+  - `gh api .../commits/e6d4173/check-runs`: Gradle build success, DB schema (PostgreSQL 16) success, Secret scan and collector boundary success.
+  - `gh api .../issues/comments/6158349779`: 작성자 `hwan82`, author_association **OWNER**, 2026-10-14T00:48:01Z, 본문 "A안 결정확인", PR #84에 달림. PR 본문 첫 줄의 요청자 표기(BAE, github_login hwan82)와 같은 사람.
+  - `git diff 8470997 e6d4173`: 대조표 변경은 26행 범례("이연 = …7단계로 옮김(4장, 사용자 결정 A)")와 43·44행 판단("부분 → 이연(사용자 결정 A, 4장)") 세 줄뿐. `grep -n "이연 제안"`은 48행 4장 제목 "이연 제안 (사용자 결정: A)"만 남음(제안 내용과 결정을 함께 보이는 제목이라 맞음).
+  - `docs/reviews/pr-84/architect.md` 앞 32행이 처음 쓴 원문과 같고(판정 줄 포함) 고쳐지지 않았음을 확인.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 실행 `./gradlew build` 종료 코드 0(e6d4173). CI Gradle build success |
+| B2 | 해당 없음 | 코드·빌드 스크립트·ArchUnit 규칙 변경 없음(diff는 `docs/` 두 파일) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음. 기획서 수정 없음 |
+| B4 | 해당 없음 | 시뮬레이션 코드·골든 데이터 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 없음. 테스트 삭제·`@Disabled` 추가 없음 |
+| B7 | 해당 없음 | 실전 경로·Guard·블랙리스트·보호 테스트 변경 없음. 기획서 14장에 CFG-05·06을 7단계로 옮기는 완료 기록 PR에서는 **risk-ops 검토 필요**(처음 검토 B7 메모 유지) |
+| B8 | 통과 | diff에 API Key·계좌번호·토큰 없음(육안 확인). CI Secret scan success |
+
+### 앞 발견 처리
+1. 사용자 결정 출처: **닫음.** 저장소 소유자 `hwan82`의 PR #84 댓글(id 6158349779, 2026-10-14T00:48:01Z "A안 결정확인")로 결정 A를 GitHub에서 확인했다. 문서 59행의 스레드 발언 자체(00:24:24Z 문구)는 여전히 직접 보지 못했으나, 결정 내용(A안)은 소유자 댓글로 확인되어 기록의 근거로 충분하다. 결정 번호 부여 때 이 댓글 링크를 출처에 함께 적기를 권한다(차단 아님).
+2. 결정 전 표기: **반영 확인.** 26·43·44행이 결정 후 표기로 바뀌었다.
+3. CI: e6d4173에서 세 잡 모두 success.
+
+### 판정
+승인
