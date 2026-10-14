@@ -182,3 +182,46 @@
 
 ## 판정
 수정 필요(AR-7)
+
+## 재검토 2026-10-14 (4)
+- 대상: PR #108 / 커밋 87863e8 / main 대비 diff(`git diff origin/main...87863e8`). 앞 재검토(4006964) 뒤 바뀐 것(`git diff 4006964 87863e8`):
+  - `RealPathReflectionTest.java`의 `System` 분기에 `setProperty`·`setProperties`·`clearProperty` 금지를 더했다(196-199행)
+  - `DynamicCode#viaSystemProperty` 고정 예제와 그 단언을 더했다
+  - ADR-002 9.5 2항과 남은 한계, D-085 1항과 남은 한계를 고쳤다(`-D` 실행 옵션 대조를 7단계 설치본 대조로 넘김)
+  - 검토 원문 2개가 추가됐다
+- 점검표: B
+- 직접 실행한 것(별도 작업 트리 `git worktree add <스크래치>/wt4 87863e8`에서 실행했고, 끝난 뒤 `git worktree remove`로 지웠다. 공유 작업 트리 소스는 건드리지 않았다):
+  - `./gradlew clean build --no-daemon`: `BUILD SUCCESSFUL in 3m 42s`, 종료 코드 0. 결과 XML 합계 테스트 1,108건, 실패·오류·건너뜀 0. `RealPathReflectionTest`는 7건 실행, 실패 0
+  - 변조 실험(커밋하지 않음): `autotrade-config`에 `com.autotrade.config.qaprobe`의 2개 클래스를 넣고 `:autotrade-architecture-test:test --tests '*RealPathReflectionTest'`를 실행했다. 종료 코드 1, 위반 2건
+    | 프로브 | 내용 | 결과 |
+    |---|---|---|
+    | `PropertyProbe` | `System.setProperty("java.util.logging.config.class", className)` + `System.getLogger(..)` (AR-7) | 잡힘 |
+    | `PropsViaGet` | `System.getProperties().put("java.util.logging.config.class", className)` (금지 메서드를 피해 `Properties`를 직접 고치는 우회) | 잡힘(`java.util.Properties`가 허용 클래스 목록 밖) |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew clean build` 종료 코드 0, 테스트 1,108건 실패 0 |
+| B2 | 통과 | 규칙 변경은 테스트 모듈 안에만 있다. ADR-002 9.5와 D-085가 갱신됐다. 운영 코드 위반 0건(위 빌드) |
+| B3 | 통과 | 운영 계약 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | 새 금지 항목에 고정 예제(`DynamicCode#viaSystemProperty`)와 단언(`"System.setProperty", "System.setProperties", "System.clearProperty"`)이 있다. 기존 단언 삭제나 약화는 없다 |
+| B7 | risk-ops 검토 필요 | 보호 테스트 강화이고 실전 경로(Guard)를 다룬다. risk-ops 검토 뒤 사용자가 머지한다 |
+| B8 | 통과 | 비밀값 없음 |
+
+### 앞 재검토 지적의 처리
+- AR-7: 해소. 변조 실험에서 `PropertyProbe`가 잡혔고, `Properties`를 직접 고치는 우회도 클래스 단위 허용 목록 때문에 잡혔다.
+
+### 전체 지적 상태
+- AR-1~AR-7은 모두 해소됐다.
+- 남은 한계는 D-085 "보장하지 않는 것"과 ADR-002 9.5 "남은 한계"에 적혀 있다:
+  - 허용 클래스·패키지 안의 아직 모르는 간접 호출 수단, Jackson 기본 동작 안의 리플렉션 `[추론]`
+  - `Object`로 받은 객체의 `getClass()`
+  - 설치본·JVM 옵션(`-javaagent`, `-D`, `-XX:+DisableAttachMechanism`). 7단계 설치본 대조로 넘겼다
+- 이 한계들은 정적 규칙으로 닫을 수 없거나 빌드 밖의 문제다. 이 PR의 범위(바이트코드 규칙)에서 더 요구할 것은 없다.
+
+### 새 지적
+- 없음.
+
+## 판정
+승인
