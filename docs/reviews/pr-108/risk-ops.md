@@ -78,3 +78,43 @@
 
 ### 판정
 수정 필요(F3 클래스 로더 정적 팩토리와 로더 인자 JDK API를 통한 빌드 밖 코드 적재 차단과 예제, A14 D-085·ADR-002 9.5 "클래스 로더 생성" 문구 정합)
+
+## 재검토 2026-10-14 (2)
+- 대상: PR #108 / 헤드 dbdb953 / `git diff origin/main...HEAD` 전체(앞 재검토 뒤 변경: `reflective()`에 클래스 로더 타입 전 메서드·로더 주고받는 API·`ResourceBundle`·`ProcessBuilder`·`Runtime#exec` 금지, `Guard_타입은_Jackson이_만들_수_있는_모양이_아니다` 추가, `DynamicCode` 예제 6종 추가, ADR-002 9.5·D-085 정정)
+- 점검표: A
+- 직접 실행한 것(별도 작업 트리 `git worktree add .. dbdb953`, 끝난 뒤 제거. 공유 작업 트리 소스는 손대지 않음):
+  - `./gradlew build --no-daemon` → EXIT=0. `:autotrade-risk:test` 55건, `:autotrade-architecture-test:test` 39건(`RealPathReflectionTest` 7건), `:autotrade-app-engine:test` 50건, 실패·오류·건너뜀 0.
+  - 변조 실험(커밋하지 않음, 지움): 앞 재검토의 `LoaderProbe`(`URLClassLoader.newInstance`, `ResourceBundle.getBundle(.., ClassLoader)`)를 `autotrade-control`에 다시 넣음 → 두 호출 모두 `RealPathReflectionTest` 실패로 잡힘(F3 해소 확인). 같은 실험의 `ModulesProbe`(`ObjectMapper#findAndRegisterModules`) → 잡히지 않음(R4).
+  - `jackson-databind` jar의 `META-INF/services` 확인: `com.fasterxml.jackson.core.ObjectCodec` 하나뿐, Jackson `Module` 제공 항목 없음.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F3 클래스 로더 정적 팩토리·로더 인자 API | 해소 | RealPathReflectionTest.java `reflective()`의 로더 타입 소유·로더 매개변수·로더 반환 판정과 `ResourceBundle`·`ResourceBundle.Control` 금지. `DynamicCode#outsideCode`·`#contextLoader` 걸림을 `규칙은_리플렉션_우회를_실제로_잡아낸다`가 단언, 변조 실험 재현으로 실패 확인 |
+| A14 문구 | 해소 | D-085 결정 1번과 ADR-002 9.5 규칙 문구가 "로더 타입의 모든 메서드와 생성, 정적 팩토리, 로더를 돌려주는·받는 API, `ResourceBundle`"로 실제 규칙과 일치 |
+| R3 `getClass()` | 해소 | `Guard_타입은_Jackson이_만들_수_있는_모양이_아니다`가 Guard 패키지 운영 타입에 Jackson 주석·인자 없는 생성자가 없고 레코드는 3개로 고정됨을 단언. 남은 `SecondConfirmation` 레코드 경로는 D-085 남은 한계에 `[추론]`으로 기록 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 없음(diff는 `autotrade-architecture-test`와 문서뿐). `RealTradingGuard` 생성 시 전 계좌 OFF 그대로, `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | 기존 `ArchitectureTest` 규칙 변경 없음. 새 규칙이 리플렉션·동적 코드·로더·외부 명령·Jackson 객체 접근을 막고 각각 고정 예제로 걸림을 확인(`규칙은_리플렉션_우회를_실제로_잡아낸다`, `합친_범위는_...`). R4는 빌드 밖 jar가 있어야만 효과가 있어 D-085가 넘긴 설치본 한계와 같다 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정과 `processIsolation`(autotrade-app-engine/build.gradle.kts) 그대로 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | `DynamicCode` 새 예제의 `"jcmd"`·`"/x.jar"`는 자리 문자열, 비밀값 없음 |
+| A11 | 통과 | 기존 단언 삭제·약화 없음(`DynamicCode` 단언은 6개 항목 추가). 새 테스트 1건 추가 |
+| A12 | 수정 필요 | F4: 장애 대응표 #8(실전 엔진 크래시 → 감시 프로세스가 "자동 재기동", broker-and-fault-design.md 6장 167행)과 #9(실험실·UI·게이트웨이 자동 재기동)는 감시 프로세스가 다른 프로세스를 띄우는 것을 전제한다. 이번 커밋은 실전 경로 범위(감시 `:autotrade-app-watchdog` 포함)에서 `ProcessBuilder`·`Runtime#exec`를 허용 목록 없이 전면 금지했고, D-085·ADR-002에 #8·#9를 어떻게 구현할지(감시 안 실행기 한 클래스 허용 목록, 또는 OS 서비스 관리자에게 맡김)가 없다. 지금 감시 코드에 재기동 구현이 없어 빌드는 통과하지만, 대응표 전제와 테스트가 함께 정리되지 않았다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 수정 필요 | F4와 같은 이유로 D-085 위험과 한계·되돌릴 조건에 장애 #8·#9 재기동 경로가 빠져 있다 |
+
+### 점검표 밖 발견
+- **F4 (보통, 수정 필요)** 외부 명령 금지와 장애 #8·#9 자동 재기동 설계의 정합. 금지 자체는 AR-4(자기 JVM 에이전트 부착) 방어로 맞고 약화를 요구하지 않는다. 요구: (a) `ServiceLoader`와 같은 방식으로 `ALLOWED_PROCESS_LAUNCHERS`(지금 비어 있음, 테스트로 고정)를 두고 7단계 감시 재기동 구현 PR에서 감시 프로세스의 실행기 클래스 하나만 넣는다(그 클래스는 고정된 실행 파일과 인자만 쓰고, 실전 엔진 PID를 대상으로 하는 `jcmd`류를 부를 수 없음을 테스트), 또는 (b) 재기동은 OS 서비스 관리자(Windows 서비스·작업 스케줄러)에 맡긴다고 D-085와 broker-and-fault-design.md #8·#9 처리 칸에 적는다. 어느 쪽이든 D-085 "되돌릴 조건"에 적는다. (b)를 고르면 대응표 변경이라 사용자 확인 대상이다(지침 8장 2항).
+- **R4 (참고)** `ObjectMapper#findAndRegisterModules`·`ObjectMapper.findModules`는 `JACKSON_OBJECT_ACCESS`에 없고 내부에서 `ServiceLoader`를 쓴다. 실전 경로 런타임 외부 jar가 Jackson 4개와 정확히 같고(`실전_경로_런타임_구성은_고정_목록과_같다`) 그 안에 Jackson `Module` 제공 항목이 없어 빌드 안에서는 효과가 없다. 설치본에 jar를 끼워 넣는 경우에만 의미가 있어 D-085가 넘긴 한계와 같다. 일관성을 위해 금지 목록에 넣기를 권한다.
+
+### 판정
+수정 필요(F4 외부 명령 전면 금지와 장애 #8·#9 감시 자동 재기동 설계의 정합: 비어 있는 실행기 허용 목록과 테스트 또는 OS 서비스 관리자 위임 기록, A12·A14 해당 문서 정리)
