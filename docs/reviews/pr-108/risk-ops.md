@@ -36,3 +36,45 @@
 
 ## 판정
 수정 필요(F1 Jackson 매퍼 설정을 통한 객체 필드 쓰기 경로 차단 규칙과 예제, F2 JDK 동적 코드·간접 호출 수단 금지 목록 보강, A14 D-085·ADR-002 9.5 위험과 한계 문서 정정)
+
+## 재검토 2026-10-14
+- 대상: PR #108 / 헤드 618ae22 / `git diff origin/main...HEAD` 전체(앞 검토 뒤 변경: `RealPathReflectionTest`에 JDK 패키지·`java.lang.reflect` 구조 타입·Jackson 타입 허용 목록, 금지 메서드 보강, `GUARD_TYPES_ARE_NOT_DATA`, 합친 범위 테스트, 고정 예제 `DynamicCode`·`GuardAsData`·`JacksonObjectAccess`·`PolymorphicJson.ClassIdIntrospector`·`qa.probe.OutsideReflective`, ADR-002 9.5·D-085·결정 로그 정정)
+- 점검표: A
+- 직접 실행한 것(모두 `git worktree add`로 만든 별도 작업 트리 618ae22에서 실행, 끝난 뒤 작업 트리 제거, 공유 작업 트리의 소스는 손대지 않음):
+  - `./gradlew build --no-daemon` → EXIT=0. `:autotrade-risk:test` 55건, `:autotrade-architecture-test:test` 38건(`RealPathReflectionTest` 6건), `:autotrade-app-engine:test` 50건, 모두 실패·오류·건너뜀 0.
+  - 변조 실험 1종: 실전 경로 모듈 `autotrade-control`에 `com.autotrade.control.qaprobe.LoaderProbe`(`URLClassLoader.newInstance(URL[])`, `ResourceBundle.getBundle(String, Locale, ClassLoader)`)를 넣고 `:autotrade-architecture-test:test --tests '*RealPathReflectionTest*'` → **통과(잡지 못함)**. 실험 파일은 지웠다.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F1 Jackson 객체 필드 쓰기 경로 | 해소 | `JACKSON_OBJECT_ACCESS`(기존 객체 갱신·가시성·주석 해석기·믹스인·수정자·`findClass`)와 `JACKSON_ALLOWLIST`(27개 타입, `MapperFeature`·`AnnotatedField`·`ClassUtil` 등 목록 밖) 이중 차단, `GUARD_TYPES_ARE_NOT_DATA`(클래스 객체·`TypeReference` 인자·주석 값). 고정 예제 `JacksonObjectAccess`·`GuardAsData`가 `규칙은_리플렉션_우회를_실제로_잡아낸다`에서 걸림 확인. 허용 목록 방식이라 앞 검토보다 강하다 |
+| F2 JDK 동적 코드 수단 | 대부분 해소, 남은 구멍 F3 | `DYNAMIC_CODE_PACKAGES`에 `java.lang.management`·`javax.management`·`javax.tools`·`jdk.jshell`·`java.lang.foreign`·`jdk.dynalink`·`javax.naming`·`java.rmi` 추가, `System`·`Runtime`의 `load·loadLibrary`, `native` 선언, `Module#add*` 금지. 더해 `ALLOWED_JDK_PACKAGES` 23개 허용 목록. `DynamicCode` 예제 8종 걸림 확인. 앞 검토의 `NativeProbe` 3종은 이제 각각 금지 메서드·금지 패키지·허용 목록 밖으로 걸린다(코드 대조) |
+| A14 문서 | 해소 | D-085 "보장하는 것/보장하지 않는 것"과 ADR-002 9.5 남은 한계가 Jackson 기본 동작과 허용 패키지 안 미지 수단을 `[추론]`으로 적음. 단 F3 대상은 문서의 "클래스 로더 생성 금지" 서술과 맞지 않는다 |
+| R1 `Atomic*FieldUpdater` | 해소 | `reflective()` 정규식, `DynamicCode#updater` 걸림 |
+| R2 합친 범위 테스트 | 해소 | `합친_범위는_실전_경로_모듈의_com_autotrade_밖_패키지도_잡는다`: 가짜 배치표로 모듈 판정만이 `qa.probe.OutsideReflective`를 잡고, 실험실 배치로는 걸리지 않음을 함께 확인 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 없음(diff는 `autotrade-architecture-test`와 문서뿐). `RealTradingGuard` 생성 시 모든 계좌 OFF 그대로, `:autotrade-risk:test` 55건 통과 |
+| A2 | 수정 필요 | 기존 `ArchitectureTest` 규칙 변경 없음, 새 규칙이 우회를 넓게 막음. 그러나 F3: 실전 경로 코드가 빌드 밖 코드를 적재하는 경로(클래스 로더 정적 팩토리, 로더를 받는 `ResourceBundle.getBundle`)가 열려 있어, 적재된 코드는 어떤 ArchUnit 규칙도 거치지 않는다 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정 그대로, `processIsolation`(autotrade-app-engine/build.gradle.kts) 변경 없음 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 예제 5개에 키·계좌번호·토큰 없음(`DynamicCode`의 `"/x.so"`·`"x"`는 자리 문자열) |
+| A11 | 통과 | 기존 단언 삭제 없음. `PolymorphicJson` 단언은 `hasSize(4)`에서 종류별 개수(2+2)와 허용 목록 밖 의존 확인으로 바뀌었고 더 엄격하다. `allowEmptyShould(true)`는 범위가 비는 경우에만 영향이며, 범위가 비지 않음은 `범위는_실전_경로_프로젝트의_운영_클래스_전체다`가 단언한다 |
+| A12 | 해당 없음 | 장애 대응표 17종·O1~O8·장애 테스트 8종의 전제를 바꾸는 동작 변경 없음 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 수정 필요 | D-085 결정 1번과 ADR-002 9.5가 "클래스 로더 생성" 금지라 적지만 F3의 정적 팩토리는 잡지 않는다. 고친 뒤 문서와 맞춘다 |
+
+### 점검표 밖 발견
+- **F3 (보통, 수정 필요)** 빌드 밖 코드 적재 경로. `reflective()`의 클래스 로더 분기는 `<init>`·`loadClass`·`defineClass`만 본다. `java.net.URLClassLoader.newInstance(..)`(정적 팩토리, `java.net`은 허용 패키지)로 로더를 만들고, `java.util.ResourceBundle.getBundle(String, Locale, ClassLoader)`(이름으로 클래스를 찾아 인스턴스를 만든다, `java.util`은 허용 패키지)로 그 로더의 클래스를 실행할 수 있다. 변조 실험 `LoaderProbe`로 규칙이 두 호출 모두 잡지 못함을 확인했다. 적재되는 클래스는 저장소·빌드에 없으므로 `ArchitectureTest`·`RealPathReflectionTest` 어느 규칙도 거치지 않는다(나머지 단계는 `[추론]`, 실제 적재·실행 실험은 하지 않았다).
+  - 요구: `ClassLoader` 하위 타입의 정적 팩토리(`newInstance` 포함, 사실상 `ClassLoader` 하위 타입이 반환·소유인 모든 생성 수단)를 금지하고, `ClassLoader`를 인자로 받는 JDK API(`ResourceBundle.getBundle(.., ClassLoader)`, `ResourceBundle.Control#newBundle`, `ModuleLayer` 정의 메서드, `Thread#setContextClassLoader`)를 금지하거나, 더 단순하게 실전 경로에서 `java.lang.ClassLoader` 하위 타입에 대한 의존 자체를 금지한다(운영 코드에 쓰는 곳이 있으면 허용 목록). `DynamicCode`에 두 예제를 더하고 D-085·ADR-002 9.5 문구를 맞춘다.
+- **R3 (참고)** `GUARD_TYPES_ARE_NOT_DATA`는 클래스 리터럴만 본다. 살아 있는 Guard 객체의 `getClass()`로 얻은 클래스 객체를 바인딩에 넘기는 것은 걸리지 않지만, Guard 타입은 기본 생성자·`@JsonCreator`가 없고 살아 있는 객체 덮어쓰기 API는 금지되어 실효는 낮다 `[추론]`. 문서 남은 한계에 한 줄 적어 두기를 권한다.
+
+### 판정
+수정 필요(F3 클래스 로더 정적 팩토리와 로더 인자 JDK API를 통한 빌드 밖 코드 적재 차단과 예제, A14 D-085·ADR-002 9.5 "클래스 로더 생성" 문구 정합)
