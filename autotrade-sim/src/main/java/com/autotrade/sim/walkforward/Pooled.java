@@ -101,6 +101,37 @@ public record Pooled(boolean complete, RunMetrics metrics, List<EquityPoint> cha
         return end == null || n == 0 ? null : end.subtract(seed.amount()).divide(BigDecimal.valueOf(n), MC);
     }
 
+    /**
+     * 검증 전체 비용 비중 = Σ 구간 비용 ÷ Σ 구간 비용 전 손익(구간 최종 평가금액 − 시드 + 구간 비용). 구간마다 시드에서 새로
+     * 시작하므로 분자·분모를 같은 원 금액 배율(구간 합)로 맞춘다(이은 곡선의 복리 손익과 섞지 않음, PR #98 검토 M1).
+     * 구간이 하나라도 실패했거나 비용 전 손익 합이 0 이하면 null.
+     */
+    public static BigDecimal costShare(Money seed, List<WindowRun> runs) {
+        if (runs.isEmpty() || !runs.stream().allMatch(WindowRun::completed)) {
+            return null;
+        }
+        BigDecimal costs = BigDecimal.ZERO;
+        BigDecimal gross = BigDecimal.ZERO;
+        for (WindowRun r : runs) {
+            BigDecimal c = r.metrics().totalCosts().amount();
+            costs = costs.add(c);
+            gross = gross.add(r.finalEquity().subtract(seed.amount()).add(c));
+        }
+        return gross.signum() <= 0 ? null : costs.divide(gross, MC).setScale(SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /** 검증 전체 회전율 = 구간 회전율(매매 대금 ÷ 2 ÷ 그 구간 평균 평가금액)의 합. 구간이 하나라도 실패면 null. */
+    public static BigDecimal turnover(List<WindowRun> runs) {
+        if (runs.isEmpty() || !runs.stream().allMatch(WindowRun::completed)) {
+            return null;
+        }
+        BigDecimal sum = BigDecimal.ZERO;
+        for (WindowRun r : runs) {
+            sum = sum.add(r.metrics().turnover());
+        }
+        return sum.setScale(SCALE, RoundingMode.HALF_EVEN);
+    }
+
     /** 이은 총수익률(복리). 완료되지 않았으면 null. */
     public BigDecimal totalReturn() {
         return metrics == null ? null : metrics.totalReturn();

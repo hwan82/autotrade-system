@@ -169,16 +169,17 @@ final class WalkForwardReport {
                     .append(" | ").append(ScreeningCriteria.num(m1.profitFactor())).append(" | ")
                     .append(ScreeningCriteria.pct(m1.winRate())).append(" | ").append(m1.roundTripCount()).append(" | ")
                     .append(m1.totalCosts()).append(" | ")
-                    .append(ScreeningCriteria.pct(m1.costShare())).append(" | ")
-                    .append(ScreeningCriteria.num(m1.avgHoldingDays())).append(" | ")
-                    .append(ScreeningCriteria.num(m1.turnover())).append(" | ")
+                    .append(ScreeningCriteria.pct(Pooled.costShare(r.plan().seedCapital(), r.validationRuns().get(i))))
+                    .append(" | ").append(ScreeningCriteria.num(m1.avgHoldingDays())).append(" | ")
+                    .append(ScreeningCriteria.num(Pooled.turnover(r.validationRuns().get(i)))).append(" | ")
                     .append(j.perTrip() == null ? "-" : ScreeningCriteria.won(j.perTrip())).append(" | ")
                     .append(j.verdict().label()).append(" |\n");
         }
         sb.append("\n벤치마크(검증 전체를 이음): 시총 가중 ").append(ScreeningCriteria.pct(r.idxCapPooled())).append(", 동일가중 ")
                 .append(ScreeningCriteria.pct(r.idxEqualPooled())).append("\n\n");
-        sb.append("비용 비중 = 비용 ÷ 비용 전 손익(비용 전 손익이 0 이하면 -). 평균 보유 = 왕복의 진입일~청산일 달력일 평균.")
-                .append(" 회전율 = 매매 대금 ÷ 2 ÷ 평균 평가금액(검증 전체 기간 합, 연율 아님). 판정에 쓰지 않는다.\n\n");
+        sb.append("비용 비중 = 구간 비용 합 ÷ 구간 비용 전 손익 합(구간마다 시드에서 시작한 원 금액, 합이 0 이하면 -).")
+                .append(" 평균 보유 = 왕복의 진입일~청산일 달력일 평균. 회전율 = 구간별 (매매 대금 ÷ 2 ÷ 구간 평균 평가금액)의 합")
+                .append("(연율 아님). 판정에 쓰지 않는다.\n\n");
 
         sb.append("## 구간별 검증 총수익률 (괄호는 시총 가중 지수 초과)\n\n");
         sb.append("| 조합 |");

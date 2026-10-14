@@ -160,6 +160,14 @@ class WalkForwardStudyTest {
     }
 
     @Test
+    void 등록_파일_해시는_줄바꿈이_CRLF여도_LF_원본과_같다() {
+        String lf = "id: \"EXP-1\"\nseed: \"1\"\n";
+        // Windows 작업 트리(core.autocrlf)의 사본과 커밋된 원본이 같은 값이어야 대조할 수 있다(PR #98 검토 M2)
+        assertThat(WalkForwardStudy.studySha256(lf.replace("\n", "\r\n"))).isEqualTo(WalkForwardStudy.studySha256(lf))
+                .isEqualTo("85faebdab269cb54e3c8fb7a244e5677749c8cf95d708edba348317c0260fa75");
+    }
+
+    @Test
     void 같은_입력을_두_번_돌리면_결과가_같다() throws IOException {
         WalkForwardStudy.Outcome first = run(false, RunGate.NONE);
         WalkForwardStudy.Outcome second = run(false, RunGate.NONE);

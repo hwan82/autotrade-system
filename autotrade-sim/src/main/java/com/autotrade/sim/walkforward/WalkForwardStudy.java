@@ -5,7 +5,6 @@ import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.daily.DailyBar;
 import com.autotrade.marketdata.daily.InstrumentPeriod;
-import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.marketdata.rules.KrxMarketRules;
 import com.autotrade.risk.BlacklistEntry;
 import com.autotrade.risk.BlacklistSnapshot;
@@ -52,10 +51,13 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +159,20 @@ public final class WalkForwardStudy {
         return new Outcome(files, first.anyRunFailed(), deterministic);
     }
 
+    /**
+     * 등록 파일 내용의 SHA-256(16진수 소문자). 줄바꿈을 LF로 맞춘 뒤 계산한다: Windows 작업 트리(Git {@code core.autocrlf})의
+     * CRLF 사본과 저장소에 커밋된 LF 원본이 같은 값이 되어야 대조할 수 있다(PR #98 검토 M2).
+     */
+    static String studySha256(String text) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(text.replace("\r\n", "\n").getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. 멈추면 아무것도 쓰지 않는다. */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path snapshotsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
@@ -164,8 +180,9 @@ public final class WalkForwardStudy {
         WalkForwardPlan plan;
         String studySha256;
         try {
-            plan = WalkForwardPlan.parse(Files.readString(file, StandardCharsets.UTF_8), file.toString());
-            studySha256 = Sha256.ofFile(file);
+            String text = Files.readString(file, StandardCharsets.UTF_8);
+            plan = WalkForwardPlan.parse(text, file.toString());
+            studySha256 = studySha256(text);
         } catch (IOException e) {
             throw new UncheckedIOException("등록 파일을 읽을 수 없습니다: " + file, e);
         }
