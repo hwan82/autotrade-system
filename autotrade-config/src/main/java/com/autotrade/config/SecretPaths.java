@@ -27,12 +27,21 @@ final class SecretPaths {
 
     private static final PropertyNamingStrategies.KebabCaseStrategy KEBAB = new PropertyNamingStrategies.KebabCaseStrategy();
     private static final Set<String> PATHS = Collections.unmodifiableSet(collect(RuntimeConfig.class, ""));
+    /** 설정 구조의 모든 경로(중간 노드 포함). 맵 키 자리는 {@code *}. 경고에 키 이름을 내보내도 되는지 가리는 데 쓴다. */
+    private static final Set<String> SCHEMA = Collections.unmodifiableSet(schema(RuntimeConfig.class, ""));
+    /** 설정 키 이름 모양(소문자와 하이픈). 숫자가 든 이름은 계좌번호일 수 있어 경고에 내보내지 않는다. */
+    private static final java.util.regex.Pattern KEY_LIKE = java.util.regex.Pattern.compile("[a-z][a-z-]*");
 
     private SecretPaths() {}
 
     /** "brokers/kis/app-key" 형식. 맵 비밀값은 "real-trading/account-numbers/*". */
     static Set<String> all() {
         return PATHS;
+    }
+
+    /** 설정 키 이름 모양인지(소문자와 하이픈). 아니면 경고에서 가린다. */
+    static boolean isKeyLike(String name) {
+        return KEY_LIKE.matcher(name).matches();
     }
 
     /** 값 경로가 비밀값 경로인지. */
@@ -119,6 +128,47 @@ final class SecretPaths {
         return path;
     }
 
+    /**
+     * 경고에 쓸 secrets.json의 비밀값 아닌 키 경로. 설정 구조에 있는 키 이름은 그대로 두고, 맵 키 자리와 구조에 없는 키 중
+     * 키 이름 모양이 아닌 것은 {@code *}로 바꾼다. 구조에 없는 키 아래는 {@code /*}로 줄인다. {@code *}가 든 경로는
+     * 개수를 붙인다. 위치가 틀린 키 이름 자리에 계좌번호를 적었을 수 있어서다(PR #100 QA R4). 순서는 처음 나온 순서.
+     * 예: {@code real-trading/acount-numbers/99990000-01} → {@code real-trading/acount-numbers/* 1개}.
+     */
+    static List<String> forNonSecretWarning(List<String> paths) {
+        java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
+        for (String path : paths) {
+            counts.merge(maskedPath(path), 1, Integer::sum);
+        }
+        List<String> out = new ArrayList<>();
+        counts.forEach((masked, n) -> out.add(masked.contains(ANY_KEY) ? masked + " " + n + "개" : masked));
+        return out;
+    }
+
+    private static String maskedPath(String path) {
+        String[] parts = path.split("/", -1);
+        List<String> shown = new ArrayList<>();
+        String schemaPrefix = "";
+        for (int i = 0; i < parts.length; i++) {
+            String literal = schemaPrefix + parts[i];
+            String any = schemaPrefix + ANY_KEY;
+            if (SCHEMA.contains(literal)) {
+                shown.add(parts[i]);
+                schemaPrefix = literal + "/";
+            } else if (SCHEMA.contains(any)) {
+                shown.add(ANY_KEY);
+                schemaPrefix = any + "/";
+            } else {
+                // 구조에 없는 키: 오타로 보이는 키 이름만 보이고 그 아래는 줄인다
+                shown.add(isKeyLike(parts[i]) ? parts[i] : ANY_KEY);
+                if (i < parts.length - 1) {
+                    shown.add(ANY_KEY);
+                }
+                break;
+            }
+        }
+        return String.join("/", shown);
+    }
+
     /** 비밀값 경로가 아닌 값의 경로. secrets.json 검사용. */
     static List<String> nonSecretLeaves(JsonNode tree) {
         List<String> leaves = new ArrayList<>();
@@ -161,6 +211,25 @@ final class SecretPaths {
             node = node.has(parts[i]) ? (ObjectNode) node.get(parts[i]) : node.putObject(parts[i]);
         }
         return node;
+    }
+
+    private static Set<String> schema(Class<?> type, String prefix) {
+        Set<String> paths = new TreeSet<>();
+        for (RecordComponent c : type.getRecordComponents()) {
+            String path = prefix + KEBAB.translate(c.getName());
+            paths.add(path);
+            Class<?> t = c.getType();
+            if (t.isRecord()) {
+                paths.addAll(schema(t, path + "/"));
+            } else if (Map.class.isAssignableFrom(t) && c.getGenericType() instanceof ParameterizedType pt) {
+                paths.add(path + "/" + ANY_KEY);
+                if (pt.getActualTypeArguments()[1] instanceof Class<?> v && v.isRecord()) {
+                    paths.addAll(schema(v, path + "/" + ANY_KEY + "/"));
+                }
+            }
+            // 목록 안의 키는 경로로 내려가지 않는다(collectLeaves도 목록을 값 하나로 본다)
+        }
+        return paths;
     }
 
     private static Set<String> collect(Class<?> type, String prefix) {

@@ -19,3 +19,4 @@
 | 2026-10-14 | PR #91 검토해줘 | docs/reviews/pr-91/qa.md | 실전 관련 PR(장애 대응: 실험실 실시간 세션 디스크 하한 1GB 미만 거부, PR #87 QA 권고 후속, 브랜치 claude/project-thread-go4oua) |
 | 2026-10-14 | PR #100 검토해줘 | docs/reviews/pr-100/qa.md | 실전 관련 PR(1단계 QA 권고 R3: 실전 엔진 상태 스냅샷에 설정 파일 거부 경고 configWarning, 실전 운영 화면 표시. 실전 엔진·명령 채널 계약 변경, 브랜치 claude/project-thread-gayfxk) |
 | 2026-10-14 | PR #100 재검토해줘 | docs/reviews/pr-100/qa.md(재검토 절) | 실전 관련 PR 재검토(첫 판정 승인의 권고 Q1·R1·R2를 fa50f3f에서 반영, 사용자 결정 "고친 뒤 머지". risk-ops·architect 재검토 승인, 브랜치 claude/project-thread-gayfxk) |
+| 2026-10-14 | PR #101 검토해줘 | docs/reviews/pr-101/qa.md | 실전 관련 PR(PR #100 QA 권고 R4: secrets.json·runtime-config.json 거부 경고에서 계좌번호 모양 키 이름 가림, 실전 엔진 로그·운영 화면에 나가는 경고 변경, 브랜치 claude/project-thread-gayfxk) |

@@ -77,7 +77,8 @@ public final class ConfigLoader {
                 secrets = readObject(paths.secretsFile());
                 List<String> nonSecret = SecretPaths.nonSecretLeaves(secrets);
                 if (!nonSecret.isEmpty()) {
-                    throw new InvalidConfigException("비밀값이 아닌 키가 있습니다: " + nonSecret);
+                    throw new InvalidConfigException("비밀값이 아닌 키가 있습니다: "
+                            + SecretPaths.forNonSecretWarning(nonSecret));
                 }
             } catch (IOException | RuntimeException e) {
                 secrets = null;
