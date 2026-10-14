@@ -17,3 +17,4 @@
 | 2026-10-14 | PR #87 검토해줘 | docs/reviews/pr-87/qa.md | 실전 관련 PR(D-076 게이트웨이 시세 전달 소켓·실시간 모의 세션. 게이트웨이를 실전 엔진과 공유, 장애 대응 표 #9·#10, 브랜치 claude/project-thread-go4oua) |
 | 2026-10-14 | main 기준으로 5단계 완료 재판정해줘 | docs/reviews/gates/stage-5.md(재검토 절) | 단계 완료 재판정(1차 수정 필요 C5 → 사용자 결정 D-079 기록과 C5 4곳 정정, 이 줄이 들어간 문서 PR 머지 뒤 main) |
 | 2026-10-14 | PR #91 검토해줘 | docs/reviews/pr-91/qa.md | 실전 관련 PR(장애 대응: 실험실 실시간 세션 디스크 하한 1GB 미만 거부, PR #87 QA 권고 후속, 브랜치 claude/project-thread-go4oua) |
+| 2026-10-14 | PR #100 검토해줘 | docs/reviews/pr-100/qa.md | 실전 관련 PR(1단계 QA 권고 R3: 실전 엔진 상태 스냅샷에 설정 파일 거부 경고 configWarning, 실전 운영 화면 표시. 실전 엔진·명령 채널 계약 변경, 브랜치 claude/project-thread-gayfxk) |
