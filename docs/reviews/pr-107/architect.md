@@ -34,3 +34,30 @@
 
 ## 판정
 수정 필요(R1 세션 범위 판정이 무음 정지를 "세션 밖"으로 숨김, R2 기록 없는 녹화일 누락)
+
+## 재검토 2026-10-14
+- 대상: PR #107 / 커밋 aca7fcc / main 대비 diff 전체(`git diff origin/main...HEAD`), 수정분은 `7dd4ebd..aca7fcc`(4개 파일 +204 −43). 수정 커밋은 이 원문 파일을 건드리지 않음
+- 점검표: B
+- 직접 실행한 것: `./gradlew build --no-daemon` 종료 코드 0, 테스트 결과 XML 합계 1,111건 실패·오류·건너뜀 0. `./gradlew :autotrade-sim:test --tests 'com.autotrade.sim.live.*' --rerun`으로 다시 돌려 `LiveWeeklyCheckTest` 8건 통과(이번 실행 시각 기록 확인)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 직접 실행 `./gradlew build` 종료 코드 0, 1,111건 실패 0 |
+| B2 | 통과 | 새 의존 없음. 추가 import는 테스트의 `FeedServer`뿐(이미 main 코드가 쓰는 패키지). ArchUnit 스위트 통과 |
+| B3 | 통과 | 계약 변경 없음. `DayRow`(sim 공개 record)에 `journalPresent` 추가, 사용처는 `LiveWeeklyCheck`·그 테스트뿐(grep, app-lab의 `DayRow`는 다른 타입). D-088 2·4·6번, 위험과 한계, 검증, 절차서 3장 갱신 |
+| B4 | 통과 | 날짜 집합 `TreeSet`, 구간은 메타 구간 순서, 줄은 파일 순서. `now()` 없음. 같은 입력→같은 보고서 테스트 유지 |
+| B5 | 통과 | 금액 계산 변경 없음 |
+| B6 | 통과 | 새 테스트 `silentStopWhileTheSessionIsOpenIsADefectNotOutsideTheSession`(R1), `dayTheLabNeverOpenedIsCountedAsMissingAndStillInTheRecordingReplay`(R2), `missingEventsAreCountedByTheLabGapThatCoversThem`에 게이트웨이 큐 넘침 원인 추가(N1). 기존 단언 하나(`FEED` 원인 0)는 그 원인을 실제로 만들게 되어 기대값 1로 바뀐 것이고 약화가 아님 |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·리스크 한도·장애 대응·게이트웨이 코드 변경 없음 |
+| B8 | 통과 | 로그·예외에 경로·건수만 |
+
+### 앞 지적 처리
+- R1 해소: `missingCause`가 실험실 공백을 먼저 보고, 없으면 입력 기록 메타 구간(`sessionSpans`, `LiveWeeklyCheck.java` `RecordingMeta.segments` 열림·닫힘 시각, 시작은 첫 줄 수신 시각으로 당김) 안이면 설명 없음, 밖이면 세션 밖. 닫힌 시각 없는 구간은 마지막 줄 시각에서 끝냄 — 같은 날 재기동하면 `DayWriter.java:138`이 앞 구간 끝을 마지막 수신 시각으로 채우는 것과 일치. 남는 한계(같은 구간에서 무음 정지 후 비정상 종료, 세션 열고 첫 이벤트 전)는 D-088 위험과 한계에 적힘. 정상 종료된 세션의 무음 정지는 새 테스트로 결함 판정 확인
+- R2 해소: 점검 날짜 = 기록일 ∪ 녹화일(운용 기간 안), 기록 없는 날은 "기록 없음" 행·boards 줄 전부 세션 밖·녹화 리플레이에 포함. 선택 근거와 버린 대안이 D-088 4번에 있음
+- N1~N4 반영 확인(N2 `fingerprint`가 events·meta 둘 다 해시, N3 주석, N4 D-088 위험과 한계에 힙 실측 안내)
+
+### 새 권고(머지 막지 않음)
+- N5: D-088 1번은 "기본 마지막 날은 운용 기간 안 입력 기록의 마지막 날"인데 코드는 기록일·녹화일 합집합의 마지막 날(`end = to.orElse(allDays.last())`)이다. 실험실을 마지막 날에 끈 경우 그날까지 보므로 코드 쪽이 맞다. 다음 문서 변경 때 D-088 1번 문구를 코드에 맞춘다
+
+## 판정 (재검토)
+승인
