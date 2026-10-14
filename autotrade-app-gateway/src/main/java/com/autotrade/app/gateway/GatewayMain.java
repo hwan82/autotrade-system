@@ -9,6 +9,8 @@ import com.autotrade.config.LoadedConfig;
 import com.autotrade.config.ProcessStartup;
 import com.autotrade.config.RuntimeConfig;
 import com.autotrade.domain.account.BrokerId;
+import com.autotrade.marketdata.feed.FeedServer;
+import com.autotrade.marketdata.feed.FeedSocket;
 import com.autotrade.marketdata.live.JdkHttpPort;
 import com.autotrade.marketdata.live.JdkScheduler;
 import com.autotrade.marketdata.live.JdkWsTransport;
@@ -29,7 +31,8 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 
 /**
- * 시세 게이트웨이(D-013 ②). 키움·한국투자 실시간 시세를 받아 녹화한다(ADR-003). 주문 API는 호출하지 않는다(MD-01).
+ * 시세 게이트웨이(D-013 ②). 키움·한국투자 실시간 시세를 받아 녹화하고 실험실에 전달한다(ADR-003, ADR-010). 주문 API는
+ * 호출하지 않는다(MD-01).
  * 토스는 연결하지 않는다. 토스 토큰은 실전 엔진만 쓰므로 게이트웨이·실험실의 실시간·REST 보정 시세는 키움·한국투자로만 받는다(D-059).
  *
  * <p>시스템 시계를 만드는 곳은 이 진입점뿐이다. 나머지 코드는 주입받은 {@link Clock}만 쓴다(ArchitectureTest).
@@ -96,7 +99,23 @@ public final class GatewayMain {
         if (plugins.isEmpty()) {
             LOG.log(Level.WARNING, "실시간 시세용 증권사 키가 설정되지 않았습니다. 수신 없이 대기합니다");
         }
-        return Gateway.start(config.marketData().mode(), plugins, watch, dir.resolve(RECORDINGS_DIR), runtime.clock());
+        return Gateway.start(config.marketData().mode(), plugins, watch, dir.resolve(RECORDINGS_DIR), openFeed(dir),
+                runtime.clock());
+    }
+
+    /**
+     * 실험실 실시간 전달 서버(ADR-010, D-076)를 연다. 열지 못하면(소켓 경로가 길거나 다른 게이트웨이가 쓰는 중) 경고만 남기고
+     * 녹화만 한다. 전달은 실험실용이라 없어도 수신·녹화는 그대로다.
+     */
+    static FeedServer openFeed(Path configDir) {
+        try {
+            FeedServer feed = FeedServer.open(FeedSocket.path(configDir));
+            LOG.log(Level.INFO, "실험실 시세 전달 소켓을 열었습니다: {0}", feed.socket());
+            return feed;
+        } catch (IOException | RuntimeException e) {
+            LOG.log(Level.WARNING, "실험실 시세 전달을 열지 못해 녹화만 합니다: {0}", e.getMessage());
+            return null;
+        }
     }
 
     /**
