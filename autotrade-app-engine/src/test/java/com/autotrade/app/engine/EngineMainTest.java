@@ -131,7 +131,9 @@ class EngineMainTest {
         ConfigPaths paths = ConfigPaths.in(dir);
         StringBuilder keys = new StringBuilder("{ \"lab\": {");
         for (int i = 0; i < 6000; i++) {
-            keys.append(i == 0 ? "" : ",").append("\"not-a-secret-key-").append(i).append("\": \"x\"");
+            // 숫자가 든 키 이름은 경고에서 "*"로 묶이므로(QA R4) 글자로만 된 서로 다른 이름을 쓴다
+            String suffix = "" + (char) ('a' + i / 676) + (char) ('a' + i / 26 % 26) + (char) ('a' + i % 26);
+            keys.append(i == 0 ? "" : ",").append("\"not-a-secret-key-").append(suffix).append("\": \"x\"");
         }
         Files.writeString(paths.secretsFile(), keys.append("} }").toString());
         assertThat(new ConfigLoader().load(paths).warning().length()).isGreaterThan(64 * 1024);

@@ -296,6 +296,34 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void secrets의_위치가_틀린_키_아래_키_이름은_경고에_남기지_않는다() throws IOException {
+        // 부모 키 오타 아래 키 자리에 계좌번호를 적은 경우(PR #100 QA R4). 오타 키 이름은 보여 고칠 곳을 알게 한다
+        secrets("""
+                { "real-trading": { "acount-numbers": { "99990000-01": "%s", "99990000-02": "%s" } },
+                  "lab": { "max-parallel-runs": 2 } }
+                """.formatted(FAKE_SECRET, FAKE_SECRET));
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.warning()).contains("secrets.json")
+                .contains("real-trading/acount-numbers/* 2개").contains("lab/max-parallel-runs")
+                .doesNotContain("99990000").doesNotContain(FAKE_SECRET);
+    }
+
+    @Test
+    void secrets의_숫자가_든_키_이름은_구조에_없으면_가린다() throws IOException {
+        secrets("""
+                { "real-trading": { "99990000-01": "x" }, "99990000-02": { "a": "y" },
+                  "brokers": { "kis": { "app-kye": "z" } } }
+                """);
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.warning()).contains("real-trading/* 1개").contains("*/* 1개")
+                .contains("brokers/kis/app-kye").doesNotContain("99990000");
+    }
+
+    @Test
     void 키_이름에_슬래시가_있어도_예외_없이_그_파일만_거부한다() throws IOException {
         secrets("""
                 { "brokers/kis": { "app-key": "%s" } }
