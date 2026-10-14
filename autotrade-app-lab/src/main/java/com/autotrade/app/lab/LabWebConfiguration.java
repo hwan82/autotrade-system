@@ -102,11 +102,12 @@ public class LabWebConfiguration {
             @Value("${autotrade.lab.experiments-dir:experiments}") String experimentsDir,
             @Value("${autotrade.lab.strategies-dir:strategies}") String strategiesDir,
             @Value("${autotrade.code-commit:unknown}") String commit,
-            @Value("${autotrade.code-dirty:true}") boolean dirty, Clock clock) {
+            @Value("${autotrade.code-dirty:true}") boolean dirty,
+            @Value("${autotrade.lab.live.min-free-gb:20}") long minFreeGb, Clock clock) {
         Path configDir = store.paths().runtimeFile().toAbsolutePath().getParent();
         Path repoRoot = Path.of(strategiesDir).toAbsolutePath().normalize().getParent();
         return new LiveLabService(Path.of(experimentsDir), repoRoot, configDir.resolve(LiveCheckMain.SESSIONS_DIR),
                 FeedSocket.path(configDir), configDir.resolve(LiveLabService.STOP_REQUEST), new CodeVersion(commit, dirty),
-                clock);
+                clock, LiveLabService.FILE_STORE, minFreeGb);
     }
 }

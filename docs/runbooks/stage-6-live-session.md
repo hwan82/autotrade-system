@@ -41,7 +41,8 @@
    Invoke-RestMethod http://127.0.0.1:8480/api/live/status
    ```
 
-4. 상태에서 `feedState`가 `CONNECTED`, 장중에 `session.events`가 늘어나는지 본다.
+4. 상태에서 `restoring`이 `false`가 된 뒤(입력 기록으로 계좌를 되살리는 중에는 `true`, 게이트웨이에 아직 붙지 않음) `feedState`가 `CONNECTED`, 장중에 `session.events`가 늘어나는지 본다. 시작이 실패하면 `stopReason`에 `시작 실패: …`가 남는다.
+5. 설정 폴더 디스크 여유가 20GB(`autotrade.lab.live.min-free-gb`)보다 적으면 시작하지 않고, 운용 중이면 멈춘다(`stopReason`).
 
 ## 3. 운용 중
 

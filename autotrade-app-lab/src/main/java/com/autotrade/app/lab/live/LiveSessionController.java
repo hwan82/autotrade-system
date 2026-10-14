@@ -1,7 +1,6 @@
 package com.autotrade.app.lab.live;
 
 import com.autotrade.app.lab.web.ApiException;
-import com.autotrade.sim.live.LiveSession;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,7 +27,7 @@ public class LiveSessionController {
     }
 
     @PostMapping("/sessions/{id}/start")
-    public LiveSession.Status start(@PathVariable String id) {
+    public LiveLabService.View start(@PathVariable String id) {
         try {
             return service.start(id);
         } catch (IllegalStateException e) {

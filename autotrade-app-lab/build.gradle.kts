@@ -37,8 +37,11 @@ val labGitDirty = providers.exec {
     workingDir = labRepoRoot
     isIgnoreExitValue = true
 }.standardOutput.asText.map { it.isNotBlank().toString() }
+// 힙 상한(SIM-14, risk-ops PR #87 R2): 실험실이 실전 엔진 PC 메모리를 끝없이 쓰지 않게 정한다. 실시간 모의 되살리기는 기록일 하나씩
+// 읽으므로 하루치 입력 기록이 들어갈 만큼이면 된다. 조합 실험 결과를 많이 불러오면 -PlabHeap=6g처럼 늘린다
 tasks.named<JavaExec>("bootRun") {
     workingDir = rootProject.projectDir
+    maxHeapSize = (findProperty("labHeap") as String?) ?: "4g"
     jvmArgumentProviders.add(CommandLineArgumentProvider {
         listOf("-Dautotrade.code-commit=${labGitCommit.get()}", "-Dautotrade.code-dirty=${labGitDirty.get()}")
     })

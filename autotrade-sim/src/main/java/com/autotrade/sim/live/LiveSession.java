@@ -128,7 +128,17 @@ public final class LiveSession implements AutoCloseable {
      * @throws IllegalStateException 다른 프로세스가 이 세션을 열고 있을 때
      */
     public static LiveSession open(LivePlan plan, Path repoRoot, Path sessionsRoot, Clock clock, Consumer<String> log) {
+        return open(plan, repoRoot, sessionsRoot, clock, log, () -> { });
+    }
+
+    /**
+     * {@link #open(LivePlan, Path, Path, Clock, Consumer)}과 같고, 입력 기록을 되살리는 동안 기록일 하나를 읽기 전마다
+     * {@code beforeEachDay}를 부른다. 정지 요청 등으로 멈춰야 하면 거기서 예외를 던진다(세션은 열리지 않고 잠금이 풀린다).
+     */
+    public static LiveSession open(LivePlan plan, Path repoRoot, Path sessionsRoot, Clock clock, Consumer<String> log,
+            Runnable beforeEachDay) {
         Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(beforeEachDay, "beforeEachDay");
         LiveSetup setup = LiveSetup.of(plan, repoRoot);
         Path dir = sessionsRoot.toAbsolutePath().resolve(plan.id().value());
         FileChannel ch = null;
@@ -152,7 +162,7 @@ public final class LiveSession implements AutoCloseable {
         LiveSession session;
         try {
             session = new LiveSession(setup, dir, clock, ch, lock);
-            session.restore(log);
+            session.restore(log, beforeEachDay);
         } catch (RuntimeException e) {
             try {
                 lock.release();
@@ -165,22 +175,31 @@ public final class LiveSession implements AutoCloseable {
         return session;
     }
 
-    /** 입력 기록이 있으면 처음부터 다시 돌린다(기록에는 쓰지 않음). */
-    private void restore(Consumer<String> log) {
+    /**
+     * 입력 기록이 있으면 처음부터 다시 돌린다(기록에는 쓰지 않음). 메모리를 아끼려고 기록일 하나씩 읽는다. 녹화 어댑터는 날짜마다
+     * 따로 처리하고 순번만 이어 매기므로, 하루씩 읽어 앞 날짜 이벤트 수만큼 순번을 밀면 전체를 한 번에 읽은 것과 같다
+     * (리플레이 확인이 쓰는 {@link RecordedMarketDataSet#fromDirs} 전체 읽기와 같은 순번).
+     */
+    private void restore(Consumer<String> log, Runnable beforeEachDay) {
         List<Path> days = journalDays();
         if (days.isEmpty()) {
             log.accept("새 세션: " + setup.plan().id() + " (" + runs.size() + "계좌)");
             return;
         }
-        RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(setup.plan().market(), days);
-        for (MarketEvent e : data.events()) {
-            if (!inPlan(e)) {
-                throw new IllegalStateException("입력 기록에 운용 범위 밖 이벤트가 있습니다: seq " + e.sequence());
+        long offset = 0;
+        for (Path day : days) {
+            beforeEachDay.run();
+            RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(setup.plan().market(), List.of(day));
+            for (MarketEvent e : data.events()) {
+                if (!inPlan(e)) {
+                    throw new IllegalStateException("입력 기록에 운용 범위 밖 이벤트가 있습니다: " + day + " seq " + e.sequence());
+                }
+                step(EventSequences.withSequence(e, offset + e.sequence()));
             }
-            step(e);
+            offset += data.events().size();
         }
         restored = position;
-        log.accept("입력 기록으로 계좌를 되살렸습니다: 이벤트 " + restored + ", 기록일 " + data.days().size());
+        log.accept("입력 기록으로 계좌를 되살렸습니다: 이벤트 " + restored + ", 기록일 " + days.size());
     }
 
     /** 입력 기록 날짜 폴더(날짜 오름차순). 운용 기간 안만 본다. */

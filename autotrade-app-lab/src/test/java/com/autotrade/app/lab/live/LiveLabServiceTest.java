@@ -40,6 +40,8 @@ class LiveLabServiceTest {
     Path config;
 
     Path stopRequest;
+    /** 디스크 여유(바이트). -1이면 service()에 준 값. */
+    final java.util.concurrent.atomic.AtomicLong free = new java.util.concurrent.atomic.AtomicLong(-1);
     LiveLabService service;
     FeedServer gateway;
 
@@ -62,8 +64,12 @@ class LiveLabServiceTest {
                 "  - \"005930 KOSPI\"",
                 ""), StandardCharsets.UTF_8);
         stopRequest = config.resolve(LiveLabService.STOP_REQUEST);
-        service = new LiveLabService(experiments, REPO, config.resolve("live-sessions"),
-                FeedSocket.path(config), stopRequest, new CodeVersion("abc", false), Clock.systemUTC());
+        service = service(Long.MAX_VALUE);
+    }
+
+    private LiveLabService service(long freeBytes) {
+        return new LiveLabService(experiments, REPO, config.resolve("live-sessions"), FeedSocket.path(config), stopRequest,
+                new CodeVersion("abc", false), Clock.systemUTC(), dir -> free.get() == -1 ? freeBytes : free.get(), 20);
     }
 
     @AfterEach
@@ -91,7 +97,7 @@ class LiveLabServiceTest {
     @Test
     void receivesGatewayFeedAndWritesTheLiveReportOnFinish() throws Exception {
         gateway = FeedServer.open(FeedSocket.path(config));
-        service.start(ID);
+        assertThat(service.start(ID).restoring()).isTrue();
         assertThatThrownBy(() -> service.start(ID)).isInstanceOf(IllegalStateException.class);
         await(() -> gateway.subscriberCount() == 1 && service.status().feedState() == ConnectionState.CONNECTED);
 
@@ -115,6 +121,7 @@ class LiveLabServiceTest {
     @Test
     void runsWithoutGatewayAndStopsOnWatchdogStopRequest() throws Exception {
         service.start(ID);
+        await(() -> service.status().session().isPresent());
         assertThat(service.status().feedState()).isNotEqualTo(ConnectionState.CONNECTED);
         Files.createDirectories(stopRequest.getParent());
         Files.writeString(stopRequest, "");
@@ -125,7 +132,50 @@ class LiveLabServiceTest {
 
         Files.delete(stopRequest);
         service.start(ID); // 요청을 거두면 다시 시작한다(기록으로 되살림)
-        assertThat(service.status().session()).isPresent();
+        await(() -> service.status().session().isPresent());
+        assertThat(service.status().experimentId()).isEqualTo(ID);
+    }
+
+    @Test
+    void lowDiskRefusesStartAndStopsARunningSession() throws Exception {
+        long gb = 1024L * 1024L * 1024L;
+        free.set(19 * gb);
+        assertThatThrownBy(() -> service.start(ID)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("디스크 여유");
+
+        free.set(100 * gb);
+        service.start(ID);
+        await(() -> service.status().session().isPresent());
+        free.set(5 * gb); // 운용 중 디스크가 줄면 1초 안에 멈춘다
+        await(() -> service.status().session().isEmpty() && service.status().experimentId().isEmpty());
+        assertThat(service.status().stopReason()).contains("디스크 여유");
+    }
+
+    @Test
+    void restoreCanBeStoppedAndResumesFromTheJournal() throws Exception {
+        // 하루치 기록을 남긴다
+        gateway = FeedServer.open(FeedSocket.path(config));
+        service.start(ID);
+        await(() -> gateway.subscriberCount() == 1 && service.status().feedState() == ConnectionState.CONNECTED);
+        Instant t = LocalDate.of(2026, 10, 14).atTime(9, 30).atZone(ZoneId.of("Asia/Seoul")).toInstant();
+        gateway.publish("KIWOOM-WS", new TradeTick(SAMSUNG, 1, t, t, new BigDecimal("60000"), 5));
+        await(() -> events(service) == 1);
+        service.stop("시험");
+
+        // 되살리는 중에 멈추면 기록일 사이에서 그만두고 잠금을 푼다. 정리가 끝나면 다시 시작할 수 있다
+        service.start(ID);
+        service.stop("되살리는 중 멈춤 시험");
+        assertThat(service.status().experimentId()).isEmpty();
+        await(() -> {
+            try {
+                service.start(ID);
+                return true;
+            } catch (IllegalStateException e) {
+                return false;
+            }
+        });
+        await(() -> service.status().session().isPresent());
+        assertThat(service.status().session().orElseThrow().restored()).isEqualTo(1);
     }
 
     @Test
@@ -133,5 +183,6 @@ class LiveLabServiceTest {
         assertThatThrownBy(() -> service.start("../x")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.start("EXP-NONE")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(service::finish).isInstanceOf(IllegalStateException.class);
+        assertThat(service.status().experimentId()).isEmpty();
     }
 }

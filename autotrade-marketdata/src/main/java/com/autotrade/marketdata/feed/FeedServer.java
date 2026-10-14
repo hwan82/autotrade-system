@@ -65,6 +65,10 @@ public final class FeedServer implements AutoCloseable {
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(daemon("feed-timer"));
     private final Thread acceptor;
     private final AtomicLong dropped = new AtomicLong();
+    private static final long DROP_LOG_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(1);
+    /** 타이머 스레드에서만 쓴다. */
+    private long droppedLogged;
+    private long droppedLoggedAt = System.nanoTime() - DROP_LOG_INTERVAL_NANOS;
     private volatile boolean closed;
 
     private FeedServer(Path socket, int queueCapacity, Duration stallLimit) throws IOException {
@@ -136,6 +140,7 @@ public final class FeedServer implements AutoCloseable {
     }
 
     private void acceptLoop() {
+        AcceptBackoff backoff = new AcceptBackoff();
         while (!closed) {
             SocketChannel ch;
             try {
@@ -143,11 +148,23 @@ public final class FeedServer implements AutoCloseable {
             } catch (ClosedChannelException e) {
                 return;
             } catch (IOException e) {
-                if (!closed) {
-                    LOG.log(Level.WARNING, "시세 전달 연결 받기 실패: {0}", e.getClass().getName());
+                if (closed) {
+                    return;
+                }
+                // 파일 핸들 고갈처럼 실패가 이어져도 CPU와 로그를 쏟지 않게 쉬었다가 다시 받는다(risk-ops PR #87 R3)
+                long failures = backoff.failed();
+                if (AcceptBackoff.shouldLog(failures)) {
+                    LOG.log(Level.WARNING, "시세 전달 연결 받기 실패({0}번째): {1}", failures, e.getClass().getName());
+                }
+                try {
+                    Thread.sleep(backoff.delayMillis());
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
                 }
                 continue;
             }
+            backoff.succeeded();
             if (subscribers.size() >= MAX_SUBSCRIBERS) {
                 LOG.log(Level.WARNING, "시세 전달 받는 쪽이 상한({0})이라 새 연결을 닫습니다", MAX_SUBSCRIBERS);
                 closeQuietly(ch);
@@ -161,6 +178,14 @@ public final class FeedServer implements AutoCloseable {
 
     private void checkStalls() {
         long now = System.nanoTime();
+        long droppedNow = dropped.get();
+        if (droppedNow != droppedLogged && now - droppedLoggedAt >= DROP_LOG_INTERVAL_NANOS) {
+            // 게이트웨이 로그에 버린 수를 남긴다(1분에 한 번까지, risk-ops PR #87 N3). 받는 쪽은 공백으로 안다
+            LOG.log(Level.WARNING, "시세 전달 받는 쪽 큐가 차서 지금까지 {0}건을 버렸습니다(직전 기록 뒤 {1}건). 녹화는 그대로입니다",
+                    droppedNow, droppedNow - droppedLogged);
+            droppedLogged = droppedNow;
+            droppedLoggedAt = now;
+        }
         for (Subscriber s : subscribers) {
             long since = s.writingSince;
             if (s.subscribed && since != 0 && now - since > stallNanos) {

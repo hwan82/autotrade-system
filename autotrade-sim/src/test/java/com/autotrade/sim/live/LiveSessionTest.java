@@ -228,6 +228,35 @@ class LiveSessionTest {
     }
 
     @Test
+    void blacklistedSymbolIsNeverBoughtInTheLiveSession() throws Exception {
+        String yaml = Files.readString(experimentDir.resolve("experiment.yaml"), StandardCharsets.UTF_8)
+                + "blacklist:\n  - \"000660\"\n";
+        LivePlan black = LivePlan.parse(yaml, "experiment.yaml");
+        List<MarketEvent> day = twoDays().stream()
+                .filter(e -> e.receivedAt().atZone(SEOUL).toLocalDate().equals(LocalDate.of(2026, 10, 14))).toList();
+
+        SimulationReport withBlacklist = runDay(black, tmp.resolve("black"), day);
+        SimulationReport without = runDay(plan, tmp.resolve("plain"), day);
+
+        // 같은 시세에서 블랙리스트가 없으면 매수 후보(buy-and-hold, A01)가 하이닉스를 사므로 대조가 된다
+        assertThat(without.runs().get(0).fills()).anySatisfy(f -> assertThat(f.fill().symbol()).isEqualTo(HYNIX));
+        assertThat(withBlacklist.runs()).allSatisfy(r -> assertThat(r.fills())
+                .noneSatisfy(f -> assertThat(f.fill().symbol()).isEqualTo(HYNIX)));
+        assertThat(withBlacklist.runs()).flatExtracting(r -> r.rejections()).isNotEmpty()
+                .allSatisfy(x -> assertThat(x.symbol()).isEqualTo(HYNIX));
+    }
+
+    private SimulationReport runDay(LivePlan p, Path root, List<MarketEvent> events) {
+        try (LiveSession s = LiveSession.open(p, REPO, root, clock, m -> { })) {
+            for (MarketEvent e : events) {
+                clock.now = e.receivedAt();
+                s.accept("KIWOOM-WS", e);
+            }
+            return s.finish(new CodeVersion("c", false));
+        }
+    }
+
+    @Test
     void replayCheckDetectsADifferentLiveReport() throws Exception {
         LiveSession s = open();
         for (MarketEvent e : twoDays().subList(0, 300)) {
