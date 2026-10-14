@@ -1,55 +1,30 @@
 package com.autotrade.sim.run;
 
 import com.autotrade.domain.MarketRules;
-import com.autotrade.domain.Money;
-import com.autotrade.domain.account.AccountId;
-import com.autotrade.domain.account.AccountSnapshot;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
-import com.autotrade.domain.order.IdempotencyKey;
-import com.autotrade.domain.order.OrderAck;
 import com.autotrade.domain.order.OrderIntent;
-import com.autotrade.domain.order.OrderRequest;
-import com.autotrade.domain.order.OrderState;
-import com.autotrade.domain.time.ReplayClock;
 import com.autotrade.risk.RiskChain;
-import com.autotrade.risk.RiskDecision;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentRunner;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.RunResult;
-import com.autotrade.sim.RunStatus;
-import com.autotrade.sim.account.AppliedFill;
-import com.autotrade.sim.account.VirtualAccount;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.exchange.ExecutionSettings;
-import com.autotrade.sim.exchange.Fill;
-import com.autotrade.sim.exchange.OrderRejectedReason;
-import com.autotrade.sim.exchange.VirtualExchange;
-import com.autotrade.sim.metrics.EquityPoint;
-import com.autotrade.sim.metrics.MetricsCalculator;
-import com.autotrade.sim.metrics.RunMetrics;
-import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.selection.SelectionSchedule;
 import com.autotrade.sim.selection.SelectionSource;
-import com.autotrade.strategy.Strategy;
-import com.autotrade.strategy.StrategyContext;
 import com.autotrade.strategy.StrategyFactory;
-import com.autotrade.strategy.TradeSignal;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.Objects;
 import java.util.RandomAccess;
 import java.util.TreeSet;
@@ -373,29 +348,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         return lo;
     }
 
-    /**
-     * 예열 이벤트를 전략에만 준다. 전략에는 현금 0의 빈 계좌를 보여 줘 신호가 수량 0으로 사라지고(내부 진입 한도·예약 상태가
-     * 쌓이지 않는다), 나온 신호는 어떤 경우에도 버린다. 거래소·계좌·리스크 체인·자산 곡선은 건드리지 않는다.
-     */
-    private void feedWarmup(Strategy strategy, List<MarketEvent> warmup, AccountId accountId, Money seed) {
-        if (warmup.isEmpty()) {
-            return;
-        }
-        Money none = Money.zero(seed.currency());
-        for (MarketEvent e : warmup) {
-            AccountSnapshot empty = new AccountSnapshot(accountId, e.receivedAt(), none, new java.util.TreeMap<>());
-            strategy.onEvent(e, new WarmupContext(e.receivedAt(), empty));
-        }
-    }
-
     private record Slice(List<MarketEvent> warmup, List<MarketEvent> events) {
-    }
-
-    private record WarmupContext(Instant now, AccountSnapshot account) implements StrategyContext {
-        @Override
-        public boolean hasOpenOrder(Symbol symbol) {
-            return false;
-        }
     }
 
     /**
@@ -446,177 +399,21 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private RunReport runOne(
             ExperimentSpec spec, int index, List<MarketEvent> warmup, List<MarketEvent> events, BigDecimal benchmarkReturn,
             SelectionSchedule schedule, AtomicReference<ExperimentStoppedException> stopped) {
-        Combination combination = spec.combinations().get(index);
-        String runId = spec.id().value() + String.format("-A%02d", index + 1);
-        AccountId accountId = new AccountId(runId);
-        String profileHash = combination.profile().profileHash();
-        String selectionHash = combination.selectionHashOrNone();
-        String combinationHash = combination.combinationHash();
-        long runSeed = RunSeeds.derive(spec.randomSeed(), combination);
-        String seedScheme = RunSeeds.scheme(combination);
-        VirtualAccount account = new VirtualAccount(accountId, spec.seedCapital());
-        RunState state = new RunState();
+        RunStepper run = new RunStepper(spec, index, rules, cost, execution, strategies, risk, data.exchangeTimed(),
+                schedule);
         try {
             Instant start = events.isEmpty() ? spec.from().atStartOfDay(rules.zone()).toInstant()
                     : events.get(0).receivedAt();
-            ReplayClock clock = new ReplayClock(start, rules.zone());
-            VirtualExchange exchange = new VirtualExchange(accountId, rules, cost, execution, account, clock,
-                    data.exchangeTimed());
-            Strategy strategy = strategies.create(combination.profile(), runSeed);
-            SimOrderKeys keys = new SimOrderKeys();
-            feedWarmup(strategy, warmup, accountId, spec.seedCapital());
-            LocalDate day = null;
-            Instant dayLastTime = null;
+            run.begin(start, warmup);
             for (MarketEvent e : events) {
-                LocalDate d = rules.tradingDate(e.exchangeTime());
-                if (day != null && !d.equals(day)) {
-                    closeDay(day, dayLastTime, exchange, account, state);
-                    checkGate(stopped);
-                }
-                if (!d.equals(day) && combination.hasSelection()) {
-                    state.openSelectionDay(schedule.day(selectionHash, d));
-                }
-                day = d;
-                dayLastTime = e.exchangeTime();
-                clock.advanceToAtLeast(e.receivedAt());
-                exchange.onEvent(e);
-                state.lastSeq = e.sequence();
-                Instant now = clock.instant();
-                AccountSnapshot snapshot = account.snapshot(now);
-                List<TradeSignal> signals = strategy.onEvent(e, new Context(now, snapshot, exchange));
-                for (TradeSignal s : signals) {
-                    if (state.selectionDay != null && !s.intent().isProtective()
-                            && !state.selectionDay.allowsEntry(s.symbol())) {
-                        // 선정 밖 신규 진입은 주문을 만들지 않는다(멱등 키도 쓰지 않음). 건수만 그날 기록에 남긴다
-                        state.blockedToday++;
-                        continue;
-                    }
-                    submit(s, d, e, accountId, keys, exchange, account, clock, state);
-                }
+                run.onEvent(e, () -> checkGate(stopped));
             }
-            Set<String> endLots = new HashSet<>();
-            if (day != null) {
-                if (settleAtWindowEnd) {
-                    settleAtEnd(day, dayLastTime, keys, exchange, account, state, endLots);
-                }
-                closeDay(day, dayLastTime, exchange, account, state);
-            }
-            state.closeSelectionDay();
-            RunMetrics metrics = MetricsCalculator.compute(spec.seedCapital(), spec.from(), spec.to(), state.equity,
-                    account.ledger(), account.roundTrips(), benchmarkReturn);
-            RunResult summary = new RunResult(runId, accountId, profileHash, selectionHash, combinationHash, runSeed,
-                    seedScheme, RunStatus.COMPLETED, metrics.finalEquity(), "", metrics);
-            return new RunReport(summary, combination, account.ledger(), state.equity, account.roundTrips(),
-                    state.rejections, state.selectionDays, endLots);
+            return run.finish(benchmarkReturn, settleAtWindowEnd);
         } catch (ExperimentStoppedException e) {
             throw e; // Run 실패가 아니라 실험 전체 정지다(결과에 남기지 않음)
         } catch (RuntimeException e) {
             // 계좌 격리: 이 Run만 실패로 끝낸다. 다른 Run은 계속 돈다
-            state.closeSelectionDay();
-            RunResult summary = new RunResult(runId, accountId, profileHash, selectionHash, combinationHash, runSeed,
-                    seedScheme, RunStatus.FAILED, null, failureReason(e), null);
-            return new RunReport(summary, combination, account.ledger(), state.equity, account.roundTrips(),
-                    state.rejections, state.selectionDays);
-        }
-    }
-
-    private void submit(
-            TradeSignal s, LocalDate day, MarketEvent e, AccountId accountId, SimOrderKeys keys,
-            VirtualExchange exchange, VirtualAccount account, ReplayClock clock, RunState state) {
-        IdempotencyKey key = keys.next(day, s.symbol(), s.side());
-        OrderRequest request = new OrderRequest(key, accountId, s.symbol(), s.side(), s.intent(), s.type(),
-                s.limitPrice(), s.quantity());
-        RiskDecision decision = risk.evaluate(request, account.snapshot(clock.instant()));
-        if (decision instanceof RiskDecision.Rejected r) {
-            state.rejections.add(new OrderRejection(e.sequence(), key, s.symbol(), "RISK", r.ruleId(), r.reason()));
-            return;
-        }
-        OrderAck ack = exchange.submit(request);
-        if (ack.state() == OrderState.REJECTED) {
-            state.rejections.add(new OrderRejection(e.sequence(), key, s.symbol(), "EXCHANGE", ack.message(), ""));
-        }
-        state.submitted.add(request);
-    }
-
-    private void closeDay(
-            LocalDate day, Instant lastTime, VirtualExchange exchange, VirtualAccount account, RunState state) {
-        exchange.endOfDay();
-        for (OrderRequest r : state.submitted) {
-            OrderRejectedReason reason = exchange.reasonOf(r.key());
-            if (reason == OrderRejectedReason.DAY_END || reason == OrderRejectedReason.CASH_SHORT_AT_FILL) {
-                state.rejections.add(new OrderRejection(state.lastSeq, r.key(), r.symbol(), "EXCHANGE", reason.name(), ""));
-            }
-        }
-        state.submitted.clear();
-        Money equity = account.equity(exchange::markPrice);
-        state.equity.add(new EquityPoint(day, lastTime, equity, account.cash()));
-        account.verifyInvariants();
-    }
-
-    /** 구간 끝 정리({@code settleAtWindowEnd}): 남은 포지션을 마지막 체결가 − 슬리피지(호가 단위 내림)에 팔고 비용을 뺀다. */
-    private void settleAtEnd(
-            LocalDate day, Instant lastTime, SimOrderKeys keys, VirtualExchange exchange, VirtualAccount account,
-            RunState state, Set<String> endLots) {
-        AccountSnapshot snap = account.snapshot(lastTime);
-        for (Map.Entry<Symbol, Long> q : account.quantities().entrySet()) {
-            Symbol s = q.getKey();
-            long qty = q.getValue();
-            BigDecimal mark = exchange.markPrice(s);
-            if (mark == null) {
-                mark = snap.positions().get(s).averagePrice().amount();
-            }
-            BigDecimal price = rules.roundToTick(s, mark.multiply(BigDecimal.ONE.subtract(cost.slippageRate())),
-                    java.math.RoundingMode.FLOOR);
-            if (price.signum() <= 0) {
-                price = mark;
-            }
-            Money slippage = new Money(mark.subtract(price).multiply(BigDecimal.valueOf(qty)), account.currency())
-                    .rounded(4, java.math.RoundingMode.HALF_EVEN);
-            Fill fill = new Fill(keys.next(day, s, com.autotrade.domain.order.Side.SELL), 1, s,
-                    com.autotrade.domain.order.Side.SELL, OrderIntent.EXIT, qty, price,
-                    cost.fees(com.autotrade.domain.order.Side.SELL, s, day, price, qty), slippage, state.lastSeq,
-                    state.lastSeq + 1, lastTime, lastTime, day);
-            endLots.add(account.apply(fill).lotId());
-        }
-    }
-
-    private static String failureReason(RuntimeException e) {
-        String text = e.getClass().getSimpleName() + ": " + Objects.toString(e.getMessage(), "");
-        return text.length() > 500 ? text.substring(0, 500) : text;
-    }
-
-    /** Run 하나의 기록용 가변 상태. */
-    private static final class RunState {
-        private final List<EquityPoint> equity = new ArrayList<>();
-        private final List<OrderRejection> rejections = new ArrayList<>();
-        /** 이번 거래일에 접수한 주문(마감 시 취소 사유 기록용). 접수 순서. */
-        private final List<OrderRequest> submitted = new ArrayList<>();
-        /** 마지막으로 처리한 이벤트 순번. 마감 취소 기록의 시점이다. */
-        private long lastSeq;
-        /** 선정 있는 조합의 날짜별 기록. 거래일 오름차순. */
-        private final List<RunSelectionDay> selectionDays = new ArrayList<>();
-        /** 오늘 쓰는 선정 판정. 선정 없는 조합이면 null(신규 진입을 거르지 않음). */
-        private SelectionDay selectionDay;
-        private int blockedToday;
-
-        void openSelectionDay(SelectionDay today) {
-            closeSelectionDay();
-            selectionDay = today;
-            blockedToday = 0;
-        }
-
-        void closeSelectionDay() {
-            if (selectionDay != null) {
-                selectionDays.add(new RunSelectionDay(selectionDay, blockedToday));
-                selectionDay = null;
-            }
-        }
-    }
-
-    private record Context(Instant now, AccountSnapshot account, VirtualExchange exchange) implements StrategyContext {
-        @Override
-        public boolean hasOpenOrder(Symbol symbol) {
-            return exchange.hasOpenOrder(symbol);
+            return run.failed(e);
         }
     }
 }

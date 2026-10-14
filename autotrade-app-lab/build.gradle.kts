@@ -25,8 +25,23 @@ dependencies {
 }
 
 // bootRun·bootTestRun은 저장소 루트에서 돌려 strategies/ 기본 경로가 저장소 폴더를 가리키게 한다
+// 실시간 모의 세션 보고서(live-detail.txt)에 남길 커밋과 dirty 여부(D-076). 리플레이 확인이 code 줄을 따로 적는다
+val labRepoRoot = rootProject.projectDir
+val labGitCommit = providers.exec {
+    commandLine("git", "rev-parse", "HEAD")
+    workingDir = labRepoRoot
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
+val labGitDirty = providers.exec {
+    commandLine("git", "status", "--porcelain", "--", ".", ":!experiments")
+    workingDir = labRepoRoot
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.isNotBlank().toString() }
 tasks.named<JavaExec>("bootRun") {
     workingDir = rootProject.projectDir
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-Dautotrade.code-commit=${labGitCommit.get()}", "-Dautotrade.code-dirty=${labGitDirty.get()}")
+    })
 }
 tasks.named<JavaExec>("bootTestRun") {
     workingDir = rootProject.projectDir

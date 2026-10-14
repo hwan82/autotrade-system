@@ -162,9 +162,15 @@ final class DayWriter implements AutoCloseable {
         return date;
     }
 
-    void write(String sourceId, MarketEvent event) throws IOException {
+    /**
+     * 이벤트 한 줄을 쓴다. 이어 쓰기 첫 이벤트면 그 앞에 재기동 공백 줄을 먼저 쓴다.
+     *
+     * @return 이 호출로 이벤트 앞에 쓴 재기동 공백(쓴 순서, sequence는 그 줄의 녹화 순번). 대부분 빈 목록이다
+     */
+    List<DataGap> write(String sourceId, MarketEvent event) throws IOException {
+        List<DataGap> gaps = List.of();
         if (!restartSymbols.isEmpty()) {
-            writeRestartGaps(event.receivedAt());
+            gaps = writeRestartGaps(event.receivedAt());
         }
         seq++;
         out.write(codec.encode(seq, sourceId, event));
@@ -177,20 +183,30 @@ final class DayWriter implements AutoCloseable {
             }
         }
         sources.putIfAbsent(sourceId, RECORDER_SOURCE.equals(sourceId) ? RECORDER_SCOPE : "UNKNOWN");
+        return gaps;
     }
 
-    private void writeRestartGaps(Instant resumedAt) throws IOException {
+    /** 이 날 파일의 마지막 녹화 순번. */
+    long lastSeq() {
+        return seq;
+    }
+
+    private List<DataGap> writeRestartGaps(Instant resumedAt) throws IOException {
         Instant start = restartGapStart == null || restartGapStart.isAfter(resumedAt) ? resumedAt : restartGapStart;
+        List<DataGap> written = new ArrayList<>();
         for (Symbol s : restartSymbols) {
             seq++;
-            out.write(codec.encode(seq, RECORDER_SOURCE, new DataGap(s, 0, resumedAt, resumedAt, start, resumedAt,
-                    DataGap.GapReason.RECORDER_RESTART)));
+            // 녹화 줄의 srcSeq는 0이다(녹화기가 만든 줄). 돌려주는 사본만 sequence를 녹화 순번으로 둔다
+            DataGap gap = new DataGap(s, 0, resumedAt, resumedAt, start, resumedAt, DataGap.GapReason.RECORDER_RESTART);
+            out.write(codec.encode(seq, RECORDER_SOURCE, gap));
             out.write('\n');
             eventCount++;
             gapCount++;
+            written.add((DataGap) EventSequences.withSequence(gap, seq));
         }
         sources.put(RECORDER_SOURCE, RECORDER_SCOPE);
         restartSymbols = new TreeSet<>();
+        return written;
     }
 
     void flush() throws IOException {

@@ -135,3 +135,27 @@ val runWalkForwardStudy by tasks.registering(JavaExec::class) {
         }
     })
 }
+
+// 실시간 모의 리플레이 확인(D-076, ADR-010 2.5): ./gradlew :autotrade-app-experiment:runLiveReplayCheck -Pexperiment=<실험ID>
+//     [-PsessionsDir=폴더] [-PallowDuringSession] [-Pheap=4g]
+// 실험실에서 끝낸 실시간 모의 세션의 입력 기록(<설정 폴더>/live-sessions/<실험ID>/journal)을 리플레이 실행기로 다시 돌려, 세션이 남긴
+// experiments/<실험ID>/live-detail.txt와 바이트로 같은지 보고 inputs.yaml·results.md·detail.txt를 쓴다. 다르면 종료 코드 2(실시간 경로 결함).
+val runLiveReplayCheck by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "실시간 모의 세션의 입력 기록을 리플레이로 다시 돌려 실시간 결과와 같은지 확인한다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "4g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val sessionsDir = providers.gradleProperty("sessionsDir")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            add("live-check")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }
+        }
+    })
+}

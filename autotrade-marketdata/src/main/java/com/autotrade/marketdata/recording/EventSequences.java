@@ -7,11 +7,11 @@ import com.autotrade.domain.market.OrderBookSnapshot;
 import com.autotrade.domain.market.TradeTick;
 
 /** 이벤트의 순번만 바꾼 사본. 녹화 순번과 소스 순번을 오갈 때 쓴다. */
-final class EventSequences {
+public final class EventSequences {
 
     private EventSequences() {}
 
-    static MarketEvent withSequence(MarketEvent e, long seq) {
+    public static MarketEvent withSequence(MarketEvent e, long seq) {
         return switch (e) {
             case TradeTick t -> new TradeTick(t.symbol(), seq, t.exchangeTime(), t.receivedAt(), t.price(), t.quantity());
             case OrderBookSnapshot b -> new OrderBookSnapshot(b.symbol(), seq, b.exchangeTime(), b.receivedAt(), b.asks(), b.bids());

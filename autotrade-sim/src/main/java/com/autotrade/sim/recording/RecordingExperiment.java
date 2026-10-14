@@ -187,7 +187,7 @@ public final class RecordingExperiment {
         return out;
     }
 
-    static String inputs(RecordingPlan plan, RecordedMarketDataSet data, TreeSet<Symbol> symbols, CostModel cost,
+    public static String inputs(RecordingPlan plan, RecordedMarketDataSet data, TreeSet<Symbol> symbols, CostModel cost,
             ExecutionSettings execution, BlacklistSnapshot blacklist, SimulationReport report, String determinism,
             String detail) {
         StringBuilder sb = new StringBuilder();
@@ -229,7 +229,7 @@ public final class RecordingExperiment {
         return sb.toString();
     }
 
-    static String results(RecordingPlan plan, RecordedMarketDataSet data, CostModel cost, ExecutionSettings execution,
+    public static String results(RecordingPlan plan, RecordedMarketDataSet data, CostModel cost, ExecutionSettings execution,
             BlacklistSnapshot blacklist, SimulationReport report, String determinism) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 결과\n\n");
@@ -273,7 +273,7 @@ public final class RecordingExperiment {
         return sb.toString();
     }
 
-    static StrategyProfile loadStrategy(Path root, RecordingPlan.ProfileRef ref) {
+    public static StrategyProfile loadStrategy(Path root, RecordingPlan.ProfileRef ref) {
         Path file = root.resolve("strategies").resolve(ref.id()).resolve("v" + ref.version() + ".yaml");
         String text;
         try {
@@ -296,7 +296,7 @@ public final class RecordingExperiment {
         return v == null ? "-" : v.setScale(2, RoundingMode.HALF_EVEN).toPlainString();
     }
 
-    static String sha256(String text) {
+    public static String sha256(String text) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(text.getBytes(StandardCharsets.UTF_8)));

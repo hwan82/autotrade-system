@@ -3,12 +3,16 @@ package com.autotrade.app.lab;
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
 import com.autotrade.app.lab.experiment.ExperimentFolders;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
+import com.autotrade.app.lab.live.LiveLabService;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
+import com.autotrade.marketdata.feed.FeedSocket;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
+import com.autotrade.sim.live.LiveCheckMain;
+import com.autotrade.sim.run.CodeVersion;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Clock;
@@ -69,5 +73,22 @@ public class LabWebConfiguration {
         SelectionProfileStore store = new SelectionProfileStore(Path.of(dir), clock);
         log.info("선정 프로필 폴더: {}", store.root());
         return store;
+    }
+
+    /**
+     * 실시간 모의 운용(ADR-010, D-076). 게이트웨이 시세 전달 소켓({@code <설정 폴더>/run/market-feed.sock})을 받고, 입력 기록은
+     * 설정 폴더 아래 {@code live-sessions}(저장소 밖)에 쓴다. 저장소 루트는 전략 프로필 폴더의 부모다.
+     */
+    @Bean(destroyMethod = "close")
+    LiveLabService liveLabService(RuntimeConfigStore store,
+            @Value("${autotrade.lab.experiments-dir:experiments}") String experimentsDir,
+            @Value("${autotrade.lab.strategies-dir:strategies}") String strategiesDir,
+            @Value("${autotrade.code-commit:unknown}") String commit,
+            @Value("${autotrade.code-dirty:true}") boolean dirty, Clock clock) {
+        Path configDir = store.paths().runtimeFile().toAbsolutePath().getParent();
+        Path repoRoot = Path.of(strategiesDir).toAbsolutePath().normalize().getParent();
+        return new LiveLabService(Path.of(experimentsDir), repoRoot, configDir.resolve(LiveCheckMain.SESSIONS_DIR),
+                FeedSocket.path(configDir), configDir.resolve(LiveLabService.STOP_REQUEST), new CodeVersion(commit, dirty),
+                clock);
     }
 }
