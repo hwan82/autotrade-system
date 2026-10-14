@@ -311,3 +311,76 @@
 
 ### 판정
 수정 필요 (A2·A14, F6: `Class[].class`로 이름 문자열 클래스 찾기가 규칙을 통과해 독립 QA F1이 일부만 해소됨. 권고 R5)
+
+## 재검토 2026-10-14 (헤드 4f44ccc)
+- 대상: PR #108 브랜치 `claude/project-thread-l44wj7`, 헤드 4f44ccc. `git diff origin/main...HEAD` 전체(22파일, +2,211 −3)를 다시 봤다. 새 커밋은 4f44ccc 하나다(architect AR-8·AR-9, risk-ops F6·R5 반영).
+  - 운영 코드 변경은 여전히 0줄이다. 바뀐 것은 다음과 같다.
+    - `GetClassUses.java` 새 파일(바이트코드 명령 순서로 `getClass()` 결과 사용처 검사)
+    - `RealPathReflectionTest.java` `classAsData`의 클래스 객체 필터를 원소 타입 기준(`getBaseComponentType`)으로 바꾸고 `GetClassUses`를 붙임, 단언 3개 추가
+    - 고정 예제 `NameToClassBinding#byNames`·`#viaGetClass`·`#classOf`
+    - D-086 결정 1번·위험과 한계, ADR-002 9.5 6항·남은 한계, `qa-out-status.md` 한 줄
+  - 커밋 메시지와 D-086의 주장은 확인할 주장으로만 봤다.
+  - 4f44ccc는 이 파일(risk-ops.md)을 바꾸지 않았다.
+- 점검표: A
+- 직접 실행한 것:
+  - 실행 장소: 별도 작업 트리 2개(검토용, 변조 실험용, 둘 다 4f44ccc)에서 하고 끝난 뒤 지웠다. 공유 작업 트리 소스는 손대지 않았다.
+  - `./gradlew build --no-daemon --rerun-tasks` → BUILD SUCCESSFUL, EXIT=0, 130개 작업 실행. 시험 결과 XML 합계 1,130건, 실패·오류·건너뜀 0.
+    - `:autotrade-risk:test` 55건
+    - `:autotrade-architecture-test:test` 39건(`RealPathReflectionTest` 7건 포함)
+    - `:autotrade-app-engine:test` 50건
+  - 변조 실험(커밋하지 않음, 지움). 실전 경로 범위인 `autotrade-control`에 탐침을 넣고 `:autotrade-architecture-test:test`를 돌렸다.
+    - Q0 `return Class.class;` → 잡힘("클래스 객체 Class.class를 참조"). 이 실험 배치에서 규칙이 `autotrade-control`을 보고 있음을 확인한 대조군이다.
+    - Q1 상위 타입 인자: `final class Names extends ArrayList<Class<?>> {}`, `Names n = M.readValue("[\"" + name + "\"]", Names.class); M.convertValue(fields, n.get(0))` → **통과(잡히지 않음)**
+    - Q2 게터를 설정자로 쓰기: `Bag`에 `List<Object> store` 필드와 `public List<Class<?>> getItems() { return (List) store; }`, `M.readValue("{\"items\":[\"" + name + "\"]}", Bag.class)` 뒤 `M.convertValue(fields, b.getItems().get(0))` → **통과(잡히지 않음)**
+  - Q1·Q2 실제 동작: 빌드된 `autotrade-control` 클래스를 Jackson 2.21.4(`jackson-databind-2.21.4.jar`)로 직접 돌렸다.
+    - 둘 다 `"com.autotrade.domain.account.AccountId"`라는 이름 문자열만으로 `AccountId` 객체(`KIS-1`, `KIS-2`)가 만들어졌다. 실전 경로 모듈 코드가 정적 의존 없이 이름으로 클래스를 얻고 객체를 만든다.
+    - `"com.autotrade.risk.guard.SecondConfirmation"`는 Q1에서 `IllegalArgumentException`(생성자 검증 `account`)으로 실패했다. 클래스 찾기 자체는 됐고, 필드 값과 `Instant` 처리만 남은 상태다.
+  - 수정안 검증(커밋하지 않음): `classAsData`에 두 검사를 더했다.
+    - 상위 클래스·인터페이스의 실제 타입 인자에 `Class`가 들어가면 위반
+    - 메서드 반환 타입이 매개변수화 타입이고(원래 타입이 `Class`인 경우 제외) 타입 인자에 `Class`가 들어가면 위반(기존 매개변수 `classArgument` 판정과 같은 모양)
+    - 결과: Q1(`Q1SuperArg$Names 상위 타입 인자에 Class`)과 Q2(`Q2GetterAsSetter$Bag.getItems() 반환 타입에 Class`)만 잡혔다. 탐침을 지운 뒤 `:autotrade-architecture-test:test`는 BUILD SUCCESSFUL이었다. 운영 코드 오탐은 없다.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F6 `Class[].class` | 해소 | `RealPathReflectionTest.java:405-408` 필터가 `getRawType().getBaseComponentType()`으로 원소 타입을 본다. `규칙은_리플렉션_우회를_실제로_잡아낸다`가 `NameToClassBinding.byNames(java.lang.String)가 클래스 객체 Class[].class를 참조`를 단언한다(`:749`). `Class[][].class`도 원소 타입이 같으므로 잡힌다 `[추론]` |
+| R5 `getClass()`로 얻은 `Class` 타입 객체 | 해소 | `GetClassUses.java:77-94`가 이름·서술자 `getClass()Ljava/lang/Class;` 호출(소유 타입 무관, `invokespecial` 포함) 바로 다음 명령이 `Class.getName()`·`getSimpleName()`이 아니면 위반으로 적는다. 다른 모든 명령 방문자가 대기 상태를 끊고(`:96-110`), `invokedynamic` 인자에 `getClass` 핸들이 있으면 메서드 참조로 잡는다. 람다 본문은 같은 클래스 파일의 합성 메서드라 함께 읽힌다. 단언은 `:750-751`(`viaGetClass`·`classOf`)과 허용 예제 `:753`(`ReflectionFreeEngineCode` 위반 0건)이다. 운영 코드 전체가 이 규칙을 통과했으므로(빌드) 오탐도 없다 |
+| A2(직전) | **미해소** | F6 경로는 닫혔지만 같은 결과(이름 문자열 → 클래스 → 객체)를 내는 다른 바인딩 대상 두 가지가 열려 있다(아래 F7) |
+| A14(직전) | **미해소** | F6 문구는 맞춰졌지만 아래 A14 그대로 문서가 규칙보다 넓게 보장한다 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 0줄. `RealTradingGuard` 기본 OFF·재기동 OFF가 그대로다. `:autotrade-risk:test` 55건 통과 |
+| A2 | **실패** | 기존 `ArchitectureTest` 출구·Guard 규칙 변경은 없다(diff 0줄). 새 규칙이 막겠다고 한 경로가 아직 열려 있다. 실전 경로 모듈 코드가 상위 타입 인자(`extends ArrayList<Class<?>>`, Q1)나 게터 반환 타입(`List<Class<?>> getItems()`, Q2)으로 Jackson에 `Class` 값을 바인딩시켜, 이름 문자열에서 클래스를 얻고 정적 의존 없이 객체를 만든다. 실제 실행으로 확인했다(F7). 2차 확인 위조는 지금 생성자 검증과 `Instant` 처리만 막고 있다 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정과 엔진 `processIsolation`이 그대로다. 빌드에서 통과했다 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 파일(`GetClassUses`)과 예제 추가분에 키·계좌번호·토큰 없음 |
+| A11 | 통과 | 보호 시험 삭제·약화 없음. 단언 3개와 허용 예제 단언 1개가 늘었다. 새 규칙(`GetClassUses`)에는 실패하는 경우(`viaGetClass`·`classOf`)와 허용 경우(`ReflectionFreeEngineCode`)가 함께 있다. 다만 F7의 두 경우를 단언하는 예제는 없다 |
+| A12 | 통과 | 장애 대응표 17종, O1~O8, 장애 테스트 8종의 전제를 바꾸는 동작 변경이 없다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | **실패** | 문서가 보장한다고 적은 것과 규칙의 실제 동작이 다르다.<br>- ADR-002 9.5 6항(`ADR-002-real-trading-guard.md:239`): "`Class` 속성을 가진 바인딩 대상 … 금지". Q1의 원소 타입, Q2의 게터 속성은 Jackson이 보는 `Class` 속성인데 규칙을 통과한다<br>- D-086 위험과 한계(`D-086-real-path-reflection-ban.md:47`): "`Instant` … 사실에 기대지 않는다(위 1번이 `Class` 값 바인딩을 막는다)". Q1·Q2에서 `Class` 값 바인딩이 실제로 된다<br>- D-086 결정 1번(`:23`)이 나열한 대상(필드·생성자 매개변수·매개변수 제네릭 인자·설정자·Jackson 주석 메서드)에는 상위 타입 인자와 게터 반환 타입이 없다. 나열은 사실이지만, 그 나열로 `Class` 값 바인딩이 닫힌다는 결론(:47)이 틀렸다 |
+
+### 점검표 밖 발견
+- **F7 상위 타입 인자와 게터 반환 타입으로 Jackson `Class` 역직렬화가 열려 있다**(차단, 독립 QA F1의 남은 부분)
+  - 위치: `RealPathReflectionTest.java:403-431` `classAsData`. 필드(`:409-411`), 코드 단위 매개변수(`:413-422`), 클래스 객체(`:405-408`), `getClass()`(`:429`)만 본다. 상위 타입의 타입 인자와 메서드 반환 타입은 보지 않는다. `outsideAllowlist`·`ClassFileTypes`는 `java.lang.Class`를 허용 타입으로 보므로 거기서도 걸리지 않는다.
+  - Q1: Jackson은 `Names.class`의 상위 타입 `ArrayList<Class<?>>`에서 원소 타입 `Class`를 풀어 이름 문자열마다 클래스를 만든다. `Names`에는 `Class` 필드·매개변수·리터럴이 없다. 같은 모양으로 `extends HashMap<String, Class<?>>`, 제네릭 실전 경로 클래스 `Holder<T>`의 `Holder<Class<?>>` 하위 클래스도 열려 있다 `[추론]`.
+  - Q2: Jackson 기본 설정 `MapperFeature.USE_GETTERS_AS_SETTERS`(기본 켜짐)는 설정자 없는 컬렉션·맵 속성을 게터로 받아 원소를 넣는다. 원소 타입은 게터 반환 타입 `List<Class<?>>`에서 정해진다. 필드는 `List<Object>`라 필드 검사에 걸리지 않는다.
+  - 결과: 위 직접 실행대로 이름 문자열만으로 `AccountId` 객체가 만들어졌다.
+  - 수정 제안:
+    1. `classAsData`에 상위 클래스·인터페이스의 실제 타입 인자 검사를 더한다(`guardTypeAsData`의 `:536-544`와 같은 방식, 판정만 `involvesClass`).
+    2. 메서드 반환 타입이 매개변수화 타입이고 원래 타입이 `Class`가 아니며 타입 인자에 `Class`가 들어가면 위반으로 한다(매개변수 `classArgument`와 같은 모양). 위 수정안 검증에서 두 검사 모두 운영 코드 오탐이 없었다.
+    3. `NameToClassBinding`에 두 예제(상위 타입 인자, 컬렉션 게터)를 더하고 `규칙은_리플렉션_우회를_실제로_잡아낸다`에서 단언한다.
+    4. D-086 결정 1번과 ADR-002 9.5 6항에 "상위 타입 인자, 반환 타입의 제네릭 인자"를 더한다. D-086:47의 "위 1번이 `Class` 값 바인딩을 막는다"는 고친 뒤에도 "알려진 바인딩 대상 모양을 막는다 `[추론]`" 정도로 낮춘다. Jackson이 타입을 푸는 곳은 위 둘 말고도 더 있을 수 있다(예: 타입 변수 경계, 위임 생성자) `[추론]`. 이번 검토에서는 확인하지 못했다.
+- 근본 원인(참고): 지금 방식은 "Jackson이 `Class` 타입을 알아낼 수 있는 자리"를 하나씩 나열해 막는다. 다섯 차례 재검토에서 같은 종류의 구멍이 계속 나왔다(F1·F6·R5·F7). 다음 수정에서 함께 검토할 대안 두 가지를 적는다. 어느 쪽을 택할지는 architect·작성자 판단이며, 이번 판정 조건은 아니다.
+  - 대안 1: 실전 경로 운영 코드 전체에서 `Class`가 시그니처(필드·매개변수·반환·상위 타입·타입 인자)에 나오는 곳을 기본 금지하고, `ControlCodec.parse`·`ProfileParams.choice` 같은 `Class<T>` 매개변수만 허용 목록에 둔다.
+  - 대안 2: 실전 경로가 쓰는 `ObjectMapper`를 한 곳에서 만들고, 그 매퍼에 `Class` 역직렬화기를 금지하는 모듈(역직렬화 시 `Class`·`Class[]` 타입을 만나면 예외)을 등록한다. 이 경우 정적 규칙은 "그 공장 밖에서 `ObjectMapper`·`JsonMapper`를 만들지 않는다"로 줄어든다. 실행 시 방어라 테스트로 고정해야 한다.
+- 이 PR은 보호 테스트를 강화하므로 실전 관련 PR이다. 지침 10장·11장에 따라 머지 전에 사용자 확인과 독립 QA 재검토를 거쳐야 한다.
+
+### 판정
+수정 필요 (A2·A14, F7: 상위 타입 인자 `extends ArrayList<Class<?>>`와 게터 반환 타입 `List<Class<?>> getItems()`로 이름 문자열 클래스 찾기가 규칙을 통과해 독립 QA F1이 아직 일부만 해소됨. F6·R5는 해소)
