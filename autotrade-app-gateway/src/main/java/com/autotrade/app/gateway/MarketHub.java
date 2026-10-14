@@ -12,6 +12,7 @@ import com.autotrade.marketdata.ConnectionState;
 import com.autotrade.marketdata.LiveMarketDataSource;
 import com.autotrade.marketdata.MarketDataSource;
 import com.autotrade.marketdata.Subscription;
+import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.recording.MarketEventRecorder;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -52,6 +53,8 @@ final class MarketHub implements AutoCloseable {
     private final List<BrokerPlugin> byPriority;
     private final WatchList watch;
     private final MarketEventRecorder recorder;
+    /** 실험실 실시간 전달(ADR-010). 없으면 null. 넣기만 하고 기다리지 않으며 예외를 던지지 않는다. */
+    private final FeedServer feed;
     private final Clock clock;
     private final Map<BrokerId, Subscription> subscriptions = new EnumMap<>(BrokerId.class);
     private final Map<Symbol, BrokerId> owner = new TreeMap<>();
@@ -62,11 +65,18 @@ final class MarketHub implements AutoCloseable {
 
     MarketHub(Market market, MarketDataMode mode, List<BrokerPlugin> byPriority, WatchList watch,
             MarketEventRecorder recorder, Clock clock) {
+        this(market, mode, byPriority, watch, recorder, null, clock);
+    }
+
+    /** @param feed 실험실 실시간 전달 서버. 녹화와 같은 이벤트를 넘긴다. 없으면 null */
+    MarketHub(Market market, MarketDataMode mode, List<BrokerPlugin> byPriority, WatchList watch,
+            MarketEventRecorder recorder, FeedServer feed, Clock clock) {
         this.market = Objects.requireNonNull(market, "market");
         this.mode = Objects.requireNonNull(mode, "mode");
         this.byPriority = List.copyOf(byPriority);
         this.watch = Objects.requireNonNull(watch, "watch").forMarket(market);
         this.recorder = Objects.requireNonNull(recorder, "recorder");
+        this.feed = feed;
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -203,7 +213,11 @@ final class MarketHub implements AutoCloseable {
     }
 
     private void recordGap(Symbol s, Instant start, Instant end, DataGap.GapReason reason) {
-        recorder.offer(SOURCE_ID, new DataGap(s, 0, end, end, start, end, reason));
+        DataGap gap = new DataGap(s, 0, end, end, start, end, reason);
+        recorder.offer(SOURCE_ID, gap);
+        if (feed != null) {
+            feed.publish(SOURCE_ID, gap);
+        }
     }
 
     private BrokerPlugin plugin(BrokerId id) {
@@ -212,7 +226,15 @@ final class MarketHub implements AutoCloseable {
 
     private Subscription subscribe(BrokerPlugin p, SortedSet<Symbol> symbols) {
         MarketDataSource src = p.marketData(market).orElseThrow();
-        return src.subscribe(symbols, recorder.listenerFor(src.sourceId()));
+        String id = src.sourceId();
+        if (feed == null) {
+            return src.subscribe(symbols, recorder.listenerFor(id));
+        }
+        // 녹화 먼저, 그다음 전달. 둘 다 큐에 넣기만 해 수신 스레드를 막지 않는다(ADR-010 2.1)
+        return src.subscribe(symbols, e -> {
+            recorder.offer(id, e);
+            feed.publish(id, e);
+        });
     }
 
     private static String summary(SourcePlan plan) {

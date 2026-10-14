@@ -1,7 +1,7 @@
 # ADR-005 로컬 웹 대시보드 1차: 프런트 방식, 웹 보안, REST 계약, 전략 프로필 저장
 
 - 날짜: 2026-10-08
-- 상태: 채택 (D-026 확정, PR #13 머지 2026-10-09로 계약이 운영 코드가 됨. 이후 PR #49·#51·#82가 5장 REST 계약을 넓힘(D-060·D-062·D-074). 이전 상태: 제안, ui-dev 작성, architect·risk-ops 교차 검토). Q-006 닫음
+- 상태: 채택 (D-026 확정, PR #13 머지 2026-10-09로 계약이 운영 코드가 됨. 이후 PR #49·#51·#82·#87이 5장 REST 계약을 넓힘(D-060·D-062·D-074·D-076). 이전 상태: 제안, ui-dev 작성, architect·risk-ops 교차 검토). Q-006 닫음
 - 요구사항: UI-01, UI-02, UI-03, UI-04, UI-07([기획서](../spec/autotrade-spec.md) 표), [D-020](../decisions/D-020-ui-web-dashboard.md), [D-026](../decisions/D-026-ui-frontend.md)
 - 범위: 실험 비교 대시보드, 전략 프로필 편집, 설정 화면(비밀값 마스킹). **실전 운영 화면(UI-05·06: 모드 전환, 실전 활성화 2차 확인, PANIC SELL, 블랙리스트, 잔고)은 이 ADR 밖이다.** 실전 경로라서 별도 PR과 risk-ops 검토, 사용자 머지로 다룬다(지침 10장).
 
@@ -110,6 +110,10 @@ parameters:
 | `POST /api/experiment-folders/preview` | 등록과 같은 검사를 하고 쓰지 않는다. 응답 `{id, yaml, command, written=false}` |
 | `GET /api/experiment-folders/snapshots?kind=` | 수집 스냅샷(`<설정 폴더>/snapshots/<kind>/<ID>/manifest.json`, `kind`는 `krx-daily`·`dart-financials`, ID 내림차순): `{root, items[{id, firstDate, lastDate, problem}]}`. 일봉 `lastDate`는 마지막 거래일, 재무는 마지막 수집 시각. 파일 해시는 실행 명령이 확인 |
 | `POST /api/experiment-folders/{id}/load` | 결과 묶음(`result-bundle.jsonl.gz`)을 `detail.txt`·`selection-days.tsv`와 대조한 뒤 실험 목록에 올린다(실험을 다시 돌리지 않음, D-062). 응답 `{id}`. 실험 ID 형식이 아니거나 묶음이 깨졌거나 대조가 다르면 400 `INVALID`(사유는 목록 `lastError`에도 남음), 폴더·묶음·`detail.txt`가 없으면 404 `NOT_FOUND`, 이미 올라가 있으면 409 `CONFLICT`, CSRF 토큰이 없으면 403 `CSRF` |
+| `GET /api/live/status` | 실시간 모의 세션(D-076, [ADR-010](ADR-010-live-feed-and-session.md)) 상태 `View`: `experimentId`(돌거나 되살리는 중인 세션, 없으면 빈 문자열), `restoring`(입력 기록으로 계좌를 되살리는 중, 아직 게이트웨이에 붙지 않음), `session`(되살리기가 끝난 세션의 상태, 없으면 null: 실험 ID, 기간, 받은 이벤트·되살린 이벤트·뺀 종목·기간 밖·공백 수, 마지막 수신 시각, 계좌별 현금·평가액·포지션·체결·거절, 계좌별 실패 사유), `feedState`(게이트웨이 전달 연결), `feedError`, `feedReconnects`, `inboxQueued`, `inboxDropped`, `stopReason`(감시 정지 요청·디스크 부족·기록 실패·`시작 실패: …` 등) |
+| `POST /api/live/sessions/{id}/start` | `experiments/<id>/experiment.yaml`(`input: "live"`)을 검사하고 되살리기를 시작한다. 응답은 위와 같은 `View`(`restoring=true`). 되살리기와 게이트웨이 연결은 뒤에서 하고, 실패하면 상태 `stopReason`에 남는다. 이미 도는(되살리는 중 포함) 세션이 있거나, 앞서 멈춘 세션을 정리하는 중이거나, 감시 정지 요청 중이거나, 입력 기록 디스크 여유가 하한 미만이면 409 `CONFLICT`. ID 형식·등록 파일 오류면 400 `INVALID`, CSRF 토큰이 없으면 403 |
+| `POST /api/live/stop` | 세션을 멈춘다(되살리는 중이면 그만둠, 기록을 닫음, 다시 시작 가능). 응답 `View`. 도는 세션이 없으면 아무것도 하지 않는다 |
+| `POST /api/live/finish` | 세션을 끝내고 `experiments/<id>/live-detail.txt`를 쓴다. 응답 `{experimentId, detailFile, accounts, failedAccounts}`. 도는 세션이 없거나 아직 되살리는 중이면 409 `CONFLICT` |
 | `GET /api/settings` | 그룹별 키: 현재 값, 내장 default 값, 비밀값 여부·설정 여부, 편집 가능 여부, 반영 시점 |
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
 
