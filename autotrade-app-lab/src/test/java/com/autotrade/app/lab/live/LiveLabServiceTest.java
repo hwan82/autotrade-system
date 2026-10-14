@@ -3,6 +3,7 @@ package com.autotrade.app.lab.live;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.ConnectionState;
@@ -202,5 +203,87 @@ class LiveLabServiceTest {
         assertThatThrownBy(() -> service.start("EXP-NONE")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(service::finish).isInstanceOf(IllegalStateException.class);
         assertThat(service.status().experimentId()).isEmpty();
+    }
+
+    @Test
+    void unreadableRegistrationIsARefusalNotAServerError() throws Exception {
+        // 읽기 실패(여기서는 UTF-8이 아닌 바이트)는 500(UncheckedIOException)이 아니라 사용자가 고칠 수 있는 거절로 알린다
+        Path dir = Files.createDirectories(experiments.resolve("EXP-TEST-BADBYTES"));
+        Files.write(dir.resolve("experiment.yaml"), new byte[] {(byte) 0xFF, (byte) 0xFE, 0x00});
+        assertThatThrownBy(() -> service.start("EXP-TEST-BADBYTES")).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("등록 파일을 읽을 수 없습니다")
+                .hasMessageContaining("experiments/EXP-TEST-BADBYTES/experiment.yaml");
+        assertThat(service.status().experimentId()).isEmpty();
+    }
+
+    @Test
+    void listsLiveRegistrationsOnly() throws Exception {
+        Path combo = Files.createDirectories(experiments.resolve("EXP-TEST-COMBO"));
+        Files.writeString(combo.resolve("experiment.yaml"), "id: \"EXP-TEST-COMBO\"\ncombinations:\n  - \"x\"\n",
+                StandardCharsets.UTF_8);
+        Path broken = Files.createDirectories(experiments.resolve("EXP-TEST-LIVE01"));
+        Files.writeString(broken.resolve("experiment.yaml"), "id: \"EXP-TEST-LIVE01\"\ninput: live\n",
+                StandardCharsets.UTF_8);
+        Files.createDirectories(experiments.resolve("EXP-TEST-EMPTY"));
+
+        assertThat(service.registrations()).extracting(LiveLabService.Registration::id)
+                .containsExactly(ID, "EXP-TEST-LIVE01");
+        LiveLabService.Registration ok = service.registrations().get(0);
+        assertThat(ok.error()).isNull();
+        assertThat(ok.profiles()).containsExactly("kr-bh-baseline@1");
+        assertThat(ok.period()).isEqualTo("2026-10-14 ~ 2026-10-14");
+        assertThat(ok.symbols()).isEqualTo(1);
+        assertThat(ok.hasJournal()).isFalse();
+        assertThat(ok.finished()).isFalse();
+        assertThat(service.registrations().get(1).error()).isNotBlank();
+
+        service.start(ID); // 세션을 열면 입력 기록 폴더가 생겨 "이어서 시작"이 된다
+        await(() -> service.status().session().isPresent());
+        assertThat(service.status().profiles()).containsExactly("kr-bh-baseline@1");
+        service.stop("시험");
+        assertThat(service.registrations().get(0).hasJournal()).isTrue();
+    }
+
+    @Test
+    void showsRecentGapsNewestFirst() throws Exception {
+        assertThat(service.gaps(10).total()).isZero(); // 세션이 없으면 빈 목록
+        assertThatThrownBy(() -> service.gaps(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.gaps(LiveLabService.MAX_GAPS_SHOWN + 1))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        gateway = FeedServer.open(FeedSocket.path(config));
+        service.start(ID);
+        await(() -> gateway.subscriberCount() == 1 && service.status().feedState() == ConnectionState.CONNECTED);
+        Instant t = LocalDate.of(2026, 10, 14).atTime(9, 30).atZone(ZoneId.of("Asia/Seoul")).toInstant();
+        gateway.publish("KIWOOM-WS", new TradeTick(SAMSUNG, 1, t, t, new BigDecimal("60000"), 5));
+        gateway.publish("KIWOOM-WS", new DataGap(SAMSUNG, 2, t.plusSeconds(60), t.plusSeconds(60), t,
+                t.plusSeconds(60), DataGap.GapReason.DISCONNECTED));
+        gateway.publish("KIWOOM-WS", new DataGap(SAMSUNG, 3, t.plusSeconds(120), t.plusSeconds(120),
+                t.plusSeconds(90), t.plusSeconds(120), DataGap.GapReason.SOURCE_SWITCH));
+        await(() -> service.gaps(10).total() == 2);
+
+        LiveLabService.Gaps gaps = service.gaps(1);
+        assertThat(gaps.total()).isEqualTo(2);
+        assertThat(gaps.items()).singleElement().satisfies(g -> {
+            assertThat(g.reason()).isEqualTo(DataGap.GapReason.SOURCE_SWITCH);
+            assertThat(g.symbol()).isEqualTo("005930");
+            assertThat(g.gapStart()).isEqualTo(t.plusSeconds(90));
+        });
+        assertThat(service.gaps(10).items()).extracting(LiveLabService.GapView::reason)
+                .containsExactly(DataGap.GapReason.SOURCE_SWITCH, DataGap.GapReason.DISCONNECTED);
+    }
+
+    @Test
+    void reportWriteFailureAfterFinishIsExplainedAndLeftInStatus() throws Exception {
+        service.start(ID);
+        await(() -> service.status().session().isPresent());
+        // 보고서 자리에 폴더가 있으면 쓰기가 실패한다(권한 시험은 root에서 재현되지 않음)
+        Files.createDirectories(experiments.resolve(ID).resolve(LiveSession.LIVE_DETAIL_FILE));
+        assertThatThrownBy(service::finish).isInstanceOf(java.io.UncheckedIOException.class)
+                .hasMessageContaining("보고서를 쓰지 못했습니다")
+                .hasMessageContaining("experiments/" + ID + "/" + LiveSession.LIVE_DETAIL_FILE)
+                .hasMessageNotContaining(experiments.toString());
+        assertThat(service.status().experimentId()).isEmpty();
+        assertThat(service.status().stopReason()).contains("보고서를 쓰지 못했습니다");
     }
 }

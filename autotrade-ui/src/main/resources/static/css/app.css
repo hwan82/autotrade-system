@@ -176,6 +176,9 @@ tr.state-open td { background: var(--real-soft); }
   margin: .4rem 0 .8rem; }
 .panic-all p { margin: 0; }
 .warn-text { color: var(--warn); }
+/* 실시간 모의 화면 */
+.badge.ok { background: var(--lab-soft); border-color: var(--lab); color: var(--lab); }
+.badge.warn-state { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 tr.urgent td { background: var(--warn-soft); font-weight: 600; }
 .result.rejected { border-left: 4px solid var(--warn); padding-left: .75rem; }
 .outcome-done { color: var(--ok); font-weight: 600; }
@@ -185,6 +188,7 @@ tr.urgent td { background: var(--warn-soft); font-weight: 600; }
 dialog.confirm { border: 1px solid var(--rule); border-top: 6px solid var(--real); border-radius: var(--radius-m);
   max-width: 40rem; width: calc(100% - 2rem); padding: 1.2rem 1.4rem; color: var(--ink); background: var(--sheet); }
 dialog.confirm.danger { border-top-color: var(--danger); }
+dialog.confirm.lab { border-top-color: var(--lab); }
 dialog.confirm h2 { margin-top: 0; }
 dialog.confirm::backdrop { background: rgba(28, 40, 40, .55); }
 .form-grid.narrow { grid-template-columns: minmax(7rem, 9rem) 1fr; }

@@ -155,6 +155,12 @@ class LiveSessionTest {
         assertThat(status.failures()).allSatisfy(f -> assertThat(f).isEmpty());
         assertThat(status.dataGaps()).isGreaterThanOrEqualTo(3); // 재기동 공백 2종목 + 끊김 공백 1
         assertThat(status.events()).isEqualTo(events.size() + status.dataGaps());
+        // 화면용 최근 공백: 되살린 기록의 공백까지 들어 있고, 마지막은 위에서 넣은 끊김 공백이다
+        LiveSession last = s;
+        assertThat(last.recentGaps(1000)).hasSize(status.dataGaps());
+        assertThat(last.recentGaps(1)).singleElement()
+                .satisfies(g -> assertThat(g.reason()).isEqualTo(DataGap.GapReason.DISCONNECTED));
+        assertThatThrownBy(() -> last.recentGaps(0)).isInstanceOf(IllegalArgumentException.class);
 
         SimulationReport live = s.finish(new CodeVersion("live-commit", false));
         assertThat(live.result().runs()).allSatisfy(r -> assertThat(r.failureReason()).isEmpty());

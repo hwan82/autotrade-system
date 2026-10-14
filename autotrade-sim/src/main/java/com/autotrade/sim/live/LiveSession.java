@@ -362,6 +362,18 @@ public final class LiveSession implements AutoCloseable {
     }
 
     /**
+     * 계좌에 준 공백 중 최근 것(화면용, 오래된 것부터). 되살린 기록의 공백도 들어 있다.
+     *
+     * @param limit 돌려줄 최대 개수(1 이상)
+     */
+    public synchronized List<DataGap> recentGaps(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit은 1 이상이어야 합니다: " + limit);
+        }
+        return List.copyOf(gaps.subList(Math.max(0, gaps.size() - limit), gaps.size()));
+    }
+
+    /**
      * 세션 상태.
      *
      * @param events 계좌에 준 이벤트 수(기록 줄 수, 되살린 것 포함)
