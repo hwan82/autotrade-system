@@ -324,6 +324,31 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void runtime_config의_모르는_키_이름도_숫자가_들면_가린다() throws IOException {
+        // PR #101 architect 발견 1: Jackson 경로를 그대로 쓰면 모르는 키 자리의 계좌번호가 경고에 나간다
+        runtime("""
+                { "real-trading": { "99990000-01": "x" } }
+                """);
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
+        assertThat(loaded.warning()).contains("UnrecognizedPropertyException at real-trading/*")
+                .doesNotContain("99990000").doesNotContain("com.autotrade");
+    }
+
+    @Test
+    void runtime_config의_모르는_키가_키_이름_모양이면_고칠_곳을_보여_준다() throws IOException {
+        runtime("""
+                { "real-trading": { "accounts": [ { "id": "KIS-1", "broker": "KIS", "market": "KRX", "nmae": "x" } ] } }
+                """);
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.warning()).contains("at real-trading/accounts/0/nmae");
+    }
+
+    @Test
     void 키_이름에_슬래시가_있어도_예외_없이_그_파일만_거부한다() throws IOException {
         secrets("""
                 { "brokers/kis": { "app-key": "%s" } }

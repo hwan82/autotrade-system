@@ -39,6 +39,11 @@ final class SecretPaths {
         return PATHS;
     }
 
+    /** 설정 키 이름 모양인지(소문자와 하이픈). 아니면 경고에서 가린다. */
+    static boolean isKeyLike(String name) {
+        return KEY_LIKE.matcher(name).matches();
+    }
+
     /** 값 경로가 비밀값 경로인지. */
     static boolean isSecret(String path) {
         String[] parts = path.split("/");
@@ -154,7 +159,7 @@ final class SecretPaths {
                 schemaPrefix = any + "/";
             } else {
                 // 구조에 없는 키: 오타로 보이는 키 이름만 보이고 그 아래는 줄인다
-                shown.add(KEY_LIKE.matcher(parts[i]).matches() ? parts[i] : ANY_KEY);
+                shown.add(isKeyLike(parts[i]) ? parts[i] : ANY_KEY);
                 if (i < parts.length - 1) {
                     shown.add(ANY_KEY);
                 }

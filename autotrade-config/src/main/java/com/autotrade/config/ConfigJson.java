@@ -39,11 +39,26 @@ final class ConfigJson {
     static String describe(Exception e) {
         StringBuilder sb = new StringBuilder(e.getClass().getSimpleName());
         if (e instanceof JsonMappingException jme && !jme.getPath().isEmpty()) {
-            sb.append(" at ").append(jme.getPathReference());
+            sb.append(" at ").append(maskedPath(jme));
         }
         // 설정 레코드의 검증 메시지는 키 이름과 범위만 담으므로 그대로 보여 준다
         if (e.getCause() instanceof IllegalArgumentException iae && isOwnValidation(iae)) {
             sb.append(": ").append(iae.getMessage());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * JSON 경로를 "real-trading/accounts/0/id" 꼴로 쓴다. 키 이름 모양(소문자·하이픈)이 아닌 키는 {@code *}로 바꾼다.
+     * 모르는 키 자리에 계좌번호를 적었을 수 있어서다(PR #101 architect 발견 1, PR #100 QA R4와 같은 규칙).
+     */
+    private static String maskedPath(JsonMappingException e) {
+        StringBuilder sb = new StringBuilder();
+        for (JsonMappingException.Reference ref : e.getPath()) {
+            String part = ref.getFieldName() != null
+                    ? (SecretPaths.isKeyLike(ref.getFieldName()) ? ref.getFieldName() : SecretPaths.ANY_KEY)
+                    : ref.getIndex() >= 0 ? String.valueOf(ref.getIndex()) : "?";
+            sb.append(sb.isEmpty() ? "" : "/").append(part);
         }
         return sb.toString();
     }
