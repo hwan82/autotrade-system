@@ -83,3 +83,28 @@
 
 ### 판정
 수정 필요(F1: main `5f7c2a1`과 `docs/qa-out-status.md` 충돌로 이 헤드는 머지 불가)
+
+## 재검토 2026-10-14 (2)
+- 대상: PR #91 / 커밋 64509415ca5f960e62fae0d12c973dc557dc8447 / main `8f73cde` 대비 diff 전체. 새 커밋은 병합 커밋 6450941(부모 f894715, 8f73cde) 하나
+- 요청 문구("main 8f73cde를 병합한 6450941로 처리, CI 통과")는 확인할 주장으로만 봤다
+- 직접 실행한 것:
+  - `git show --remerge-diff 6450941`: 자동 병합과 다른 곳은 `docs/qa-out-status.md` 한 곳뿐이고, main의 #92·#86·#93 줄 4개(D-080 5단계 재판정, 1단계 첫 판정·재검토 두 번)를 모두 남기고 그 뒤에 이 PR의 PR #87 줄을 남겼다. 그 밖에 병합 커밋이 새로 넣은 내용 없음
+  - `git diff 81ecd6d 6450941`에서 이 PR의 코드·시험·ADR·config-keys·절차서·pending.md 변경 0줄. 바뀐 것은 main에서 들어온 문서와 이 QA 보고서뿐이다. 따라서 이전 재검토의 코드 확인(변이 M1~M4 모두 잡힘)은 그대로 유효하다
+  - `git diff origin/main...HEAD --stat`: 12파일 +208 −12, 1차·재검토 때 본 PR 내용과 같은 파일 목록(+ QA 보고서)
+  - **main과 병합 시험**: `git fetch` 뒤 origin/main = `8f73cde`(이 병합 커밋의 main 부모). `git merge-tree --write-tree origin/main 6450941` → **충돌 없음**. GitHub `mergeable_state: clean`, base sha 8f73cde
+  - `./gradlew build --no-daemon`(head 6450941): 1회째 **BUILD SUCCESSFUL**(130 tasks, 그중 21개 실행·109개 최신 상태, 코드가 81ecd6d와 같아 테스트 작업 대부분 이전 실행 결과 재사용). 테스트 결과 XML 합계 tests 1,058, failures 0, errors 0, skipped 0
+  - CI(head 6450941, check-runs): Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary 모두 completed/success(03:43~03:46Z)
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| A1~A13, B1, B6, 과금 | 1차·재검토와 같음(통과·해당 없음) | PR 코드 변경 없음(위 diff 0줄), 빌드·CI 통과 |
+| A14 | 통과 | 병합으로 들어온 main 문서(D-080·D-081·D-082, 기획서 v14.27, stage-1·stage-5 보고서)는 이 PR이 바꾼 줄과 겹치지 않음(remerge-diff에 qa-out-status.md 외 없음). ADR-010 상태·시험 목록은 재검토 때와 같음 |
+| F1 | **해소** | 현재 main `8f73cde`와 충돌 없음, `mergeable_state: clean`, 이 헤드의 CI 성공 |
+| R2 | 해소(재검토 때) | 변경 없음 |
+| R1 | 열림(권고, 이 PR을 막지 않음) | PR 본문은 "이 PR 머지 뒤 별도 PR로 다룬다"고 한다. 6단계 결과를 승격 근거로 쓰기 전에 처리됐는지 확인할 것 |
+
+### 점검표 밖 발견(재검토 2)
+- 새 발견 없음. main이 다시 움직여 표 끝이 또 충돌하면 머지 전 같은 확인(remerge-diff에 표 줄 외 변경 없음, CI 통과)이 다시 필요하다.
+
+### 판정
+승인
