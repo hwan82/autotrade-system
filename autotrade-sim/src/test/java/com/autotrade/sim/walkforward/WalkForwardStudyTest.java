@@ -149,6 +149,14 @@ class WalkForwardStudyTest {
                 .contains("(대조군, 모든 시드 합)");
         assertThat(out.files().get("runs.tsv").lines().findFirst().orElseThrow())
                 .contains("\tsignals\tentries\tlimit_blocked\tsize_blocked\tlimit_days\t");
+        // 깔때기가 Run과 실제로 이어졌다: 후보 검증 행의 진입 시도가 0이 아니다(PR #79 architect R6)
+        assertThat(out.files().get("runs.tsv").lines().filter(l -> l.startsWith("VALIDATION\t"))
+                .mapToLong(l -> Long.parseLong(l.split("\t", -1)[14])).sum()).isPositive();
+        // 해석 칸(D-083): 리더보드 비용 비중·평균 보유·회전율, 대조군 평균 보유, 등록 파일 해시
+        assertThat(results).contains("| 비용 비중 | 평균 보유(일) | 회전율 |").contains("| 최대 | 평균 보유(일) |")
+                .contains("무작위 진입 + 대조군 청산");
+        assertThat(out.files().get("inputs.yaml"))
+                .contains("experiment: " + ID + "\nstudy-sha256: " + Sha256.ofFile(dir.resolve("study.yaml")) + "\n");
     }
 
     @Test
@@ -203,6 +211,12 @@ class WalkForwardStudyTest {
         List<WalkForwardResult.Candidate> c = WalkForwardStudy.candidates(plan, Path.of(".."), factory);
         assertThat(plan.m()).isEqualTo(10);
         assertThat(c).hasSize(10).allSatisfy(x -> assertThat(x.low()).as(x.text() + " " + x.perturbNote()).isNotNull());
+        // 반전 스윙은 하락 일수 3을 2·4로 흔든다(D-083)
+        assertThat(c).filteredOn(x -> x.text().endsWith("kr-short-reversal-swing@2")).hasSize(2).allSatisfy(x -> {
+            assertThat(x.perturbKey()).isEqualTo("signal.down-days");
+            assertThat(x.low().profile().parameters().get("signal.down-days")).isEqualTo("2");
+            assertThat(x.high().profile().parameters().get("signal.down-days")).isEqualTo("4");
+        });
         assertThat(WalkForwardJudge.c10Possible(plan.nullSeeds(), plan.m())).isTrue();
         // 52주 고가 ×1.2 변형이 300일을 요구하므로 299일이면 거부된다
         WalkForwardPlan short299 = WalkForwardPlan.parse("""

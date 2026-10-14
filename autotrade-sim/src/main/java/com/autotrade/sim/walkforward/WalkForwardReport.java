@@ -152,13 +152,13 @@ final class WalkForwardReport {
         }
 
         sb.append("## 검증 전체 리더보드 (구간 검증을 이은 곡선, 비용 차감 후)\n\n");
-        sb.append("| 조합 | 총수익률 | 시총지수 초과 | 동일가중 초과(참고) | MDD | 샤프 | 손익비 | 승률 | 왕복 | 비용 | 왕복당 손익(원) | 판정 |\n");
-        sb.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:-:|\n");
+        sb.append("| 조합 | 총수익률 | 시총지수 초과 | 동일가중 초과(참고) | MDD | 샤프 | 손익비 | 승률 | 왕복 | 비용 | 비용 비중 | 평균 보유(일) | 회전율 | 왕복당 손익(원) | 판정 |\n");
+        sb.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:-:|\n");
         for (int i = 0; i < r.candidates().size(); i++) {
             Judgement j = r.judgements().get(i);
             sb.append("| `").append(r.candidates().get(i).text()).append("` |");
             if (!j.validation().complete()) {
-                sb.append(" 실패 | - | - | - | - | - | - | - | - | - | ").append(j.verdict().label()).append(" |\n");
+                sb.append(" 실패 | - | - | - | - | - | - | - | - | - | - | - | - | ").append(j.verdict().label()).append(" |\n");
                 continue;
             }
             RunMetrics m1 = j.validation().metrics();
@@ -169,11 +169,16 @@ final class WalkForwardReport {
                     .append(" | ").append(ScreeningCriteria.num(m1.profitFactor())).append(" | ")
                     .append(ScreeningCriteria.pct(m1.winRate())).append(" | ").append(m1.roundTripCount()).append(" | ")
                     .append(m1.totalCosts()).append(" | ")
+                    .append(ScreeningCriteria.pct(m1.costShare())).append(" | ")
+                    .append(ScreeningCriteria.num(m1.avgHoldingDays())).append(" | ")
+                    .append(ScreeningCriteria.num(m1.turnover())).append(" | ")
                     .append(j.perTrip() == null ? "-" : ScreeningCriteria.won(j.perTrip())).append(" | ")
                     .append(j.verdict().label()).append(" |\n");
         }
         sb.append("\n벤치마크(검증 전체를 이음): 시총 가중 ").append(ScreeningCriteria.pct(r.idxCapPooled())).append(", 동일가중 ")
                 .append(ScreeningCriteria.pct(r.idxEqualPooled())).append("\n\n");
+        sb.append("비용 비중 = 비용 ÷ 비용 전 손익(비용 전 손익이 0 이하면 -). 평균 보유 = 왕복의 진입일~청산일 달력일 평균.")
+                .append(" 회전율 = 매매 대금 ÷ 2 ÷ 평균 평가금액(검증 전체 기간 합, 연율 아님). 판정에 쓰지 않는다.\n\n");
 
         sb.append("## 구간별 검증 총수익률 (괄호는 시총 가중 지수 초과)\n\n");
         sb.append("| 조합 |");
@@ -204,14 +209,17 @@ final class WalkForwardReport {
         sb.append('\n');
 
         sb.append("## 대조군 분포 (같은 선정 + 그 스타일 무작위 대조군, 검증 전체 왕복당 순손익, 원. C10 p = (k+1)/(N+1))\n\n");
-        sb.append("| 선정 x 대조군 | 완료 표본 N | 실패 시드 | 왕복 0건이라 뺀 시드 | 최소 | 중앙 | 최대 |\n");
-        sb.append("|---|---:|---:|---:|---:|---:|---:|\n");
+        sb.append("| 선정 x 대조군 | 완료 표본 N | 실패 시드 | 왕복 0건이라 뺀 시드 | 최소 | 중앙 | 최대 | 평균 보유(일) |\n");
+        sb.append("|---|---:|---:|---:|---:|---:|---:|---:|\n");
         for (NullSummary n : r.nulls().values()) {
             sb.append("| `").append(n.pairKey()).append("` | ").append(n.usable()).append(" | ").append(n.failed())
                     .append(" | ").append(n.zeroTrip()).append(" | ").append(won(n.min())).append(" | ").append(won(n.median())).append(" | ")
-                    .append(won(n.max())).append(" |\n");
+                    .append(won(n.max())).append(" | ")
+                    .append(ScreeningCriteria.num(n.avgHoldingDays())).append(" |\n");
         }
-        sb.append('\n');
+        sb.append("\n대조군은 스타일마다 하나라 청산 규칙과 보유 기간이 후보와 다르다. 왕복당 순손익은 보유가 길수록 상승장에서 커지므로")
+                .append(" C10은 \"후보의 진입 + 청산\" 대 \"무작위 진입 + 대조군 청산\"의 비교다. 후보의 평균 보유(위 리더보드)와")
+                .append(" 이 표의 평균 보유를 같이 읽는다(사전 등록 문구, PR #79 strategy-researcher 권고 1).\n\n");
 
         sb.append("## 구간 끝 정리(WINDOW_END) 왕복: 구간별 수 / 손익 합(원)\n\n");
         sb.append("구간 마지막 거래일 종가에 팔았다고 보고 비용을 뺀 왕복이다. 전체 왕복 수·PF·C10에 포함돼 있다.\n\n");
@@ -239,7 +247,8 @@ final class WalkForwardReport {
                 .append(" 코드가 작은 종목부터 들어가고 나머지 신호는 버려진다. 한도에 걸린 날의 비율이 높을수록 성과에 코드 순 표본 추출이")
                 .append(" 섞여 있고, 같은 한도를 쓰는 무작위 대조군도 같은 방식으로 쏠린다. 그래서 C10은 \"같은 선정·같은 한도에서 무작위")
                 .append(" 진입보다 나은가\"로만 읽고 신호 전체의 엣지로 읽지 않는다. 신호 순서를 시드로 섞는 방법은 실행기 계약 변경이라")
-                .append(" 후속 과제다(사전 등록 문구, PR #79 strategy-researcher 검토 M3).\n\n");
+                .append(" 후속 과제다(사전 등록 문구, PR #79 strategy-researcher 검토 M3). 한도에 걸린 날이 관측일의 50%를 넘는 후보는")
+                .append(" 승격 제안 전에 진입 순서를 섞은 재현 결과를 붙인다(D-083).\n\n");
         sb.append("| 조합 | 진입 시도(확인 통과) | 진입 | 한도로 막힘 | 수량 0으로 막힘 | 한도에 걸린 날 / 관측일 |\n");
         sb.append("|---|---:|---:|---:|---:|---:|\n");
         for (int i = 0; i < r.candidates().size(); i++) {

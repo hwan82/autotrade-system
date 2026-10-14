@@ -62,8 +62,8 @@ combinations:
   - "kr-vol-surge-quiet@1 x kr-ma-trend@1"
   - "none x kr-donchian-swing@1"
   - "kr-vol-surge-quiet@1 x kr-donchian-swing@1"
-  - "none x kr-short-reversal-swing@1"
-  - "kr-vol-surge-quiet@1 x kr-short-reversal-swing@1"
+  - "none x kr-short-reversal-swing@2"
+  - "kr-vol-surge-quiet@1 x kr-short-reversal-swing@2"
   - "none x kr-ma-trend-position@1"
   - "kr-fin-quality-growth@1 x kr-ma-trend-position@1"
   - "none x kr-52w-high-position@1"
@@ -111,6 +111,7 @@ git diff --exit-code origin/main -- experiments/EXP-<등록일>-WF01/study.yaml
 
 ## 7. 그다음 (Claude)
 
+- `inputs.yaml`의 `study-sha256`이 커밋된 등록 파일의 SHA-256과 같은지 확인한다(다르면 결과를 쓰지 않는다, D-083).
 - 결과 파일을 커밋하고 `report.md`(요약, 조건, 리더보드, 과최적화 검사, 이상 사례, 다음 실험)를 쓴다.
 - 세율 `[가정]` 대조(Q-052)가 닫히기 전에는 리포트 결론에 `[가정]`을 붙인다(D-071 7번).
 - 4단계 완료 판정은 독립 QA 관문이다. 사용자에게 QA 요청 문구를 드리고 `docs/qa/pending.md`에 올린다.
