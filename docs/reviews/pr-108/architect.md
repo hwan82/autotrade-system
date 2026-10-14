@@ -99,3 +99,45 @@
 
 ## 판정
 수정 필요(AR-4, AR-5)
+
+## 재검토 2026-10-14 (2)
+- 대상: PR #108 / 커밋 dbdb953 / main 대비 diff(`git diff origin/main...dbdb953`). 앞 재검토(618ae22) 뒤 바뀐 것은 `git diff 618ae22 dbdb953`이다: `RealPathReflectionTest.java`(클래스 로더·`ResourceBundle`·`ProcessBuilder`·`Runtime#exec` 금지, `#Guard_타입은_Jackson이_만들_수_있는_모양이_아니다` 추가), `DynamicCode.java` 고정 예제, ADR-002 9.5, D-085, 검토 원문 2개
+- 점검표: B
+- 직접 실행한 것(별도 작업 트리 `git worktree add <스크래치>/wt2 dbdb953`에서 실행했고, 끝난 뒤 `git worktree remove`로 지웠다. 공유 작업 트리 소스는 건드리지 않았다):
+  - `./gradlew clean build --no-daemon` → `BUILD SUCCESSFUL in 4m 3s`, 종료 코드 0. 결과 XML 합계 테스트 1,108건, 실패·오류·건너뜀 0. `RealPathReflectionTest`는 7건, 실패 0
+  - 변조 실험(커밋하지 않음): `autotrade-config`에 `com.autotrade.config.qaprobe`의 3개 클래스를 넣고 `:autotrade-architecture-test:test --tests '*RealPathReflectionTest'` 실행 → 종료 코드 1, 위반 5건
+    | 프로브 | 내용 | 결과 |
+    |---|---|---|
+    | `ProcessSpawner` | `new ProcessBuilder("jcmd", pid, "JVMTI.agent_load", jar).start()`, `Runtime.getRuntime().exec(..)` (AR-4) | 잡힘 |
+    | `LoaderProbe` | `ClassLoader.getSystemClassLoader()`, `o.getClass().getClassLoader()` | 잡힘 |
+    | `ProviderProbe` | `java.security.Provider` 익명 하위 클래스에 `put("MessageDigest.Y", className)` → `getService(..).newInstance(null)` | **안 잡힘** |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew clean build` 종료 코드 0, 테스트 1,108건 실패 0 |
+| B2 | 통과 | 규칙 변경은 테스트 모듈 안에만 있다. ADR-002 9.5 2항과 D-085 1·4항이 갱신됐다. 운영 코드는 넓어진 규칙에서도 위반 0건이다(위 빌드) |
+| B3 | 통과 | 운영 계약 변경 없음. 새 고정 목록 `GUARD_RECORDS`(3개)가 D-085 4항에 적혀 있다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | 새 금지 항목은 `DynamicCode` 고정 예제와 `규칙은_리플렉션_우회를_실제로_잡아낸다`의 단언으로 확인된다(`URLClassLoader.newInstance`, `ResourceBundle.getBundle`, `Thread.getContextClassLoader`, `ProcessBuilder.<init>`·`start`, `Runtime.exec`). Guard 타입 모양 고정은 `#Guard_타입은_Jackson이_만들_수_있는_모양이_아니다`가 맡는다. 이 테스트는 레코드 집합을 정확히 일치시키므로, 거르는 조건(`/autotrade-risk/`)이 모든 클래스를 빼 버려도 통과하지 못한다. 기존 `default` 분기의 클래스 로더 조건은 앞쪽의 더 넓은 조건(로더 타입의 모든 메서드)으로 옮겨졌을 뿐이라 약화가 아니다. 지우거나 건너뛴 테스트는 없다 |
+| B7 | risk-ops 검토 필요 | 보호 테스트 강화이고 실전 경로(Guard)를 다룬다. risk-ops 재검토 뒤 사용자가 머지한다 |
+| B8 | 통과 | 고정 예제와 문서에 비밀값 없음 |
+
+### 앞 재검토 지적의 처리
+- AR-4: 해소. `ProcessBuilder`의 모든 접근과 `Runtime#exec`가 금지됐고(RealPathReflectionTest.java dbdb953 기준 191-193행), 변조 실험 `ProcessSpawner`가 잡혔다. 후속 `-XX:+DisableAttachMechanism`은 D-085 "보장하지 않는 것"에 7단계 설치본 대조 항목으로 적혔다.
+- AR-5: 해소. 잘못된 설명은 D-085 4항, ADR-002 9.5, 테스트 주석에서 바로잡혔다. `getClass()` 경로는 남은 한계로 적혔다. 전제("Guard 타입에 Jackson 주석과 인자 없는 생성자가 없고, 레코드는 3개뿐")는 테스트로 고정됐다.
+  - 직접 확인: Guard 패키지에서 인자가 하나인 생성자는 `AccountGuard(AccountRef)`(private 중첩 클래스, 스칼라 인자가 아님)와 `GuardClosedException(String)`(예외라 제외)뿐이다. 매개변수 이름 모듈과 `MapperFeature`·`ConstructorDetector`는 실전 경로 런타임 또는 허용 목록 밖이다. 그래서 기본 설정 Jackson이 이 클래스들을 만들 길은 없다 `[추론]`.
+
+### 새 지적
+
+#### AR-6 (수정 필요, 작음) `java.security.Provider.Service#newInstance`로 이름 문자열의 클래스를 만들 수 있다
+- `[사실]` 변조 실험 `ProviderProbe`가 걸리지 않았다. 동작: `Provider` 하위 클래스에 `put("MessageDigest.Y", <클래스 이름 문자열>)`을 하고 `getService("MessageDigest", "Y").newInstance(null)`을 부른다. `java.security`는 허용 패키지이고, `reflective()`에는 `Provider`에 대한 분기가 없다.
+- `[추론]` JDK가 그 이름으로 클래스를 적재해 public 생성자를 부른다. 이는 `Class#forName` + `Constructor#newInstance`(금지)와 같은 일이다. 앞 재검토 반영에서 같은 이유("이름으로 클래스를 찾아 만든다")로 `ResourceBundle`을 막았으므로, 같은 기준을 적용해야 한다. 지금 Guard 패키지에는 public 인자 없는 생성자가 없어 Guard 객체가 직접 만들어지지는 않는다. 다만 그 밖의 우리 클래스나 JDK 클래스는 이름 문자열로 생성할 수 있다.
+- 실전 경로 운영 코드는 지금 `Provider`를 쓰지 않는다(빌드 위반 0건). 그래서 막아도 깨지는 코드는 없다.
+- 고칠 방향: `reflective()`에 `java.security.Provider$Service#newInstance`를 더하고 `java.security.Provider`를 상속하거나 생성하지 못하게 한다. `Security#addProvider`·`insertProviderAt`도 함께 막는다. 이 경로를 `DynamicCode` 고정 예제에 더한다.
+
+### 참고 (판정에 넣지 않음)
+- 이번에 금지 목록에 들어간 항목들(`ResourceBundle`, `ProcessBuilder`, `Provider`)은 모두 허용 패키지 `java.lang`·`java.util`·`java.security` 안에서 나왔다. D-085가 이미 "허용 패키지 안의 아직 모르는 간접 호출 수단"을 한계로 적고 있다. 7단계 전에 `java.util`·`java.security`를 클래스 단위 허용 목록으로 좁히는 것을 검토하길 권한다. 패키지 단위 허용으로 남겨 두면 이런 발견이 계속 하나씩 나온다.
+
+## 판정
+수정 필요(AR-6)
