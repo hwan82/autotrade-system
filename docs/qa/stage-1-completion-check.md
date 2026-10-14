@@ -41,20 +41,20 @@
 | CFG-03 비밀값 분리·스캔·마스킹 | 충족 | `ConfigLoaderTest` `일반_설정_파일에_비밀값이_있으면_그_파일을_쓰지_않는다`, `SecretTest` `설정_전체를_로그로_찍어도_비밀값이_나오지_않는다`, CI gitleaks 전 이력(`ci.yml:153`) |
 | CFG-04 증권사·계좌 키 구조 ADR | 충족 | ADR-001 2.6·2.6.1, ADR-002 2.4(`account-numbers` 맵으로 수정), `docs/config/config-keys.md` |
 | CFG-05 운영 중 키·증권사 교체 규칙 | **부분 → 이연 제안** | 있는 것: 실시간 변경 거부(`RuntimeConfigHolderTest` `시세_구성과_증권사_키는_실시간으로_바꿀_수_없다`, `실전_계좌는_실시간으로_바꿀_수_없다`, `RuntimeConfigHolder.java:46` 메시지 "CFG-05"). 없는 것: 기획서 검증 방법 "미체결이 있을 때 키 교체 거부 테스트, 보유가 있을 때 증권사 교체 거부 테스트". 미체결·보유는 실전 주문 경로가 있어야 판단할 수 있다(ADR-001 2.6 "별도 경로로 연다") |
-| CFG-06 설정 3분류 | **부분 → 이연 제안** | 있는 것: 전략 프로필은 새 버전으로만 변경(`StrategyProfileStoreTest` `편집은_새_버전과_새_해시를_만들고_옛_버전은_그대로다`, `이미_있는_버전_파일은_덮어쓰지_않는다`), 프로필 해시 골든(`StrategyProfileTest`). 없는 것: "2차 확인 없는 실전 한도 변경 거부 테스트". 실전 한도 키는 Q-008(미확정)이 정해져야 생긴다(`RuntimeConfig.java:23` "리스크 한도 키는 Q-008 이후 별도 작업") |
-| OVS-02 시장 차이는 `MarketRules`로만(인터페이스) | 충족(인터페이스), 검사는 수동 | `MarketRules` 계약(ADR-001 2.3), `MarketRulesTest`, `MarketRulesImplTest`. 기획서 검증 "엔진 코드에 시장 분기 없음(검사)"은 자동 검사가 없다. 수동 확인: `Market.KRX`·`Market.US` 직접 참조는 sim의 실험 명령 입구(`CombinationExperiment.java:112`, `WalkForwardStudy.java:97`, `RecordingPlan.java:97`, KRX 전용 거절)와 비용 표(`CostModels.java:73,99`), 합성 시세(`synthetic`)뿐이고 `exchange`·`account`·`run`, `autotrade-risk`, `autotrade-app-engine`에는 없다(`grep -rln "Market\.KRX\|Market\.US"`). 5장 G4 |
+| CFG-06 설정 3분류 | **부분 → 이연 제안** | 있는 것: 전략 프로필은 새 버전으로만 변경(`StrategyProfileStoreTest` `편집은_새_버전과_새_해시를_만들고_옛_버전은_그대로다`, `이미_있는_버전_파일은_덮어쓰지_않는다`), 프로필 해시 골든(`StrategyProfileTest`). 없는 것: ① "실행 중 Run 파라미터 변경 시도 실패 테스트". 설계로는 `StrategyProfile`이 record이고 파라미터를 생성 때 복사하며(`StrategyProfile.java:25,41`), `ExperimentSpec`도 record로 조합 목록을 `List.copyOf`로 복사한다(`ExperimentSpec.java:34,59`). 그러나 이를 확인하는 실패 테스트는 없다 ② 운영 설정 변경의 감사 로그(`autotrade-config`에 감사 기록 없음) ③ "2차 확인 없는 실전 한도 변경 거부 테스트". 실전 한도 키는 Q-008(미확정)이 정해져야 생긴다(`RuntimeConfig.java:23` "리스크 한도 키는 Q-008 이후 별도 작업") |
+| OVS-02 시장 차이는 `MarketRules`로만(인터페이스) | 충족(인터페이스), 검사는 수동 | `MarketRules` 계약(ADR-001 2.3), `MarketRulesTest`, `MarketRulesImplTest`. 기획서 검증 "엔진 코드에 시장 분기 없음(검사)"은 자동 검사가 없다. 수동 확인: `Market.KRX`·`Market.US` 직접 참조는 sim의 실험 명령 입구(`CombinationExperiment.java:112`, `WalkForwardStudy.java:97`, `RecordingPlan.java:97`, KRX 전용 거절)와 비용 표(`CostModels.java:73,99`), 합성 시세(`synthetic`), 그리고 sim 밖 두 곳이다. `DailyBarQualityCheck.java:222`는 일봉 품질 검사의 가격 급변 임계를 `MarketRules`를 거치지 않고 시장별로 고르는 **실제 시장 분기**이고, `SelectionCriteria.java:231`은 재무 지표를 KRX에서만 받는 입구 거절이다. `exchange`·`account`·`run`, `autotrade-risk`, `autotrade-app-engine`에는 없다(`grep -rn "Market\.KRX\|Market\.US"`, PR #81 architect 검토 반영). 5장 G4 |
 | OVS-03 거래소 현지 시간대, 서머타임 하드코딩 금지 | 충족 | `ExchangeCalendarTest` `미국_정규장은_서머타임을_시간대_데이터로_따른다`, `미국_장은_한국_날짜로_이틀에_걸쳐도_현지_날짜로_판단한다`, `MarketRulesImplTest` `거래일과_시간대는_시장_현지_기준이다` |
 
 ## 4. 이연 제안 (사용자 확인 필요)
 
-CFG-05·CFG-06의 빠진 검증은 1단계 뼈대로는 만들 수 없는 것이다. 미체결·보유 판단은 실전 주문 경로가, 실전 한도 2차 확인은 Q-008 한도 키가 있어야 한다.
+CFG-05 교체 절차와 CFG-06 실전 한도 2차 확인은 1단계 뼈대로는 만들 수 없는 것이다. 미체결·보유 판단은 실전 주문 경로가, 실전 한도 2차 확인은 Q-008 한도 키가 있어야 한다. CFG-06의 나머지 두 빈칸(Run 불변 실패 테스트, 운영 설정 감사 로그)은 지금 만들 수 있으므로 이연 대상이 아니라 1단계 후속 과제(architect)로 둔다.
 
 | 선택지 | 내용 | 비고 |
 |---|---|---|
-| **A (추천)** | 1단계 완료 범위를 "실시간 변경 거부와 프로필 버전 규칙까지"로 보고, CFG-05 교체 절차 테스트와 CFG-06 실전 한도 2차 확인 테스트는 7단계 요구사항으로 옮긴다(기획서 14장 7단계 행에 CFG-05·06 추가) | 1단계 기준(빌드·테스트·ADR)은 그대로. 약화되는 안전 규칙 없음: 교체·한도 변경 경로 자체가 아직 없고, 있는 경로는 거부한다 |
+| **A (추천)** | 1단계 완료 범위를 "실시간 변경 거부와 프로필 버전 규칙까지"로 보고, CFG-05 교체 절차 테스트와 CFG-06 실전 한도 2차 확인 테스트는 7단계 요구사항으로 옮긴다(기획서 14장 7단계 행에 CFG-05·06 추가). Run 불변 실패 테스트와 운영 설정 감사 로그는 1단계 후속 과제로 남긴다 | 1단계 기준(빌드·테스트·ADR)은 그대로. 약화되는 안전 규칙 없음: 교체·한도 변경 경로 자체가 아직 없고, 있는 경로는 거부한다 |
 | B | CFG-05·06 테스트가 생길 때까지 1단계를 미완료로 둔다 | 7단계 실전 경로 작업 전까지 1단계가 닫히지 않는다 |
 
-이 해석은 로드맵 완료 기준의 해석이라 3단계 QA(C3, D-068 ④)와 같은 이유로 사용자 확인 대상으로 둔다. 7단계 쪽으로 옮기는 기획서 수정은 QA 판정 뒤 완료 기록 PR에서 한다.
+이 해석은 로드맵 완료 기준의 해석이라 3단계 QA(C3, D-068 ④)와 같은 이유로 사용자 확인 대상으로 둔다. 7단계 쪽으로 옮기는 기획서 수정은 QA 판정 뒤 완료 기록 PR에서 하고, 실전 요구사항의 검증 시점을 바꾸므로 그 PR은 risk-ops 검토를 받는다(PR #81 architect B7 메모).
 
 ## 5. QA 전에 알려 두는 차이 (판정 뒤 완료 기록 PR에서 정리 제안)
 
@@ -63,7 +63,7 @@ CFG-05·CFG-06의 빠진 검증은 1단계 뼈대로는 만들 수 없는 것이
 | G1 | PR #7·#9의 역할 검토 원문이 `docs/reviews/`에 없다. 원문 보존 규칙(D-030, 2026-10-09)이 두 PR 머지(2026-10-08) 뒤에 생겼다. 교차 검토 반영은 ADR-001 7장(risk-ops·sim-engine·data-engineer)과 ADR-002 8장(architect 2회, 차단 1건 반영 후 승인)에만 요약으로 남아 있다. 두 PR 모두 사용자(hwan82)가 머지했다 | `ls docs/reviews/` 가장 이른 폴더 `pr-10`, PR #7·#9 본문 |
 | G2 | ADR-001 6장 "추천안 채택(자율)" 10건에 결정 로그 번호가 없다("pm-lead가 다음 정리 때 부여"). 결정 로그 미확정 표에 Q-009(DB 엔진)가 아직 열려 있으나 ADR-001이 PostgreSQL 16으로 닫았다(ADR-001:8, 2.7절) | `docs/decisions/README.md:85`, ADR-001 245-258행 |
 | G3 | ADR-001 2.3절 `ExperimentRunner` 시드 문구가 ADR-007 이전 내용 | `RunSeeds.java` Javadoc |
-| G4 | OVS-02 "시장 분기 없음" 자동 검사 없음(수동 grep만) | 3장 OVS-02 행 |
+| G4 | OVS-02 "시장 분기 없음" 자동 검사 없음(수동 grep만). `DailyBarQualityCheck.java:222`의 시장별 급변 임계는 `MarketRules`로 옮길 후보 | 3장 OVS-02 행 |
 | G5 | 결정 로그에 D-029 번호가 비어 있다(D-028 다음 D-030). 저장소 어디에도 D-029 참조가 없다 | `grep -rn D-029 docs` 결과 없음 |
 
 G2는 1단계 완료 기록 PR에서 ADR-001 자율 결정을 한 번호로 묶어 기록하고 Q-009를 닫는 것을 제안한다. G3·G4는 architect 후속 과제로 넘긴다.
