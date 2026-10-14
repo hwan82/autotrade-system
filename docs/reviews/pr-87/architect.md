@@ -77,3 +77,36 @@
 
 ### 재검토 판정
 수정 필요(R2': config-keys.md에 `autotrade.lab.live.min-free-gb` 행, ADR-005 `/api/live` 행에 `View`의 `experimentId`·`restoring`과 디스크 부족·되살리는 중 409 사유). 코드 쪽 앞 항목(R1·R3·R4·R5·R6①)은 해소됐다. B7은 risk-ops 재검토가 따로 필요하고, D-076대로 사용자 머지 대상이다.
+
+## 재검토 2026-10-14 (2차)
+- 대상: PR #87 / 브랜치 `claude/project-thread-go4oua` 커밋 7270b525fd3203ffdba17dbfd217b8de6327fde1 (앞 재검토 b4c9227 뒤에 25dc275 "재검토 반영", 7270b52 origin/main 4e32d75 병합) / `git diff origin/main...HEAD` 전체(origin/main 4e32d75 기준 46개 파일 +4485 −256, 브랜치가 origin/main을 포함함)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build` 그대로: Maven Central 429(Too Many Requests)로 의존성 해석 실패(EXIT=1). 앞 검토들과 같은 이유이며 코드 결함 아님.
+  - 저장소 밖 미러 init 스크립트(`-I`, Google의 Maven Central 미러)만 더해 `./gradlew build --rerun-tasks --continue --max-workers=2` → **BUILD SUCCESSFUL, EXIT=0**(1분 58초, 130개 작업 모두 실행, verifyPureDependencies 14개 모듈). 결과 XML 합계 **1056개, 실패 0, 오류 0, 건너뜀 0**. FeedServerTest 9(`quietConnectionIsNotDisconnectedOnItsFirstEvent` 추가), AcceptBackoffTest 2, GatewayFeedTest 2, LiveSessionTest 9, LiveLabServiceTest 5, LivePlanTest 2, JournalWriterTest 4, ArchitectureTest 18, ModuleOwnershipTest 13, RealTradingGuardTest 31, GuardedOrderGatewayTest 8 통과.
+  - `git diff b4c9227 25dc275` 전부 읽음(FeedServer, FeedServerTest, ADR-005, config-keys.md, 검토 원문 2개). 병합 커밋 7270b52는 main 쪽 문서 2개(`docs/qa/stage-1-completion-check.md`, `docs/reviews/pr-84/architect.md`)만 들여옴, PR 고유 변경 없음. 테스트 삭제·`@Disabled` 없음.
+  - 문서와 코드 대조: config-keys 새 행 ↔ `LabWebConfiguration.java:106`(`@Value("${autotrade.lab.live.min-free-gb:20}")`), `LiveLabService.java:105`(음수면 예외 = "0 이상"). ADR-005 `/api/live` 행 ↔ `LiveSessionController`(status·start·stop이 `View`, finish가 `Finished`), `LiveLabService.View` 필드 순서·뜻(260행), `status()`의 없음/되살리는 중/운용 중 세 갈래(239~251행), start의 409 사유(120 이미 돔, 126 정리 중, 128~130 감시 정지·디스크 하한), finish 409(213 없음, 216 되살리는 중), `시작 실패: …`(169행). 모두 일치.
+  - 참고: 검토 시점 작업 트리에 이 브랜치 커밋이 아닌 `docs/qa/pending.md` 변경(PR #87 QA 요청 한 줄 추가)이 있었다. 검토 대상(HEAD)에 들어 있지 않으므로 판정에 넣지 않았고 건드리지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 실행. 미러 init 스크립트(저장소 밖)만 더한 `./gradlew build --rerun-tasks` EXIT=0, 1056/0/0/0. 빌드 스크립트·테스트는 그대로 |
+| B2 | 통과 | 이번 변경은 `com.autotrade.marketdata.feed.FeedServer` 내부 필드뿐(새 의존·새 패키지 없음). verifyPureDependencies·ArchitectureTest 18·ModuleOwnershipTest 13 통과, ArchUnit 규칙 변경 없음 |
+| B3 | 통과 | 앞 R2' 해소: config-keys.md 표에 `autotrade.lab.live.min-free-gb`(기본 20, 0 이상, 운용 중 1초 안 정지) 행. ADR-005 API 표의 `/api/live/status`·`start`·`stop`·`finish` 행이 `View`(`experimentId`·`restoring`·`session`·`stopReason` 등), 디스크 하한·정리 중·감시 정지 409, 되살리는 중 `finish` 409를 적음. 위 대조로 코드와 일치 확인. 실시간 변경 가능 여부 열은 이 표 형식에 없음(같은 표의 다른 `autotrade.lab.*` 키와 같은 형식) |
+| B4 | 통과 | 새 시스템 시계 사용은 `System.nanoTime()`(전달 멈춤 판정, 결과와 무관)뿐. 시뮬레이션 경로 변경 없음, 골든 테스트(RecordedMarketDataSetTest·RecordingExperimentTest 등)와 리플레이 일치 시험(LiveSessionTest 9) 그대로 통과 |
+| B5 | 통과 | 금액 계산 변경 없음 |
+| B6 | 통과 | 앞 권고(R3 회귀 시험) 반영: `FeedServerTest.quietConnectionIsNotDisconnectedOnItsFirstEvent`(멈춤 판단 300ms로 줄이고 1초 조용한 뒤 3건 보냄 → 받는 쪽 1, 재연결 0). 기존 `stalledSubscriberIsDisconnected` 그대로 통과. 시험 삭제·약화 없음 |
+| B7 | risk-ops 검토 필요 | 게이트웨이 프로세스 안의 `FeedServer` 멈춤 판정이 이번 커밋(25dc275)에서 또 바뀜. `docs/reviews/pr-87/risk-ops.md` 재검토 판정 "승인"은 b4c9227 기준이라 이 변경 뒤의 risk-ops 확인은 아직 없다. D-076대로 실전 관련 PR이며 독립 QA와 사용자 직접 머지 대상 |
+| B8 | 통과 | 새 로그·문서에 비밀값 없음. 바뀐 로그 문구 없음 |
+
+### 앞 재검토 항목 처리
+- **R2' 해소.** 위 B3.
+- **nanoTime 표시값 권고 해소.** `writingSince`와 따로 `volatile boolean writing`을 두고(FeedServer.java:230~233), 쓰기 쪽은 `writingSince`를 먼저 쓰고 `writing = true`(297~298), 판정은 `s.writing && now - s.writingSince > stallNanos`(190). 두 필드가 volatile이고 쓰는 순서가 시각 → 표시라서, 판정 쪽이 `writing == true`를 보면 그 줄 이후의 `writingSince`를 본다. 이전 줄의 오래된 시각으로 정상 쓰기를 끊는 경우가 없다. `now`를 루프 앞에서 잡아 `writingSince`가 더 새로우면 차가 음수가 되어 끊지 않는 쪽이다. nanoTime 부호 가정이 없어졌다. risk-ops M1도 같은 내용.
+- 참고 3·4(되살리기 중 멈춤 기록일 경계, `-PlabHeap`)는 그대로이며 차단 아님.
+
+### 이번에 새로 본 것
+1. (참고, 낮음) `LiveLabService.start`에서 등록 파일을 읽다 `UncheckedIOException`(141행)이 나면 컨트롤러가 409·400으로 바꾸지 않아 공통 오류 처리(500 계열)로 간다. ADR-005 표에 이 경우가 없다. 파일 시스템 오류라 드물고 b4c9227 이전부터 있던 동작이므로 막지 않음. 화면을 붙일 때(ui-dev) 같이 정리하면 된다.
+2. (참고) 새 시험은 1초 조용한 뒤 첫 이벤트로 판정하므로, 옛 판정(마지막 진행 뒤 시간)의 짧은 경쟁 창을 매번 재현하지는 못한다. 다만 지금 판정 기준(한 줄 쓰기가 막힌 시간)의 성질, 즉 "조용한 시간은 멈춤으로 세지 않음"은 이 시험이 직접 확인한다.
+
+### 재검토 판정
+승인. 앞 검토의 수정 필요 항목(R1·R2·R2')과 권고(R3·R4·R5·R6①·nanoTime 표시값)가 모두 해소됐고, 확인 못 한 항목은 없다. 이 승인은 architect 역할 검토에 한한다. B7: 25dc275의 `FeedServer` 변경 뒤 risk-ops 확인이 따로 필요하며, 지침 10·11장에 따라 독립 QA 검토와 사용자 직접 머지가 남아 있다.
