@@ -9,7 +9,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 버전 | v14.23 |
+| 버전 | v14.24 |
 | 갱신일 | 2026-10-14 |
 | 관리 역할 | pm-lead (`autotrade-spec-keeper` 스킬) |
 | 이전 판 | v1.0~v11.0과 ChatGPT 설계서 2종(저장소 밖 원본). 분석 결과는 [team-design.md](../team/team-design.md) 2장 |
@@ -17,6 +17,7 @@
 ### 변경 이력
 | 날짜 | 버전 | 요약 | 요구사항 ID |
 |---|---|---|---|
+| 2026-10-14 | v14.24 | D-076(architect, 추천안 채택(자율)): 6단계 선행. 게이트웨이 → 실험실 실시간 시세 전달(로컬 소켓, 녹화 줄 형식, 게이트웨이는 기다리지 않고 못 넘긴 구간은 공백)과 실험실 실시간 모의 세션(입력 기록 먼저, 재기동은 기록 재실행, 리플레이와 같은 실행 코드). 실시간 대 입력 기록 리플레이 차이 0 확인 명령 `runLiveReplayCheck`([ADR-010](../adr/ADR-010-live-feed-and-session.md), 절차서 [stage-6-live-session](../runbooks/stage-6-live-session.md)) | SIM-03, SIM-13, MD-05 |
 | 2026-10-14 | v14.23 | D-075(sim-engine, 추천안 채택(자율)): 3단계 후속(architect PR #74 R1·R2·R4, QA R3·R4). 체결 규칙 `BOOK-V4`: 평가 가격은 정규장 체결로만 갱신, 종가 단일가 체결은 폐장 뒤 60초 안의 첫 체결만, 장중에 처음 시작한 녹화는 시가 단일가가 지난 것으로 봄. 녹화 실험은 주식 호가 단위에 맞지 않는 가격(ETF·ETN 등)이 있으면 시작 전 거절 | SIM-06, SIM-07 |
 | 2026-10-13 | v14.22 | D-073(사용자 결정, Q-051 닫힘): 스윙 조합 선발에도 D-066 워크포워드 구간·판정 기준. 4단계 실행 절차서([stage-4-walkforward](../runbooks/stage-4-walkforward.md)) | STR-14·18 |
 | 2026-10-13 | v14.21 | D-072(추천안 채택(자율)): 일봉 워크포워드 판정 명령 `runWalkForwardStudy`(ADR-009, 실행기 예열·구간 끝 정리), 일봉 후보 로직 3개와 프로필 3개. Q-052(세율 법령 대조) 등록 | STR-04·06·18, SIM-09·10 |
@@ -152,7 +153,7 @@
 | SIM-10 | 실험 결과에 데이터 버전, 프로필 해시, 비용 모델 버전, 코드 버전(커밋)을 기록. 선정 프로필을 쓰는 계좌는 선정 해시와 조합 해시도 기록(STR-17) | 선정 프로필을 쓰면 계좌·거래 기록에 `selection_id`, `selection_hash`, `combination_hash`, 날짜별 선정 결과 스냅샷 해시(스키마 변경은 architect ADR). experiment·run 메타에 `data_snapshot_version`(D-019 스냅샷 ID), `profile_hash`, `cost_model_version`, `code_commit`과 dirty 여부, `seed`, `clock_mode`(실시간/리플레이). `virtual_trade_log`에 `experiment_id`, `run_id`, `account_id`, `profile_hash`, `parameters_snapshot`. 스키마는 1단계 ARC-07 | role-guides.md 4장, team-design.md 7장 |
 | SIM-11 | 성과 지표: 총수익률, CAGR, MDD, 샤프, 승률, 손익비, 평균 보유일, 거래 수, 회전율, 비용 비중, 벤치마크 대비 초과수익 | 고정 입력에 대한 지표 골든 테스트 | role-guides.md 4장 |
 | SIM-12 | 가상 엔진은 주문 상태머신, 멱등 키, 리스크 검증, 블랙리스트를 실전과 같은 코드로 통과 | 검증 체인(블랙리스트 → 리스크 → 멱등 키 → 상태머신)은 `autotrade-risk`·`-domain`에 하나만 있고, `OrderGateway` 구현은 이 체인을 거쳐서만 호출됨(ArchUnit: 체인 밖 submit 호출 금지). 가상·실전이 같은 체인을 쓰는 테스트 | 지침 5장, team-design.md 7장 |
-| SIM-13 | 녹화일 리플레이로 실시간 모의와 같은 조건에서 새 전략을 비교 | 같은 녹화일·프로필로 실시간 모의 결과와 리플레이 결과의 차이를 측정·기록 | D-004 |
+| SIM-13 | 녹화일 리플레이로 실시간 모의와 같은 조건에서 새 전략을 비교 | 같은 녹화일·프로필로 실시간 모의 결과와 리플레이 결과의 차이를 측정·기록 | D-004, D-076 |
 | SIM-14 | 실험실은 자원을 빼앗지 않는다. 자원 부족 시 가장 먼저 멈춤 | 힙·스레드 상한, 낮은 OS 우선순위. 감시 프로세스 명령으로 일시정지(RSK-07). 실험 실행 명령은 장 시간 보호 구간과 감시의 정지 요청 파일에서 결과 없이 멈춤(D-063) | broker-and-fault-design.md 5장 |
 | SIM-15 | 가상 계좌 불변식(현금 + 평가액 = 원장 합계, 포지션 = 체결 누적) 검사를 매 이벤트 또는 장 마감에 수행. 실전의 5분 대사에 해당 | 불변식 위반 시 해당 Run 중단과 기록 | 원본 v8(가상 잔고 대사) `[추론]` |
 
