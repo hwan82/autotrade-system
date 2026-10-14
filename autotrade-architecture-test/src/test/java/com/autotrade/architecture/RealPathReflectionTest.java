@@ -163,6 +163,18 @@ class RealPathReflectionTest {
                 || type.matches("java\\.util\\.concurrent\\.atomic\\.Atomic(Integer|Long|Reference)FieldUpdater")) {
             return true;
         }
+        // 클래스 로더는 어떤 방법으로든 얻거나 넘기지 않는다: 로더 타입의 모든 메서드(정적 팩토리 URLClassLoader.newInstance 포함),
+        // 로더를 돌려주는 API(getClassLoader, getContextClassLoader), 로더를 인자로 받는 API(ResourceBundle.getBundle(.., loader),
+        // Class.forName(.., loader) 등), ResourceBundle(이름으로 클래스를 찾아 만든다)(risk-ops PR #108 재검토 F3)
+        if (owner.isAssignableTo(ClassLoader.class) || owner.isAssignableTo(java.util.ResourceBundle.class)
+                || owner.isAssignableTo(java.util.ResourceBundle.Control.class)) {
+            return true;
+        }
+        if (t instanceof AccessTarget.CodeUnitAccessTarget u
+                && (u.getRawParameterTypes().stream().anyMatch(p -> p.isAssignableTo(ClassLoader.class))
+                        || u.getRawReturnType().isAssignableTo(ClassLoader.class))) {
+            return true;
+        }
         if (type.startsWith("com.fasterxml.jackson.")) {
             return JACKSON_OBJECT_ACCESS.matcher(name).matches();
         }
@@ -175,12 +187,13 @@ class RealPathReflectionTest {
             case "java.lang.reflect.Field" -> FIELD_ACCESSORS.matcher(name).matches() || name.endsWith("Accessible");
             case "java.lang.Class" -> name.equals("forName") || name.equals("newInstance");
             // JNI 네이티브 코드 적재(risk-ops PR #108 F2)
-            case "java.lang.System", "java.lang.Runtime" -> name.equals("load") || name.equals("loadLibrary");
+            case "java.lang.System" -> name.equals("load") || name.equals("loadLibrary");
+            // 자기 JVM에 에이전트를 붙이는 외부 명령(jcmd <pid> JVMTI.agent_load)도 막는다(architect PR #108 재검토 AR-4)
+            case "java.lang.Runtime" -> name.equals("load") || name.equals("loadLibrary") || name.equals("exec");
+            case "java.lang.ProcessBuilder" -> true;
             // 다른 모듈에 깊은 리플렉션을 연다
             case "java.lang.Module" -> name.startsWith("add");
-            default -> owner.isAssignableTo("java.lang.reflect.AccessibleObject") && name.endsWith("Accessible")
-                    || owner.isAssignableTo(ClassLoader.class)
-                            && (name.equals("<init>") || name.equals("loadClass") || name.equals("defineClass"));
+            default -> owner.isAssignableTo("java.lang.reflect.AccessibleObject") && name.endsWith("Accessible");
         };
     }
 
@@ -412,6 +425,47 @@ class RealPathReflectionTest {
             .allowEmptyShould(true)
             .because("Guard 상태는 Guard 코드만 만들고 바꾼다. 데이터 바인딩이 Guard 객체를 만들면 전이 검사를 건너뛴다(D-085)");
 
+    /** Jackson이 만들 수 있는 모양(레코드)으로 둔 Guard 패키지 타입. 바꾸면 risk-ops 검토. */
+    static final Set<String> GUARD_RECORDS = Set.of(
+            "com.autotrade.risk.guard.SecondConfirmation", "com.autotrade.risk.guard.GuardTransition",
+            "com.autotrade.risk.guard.RealTradingGuard$Snapshot");
+
+    /**
+     * {@code Object}로 넘겨받은 Guard 객체의 {@code getClass()}는 규칙이 보지 못한다. 그 클래스 객체로 Jackson이 새 객체를
+     * 만들려면 Jackson 주석, 인자 없는 생성자, 레코드 정규 생성자 중 하나가 필요하므로, Guard 패키지 타입이 그런 모양이 아니라는
+     * 전제를 고정한다(architect PR #108 재검토 AR-5). javac는 {@code getClass()}를 늘 {@code Object.getClass}로 부르므로 받는 쪽
+     * 정적 타입으로도 잡을 수 없다. 레코드 세 개는 예외로 적어 둔다: 2차 확인은 검증기 밖 의존이 금지돼 있고
+     * (SECOND_CONFIRMATION_IS_NOT_DATA), 전이 기록은 감사 기록 값이며, Guard 안 private 스냅숏은 만들어도 Guard에 넣을 길이 없다
+     * (살아 있는 객체 덮어쓰기는 실전 경로에서 금지).
+     */
+    @Test
+    void Guard_타입은_Jackson이_만들_수_있는_모양이_아니다() {
+        JavaClasses guard = new ClassFileImporter().importPackagesOf(RealTradingGuard.class);
+        List<String> problems = new ArrayList<>();
+        Set<String> records = new TreeSet<>();
+        for (JavaClass k : guard) {
+            if (!k.getSource().map(src -> src.getUri().toString().contains("/autotrade-risk/")).orElse(false)) {
+                continue; // 아키텍처 테스트 모듈의 같은 패키지 예제(SplitPackageGuardRaiser)는 운영 코드가 아니다
+            }
+            if (k.isEnum() || k.isInterface() || k.isAssignableTo(Throwable.class)) {
+                continue;
+            }
+            if (k.isRecord()) {
+                records.add(k.getName());
+            }
+            Stream.concat(Stream.of(k.getAnnotations()), Stream.concat(
+                            k.getFields().stream().map(JavaField::getAnnotations),
+                            k.getCodeUnits().stream().map(u -> u.getAnnotations())))
+                    .flatMap(Set::stream)
+                    .filter(a -> a.getRawType().getPackageName().startsWith("com.fasterxml.jackson"))
+                    .forEach(a -> problems.add(k.getName() + "에 Jackson 주석 " + a.getRawType().getName()));
+            k.getConstructors().stream().filter(ctor -> ctor.getRawParameterTypes().isEmpty())
+                    .forEach(ctor -> problems.add(k.getName() + "에 인자 없는 생성자"));
+        }
+        assertThat(problems).isEmpty();
+        assertThat(records).containsExactlyInAnyOrderElementsOf(GUARD_RECORDS);
+    }
+
     @Test
     void 실전_경로_런타임_구성은_고정_목록과_같다() {
         Components c = components();
@@ -521,7 +575,9 @@ class RealPathReflectionTest {
         EvaluationResult dynamic = rule.evaluate(new ClassFileImporter().importClasses(DynamicCode.class));
         assertThat(String.join("\n", dynamic.getFailureReport().getDetails())).contains(
                 "System.loadLibrary", "Runtime.load", "raise()는 native", "ManagementFactory", "ToolProvider",
-                "InitialContext", "AtomicReferenceFieldUpdater.newUpdater", "Module.addOpens");
+                "InitialContext", "AtomicReferenceFieldUpdater.newUpdater", "Module.addOpens",
+                "URLClassLoader.newInstance", "ResourceBundle.getBundle", "Thread.getContextClassLoader",
+                "ProcessBuilder.<init>", "ProcessBuilder.start", "Runtime.exec");
     }
 
     @Test

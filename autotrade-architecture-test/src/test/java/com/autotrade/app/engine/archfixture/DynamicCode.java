@@ -7,7 +7,8 @@ import javax.tools.ToolProvider;
 
 /**
  * 규칙 검증용 위반 코드(risk-ops PR #108 F2·R1): 리플렉션 API 밖의 동적 코드·간접 호출 수단. 네이티브 적재 2건,
- * native 선언 1건, MBean, 실행 중 컴파일, JNDI, 필드 이름 문자열 갱신기, 모듈 열기. 운영 코드가 아니다.
+ * native 선언 1건, MBean, 실행 중 컴파일, JNDI, 필드 이름 문자열 갱신기, 모듈 열기, 클래스 로더 정적 팩토리와 로더를 받는
+ * ResourceBundle(risk-ops PR #108 재검토 F3), 로더 꺼내기. 운영 코드가 아니다.
  */
 public final class DynamicCode {
 
@@ -40,5 +41,21 @@ public final class DynamicCode {
 
     public static void openModule(Module target) {
         DynamicCode.class.getModule().addOpens("com.autotrade.app.engine.archfixture", target);
+    }
+
+    /** 정적 팩토리로 빌드 밖 위치의 로더를 만들고, 이름으로 클래스를 찾아 만드는 API에 넘긴다. */
+    public static Object outsideCode(java.net.URL[] where) {
+        ClassLoader loader = java.net.URLClassLoader.newInstance(where);
+        return java.util.ResourceBundle.getBundle("x.Bundle", java.util.Locale.ROOT, loader);
+    }
+
+    public static Object contextLoader() {
+        return Thread.currentThread().getContextClassLoader();
+    }
+
+    /** 자기 JVM에 에이전트를 붙이는 외부 명령(architect PR #108 재검토 AR-4). */
+    public static Object attachSelf(long pid) throws Exception {
+        new ProcessBuilder("jcmd", Long.toString(pid), "JVMTI.agent_load", "/x.jar").start();
+        return Runtime.getRuntime().exec(new String[] {"jcmd", Long.toString(pid), "JVMTI.agent_load", "/x.jar"});
     }
 }
