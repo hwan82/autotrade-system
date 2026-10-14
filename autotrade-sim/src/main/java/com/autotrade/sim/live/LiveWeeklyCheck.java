@@ -45,7 +45,7 @@ import java.util.TreeSet;
 import java.util.function.Consumer;
 
 /**
- * 6단계 주간 점검(D-085, ADR-010 4장 "실험실이 본 입력 ≠ 게이트웨이 녹화"): 실시간 모의 세션의 입력 기록과 같은 날 게이트웨이
+ * 6단계 주간 점검(D-088, ADR-010 4장 "실험실이 본 입력 ≠ 게이트웨이 녹화"): 실시간 모의 세션의 입력 기록과 같은 날 게이트웨이
  * 녹화를 대조해 한 장으로 묶는다. 실험실 상태 화면의 {@code dataGaps}·{@code inboxDropped}·{@code feedReconnects}는 실험실을
  * 다시 띄우면 사라지는 메모리 값이라 손으로 옮기면 빠지기 쉽다. 이 점검은 같은 내용을 디스크에 남은 두 기록에서 다시 센다.
  *
@@ -423,7 +423,7 @@ public final class LiveWeeklyCheck {
             boolean defect, String accounts) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 주간 점검 ").append(weekFrom).append(" ~ ").append(end).append("\n\n");
-        sb.append("- 실시간 모의 입력 기록과 같은 날 게이트웨이 녹화 대조(D-085). 점검 명령이 씀, 손으로 고치지 않는다.\n");
+        sb.append("- 실시간 모의 입력 기록과 같은 날 게이트웨이 녹화 대조(D-088). 점검 명령이 씀, 손으로 고치지 않는다.\n");
         sb.append("- code: ").append(code.commit()).append(code.dirty() ? " dirty" : "").append('\n');
         sb.append("- 판정: ").append(defect
                 ? "**확인 필요**: 설명되지 않는 차이가 있다(아래 \"설명 없음\" 또는 \"녹화에 없는 기록 줄\"). 전달·기록 경로 결함일 수 있다"

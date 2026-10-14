@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 6단계 주간 점검(D-085): 입력 기록과 같은 날 게이트웨이 녹화를 대조해, 실험실이 받지 못한 이벤트를 원인(세션 밖, 끊김, 재기동,
+ * 6단계 주간 점검(D-088): 입력 기록과 같은 날 게이트웨이 녹화를 대조해, 실험실이 받지 못한 이벤트를 원인(세션 밖, 끊김, 재기동,
  * 큐 넘침)별로 손 계산과 같은 수로 세고, 공백 없이 빠지거나 녹화에 없는 줄이 생기면 결함으로 낸다.
  */
 class LiveWeeklyCheckTest {

@@ -11,7 +11,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * 6단계 주간 점검 명령(D-085)의 본체. 프로세스 진입점은 {@code com.autotrade.app.experiment.ExperimentMain}
+ * 6단계 주간 점검 명령(D-088)의 본체. 프로세스 진입점은 {@code com.autotrade.app.experiment.ExperimentMain}
  * ({@code ./gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=<실험ID>})이고 그쪽이 장 시간 보호와 정지 요청 파일을
  * {@link RunGate}로 넣는다(D-063).
  *

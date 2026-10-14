@@ -48,7 +48,7 @@
 
 - 실험실·게이트웨이를 껐다 켜도 된다. 실험실은 세션을 자동으로 다시 열지 않으니 2-3을 다시 한다. 입력 기록으로 계좌를 되살리고 끊긴 구간은 공백으로 남는다.
 - 감시 프로세스가 정지 요청 파일을 만들면 세션이 멈춘다(`stopReason`). 요청이 사라진 뒤 다시 시작한다.
-- 주간 점검(D-085): 주마다(마지막 거래일 장 마감 뒤, 수신이 멈춘 다음) 아래 명령을 돌리고 생긴 `experiments/<ID>/weekly/<날짜>.md`를 커밋한다. 상태 화면의 `dataGaps`·`inboxDropped`·`feedReconnects`를 손으로 옮기지 않아도 된다(같은 값을 입력 기록과 게이트웨이 녹화에서 다시 센다).
+- 주간 점검(D-088): 주마다(마지막 거래일 장 마감 뒤, 수신이 멈춘 다음) 아래 명령을 돌리고 생긴 `experiments/<ID>/weekly/<날짜>.md`를 커밋한다. 상태 화면의 `dataGaps`·`inboxDropped`·`feedReconnects`를 손으로 옮기지 않아도 된다(같은 값을 입력 기록과 게이트웨이 녹화에서 다시 센다).
 
   ```powershell
   ./gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=EXP-20261015-LIVE01
