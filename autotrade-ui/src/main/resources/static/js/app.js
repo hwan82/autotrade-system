@@ -2,6 +2,7 @@
 import { h, mount, toast } from './dom.js';
 import { loadSession, get } from './api.js';
 import { experimentsPage, experimentPage, runPage, selectionResultPage } from './pages/experiments.js';
+import { newExperimentPage } from './pages/new-experiment.js';
 import { selectionsPage, selectionPage, newSelectionPage } from './pages/selections.js';
 import { profilesPage, profilePage, newProfilePage } from './pages/profiles.js';
 import { settingsPage } from './pages/settings.js';
@@ -9,6 +10,7 @@ import { realPage } from './pages/real.js';
 
 const routes = [
   [/^#\/experiments$/, 'experiments', () => experimentsPage()],
+  [/^#\/experiments\/new$/, 'experiments', () => newExperimentPage()],
   [/^#\/experiments\/([A-Z0-9-]+)$/, 'experiments', m => experimentPage(m[1])],
   [/^#\/experiments\/([A-Z0-9-]+)\/runs\/([A-Za-z0-9-]+)$/, 'experiments', m => runPage(m[1], m[2])],
   [/^#\/experiments\/([A-Z0-9-]+)\/selection-results\/([0-9a-f]{64})$/, 'experiments', m => selectionResultPage(m[1], m[2])],

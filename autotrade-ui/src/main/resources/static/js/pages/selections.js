@@ -2,7 +2,7 @@
 // 조건 행 선택지(지표·연산·갱신 주기·상품 유형)는 서버 카탈로그(/api/selection-catalog)에서 받는다. 키 해석과 검증은 저장할 때 서버가 한다.
 import { h, table, toast } from '../dom.js';
 import { pagedSection } from './experiments.js';
-import { get, post } from '../api.js';
+import { get, getAll, post } from '../api.js';
 import { shortHash, MARKET, STYLE, REFRESH } from '../format.js';
 
 const enc = encodeURIComponent;
@@ -49,8 +49,8 @@ export async function selectionsPage() {
 }
 
 export async function selectionPage(id, version) {
-  const [versions, cat, strategies] = await Promise.all([
-    get(`/api/selections/${enc(id)}`), catalog(), get('/api/profiles?page=0&size=200')]);
+  const [versions, cat] = await Promise.all([
+    get(`/api/selections/${enc(id)}`), catalog()]);
   const latest = versions[versions.length - 1];
   const current = version ? versions.find(v => v.version === version) : latest;
   if (!current) throw new Error(`${id}에 v${version}이 없습니다`);
@@ -64,8 +64,8 @@ export async function selectionPage(id, version) {
     { label: '메모', render: v => v.note || '–' },
   ], [...versions].reverse());
 
-  // 조합할 수 있는 전략 프로필: 시장·스타일이 같아야 한다(STR-02). 다른 것은 화면에서 조합으로 고를 수 없다
-  const partners = strategies.items.filter(p => p.market === current.market && p.style === current.style);
+  // 조합할 수 있는 전략 프로필: 시장·스타일이 같아야 한다(STR-02). 서버가 시장·스타일로 걸러 끝까지 준다
+  const partners = await getAll(`/api/profiles?market=${enc(current.market)}&style=${enc(current.style)}`);
 
   return h('div', {},
     h('p', { class: 'crumb' }, h('a', { href: '#/selections' }, '선정 프로필'), ' / ', id),
@@ -79,6 +79,11 @@ export async function selectionPage(id, version) {
       h('a', { href: `#/selections/${enc(id)}` }, '최신 버전 열기')),
     h('h2', {}, isLatest ? '선정 조건 편집' : '선정 조건'),
     isLatest ? conditionEditor(current, current.style, cat, async (parameters, note) => {
+      // 원본과 선정 결과가 같은 새 버전이면 저장 전에 알린다(gate 재번호·상품 유형 순서·값 표기만 바뀐 경우, D-074)
+      const same = await post(`/api/selections/${enc(id)}/versions/${current.version}/compare`, { parameters });
+      if (same.sameSelection && !same.identical && !window.confirm(
+        `이 변경으로는 선정 결과(고르는 종목·순위)가 v${current.version}과 같습니다. 바뀐 것: ${same.differences.join(', ')}.\n`
+        + '그래도 저장하면 새 선정 해시가 생겨 같은 선정이 교차표에서 따로 집계됩니다. 저장할까요?')) return;
       const saved = await post(`/api/selections/${enc(id)}/versions`, { baseVersion: current.version, parameters, note });
       toast(`v${saved.version}을 저장했습니다. 새 선정 해시 ${shortHash(saved.hash)}`);
       location.hash = `#/selections/${enc(id)}/v${saved.version}`;

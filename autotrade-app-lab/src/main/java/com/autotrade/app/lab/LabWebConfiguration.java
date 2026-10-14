@@ -2,7 +2,9 @@ package com.autotrade.app.lab;
 
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
 import com.autotrade.app.lab.experiment.ExperimentFolders;
+import com.autotrade.app.lab.experiment.ExperimentRegistrations;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
+import com.autotrade.app.lab.experiment.SnapshotList;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.config.RuntimeConfigStore;
@@ -10,8 +12,8 @@ import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,6 +45,22 @@ public class LabWebConfiguration {
         ExperimentFolders folders = new ExperimentFolders(Path.of(dir), catalog);
         log.info("실험 폴더: {}", folders.root());
         return folders;
+    }
+
+    /** 실험 생성 화면이 등록 파일을 쓰는 곳(D-074). 결과를 불러오는 실험 폴더와 같은 폴더다. */
+    @Bean
+    ExperimentRegistrations experimentRegistrations(
+            @Value("${autotrade.lab.experiments-dir:experiments}") String dir, StrategyProfileStore strategies,
+            SelectionProfileStore selections) {
+        return new ExperimentRegistrations(Path.of(dir), strategies, selections);
+    }
+
+    /** 수집 스냅샷 폴더(설정 폴더 아래 {@code snapshots}, 실행 명령의 기본값과 같음, ADR-008 2.4). */
+    @Bean
+    SnapshotList snapshotList(RuntimeConfigStore store) {
+        SnapshotList list = new SnapshotList(store.paths().runtimeFile().getParent().resolve("snapshots"));
+        log.info("수집 스냅샷 폴더: {}", list.root());
+        return list;
     }
 
     /**

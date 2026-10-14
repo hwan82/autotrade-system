@@ -93,18 +93,22 @@ parameters:
 | `GET /api/experiments/{id}/runs/{runId}/fills` | 체결 내역(종목명, 멱등 키, 체결 순번, 신호·체결 이벤트 순번과 시각, 비용 항목, 실현 손익) |
 | `GET /api/experiments/{id}/runs/{runId}/round-trips` | 왕복 거래(종목명 포함) |
 | `GET /api/experiments/{id}/runs/{runId}/rejections?stage=&code=` | 거절 사유 로그 + 거르기 전 사유별 건수(`counts`) |
-| `GET /api/profiles` | 프로필 목록(ID 이름순, 최신 버전·해시, 버전 목록) |
+| `GET /api/profiles?market=&style=` | 프로필 목록(ID 이름순, 최신 버전·해시, 버전 목록). `market`·`style`을 주면 그 시장·스타일만(D-074) |
 | `GET /api/profiles/{id}` · `/versions/{v}` | 버전 이력 · 한 버전 |
 | `POST /api/profiles` | 새 프로필 v1. `basedOn: "id@v"`면 복제 |
 | `POST /api/profiles/{id}/versions` | `{baseVersion, parameters, note}` → 새 버전 |
-| `GET /api/selections` · `/{id}` · `/{id}/versions/{v}` | 선정 프로필(ADR-007 2.1) 목록 · 버전 이력 · 한 버전. 한 버전은 `refresh`, `maxSymbols`, 선정 해시(`hash`), `catalogProblem`(지금 카탈로그로 해석되지 않는 이유, 통과면 없음)을 더 준다. D-060 |
+| `GET /api/selections?market=&style=` · `/{id}` · `/{id}/versions/{v}` | 선정 프로필(ADR-007 2.1) 목록(`market`·`style` 거르기는 프로필 목록과 같음, D-074) · 버전 이력 · 한 버전. 한 버전은 `refresh`, `maxSymbols`, 선정 해시(`hash`), `catalogProblem`(지금 카탈로그로 해석되지 않는 이유, 통과면 없음)을 더 준다. D-060 |
 | `POST /api/selections` · `/{id}/versions` | 전략 프로필과 같은 모양. 저장 전에 예약 키(`SelectionProfile`)와 카탈로그(`SelectionCriteria.parse`) 검사를 모두 통과해야 하고, 걸리면 400 `INVALID`(파일을 남기지 않음) |
+| `POST /api/selections/{id}/versions/{v}/compare` | `{parameters}`로 저장하면 원본 `v`와 선정 결과가 같은 새 버전이 되는지(D-074): `identical`(글자까지 같음, 저장하면 거절됨), `sameSelection`, `differences`(선정 결과에 영향 없는 차이 문구), `problem`(해석 불가 이유, 없으면 null). 파일을 쓰지 않는다 |
 | `GET /api/selection-catalog` | 조건 행 선택지: 지표(`key`, 입력 `kind`, 기간 `param`), 연산, 갱신 주기별 허용 스타일, 상품 유형. 순수 모듈 enum에서 읽는다 |
 | `GET /api/experiments/{id}/cross-table?metric=&rowControl=` | 선정 × 매매지표 교차표(UI-02): 행(선정, "선정 없음" 행은 맨 아래), 열(전략 프로필 버전), 칸(Run ID, 조합 해시, 상태, 지표 값, `deltaVsNoSelection` 같은 열 선정 없음 칸 대비, `deltaVsRowControl` 같은 행 대조 열 대비). 차이는 서버가 `BigDecimal`로 뺀다. `metric`은 리더보드 지표 10개 중 하나(기본 `totalReturn`) |
 | `GET /api/experiments/{id}/runs/{runId}/selection-days` | 날짜별 선정 기록(`run_selection_day`): 판정(`VALID`·사유), 결과 해시, 선정 종목 수, 막은 신규 진입 수, 결과 본문 유무, 정정 대체 규칙 적용 수 |
 | `GET /api/experiments/{id}/selection-results/{hash}` | 선정 결과 하나(ADR-007 2.6 내용): 적용 범위, 입력 기준일, 평가·선정 종목 수, `restatementFallback`(MD-10 (2) 적용 수), 탈락 사유별 종목 수, 선정 종목(순위·종목명) |
 | `GET /api/experiments/{id}/selection-results/{hash}/evaluations?filter=&reason=` | 평가 행(종목 코드순, 페이징): 통과·순위, 탈락 사유, 조건별 값, 정정 대체 규칙 표시. `filter`는 `all`·`passed`·`failed`·`fallback` |
 | `GET /api/experiment-folders` | 조합 실험 폴더(`experiments-dir` 아래 `combinations:` 키가 있는 `experiment.yaml`, 실험 ID 내림차순, 페이징, D-062): `id`, `question`, `period`(`from ~ to`), `combinations`(조합 수), `state`(`LOADED` 화면에 있음·`READY` 불러올 수 있음·`NO_BUNDLE` 결과 묶음 없음·`NOT_RUN` 결과 파일 없음·`INVALID` 등록 파일 오류), `lastError`(마지막 불러오기 실패 사유나 등록 파일 오류, 없으면 null). `INVALID`면 `question`·`period`가 null |
+| `POST /api/experiment-folders` | 새 실험 등록(UI-02, D-074): `{id, question, market, style, from, to, seed, seedCapital, barsSnapshot, financialsSnapshot, benchmark, parallelism, combinations[], blacklist[]}`로 `experiments/<id>/experiment.yaml`(조합 실험 등록 파일)을 새 폴더에 쓴다. 응답 201 `{id, yaml, command, written}`(`command`는 실행 명령). 실험을 돌리지 않는다. 입력이 틀리거나 조합의 시장·스타일이 실험과 다르거나(STR-02) 재무 조건 선정에 재무 스냅샷이 없거나 시장이 KRX가 아니면 400 `INVALID`(폴더를 만들지 않음), 같은 ID 폴더가 있으면 409 `CONFLICT`(덮어쓰지 않음), CSRF 토큰이 없으면 403 |
+| `POST /api/experiment-folders/preview` | 등록과 같은 검사를 하고 쓰지 않는다. 응답 `{id, yaml, command, written=false}` |
+| `GET /api/experiment-folders/snapshots?kind=` | 수집 스냅샷(`<설정 폴더>/snapshots/<kind>/<ID>/manifest.json`, `kind`는 `krx-daily`·`dart-financials`, ID 내림차순): `{root, items[{id, firstDate, lastDate, problem}]}`. 일봉 `lastDate`는 마지막 거래일, 재무는 마지막 수집 시각. 파일 해시는 실행 명령이 확인 |
 | `POST /api/experiment-folders/{id}/load` | 결과 묶음(`result-bundle.jsonl.gz`)을 `detail.txt`·`selection-days.tsv`와 대조한 뒤 실험 목록에 올린다(실험을 다시 돌리지 않음, D-062). 응답 `{id}`. 실험 ID 형식이 아니거나 묶음이 깨졌거나 대조가 다르면 400 `INVALID`(사유는 목록 `lastError`에도 남음), 폴더·묶음·`detail.txt`가 없으면 404 `NOT_FOUND`, 이미 올라가 있으면 409 `CONFLICT`, CSRF 토큰이 없으면 403 `CSRF` |
 | `GET /api/settings` | 그룹별 키: 현재 값, 내장 default 값, 비밀값 여부·설정 여부, 편집 가능 여부, 반영 시점 |
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
@@ -149,13 +153,14 @@ parameters:
 - 실험 목록은 메모리뿐이라 재기동하면 사라진다. DB 저장 전까지는 결과 요약 파일(`experiments/<ID>/`)이 원본이다.
 - 같은 PC의 다른 프로그램(악성 코드 포함)은 루프백으로 접근할 수 있다 `[추론]`. 토큰은 같은 출처에서 읽히므로 로컬 악성 프로그램은 막지 못한다. 실전 제어(UI-05)에는 2차 확인과 명령 채널 검증을 따로 둔다(risk-ops).
 - `strategies/` 폴더를 사용자가 직접 고치면 append-only가 깨질 수 있다. 저장소에 커밋된 버전 파일이 바뀌면 리뷰에서 막는다(파일 머리 주석).
-- 실험 생성 화면(기간·시드·프로필 선택으로 실행)은 아직 없다. 실행할 데이터 스냅샷 어댑터(2단계)와 실제 전략 구현(4단계), 실행기 진행 보고·취소(ADR-004 4장)가 먼저 필요하다.
+- 실험 생성 화면(D-074)은 조합 실험 등록 파일을 쓰고 실행 명령을 보여 주는 데까지다. 실행은 사용자가 등록 파일을 커밋한 뒤 터미널에서 하고(D-062·D-063), 진행 상태·취소는 화면에 없다(실행기 진행 보고·취소, ADR-004 4장).
 
 ## 9. 후속 작업
 
 | 항목 | 담당 | 조건 |
 |---|---|---|
-| 실험 생성 화면과 실행 API(진행 상태 SSE, 취소) | ui-dev, sim-engine | 데이터 스냅샷 어댑터·전략 구현·실행기 진행 보고 후 |
+| 실험 생성 화면 | ui-dev | D-074로 처리(등록 파일 쓰기, 실행은 실행 명령) |
+| 화면 실행(커밋된 등록 파일만), 진행 상태 SSE, 취소 | ui-dev, sim-engine | 결과 DB 저장·실행기 진행 보고 후(D-074 대안 B 되돌릴 조건) |
 | `ExperimentCatalog` DB 구현, `strategy_profile` 동기화 | sim-engine, architect | 실험 DB 저장 작업 |
 | 실전 운영 화면(모드 표시, 실전 활성화 2차 확인, PANIC SELL, 블랙리스트, 잔고·거래 내역, 증권사 연결 상태) | ui-dev, risk-ops | 별도 PR, 사용자 머지(지침 10장) |
 | 증권사 키 변경 화면(재연결 절차) | ui-dev, risk-ops | 재연결 절차 구현 후 |
