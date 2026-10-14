@@ -232,3 +232,82 @@
 
 ### 판정
 승인
+
+## 재검토 2026-10-14 (헤드 743545c)
+- 대상: PR #108 브랜치 `claude/project-thread-l44wj7`, 헤드 743545c. `git diff origin/main...HEAD` 전체(21파일, +1,932 −3)를 다시 봤다. 이번 재검토의 새 커밋은 743545c(독립 QA `docs/reviews/pr-108/qa.md` F1·F2 반영) 하나다.
+  - 운영 코드 변경은 여전히 0줄이다. 바뀐 것은 다음과 같다.
+    - `ClassFileTypes.java` 새 파일(클래스 파일 상수 풀 읽기)
+    - `RealPathReflectionTest.java`의 `outsideAllowlist` 확장, `classAsData`·`ALLOWED_CLASS_METHODS`·`JAVAC_BOOTSTRAP_TYPES` 추가, 허용 목록 추가
+    - 고정 예제 `NameToClassBinding`, 허용 예제 `ReflectionFreeEngineCode.parse`
+    - D-086, ADR-002 9.5 6항, `qa-out-status.md` 한 줄
+  - 커밋 메시지와 D-086의 주장은 확인할 주장으로만 봤다.
+- 점검표: A
+- 직접 실행한 것:
+  - 실행 장소: 별도 작업 트리 2개(검토용, 변조 실험용, 둘 다 743545c)에서 하고 끝난 뒤 지웠다. 공유 작업 트리 소스는 손대지 않았다.
+  - `./gradlew build --rerun-tasks` → BUILD SUCCESSFUL, EXIT=0. 시험 결과 XML 합계 1,130건, 실패·오류·건너뜀 0.
+    - `:autotrade-risk:test` 55건
+    - `:autotrade-architecture-test:test` 39건(`RealPathReflectionTest` 7건 포함)
+    - `:autotrade-app-engine:test` 50건
+  - 변조 실험(커밋하지 않음, 지움). 실전 경로 범위인 `autotrade-control`(Jackson 컴파일 의존이 이미 있음)에 탐침을 넣고 `:autotrade-architecture-test:test`를 돌렸다.
+    - P1 `Class<?>[] ks = M.readValue("[\"" + name + "\"]", Class[].class); M.convertValue(fields, ks[0])` → **통과(잡히지 않음)**
+    - P2 `String.class.getClass()`를 `readValue`의 대상 타입으로 → 통과. javap로 보면 javac는 `Object.getClass`로 부른다. D-086 위험과 한계에 적힌 그대로다
+    - P3 `Object o = String.class; readValue(.., o.getClass())` → 통과. P2와 같은 한계
+    - P5 `record P5ArrayField(Class<?>[] types)` → 잡힘(필드·생성자 매개변수 2건)
+  - P1 실제 동작: 같은 클래스를 Jackson 2.21.4로 직접 돌렸다.
+    - `"com.autotrade.domain.account.AccountId"`라는 이름만으로 `KIS-1` 객체가 만들어졌다.
+    - `"com.autotrade.risk.guard.SecondConfirmation"`는 `java.time.Instant` 미지원으로 실패했다. QA가 Q16에서 본 것과 같은 상태다. 지금 2차 확인 위조를 막는 것은 규칙이 아니라 `Instant` 필드 하나다.
+  - 수정안 검증(커밋하지 않음): `classAsData`의 클래스 객체 필터를 `r.getRawType().getBaseComponentType().getName().equals("java.lang.Class")`로 바꿨다.
+    - P1이 "클래스 객체 Class.class를 참조 (P1ArrayClass.java:11)"로 잡혔다.
+    - 탐침을 지운 뒤 `:autotrade-architecture-test:test`는 BUILD SUCCESSFUL이었다. 운영 코드 오탐은 없다.
+
+### 앞 지적(독립 QA) 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| QA F1 이름 문자열 클래스 찾기 | **일부 해소** | `RealPathReflectionTest.java:403-427` `classAsData`가 `Class.class` 리터럴, `Class` 필드·생성자·설정자·Jackson 주석 메서드 매개변수, 제네릭 인자, 목록 밖 `Class` 메서드를 잡는다. `규칙은_리플렉션_우회를_실제로_잡아낸다`(`:736-750`)가 `NameToClassBinding`으로 단언한다. 그러나 `RealPathReflectionTest.java:405-406`의 필터가 클래스 객체의 원래 타입 이름을 `java.lang.Class`와 그대로 비교한다. 그래서 배열 클래스 객체 `Class[].class`(이름 `[Ljava.lang.Class;`)가 빠진다(P1, 아래 F6) |
+| QA F2 허용 목록 밖 타입(형변환·호출 서명) | 해소 | `outsideAllowlist`(`:357-386`)가 호출 대상의 매개변수·반환 타입, 필드 접근 타입, `ClassFileTypes` 상수 풀(클래스 상수, 서술자, 제네릭 서명)을 대조한다. `JAVAC_BOOTSTRAP_TYPES`는 상수 검사에서만 뺀다. 소스에서 쓰면 `java.lang.invoke` 금지가 따로 잡는다. 시험이 `MapperFeature`가 잡히는 것과 형변환만 한 메서드가 상수 풀에서 잡히는 것을 단언한다(`:739-750`). `ClassFileTypes`의 상수 태그 길이(3·4·5·6·7·8·9~12·15~20)는 JVMS 4.4와 맞다. 문자열 상수의 utf8은 빼되, 같은 utf8이 클래스 상수이기도 하면 넣는다. 그래서 문자열 리터럴로 형변환 대상을 숨길 수 없다 |
+| QA R1 `Instant` 의존 | 기록됨 | D-086 위험과 한계(:47)에 날짜 처리 Jackson 모듈 PR 때 함께 검토한다고 적혔다. 다만 F6 때문에 지금도 `Instant` 하나가 마지막 방어선이다 |
+| QA A14 | **미해소** | F1 부분은 F6 때문에 아래 A14 그대로다 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 0줄. `RealTradingGuard` 기본 OFF·재기동 OFF가 그대로다. `:autotrade-risk:test` 55건 통과 |
+| A2 | **실패** | 기존 `ArchitectureTest` 출구·Guard 규칙 변경은 없다(diff 0줄). 새 규칙이 막겠다고 한 경로 하나는 열려 있다. 실전 경로 모듈 코드가 `readValue(.., Class[].class)`로 이름 문자열에서 클래스를 얻고, 정적 의존 없이 Jackson이 만들 수 있는 아무 타입이나 만든다(P1, F6). 2차 확인(`SecondConfirmation`) 위조는 지금 `Instant` 필드 하나가 막고 있을 뿐이다 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정과 엔진 `processIsolation`이 그대로다. 빌드에서 통과했다 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 파일(`ClassFileTypes`, `NameToClassBinding`)에 키·계좌번호·토큰 없음 |
+| A11 | 통과 | 보호 시험 삭제·약화 없음. 허용 목록에 더한 JDK·Jackson 타입은 확인했다(`java.time.chrono`·`temporal`, `java.security.spec`, `JsonParser`, `TreeNode`, `Module`, `JsonSerializer`, `PropertyNamingStrategy`, `MapperBuilder` 등). 모두 운영 코드가 이미 쓰던 타입이 넓어진 대조(상수 풀)에 새로 나온 것이고, 이름으로 클래스를 만드는 API는 아니다. `Module`은 `findAndRegisterModules`·`findModules` 금지가 그대로다. 새 규칙에는 실패하는 경우를 포함한 시험이 있다. 다만 F6의 배열 경우를 단언하는 예제는 없다 |
+| A12 | 통과 | 장애 대응표 17종, O1~O8, 장애 테스트 8종의 전제를 바꾸는 동작 변경이 없다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | **실패** | 문서가 보장한다고 적은 것과 규칙의 실제 동작이 다르다.<br>- ADR-002 9.5 6항(`ADR-002-real-trading-guard.md:239`): "Jackson의 `Class` 역직렬화로 이름 문자열에서 클래스를 얻는 길(`Class.class` 클래스 객체, …) … 금지"<br>- D-086 결정 1번(`D-086-real-path-reflection-ban.md:23`): "Jackson은 `Class` 타입 값을 이름 문자열에서 `Class.forName`처럼 만든다 … 그래서 `Class.class` 클래스 객체 … 를 쓰지 않는다"<br>- `guardTypeAsData` 주석(`RealPathReflectionTest.java:526`): "Jackson의 `Class` 역직렬화는 실전 경로에서 금지"<br>그런데 `Class[].class`로 같은 일을 하는 코드가 규칙을 통과한다(P1). `getClass().getClass()` 경로는 D-086:47에 한계로 적혀 있어 문서와 어긋나지 않는다 |
+
+### 점검표 밖 발견
+- **F6 배열 클래스 객체 `Class[].class`로 Jackson `Class` 역직렬화가 열려 있다**(차단, QA F1의 남은 부분)
+  - 위치: `RealPathReflectionTest.java:405-406`
+    ```java
+    c.getReferencedClassObjects().stream()
+            .filter(r -> r.getRawType().getName().equals("java.lang.Class"))
+    ```
+  - 원인: `Class[].class`의 원래 타입 이름은 `[Ljava.lang.Class;`이라 이 필터에 걸리지 않는다. 다른 검사도 모두 통과한다.
+    - `outsideAllowlist`는 원소 타입 `java.lang.Class`를 허용 클래스로 본다.
+    - `ClassFileTypes`도 원소 타입으로 줄여 허용으로 본다.
+    - 이 메서드에는 `Class` 매개변수도 필드도 없다.
+  - 결과: P1과 직접 실행으로 확인했다. 이름 문자열에서 클래스를 얻고(정적 초기화 포함), `convertValue(fields, ks[0])`로 정적 의존 없이 객체를 만든다. `Class[][].class`, `treeToValue(.., Class[].class)`, `convertValue(.., Class[].class)`도 같은 원인이다 `[추론]`.
+  - 수정 제안:
+    1. 필터를 `r.getRawType().getBaseComponentType().getName().equals("java.lang.Class")`로 바꾼다. 이렇게 바꾸면 P1이 잡히고, 운영 코드 오탐이 없음을 확인했다(위 수정안 검증).
+    2. `NameToClassBinding`에 `readValue(.., Class[].class)` 예제를 더하고 `규칙은_리플렉션_우회를_실제로_잡아낸다`에서 단언한다.
+    3. D-086 결정 1번과 ADR-002 9.5 6항 문구를 "`Class`와 그 배열의 클래스 객체"로 맞춘다.
+- **R5 `getClass()`로 얻은 `Class` 타입 객체**(권고, 차단 아님)
+  - P2·P3는 리터럴 없이 F1과 같은 일을 한다. D-086:47이 "리뷰로 막는다 `[추론]`"으로 적어 두었으므로 A14와는 어긋나지 않는다.
+  - 다만 위력은 F1과 같고, 앞서 받아들인 "`Object`로 받은 Guard 객체의 `getClass()`" 한계보다 넓다. 그 한계는 Guard 객체가 이미 손에 있어야 하지만, 이 경로는 아무 클래스 객체에서나 시작할 수 있다.
+  - 정적 대안을 제안한다. 실전 경로 범위에서 Jackson 읽기 API(`readValue`·`convertValue`·`treeToValue`·`readerFor`·`forType`)의 `Class` 인자가 클래스 리터럴(`ldc`)이나 메서드의 `Class<T>` 매개변수에서 오지 않으면 실패시킨다. 바이트코드에서 인자 출처를 짧게 추적하면 된다.
+  - 이 대안을 하지 않는다면, 7단계에서 실전 경로 Jackson에 날짜 처리를 넣는 PR(QA R1) 전까지는 꼭 막아야 한다. 그 PR이 오면 risk-ops는 이 경로가 막혔는지를 승인 조건으로 본다.
+- 이 PR은 보호 테스트를 강화하므로 실전 관련 PR이다. 지침 10장·11장에 따라 머지 전에 사용자 확인과 독립 QA 재검토를 거쳐야 한다.
+
+### 판정
+수정 필요 (A2·A14, F6: `Class[].class`로 이름 문자열 클래스 찾기가 규칙을 통과해 독립 QA F1이 일부만 해소됨. 권고 R5)
