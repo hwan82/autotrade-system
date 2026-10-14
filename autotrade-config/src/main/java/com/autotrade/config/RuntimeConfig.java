@@ -7,11 +7,11 @@ import com.autotrade.domain.market.Market;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
@@ -55,7 +55,8 @@ public record RuntimeConfig(
     public record Lab(int maxParallelRuns, long defaultSeedCapitalKrw, long defaultSeedCapitalUsd) {
         public Lab {
             if (maxParallelRuns < 1 || maxParallelRuns > 64) {
-                throw new IllegalArgumentException("lab.max-parallel-runs는 1~64여야 합니다: " + maxParallelRuns);
+                // 값은 싣지 않는다: 이 메시지는 엔진 로그·실전 운영 화면 경고로 나간다(ADR-006 2.3, PR #101 QA R2)
+                throw new IllegalArgumentException("lab.max-parallel-runs는 1~64여야 합니다");
             }
             if (defaultSeedCapitalKrw < 1 || defaultSeedCapitalUsd < 1) {
                 throw new IllegalArgumentException("lab.default-seed-capital-krw/-usd는 1 이상이어야 합니다");
@@ -148,10 +149,13 @@ public record RuntimeConfig(
         public RealTrading {
             accounts = accounts == null ? List.of() : List.copyOf(accounts);
             operatorPasswordHash = operatorPasswordHash == null ? Secret.empty() : operatorPasswordHash;
-            Set<String> ids = new HashSet<>();
-            for (RealAccount a : accounts) {
-                if (!ids.add(a.id())) {
-                    throw new IllegalArgumentException("real-trading.accounts의 id가 겹칩니다: " + a.id());
+            Map<String, Integer> firstIndex = new HashMap<>();
+            for (int i = 0; i < accounts.size(); i++) {
+                Integer first = firstIndex.putIfAbsent(accounts.get(i).id(), i);
+                if (first != null) {
+                    // id 값은 싣지 않고 위치만: id 자리에 계좌번호를 적었을 수 있다(PR #101 QA R2)
+                    throw new IllegalArgumentException(
+                            "real-trading.accounts의 id가 겹칩니다(" + first + "번과 " + i + "번, 0부터)");
                 }
             }
             Map<String, Secret> numbers = new TreeMap<>();
@@ -160,7 +164,7 @@ public record RuntimeConfig(
                     Secret value = e.getValue() == null ? Secret.empty() : e.getValue();
                     // accounts에 없는 별칭은 버린다. 파일 전체를 거부하면 secrets.json의 증권사 키까지 잃어
                     // 시세 게이트웨이가 멈춘다(D-013). 버린 건수는 ConfigLoader가 경고로 남긴다(ADR-002 2.4)
-                    if (ids.contains(e.getKey()) && value.isPresent()) {
+                    if (firstIndex.containsKey(e.getKey()) && value.isPresent()) {
                         numbers.put(e.getKey(), value);
                     }
                 }
