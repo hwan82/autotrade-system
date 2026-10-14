@@ -15,6 +15,8 @@ import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
+import com.autotrade.sim.RunStatus;
+import com.autotrade.sim.account.RoundTrip;
 import com.autotrade.sim.combo.CombinationExperiment;
 import com.autotrade.sim.combo.CombinationPlan;
 import com.autotrade.sim.combo.SnapshotInputs;
@@ -45,15 +47,21 @@ import com.autotrade.strategy.catalog.ManagedStrategy;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,6 +84,7 @@ public final class WalkForwardStudy {
 
     /** 결정론 확인 줄이 들어갈 자리. 두 실행을 비교한 뒤 바꿔 넣는다. */
     static final String DETERMINISM_PLACEHOLDER = "@@DETERMINISM@@";
+    static final String INPUTS_FILE = "inputs.yaml";
 
     private WalkForwardStudy() {
     }
@@ -150,20 +159,42 @@ public final class WalkForwardStudy {
         return new Outcome(files, first.anyRunFailed(), deterministic);
     }
 
+    /**
+     * 등록 파일 내용의 SHA-256(16진수 소문자). 줄바꿈을 LF로 맞춘 뒤 계산한다: Windows 작업 트리(Git {@code core.autocrlf})의
+     * CRLF 사본과 저장소에 커밋된 LF 원본이 같은 값이 되어야 대조할 수 있다(PR #98 검토 M2).
+     */
+    static String studySha256(String text) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(text.replace("\r\n", "\n").getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. 멈추면 아무것도 쓰지 않는다. */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path snapshotsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
         Path file = experimentDir.resolve("study.yaml");
         WalkForwardPlan plan;
+        String studySha256;
         try {
-            plan = WalkForwardPlan.parse(Files.readString(file, StandardCharsets.UTF_8), file.toString());
+            String text = Files.readString(file, StandardCharsets.UTF_8);
+            plan = WalkForwardPlan.parse(text, file.toString());
+            studySha256 = studySha256(text);
         } catch (IOException e) {
             throw new UncheckedIOException("등록 파일을 읽을 수 없습니다: " + file, e);
         }
         if (!plan.id().value().equals(experimentDir.getFileName().toString())) {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다: " + experimentDir.getFileName() + " ≠ " + plan.id());
         }
-        Outcome out = run(plan, repoRoot, snapshotsRoot, code, verifyDeterminism, log, gate);
+        Outcome ran = run(plan, repoRoot, snapshotsRoot, code, verifyDeterminism, log, gate);
+        // 결과를 만든 등록 파일이 커밋된 등록 파일과 같은지 나중에 대조할 수 있게 남긴다(PR #80 검토 N1)
+        Map<String, String> files = new LinkedHashMap<>(ran.files());
+        files.computeIfPresent(INPUTS_FILE, (k, v) -> v.replaceFirst("(?m)^(experiment: .*\\n)",
+                "$1study-sha256: " + studySha256 + "\n"));
+        Outcome out = new Outcome(files, ran.anyRunFailed(), ran.deterministic());
         for (Map.Entry<String, String> f : out.files().entrySet()) {
             Path target = experimentDir.resolve(f.getKey());
             try {
@@ -416,6 +447,8 @@ public final class WalkForwardStudy {
             int failed = 0;
             int zeroTrip = 0;
             EntryFunnel.Totals funnel = EntryFunnel.Totals.ZERO;
+            long holdDays = 0;
+            long holdTrips = 0;
             for (List<WindowRun> perSeed : e.getValue()) {
                 for (WindowRun wr : perSeed) {
                     funnel = funnel.plus(wr.funnel());
@@ -423,6 +456,12 @@ public final class WalkForwardStudy {
                 if (perSeed.size() != windows.size() || !perSeed.stream().allMatch(WindowRun::completed)) {
                     failed++;
                     continue;
+                }
+                for (WindowRun wr : perSeed) {
+                    for (RoundTrip trip : wr.roundTrips()) {
+                        holdDays += ChronoUnit.DAYS.between(trip.entryDate(), trip.exitDate());
+                        holdTrips++;
+                    }
                 }
                 BigDecimal v = Pooled.perTrip(plan.seedCapital(), perSeed);
                 if (v != null) {
@@ -435,7 +474,9 @@ public final class WalkForwardStudy {
             nullPerTrip.put(e.getKey(), values);
             nullSummaries.put(e.getKey(), new NullSummary(e.getKey(), values.size(), failed, zeroTrip,
                     values.isEmpty() ? null : values.get(0), values.isEmpty() ? null : values.get(values.size() / 2),
-                    values.isEmpty() ? null : values.get(values.size() - 1), funnel));
+                    values.isEmpty() ? null : values.get(values.size() - 1), funnel,
+                    holdTrips == 0 ? null : BigDecimal.valueOf(holdDays).divide(BigDecimal.valueOf(holdTrips), 6,
+                            RoundingMode.HALF_EVEN)));
         }
         List<WalkForwardJudge.Judgement> judgements = new ArrayList<>();
         for (Candidate cand : c.candidates()) {
@@ -456,7 +497,7 @@ public final class WalkForwardStudy {
                 c.stressCost(), costTableHash, ExecutionSettings.defaults(), nullSummaries, infos,
                 c.code().commit() + (c.code().dirty() ? " dirty" : ""), c.blacklist().fingerprint(), c.blacklist().size());
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("inputs.yaml", WalkForwardReport.inputs(result, c.spanFrom()));
+        files.put(INPUTS_FILE, WalkForwardReport.inputs(result, c.spanFrom()));
         files.put("results.md", WalkForwardReport.results(result, t));
         files.put("runs.tsv", runs.toString());
         files.put("windows.tsv", WalkForwardReport.windowsTsv(result));
@@ -513,7 +554,8 @@ public final class WalkForwardStudy {
      */
     private static final class FunnelCapture implements StrategyFactory {
         private final CatalogStrategyFactory factory;
-        private final Map<String, EntryFunnel> byRun = new ConcurrentHashMap<>();
+        /** 측정하지 않는 전략(ManagedStrategy 밖)은 빈 Optional로 넣어 "못 찾음"과 구별한다. */
+        private final Map<String, Optional<EntryFunnel>> byRun = new ConcurrentHashMap<>();
 
         FunnelCapture(CatalogStrategyFactory factory) {
             this.factory = factory;
@@ -522,15 +564,22 @@ public final class WalkForwardStudy {
         @Override
         public Strategy create(StrategyProfile profile, long runSeed) {
             Strategy s = factory.create(profile, runSeed);
-            if (s instanceof ManagedStrategy m) {
-                byRun.put(profile.profileHash() + "|" + runSeed, m.entryFunnel());
-            }
+            byRun.put(profile.profileHash() + "|" + runSeed,
+                    s instanceof ManagedStrategy m ? Optional.of(m.entryFunnel()) : Optional.empty());
             return s;
         }
 
         EntryFunnel.Totals totals(RunReport r, long specSeed, LocalDate from, LocalDate to) {
-            EntryFunnel f = byRun.get(r.profile().profileHash() + "|" + RunSeeds.derive(specSeed, r.combination()));
-            return f == null ? EntryFunnel.Totals.ZERO : f.totals(from, to);
+            String key = r.profile().profileHash() + "|" + RunSeeds.derive(specSeed, r.combination());
+            Optional<EntryFunnel> f = byRun.get(key);
+            if (f == null) {
+                if (r.summary().status() != RunStatus.COMPLETED) {
+                    return EntryFunnel.Totals.ZERO; // 전략을 만들기 전에 실패한 Run
+                }
+                // Run 시드 파생이 바뀌면 표가 소리 없이 0이 되지 않게 멈춘다(PR #79 architect R6)
+                throw new IllegalStateException("진입 깔때기를 Run과 잇지 못했습니다: " + r.summary().runId() + " (" + key + ")");
+            }
+            return f.map(x -> x.totals(from, to)).orElse(EntryFunnel.Totals.ZERO);
         }
     }
 

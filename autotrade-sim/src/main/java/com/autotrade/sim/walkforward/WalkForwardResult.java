@@ -49,9 +49,12 @@ record WalkForwardResult(
             Combination high, String perturbKey, String perturbNote) {
     }
 
-    /** 대조군 분포 요약. 값은 시드별 왕복당 순손익(원). {@code funnel}은 모든 시드·검증 구간 Run의 진입 깔때기 합. */
+    /**
+     * 대조군 분포 요약. 값은 시드별 왕복당 순손익(원). {@code funnel}은 모든 시드·검증 구간 Run의 진입 깔때기 합.
+     * {@code avgHoldingDays}는 완료된 시드 전체 왕복의 평균 보유 기간(진입일~청산일 달력일, 후보 리더보드와 같은 정의). 왕복이 없으면 null.
+     */
     record NullSummary(String pairKey, int usable, int failed, int zeroTrip, BigDecimal min, BigDecimal median, BigDecimal max,
-            EntryFunnel.Totals funnel) {
+            EntryFunnel.Totals funnel, BigDecimal avgHoldingDays) {
     }
 
     /** 구간별 데이터 정보. */
