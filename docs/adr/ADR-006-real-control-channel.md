@@ -77,6 +77,8 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 
 상태 조회(`GET /api/real/status`)는 엔진 상태를 셋으로 나눈다(`engineState`): `UP`, `NOT_RUNNING`(소켓이 없거나 연결 거절이고, 잠금 파일이 없거나 거기 적힌 엔진 PID가 죽음: 엔진 프로세스 없음, 다시 뜨면 모든 계좌 OFF), `UNKNOWN`(그 밖의 모든 경우: 연결은 됐지만 2초 안에 답이 없거나 끊김, 소켓이 없는데 엔진 PID는 살아 있음, 잠금 파일을 읽지 못함. 엔진이 살아 있고 실전 계좌가 열려 있을 수 있음). 판단할 수 없으면 언제나 `UNKNOWN`이다. 조회 시각 `asOf`를 함께 준다.
 
+`UP`일 때 엔진 스냅샷(`EngineStatus`)에는 `configWarning`이 있다: 엔진이 기동할 때 `runtime-config.json`·`secrets.json`을 버렸거나 일부를 무시한 이유(`LoadedConfig.warning()`, 파일 이름·JSON 경로·규칙만, 값 없음), 문제가 없으면 빈 문자열. 파일을 버리면 실전 계좌 목록과 비밀번호 해시도 같이 빠지므로 운영 화면은 이 경고를 계좌 상태 위에 눈에 띄게 보인다(1단계 QA 권고 R3, `docs/reviews/gates/stage-1.md` S1). 표시용이며 Guard 전이와 명령 검증에는 쓰지 않는다. 이 필드가 없는 옛 엔진의 응답은 빈 문자열로 읽는다(응답은 모르는·빠진 필드에 관대, 2.3).
+
 ### 2.4 2차 확인 (RSK-01)
 
 - **운영자 비밀번호 해시**: 새 설정 키 `real-trading.operator-password-hash` 🔒(secrets.json). 형식 `pbkdf2-sha256$<반복>$<salt>$<해시>`, PBKDF2-HMAC-SHA256, 반복 600,000회 `[사실: OWASP Password Storage Cheat Sheet 권고값]`, salt 16바이트, 상수 시간 비교. 평문은 어디에도 저장하지 않는다. 해시는 `autotrade-engine hash-password`(터미널에서 화면에 보이지 않게 두 번 입력, **15자 이상**: 이 비밀번호 하나로 실전을 여는 단일 인증 요소라 NIST SP 800-63B-4의 단일 요소 최소 15자를 따른다 `[가정: 2차 자료로 확인, 원문 미확인]`)로 만들어 사용자가 secrets.json에 넣는다. 실시간 변경 불가(엔진 재기동, `RuntimeConfigHolder`가 real-trading 변경을 거부). 해시가 없거나 형식이 틀리거나 반복 횟수가 100,000 미만·10,000,000 초과면 비밀번호 미설정으로 보고 **올리는 명령과 PANIC 2단계 이후를 거절**한다(PANIC 1단계 보호 모드 고정은 한다).

@@ -99,11 +99,30 @@ class EngineMainTest {
             assertThat(status.status().accounts()).singleElement()
                     .satisfies(a -> assertThat(a.state()).isEqualTo("OFF"));
             assertThat(status.status().passwordConfigured()).isFalse();
+            assertThat(status.status().configWarning()).isEmpty();
             // 같은 설정 폴더로 두 번째 엔진은 뜨지 않는다
             assertThat(EngineMain.run(paths, FIXED)).isEqualTo(1);
             assertThat(engine.guard().state(new AccountId("KIS-US-1"))).isEqualTo(GuardState.OFF);
         }
         assertThat(socket).doesNotExist();
+    }
+
+    @Test
+    void 설정_파일을_버리고_기동하면_상태_조회에_그_경고가_실린다() throws Exception {
+        // 1단계 QA 권고 R3: 오타 키 하나로 runtime-config.json을 통째로 버리면 실전 계좌도 사라진다. 운영 화면이 알 수 있어야 한다
+        ConfigPaths paths = ConfigPaths.in(dir);
+        Files.writeString(paths.runtimeFile(), """
+                { "real-trading": { "acounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] } }
+                """);
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED);
+                ControlClient client = new ControlClient(ControlSocket.path(paths), Duration.ofSeconds(5))) {
+            ControlResponse status = client.send(ControlRequest.status());
+
+            assertThat(status.status().accounts()).isEmpty();
+            assertThat(status.status().configWarning()).contains("runtime-config.json을(를) 쓰지 않고 default로 기동")
+                    .doesNotContain(dir.toString());
+            assertThat(engine.guard().accounts()).isEmpty();
+        }
     }
 
     @Test
@@ -159,7 +178,7 @@ class EngineMainTest {
         LoadedConfig loaded = new ConfigLoader().load(paths);
         RealTradingGuard guard = EngineMain.startGuard(loaded.config(), FIXED);
 
-        assertThat(EngineMain.commandHandler(loaded.config(), guard, FIXED).status().passwordConfigured()).isFalse();
+        assertThat(EngineMain.commandHandler(loaded.config(), guard, FIXED, loaded.warning()).status().passwordConfigured()).isFalse();
     }
 
     @Test

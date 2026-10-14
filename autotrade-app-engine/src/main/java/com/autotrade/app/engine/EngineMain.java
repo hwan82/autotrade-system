@@ -83,7 +83,7 @@ public final class EngineMain {
         LoadedConfig loaded = ProcessStartup.start(PROCESS, paths, clock);
         RuntimeConfig config = loaded.config();
         RealTradingGuard guard = startGuard(config, clock);
-        EngineCommandHandler handler = commandHandler(config, guard, clock);
+        EngineCommandHandler handler = commandHandler(config, guard, clock, loaded.warning());
         ControlServer server = ControlServer.start(ControlSocket.path(paths), handler);
         LOG.log(Level.INFO, "실전 제어 명령 채널을 열었습니다(로컬 소켓, 네트워크 포트 없음)");
         return new Engine(guard, handler, server);
@@ -104,7 +104,9 @@ public final class EngineMain {
         return guard;
     }
 
-    static EngineCommandHandler commandHandler(RuntimeConfig config, RealTradingGuard guard, Clock clock) {
+    /** @param configWarning 기동 때 설정 로딩 경고. 상태 조회로 운영 화면에 보인다(1단계 QA 권고 R3) */
+    static EngineCommandHandler commandHandler(
+            RuntimeConfig config, RealTradingGuard guard, Clock clock, String configWarning) {
         RuntimeConfig.RealTrading realTrading = config.realTrading();
         Optional<OperatorPasswordHash> hash = OperatorPasswordHash.parse(realTrading.operatorPasswordHash().reveal());
         if (hash.isEmpty()) {
@@ -114,7 +116,8 @@ public final class EngineMain {
         }
         // 증권사 주문 연동 전이라 활성화 단계와 PANIC 증권사 단계는 수행 불가로 끝난다(ADR-006 2.5)
         return new EngineCommandHandler(guard, new OperatorAuthenticator(hash, clock), realTrading::isConfigured,
-                ActivationStepRunner.BROKER_NOT_CONNECTED, PanicLiquidator.BROKER_NOT_CONNECTED, CommandAuditLog.LOGGING);
+                ActivationStepRunner.BROKER_NOT_CONNECTED, PanicLiquidator.BROKER_NOT_CONNECTED, CommandAuditLog.LOGGING,
+                configWarning);
     }
 
     /** 비밀번호를 두 번 입력받아(화면에 보이지 않음) 해시를 출력한다. 평문은 출력·저장하지 않는다. */
