@@ -12,7 +12,8 @@ export async function experimentsPage() {
     get(`/api/experiment-folders?page=0&size=${FOLDER_PAGE}`).catch(err => ({ error: err.message }))]);
   const head = h('div', { class: 'page-head' }, h('div', {},
     h('h1', {}, '실험'),
-    h('p', { class: 'muted' }, '같은 기간·시드·비용 모델로 여러 전략 계좌를 돌린 결과입니다. 실험을 열면 계좌끼리 비교합니다.')));
+    h('p', { class: 'muted' }, '같은 기간·시드·비용 모델로 여러 전략 계좌를 돌린 결과입니다. 실험을 열면 계좌끼리 비교합니다.')),
+    h('a', { class: 'btn', href: '#/experiments/new' }, '새 실험 등록'));
   const list = first.total === 0
     ? h('div', { class: 'empty' },
       h('p', {}, '화면에 올라온 실험이 없습니다.'),
@@ -69,7 +70,11 @@ function folderSection(res) {
       f.lastError ? h('span', { class: 'sub warn' }, ` ${f.state === 'INVALID' ? '' : '실패: '}${f.lastError}`) : null) },
     { label: '', render: f => f.state === 'READY'
       ? h('button', { class: 'btn secondary', type: 'button', onclick: (ev) => load(f, ev.currentTarget) }, '불러오기')
-      : null },
+      : f.state === 'NOT_RUN' || f.state === 'NO_BUNDLE'
+        ? h('details', {}, h('summary', {}, '실행 명령'),
+          h('p', { class: 'hint' }, '등록 파일을 커밋한 뒤 터미널에서 돌립니다.'),
+          h('pre', { class: 'yaml' }, `./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=${f.id} -PverifyDeterminism`))
+        : null },
   ], folders), res.total > folders.length ? h('p', { class: 'muted small' }, `최근 ${folders.length}개만 보입니다(전체 ${number(res.total)}개).`) : null);
 }
 

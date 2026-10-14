@@ -27,9 +27,9 @@
 
 멱등 키는 전략이 아니라 실행기가 붙인다. 전략이 키를 만들면 "새 키는 발급기만 만든다"(IdempotencyKey 주석)를 어기게 된다.
 
-### 2.2 가상 체결 규칙 `BOOK-V3` (`autotrade-sim`, `exchange.VirtualExchange`)
+### 2.2 가상 체결 규칙 `BOOK-V4` (`autotrade-sim`, `exchange.VirtualExchange`)
 
-`BOOK-V1`(1~10번)에 시세 공백 처리(11번)를 더한 것이 `BOOK-V2`다([D-068](../decisions/D-068-recording-adapter-gap-handling.md)). 공백이 없는 데이터의 결과는 두 버전이 같다. 여기에 매매 단계(12번)를 더한 것이 `BOOK-V3`다([D-069](../decisions/D-069-session-phases-recording-experiment.md)). 단일가 구간이 없는 규칙(정규장 내내 접속 매매)으로 돌린 결과는 BOOK-V2와 같다.
+`BOOK-V1`(1~10번)에 시세 공백 처리(11번)를 더한 것이 `BOOK-V2`다([D-068](../decisions/D-068-recording-adapter-gap-handling.md)). 공백이 없는 데이터의 결과는 두 버전이 같다. 여기에 매매 단계(12번)를 더한 것이 `BOOK-V3`다([D-069](../decisions/D-069-session-phases-recording-experiment.md)). 단일가 구간이 없는 규칙(정규장 내내 접속 매매)으로 돌린 결과는 BOOK-V2와 같다. 평가 가격과 단일가 체결 창(13번)을 더한 것이 `BOOK-V4`다([D-075](../decisions/D-075-book-v4-auction-print-window.md)). 장 밖 체결과 장중 시작이 없는 데이터의 결과는 BOOK-V3과 같다.
 
 `VirtualExchange`는 계좌 하나의 `OrderGateway` 가상 구현이다. 증권사 주문 API를 호출하지 않는다(SIM-01, ArchUnit `시뮬레이션은_증권사_플러그인을_모른다`).
 
@@ -45,6 +45,7 @@
 10. **주문 지연 기본값 0.5초** `[가정]`. 체결 규칙 버전과 지연은 `ExecutionSettings.id()`(예: `BOOK-V2;latency=PT0.5S`)로 결과에 남기고 같은 ID끼리만 비교한다.
 11. **시세 공백**(`DataGap`, 원인 무관, RECORDER_RESTART 포함): 그 종목의 마지막 호가 스냅샷을 체결과 시장가 매수 예약에 쓰지 않고, 그 종목 대기 지정가의 앞선 잔량을 "모름"으로 되돌린다. 공백 자체로는 체결하지 않는다. 다음 스냅샷 전까지 그 종목 시장가는 체결되지 않고 대기 지정가는 지정가보다 유리한 체결로만 체결되며, 새 스냅샷의 같은 가격 잔량으로 앞선 잔량을 다시 잡는다. 주문은 남기고, 평가 가격(마지막 체결가, 없으면 마지막 스냅샷 최우선 매수 호가)과 거래 상태는 그대로 쓴다.
 12. **매매 단계**(`MarketRules.sessionPhase`, 이벤트의 거래소 시각 기준): 접속 매매(`CONTINUOUS`) 이벤트로만 1~11번대로 체결한다. 단일가 접수 구간(`OPENING_AUCTION`, `CLOSING_AUCTION`) 이벤트는 체결에 쓰지 않고(예상 호가), 그때 유효한 그 종목 미체결 주문을 그 단일가 참여 주문으로 표시한다. 구간이 끝난 뒤 그 종목 첫 체결(시가는 접속 매매 첫 체결, 종가는 폐장 뒤 첫 체결)을 단일가 체결로 보고 참여 주문을 접수 순서대로 그 체결가 하나로, 그 체결 수량 안에서 체결한다(시장가는 무조건, 지정가는 체결가가 지정가 이내일 때, 슬리피지 0). 시가 단일가에서 남은 수량은 접속 매매 주문으로 이어지고 종가 단일가에서 남은 수량은 장 마감에 만료된다. 장 밖(`CLOSED`) 이벤트로는 단일가 체결 말고는 체결하지 않는다. 단일가 구간 중 그 종목 시세 공백이 오면 참여 표시를 지운다. 시가 단일가로 여는 시장(`MarketRules.opensWithAuction`, KRX)은 단일가 접수 마감이 임의로 늦춰지므로(랜덤 엔드 `[가정]`), 개장 시각이 지나도 그 종목 그날 첫 체결 전까지의 이벤트를 시가 단일가 접수로 본다: 호가로 체결하지 않고, 그 사이 새 주문도 참여하며, 첫 체결 직전까지 유효해진 주문은 모두 그 체결가로 체결된다. 그 사이 시세 공백이 오면 열린 것으로 보고 공백 뒤 새 호가부터 접속 매매로 체결한다. 이벤트 시각이 합성인 데이터(`MarketDataSet.exchangeTimed() == false`, 일봉 경로)는 매매 단계를 보지 않는다(BOOK-V2와 같음): 칸 시각이 그날 실제 개장 시각을 따르지 않고 캘린더 수록 범위 밖 과거도 있기 때문이다.
+13. **평가 가격과 단일가 체결 창**(D-075): 마지막 체결가(평가 가격)는 정규장 체결로만 갱신한다(접속 매매 체결 틱, 시가 단일가 체결, 종가 단일가 체결). 장전·장후 시간외 체결과 단일가 접수 구간의 체결 이벤트는 쓰지 않는다. 종가 단일가 체결은 종가 단일가 구간이 끝나고 `VirtualExchange.AUCTION_PRINT_GRACE`(60초, 랜덤 엔드 상한 30초 `[가정]` + 지연 여유) 안의 그 종목 그날 첫 체결로만 보고, 그보다 늦은 장 밖 체결로는 종가 참여 주문을 체결하지 않는다. 시가 단일가로 여는 시장에서 그날 그 종목 첫 이벤트가 개장 뒤 60초보다 늦게 오면(녹화가 장중에 시작) 시가 단일가 체결이 이미 지난 것으로 보고 그 이벤트부터 접속 매매로 체결한다.
 
 ### 2.3 비용 모델 (`autotrade-sim`, `cost`)
 
@@ -119,7 +120,7 @@
 | 비용 표 설정 키(`cost.profiles.*`, Q-004 조사 4장) | architect | 지금은 `CostModels`의 코드 기본값. 설정에서 읽어도 `CostModel` 구조는 같다 |
 | 실험 진행 보고·취소, 실험실 자원 상한(SIM-14) | sim-engine, app-lab | `lab.max-parallel-runs`를 `parallelism`으로 넘긴다 |
 | 실시간 모의 대 리플레이 차이 측정(SIM-13), 실시간 실행기 | sim-engine | 6단계 |
-| 장 시작·마감 단일가 구간(KRX 08:30~09:00, 15:20~15:30) 처리 | sim-engine, data-engineer, architect | **[D-069](../decisions/D-069-session-phases-recording-experiment.md)로 끝남**(`MarketRules.sessionPhase`, `BOOK-V3` 단일가 일괄 체결). 시간외 매매 모의, 특별 운영일 단일가 시간 공지 대조는 남음 |
+| 장 시작·마감 단일가 구간(KRX 08:30~09:00, 15:20~15:30) 처리 | sim-engine, data-engineer, architect | **[D-069](../decisions/D-069-session-phases-recording-experiment.md)로 끝남**(`MarketRules.sessionPhase`, `BOOK-V3` 단일가 일괄 체결). 장 밖 체결 평가·종가 체결 창·장중 시작 녹화는 [D-075](../decisions/D-075-book-v4-auction-print-window.md)(`BOOK-V4`). 시간외 매매 모의, 특별 운영일 단일가 시간 공지 대조는 남음 |
 | PR #10 `DataGap` 처리: 그 종목 앞선 잔량·호가 무효화, Run 보고서에 공백 표시, 거래일 판정에서 제외 | sim-engine | **호가·앞선 잔량 무효화(`BOOK-V2`)와 보고서 `data-gap` 줄은 [D-068](../decisions/D-068-recording-adapter-gap-handling.md)으로 끝남.** 남은 것: 공백이 있는 거래일을 거래일 판정·지표에서 다루는 방법, 실험실 결과 묶음(D-062)에 공백 표시 |
 | 체결 모델 ID를 `ExperimentSpec.executionModelId`로 옮겨 명세만으로 재현, 벤치마크 종목도 결과에 기록 | sim-engine, architect | DB 저장 작업과 함께(architect 검토 2) |
 | 장 마감 시 VI·정지 상태와 호가 초기화 여부, 유효 시점·비용 날짜 기준 통일(`receivedAt + latency`, `exchangeTime`) | sim-engine | architect 검토 4·5. 동작이 바뀌므로 `RULES_VERSION` 상향과 함께 |

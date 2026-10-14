@@ -28,3 +28,13 @@ export async function request(method, url, body) {
 export const get = (url) => request('GET', url);
 export const post = (url, body) => request('POST', url, body);
 export const put = (url, body) => request('PUT', url, body);
+
+/** 페이징 목록을 끝까지 읽는다(200개가 넘어도 빠지지 않게, PR #49 architect 권고 3). url에는 이미 ?가 있어야 한다. */
+export async function getAll(url) {
+  const out = [];
+  for (let page = 0; ; page++) {
+    const res = await get(`${url}&page=${page}&size=200`);
+    out.push(...res.items);
+    if (out.length >= res.total || res.items.length === 0) return out;
+  }
+}

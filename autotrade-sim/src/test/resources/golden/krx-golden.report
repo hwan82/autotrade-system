@@ -1,7 +1,7 @@
 experiment EXP-20261008-GOLD
 code test
 cost-table-hash 9464ccf33cb9633f663a33e4520d6921328ad2a9551cfc7418174cb160ded5ad
-execution-model BOOK-V3;latency=PT0.5S
+execution-model BOOK-V4;latency=PT0.5S
 
 run EXP-20261008-GOLD-A01 status=COMPLETED profile=mkt-hold@1 hash=0af599999cc0652f6bd0d67be9cbc3dcf4ca3d64ac54437e3c6d72846514f9b5 seed=-74931971884477194
   metrics observation-days=2 final-equity=10055715 KRW total-return=0.005572 cagr=- mdd=0.000000 sharpe=-

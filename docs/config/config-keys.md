@@ -38,7 +38,7 @@
 | `server.port` | `8480` (환경 변수 `AUTOTRADE_UI_PORT`) | 대시보드 포트 | ADR-005 |
 | `autotrade.lab.strategies-dir` | `strategies` (실행 폴더 기준, bootRun은 저장소 루트) | 전략 프로필 YAML 폴더 | ADR-005 4장 |
 | `autotrade.lab.selections-dir` | `selections` (실행 폴더 기준, bootRun은 저장소 루트) | 선정 프로필 YAML 폴더. 실험 실행기가 읽는 `selections/`와 같은 폴더를 가리켜야 화면에서 만든 선정이 실험에 쓰인다 | ADR-005 4·5장, ADR-007 2.1, D-060 |
-| `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다 | D-062 |
+| `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다. 실험 생성 화면도 이 폴더에 새 실험 폴더와 등록 파일(`experiment.yaml`)을 쓴다 | D-062, D-074 |
 
 ## 아직 없는 키 (담당 작업에서 추가)
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).

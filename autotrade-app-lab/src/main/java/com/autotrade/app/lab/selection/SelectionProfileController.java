@@ -35,10 +35,14 @@ public class SelectionProfileController {
         this.store = store;
     }
 
+    /** 목록. {@code market}·{@code style}을 주면 그 시장·스타일만(실험 생성 화면의 조합 고르기, STR-02). */
     @GetMapping
     public Page<SelectionProfileStore.SelectionSummary> list(
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-        return Page.of(store.list(), page, size);
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) Market market, @RequestParam(required = false) TradingStyle style) {
+        return Page.of(store.list().stream()
+                .filter(p -> (market == null || p.market() == market) && (style == null || p.style() == style))
+                .toList(), page, size);
     }
 
     @GetMapping("/{id}")
@@ -96,6 +100,18 @@ public class SelectionProfileController {
                 request.note()));
     }
 
+    /**
+     * 저장하기 전 확인: 이 파라미터로 저장하면 원본({@code version})과 선정 결과가 같은 새 버전(새 해시)이 되는지(D-074).
+     * 파일은 쓰지 않는다.
+     */
+    @PostMapping("/{id}/versions/{version}/compare")
+    public SelectionEquivalence.Result compare(
+            @PathVariable String id, @PathVariable int version, @RequestBody CompareRequest request) {
+        StoredSelection base = store.find(id, version)
+                .orElseThrow(() -> ApiException.notFound("선정 프로필 버전이 없습니다"));
+        return SelectionEquivalence.compare(base.profile(), request == null ? Map.of() : params(request.parameters()));
+    }
+
     private static Map<String, String> params(Map<String, String> parameters) {
         return parameters == null ? Map.of() : parameters;
     }
@@ -116,6 +132,9 @@ public class SelectionProfileController {
     public record CreateRequest(
             String id, Market market, TradingStyle style, Map<String, String> parameters, String basedOn,
             String note) {
+    }
+
+    public record CompareRequest(Map<String, String> parameters) {
     }
 
     public record VersionRequest(Integer baseVersion, Map<String, String> parameters, String note) {

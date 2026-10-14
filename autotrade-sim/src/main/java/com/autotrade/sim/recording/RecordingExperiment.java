@@ -1,8 +1,12 @@
 package com.autotrade.sim.recording;
 
+import com.autotrade.domain.MarketRules;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.MarketEvent;
+import com.autotrade.domain.market.OrderBookSnapshot;
+import com.autotrade.domain.market.PriceLevel;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.rules.InstrumentKind;
@@ -102,9 +106,12 @@ public final class RecordingExperiment {
             log.accept("녹화일 " + d.date() + ": 줄 " + d.recordedEvents() + ", 정상 종료 " + d.complete() + ", 잘림 "
                     + d.truncated() + ", 구간 " + d.segments() + ", 끼운 공백 " + d.insertedGaps());
         }
+        // 녹화에는 상품 유형이 없다. 주식 호가 단위로 보고, 그 단위에 맞지 않는 가격이 있으면 거절한다(D-075)
+        KrxMarketRules rules = new KrxMarketRules(calendar, s -> InstrumentKind.STOCK);
         TreeSet<Symbol> symbols = new TreeSet<>();
         for (MarketEvent e : data.events()) {
             symbols.add(e.symbol());
+            requireStockTicks(rules, e);
         }
         for (Symbol s : symbols) {
             if (!plan.boards().containsKey(s.code())) {
@@ -118,8 +125,6 @@ public final class RecordingExperiment {
         });
         log.accept("이벤트 " + data.events().size() + ", 종목 " + symbols.size() + ", 데이터셋 " + data.version());
 
-        // 녹화에는 상품 유형이 없다. 등록 파일 종목은 주식만 받으므로(boards) 주식 호가 단위를 쓴다
-        KrxMarketRules rules = new KrxMarketRules(calendar, s -> InstrumentKind.STOCK);
         CostModel cost = CostModels.krDefault(s -> plan.boards().get(s.code()));
         CatalogStrategyFactory factory = new CatalogStrategyFactory(rules);
         List<Combination> combinations = new ArrayList<>();
@@ -159,6 +164,34 @@ public final class RecordingExperiment {
         files.put("results.md", results(plan, data, cost, execution, blacklist, report, determinism));
         files.put("detail.txt", detail);
         return new Outcome(spec, report, data, files);
+    }
+
+    /**
+     * 녹화 가격이 주식 호가 단위에 맞는지 본다(D-075, architect PR #74 R2). ETF·ETN(5원 단위)은 주식 단위에 맞지 않는 가격이
+     * 나와 여기서 걸린다. 비용 표에 ETF·ETN 과세 구분이 없어(증권거래세 비과세 `[추론]`, docs/research/q-004-trading-costs.md)
+     * 녹화 실험은 아직 주식만 받는다.
+     *
+     * @throws IllegalArgumentException 호가 단위에 맞지 않는 가격이 있을 때
+     */
+    static void requireStockTicks(MarketRules rules, MarketEvent e) {
+        if (e instanceof TradeTick t) {
+            requireTick(rules, e, t.price());
+        } else if (e instanceof OrderBookSnapshot b) {
+            for (PriceLevel l : b.asks()) {
+                requireTick(rules, e, l.price());
+            }
+            for (PriceLevel l : b.bids()) {
+                requireTick(rules, e, l.price());
+            }
+        }
+    }
+
+    private static void requireTick(MarketRules rules, MarketEvent e, BigDecimal price) {
+        if (rules.roundToTick(e.symbol(), price, RoundingMode.DOWN).compareTo(price) != 0) {
+            throw new IllegalArgumentException("주식 호가 단위에 맞지 않는 녹화 가격입니다: " + e.symbol().code() + " "
+                    + price.toPlainString() + " (sequence " + e.sequence() + "). ETF·ETN 같은 주식 밖 종목은 녹화 실험이 아직 "
+                    + "받지 않으니 녹화 종목에서 빼고 다시 녹화하세요");
+        }
     }
 
     /** 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. 멈추면 결과 파일을 하나도 쓰지 않는다. */
