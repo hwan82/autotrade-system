@@ -7,7 +7,7 @@
 
 ## 결정
 
-1. **명령**: `./gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=<실험ID> [-Pto=YYYY-MM-DD]`(`ExperimentMain live-weekly`, 본체 `LiveWeeklyCheck`). D-063 장 시간 보호·정지 요청 파일을 그대로 받는다. 기본 마지막 날은 운용 기간 안 입력 기록의 마지막 날, 주는 그 앞 7일(운용 시작 앞으로는 가지 않음).
+1. **명령**: `./gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=<실험ID> [-Pto=YYYY-MM-DD]`(`ExperimentMain live-weekly`, 본체 `LiveWeeklyCheck`). D-063 장 시간 보호·정지 요청 파일을 그대로 받는다. 기본 마지막 날은 운용 기간 안 입력 기록일과 녹화일 중 마지막 날(실험실을 마지막 날에 끈 경우도 보이게), 주는 그 앞 7일(운용 시작 앞으로는 가지 않음).
 2. **입력 대조(날마다)**: 같은 날 게이트웨이 녹화(`<설정 폴더>/recordings`, `-PrecordingsDir`)에서 등록 파일 `boards`·운용 기간에 드는 줄과 입력 기록(`live-sessions/<ID>/journal`)의 줄을 원래 소스·소스 순번·내용(녹화 순번 빼고)으로 맞춘다. 전달은 녹화와 같은 줄 형식이고 수신 시각도 게이트웨이 값이라(ADR-010 2.2) 같은 이벤트면 같은 열쇠다.
    - 점검 날짜는 입력 기록이 있는 날과 게이트웨이 녹화가 있는 날을 합친 것이다. 실험실을 하루 통째로 끈 날은 "기록 없음" 행으로 나오고 그날 boards 줄은 모두 세션 밖 빠짐이다(architect PR #107 R2).
    - 녹화에만 있는 줄(빠짐)은 그 이벤트 수신 시각을 덮는 실험실 쪽 공백으로 먼저 원인을 나눈다: 받는 쪽 끊김(`FEED-CLIENT`), 실험실 재기동(`RECORDER`), 게이트웨이 전달 큐 넘침(`FEED`, 그 종목), 실험실 받는 큐 넘침(`LAB-INBOX`, 그 종목). 끊김·재기동 공백 줄은 앞 구간에 나온 종목마다 하나씩이지만 그 사이에는 연결이나 프로세스 자체가 없었으므로 종목과 상관없이 시각 구간으로 본다.

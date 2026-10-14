@@ -133,7 +133,7 @@ public final class LiveWeeklyCheck {
      * @param experimentDir {@code experiments/<실험ID>}
      * @param sessionsRoot 세션 폴더들의 부모(설정 폴더 아래 {@code live-sessions})
      * @param recordingsRoot 게이트웨이 녹화 폴더(설정 폴더 아래 {@code recordings})
-     * @param to 점검 마지막 날. 비어 있으면 운용 기간 안 입력 기록의 마지막 날
+     * @param to 점검 마지막 날. 비어 있으면 운용 기간 안 입력 기록일과 녹화일 중 마지막 날
      * @throws IllegalArgumentException 입력이 맞지 않을 때(등록 파일, 입력 기록 없음 등)
      */
     public static Outcome run(Path experimentDir, Path repoRoot, Path sessionsRoot, Path recordingsRoot,
