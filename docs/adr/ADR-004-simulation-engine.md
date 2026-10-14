@@ -68,6 +68,7 @@
 - 거래일 마감: 남은 주문 취소, 자산 곡선 한 점(평가 가격은 마지막 체결가, 없으면 최우선 매수 호가, 없으면 원가), 계좌 불변식 검사(SIM-15, `LedgerCheck`). 위반이면 그 Run만 FAILED.
 - 녹화 실험 명령(`recording.RecordingExperiment`, D-069): `runRecordingExperiment`가 등록 파일(`input: "recording"`)의 기간·프로필·소속부·제외 종목으로 실녹화를 실제 `KrxMarketRules` 위에서 돌리고, `inputs.yaml`에 녹화일별 입력 품질(`DayInfo`)과 `detail.txt` SHA-256을 남긴다.
 - 녹화 입력(`recording.RecordedMarketDataSet`, D-068): 기간 안 녹화일을 날짜 오름차순으로 잇는다. sequence는 녹화일 → 녹화 순번 순의 데이터셋 위치(1부터)이고 `origin(sequence)`가 (녹화일, 녹화 순번)을 돌려준다(끼워 넣은 줄은 0). 리플레이 소스의 "sequence = 녹화 순번"(ADR-003 2.4)은 그대로다. 공백 표시 없는 이전 녹화의 재기동 경계에는 녹화기와 같은 규칙으로 `RECORDER_RESTART` 공백을 끼운다. 버전은 `REC-<시장>-<첫 날>..<끝 날>-<해시 16자>`(어댑터 버전 `REC-ADAPTER-V1`, 시장, 날짜별 events 파일 SHA-256)이고, 읽는 동안 파일이 바뀌면 열지 않는다.
+- Run 한 개의 단계(시작·이벤트 처리·거래일 마감·끝 정리·실패 기록)는 `run.RunStepper`에 있다. 리플레이 실행기와 실험실 실시간 모의 세션(`live.LiveSession`, D-076, [ADR-010](ADR-010-live-feed-and-session.md))이 같은 코드를 쓴다. 실행기의 `clockMode == REPLAY` 검사는 그대로이고, 실시간 세션은 실행기를 거치지 않고 입력 기록 순번으로 `RunStepper`를 직접 움직인다(실시간 결과 = 입력 기록 리플레이, `runLiveReplayCheck`).
 - 식별자: `runId = accountId = <실험ID>-A01, -A02 …`(프로필 목록 순서).
 - Run 시드: `SHA-256("run-seed-v1|" + randomSeed + "|" + profileHash)` 앞 8바이트(big-endian long). 바꾸면 접두어 버전을 올린다.
 - 실패 격리: Run 안의 모든 `RuntimeException`은 그 Run의 FAILED와 사유(클래스명 + 메시지, 500자)로 끝나고 다른 Run은 계속 돈다.
