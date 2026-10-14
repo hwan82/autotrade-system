@@ -23,7 +23,7 @@
 
 ## 3. 기획서 요구사항별 대조
 
-판단 칸: **충족** = 기획서의 검증 방법이 지금 main에 자동 검사나 문서로 있음, **부분** = 일부만 있음, **이연 제안** = 1단계 범위에서 빼고 뒤 단계로 옮기자는 제안(4장).
+판단 칸: **충족** = 기획서의 검증 방법이 지금 main에 자동 검사나 문서로 있음, **부분** = 일부만 있음, **이연** = 1단계 범위에서 빼고 7단계로 옮김(4장, 사용자 결정 A).
 
 | ID | 판단 | 근거 |
 |---|---|---|
@@ -40,8 +40,8 @@
 | CFG-02 재기동 시 실전 OFF | 충족 | `ConfigLoaderTest` `실전_활성화_키가_있는_파일은_받아들이지_않는다`, `설정_스냅샷에는_실전_활성화_상태가_없다`, `RealTradingGuardTest`(RSK-01·CFG-02), `EngineMainTest:69`. 환경변수 계층은 설정 로더가 환경변수를 키로 읽지 않아(ADR-001 2.6) 해당 없음 `[추론]` |
 | CFG-03 비밀값 분리·스캔·마스킹 | 충족 | `ConfigLoaderTest` `일반_설정_파일에_비밀값이_있으면_그_파일을_쓰지_않는다`, `SecretTest` `설정_전체를_로그로_찍어도_비밀값이_나오지_않는다`, CI gitleaks 전 이력(`ci.yml:153`) |
 | CFG-04 증권사·계좌 키 구조 ADR | 충족 | ADR-001 2.6·2.6.1, ADR-002 2.4(`account-numbers` 맵으로 수정), `docs/config/config-keys.md` |
-| CFG-05 운영 중 키·증권사 교체 규칙 | **부분 → 이연 제안** | 있는 것: 실시간 변경 거부(`RuntimeConfigHolderTest` `시세_구성과_증권사_키는_실시간으로_바꿀_수_없다`, `실전_계좌는_실시간으로_바꿀_수_없다`, `RuntimeConfigHolder.java:46` 메시지 "CFG-05"). 없는 것: 기획서 검증 방법 "미체결이 있을 때 키 교체 거부 테스트, 보유가 있을 때 증권사 교체 거부 테스트". 미체결·보유는 실전 주문 경로가 있어야 판단할 수 있다(ADR-001 2.6 "별도 경로로 연다") |
-| CFG-06 설정 3분류 | **부분 → 이연 제안** | 있는 것: 전략 프로필은 새 버전으로만 변경(`StrategyProfileStoreTest` `편집은_새_버전과_새_해시를_만들고_옛_버전은_그대로다`, `이미_있는_버전_파일은_덮어쓰지_않는다`), 프로필 해시 골든(`StrategyProfileTest`). 없는 것: ① "실행 중 Run 파라미터 변경 시도 실패 테스트". 설계로는 `StrategyProfile`이 record이고 파라미터를 생성 때 복사하며(`StrategyProfile.java:25,41`), `ExperimentSpec`도 record로 조합 목록을 `List.copyOf`로 복사한다(`ExperimentSpec.java:34,59`). 그러나 이를 확인하는 실패 테스트는 없다 ② 운영 설정 변경의 감사 로그(`autotrade-config`에 감사 기록 없음) ③ "2차 확인 없는 실전 한도 변경 거부 테스트". 실전 한도 키는 Q-008(미확정)이 정해져야 생긴다(`RuntimeConfig.java:23` "리스크 한도 키는 Q-008 이후 별도 작업") |
+| CFG-05 운영 중 키·증권사 교체 규칙 | **부분 → 이연(사용자 결정 A, 4장)** | 있는 것: 실시간 변경 거부(`RuntimeConfigHolderTest` `시세_구성과_증권사_키는_실시간으로_바꿀_수_없다`, `실전_계좌는_실시간으로_바꿀_수_없다`, `RuntimeConfigHolder.java:46` 메시지 "CFG-05"). 없는 것: 기획서 검증 방법 "미체결이 있을 때 키 교체 거부 테스트, 보유가 있을 때 증권사 교체 거부 테스트". 미체결·보유는 실전 주문 경로가 있어야 판단할 수 있다(ADR-001 2.6 "별도 경로로 연다") |
+| CFG-06 설정 3분류 | **부분 → 이연(사용자 결정 A, 4장)** | 있는 것: 전략 프로필은 새 버전으로만 변경(`StrategyProfileStoreTest` `편집은_새_버전과_새_해시를_만들고_옛_버전은_그대로다`, `이미_있는_버전_파일은_덮어쓰지_않는다`), 프로필 해시 골든(`StrategyProfileTest`). 없는 것: ① "실행 중 Run 파라미터 변경 시도 실패 테스트". 설계로는 `StrategyProfile`이 record이고 파라미터를 생성 때 복사하며(`StrategyProfile.java:25,41`), `ExperimentSpec`도 record로 조합 목록을 `List.copyOf`로 복사한다(`ExperimentSpec.java:34,59`). 그러나 이를 확인하는 실패 테스트는 없다 ② 운영 설정 변경의 감사 로그(`autotrade-config`에 감사 기록 없음) ③ "2차 확인 없는 실전 한도 변경 거부 테스트". 실전 한도 키는 Q-008(미확정)이 정해져야 생긴다(`RuntimeConfig.java:23` "리스크 한도 키는 Q-008 이후 별도 작업") |
 | OVS-02 시장 차이는 `MarketRules`로만(인터페이스) | 충족(인터페이스), 검사는 수동 | `MarketRules` 계약(ADR-001 2.3), `MarketRulesTest`, `MarketRulesImplTest`. 기획서 검증 "엔진 코드에 시장 분기 없음(검사)"은 자동 검사가 없다. 수동 확인: `Market.KRX`·`Market.US` 직접 참조는 sim의 실험 명령 입구(`CombinationExperiment.java:112`, `WalkForwardStudy.java:97`, `RecordingPlan.java:97`, KRX 전용 거절)와 비용 표(`CostModels.java:73,99`), 합성 시세(`synthetic`), 그리고 sim 밖 두 곳이다. `DailyBarQualityCheck.java:222`는 일봉 품질 검사의 가격 급변 임계를 `MarketRules`를 거치지 않고 시장별로 고르는 **실제 시장 분기**이고, `SelectionCriteria.java:231`은 재무 지표를 KRX에서만 받는 입구 거절이다. `exchange`·`account`·`run`, `autotrade-risk`, `autotrade-app-engine`에는 없다(`grep -rn "Market\.KRX\|Market\.US"`, PR #81 architect 검토 반영). 5장 G4 |
 | OVS-03 거래소 현지 시간대, 서머타임 하드코딩 금지 | 충족 | `ExchangeCalendarTest` `미국_정규장은_서머타임을_시간대_데이터로_따른다`, `미국_장은_한국_날짜로_이틀에_걸쳐도_현지_날짜로_판단한다`, `MarketRulesImplTest` `거래일과_시간대는_시장_현지_기준이다` |
 
