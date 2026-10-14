@@ -130,3 +130,43 @@
 
 ### 사용자 확인 (2026-10-14T02:15:55Z, QA 스레드)
 - 사용자 BAE: "CFG-05·06 검증을 7단계로 미루는 A안골랐어". 재검토 "완료에 필요한 것" 2(결정 A 출처 확인)는 이것으로 닫는다. 판정은 바뀌지 않는다: 수정 필요(C5 문서 불일치 4건). 남은 것은 C5 ①~④ 정리 뒤 main 재판정 요청뿐이다.
+
+## 재검토 2026-10-14 (2) (main `5eb0885` 기준)
+- 대상: main `5eb0885`(지난 재검토 `4e32d75` 뒤 PR #87 `40388a4` 실시간 시세 전달·실시간 모의 세션 D-076, PR #89 `b89c2e9` 1단계 C5 정리 D-077·D-078, PR #88 `5eb0885` 5단계 판정 반영 D-079). `git diff 4e32d75 5eb0885` 57파일 +4842 −277 중 1단계 판정과 닿는 곳(결정 로그, ADR-001·002, ADR 목록, 스모크, 설정 키 문서, 진입점·외부 호출 위치)을 확인. PR #87 코드는 실전 관련 PR로 별도 QA 판정(`docs/reviews/pr-87/qa.md` 승인)이 있어 이 판정에서는 1단계 계약(진입점·ArchUnit·설정 체계·외부 호출)만 다시 봤다
+- 점검표: C 전체 + 과금 검사(QA 지침 8장). `docs/qa/checklists.md` 변경 없음
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon --rerun-tasks`(main `5eb0885`, 작업 트리 깨끗함) → **BUILD SUCCESSFUL in 2m 54s, 130 actionable tasks: 130 executed**(1회째, 캐시 결과에 기대지 않음). 테스트 결과 XML 합계 **1,056건, 실패 0·오류 0·건너뜀 0**
+  - PostgreSQL 16.15 빈 클러스터에 `V1`·`V2`·`schema-smoke.sql` 적용, 셋 다 종료 코드 0, 스모크 `ok:` **11건**(새 `ok: buy row with realized pnl rejected` 포함)
+  - `grep`: 운영 코드 `Clock.system*` 호출 7곳(`CollectorMain`·`WatchdogMain`·`KiwoomDailyMain`·`GatewayMain`·`EngineMain`·`CoreConfiguration`·`ExperimentMain`), 새 시세 전달 코드의 연결 대상(`FeedServer.java:82`·`FeedClient.java:129` `UnixDomainSocketAddress`만), 설정 키 문서의 새 항목(`run/market-feed.sock` ↔ `FeedSocket.java:20`)
+
+### 지난 재검토 "완료에 필요한 것" 처리
+1. **C5 ①~④** → **모두 해결.**
+   - ① `docs/decisions/README.md:83` D-077(ADR-001 6장 10건, ⑧ "**Q-009 닫음**"), `:109` 닫힌 미확정 표 Q-009 "D-077 ⑧로 닫음". 미확정 표에서 빠짐
+   - ② `ADR-002:3` "상태: 채택 (PR #9 머지, 2026-10-08 사용자 결정. 이전 상태: 제안 (risk-ops)) … 결정 로그 번호: D-078", `docs/adr/README.md` ADR-002 행 "채택(PR #9 사용자 머지, D-078)", `docs/decisions/README.md:84` D-078(ADR-002 7장 8건)
+   - ③ ADR-001 2.4 원문을 남기고 "정정 기록(2026-10-14, 1단계 QA C5 ③)"으로 지금 7곳을 나열. QA `grep` 결과 7곳과 이름까지 일치(ADR 규칙 "기존 내용 지우지 않음"에도 맞음)
+   - ④ ADR-001 2.7에 정정 기록, `scripts/ci/schema-smoke.sql`에 매수 행 실현손익 거부 경우 추가. QA 직접 실행에서 `ok: buy row with realized pnl rejected` 확인
+2. **결정 A 출처** → 위 "사용자 확인 (2026-10-14T02:15:55Z)"으로 닫힘. 결정 로그 번호·기획서 14장 7단계 행 반영은 개발 쪽 완료 기록 PR 몫(대조표 4장)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| C1 | 통과 | 완료 기준 "빌드·테스트 통과"(위 직접 실행 `--rerun-tasks` 1,056건 실패 0), "ADR 작성"(ADR-001·ADR-002, 1차 판정 C1 상세 2). 기획서 1단계 요구사항 중 CFG-05·06 부분 충족은 사용자 결정 A(QA 스레드 확인)로 7단계 이연·1단계 후속 과제로 정리됨 |
+| C2 | 통과 | 1차 판정과 같음. 새 원문 `pr-89/architect.md`·`pr-89/risk-ops.md`는 이 C5 정리 PR의 검토이고 마지막 판정 승인 |
+| C3 | 통과 | 1단계 자율 결정 18건에 결정 로그 번호 부여됨(D-077 10건, D-078 8건). 사용자 확인이 필요한 항목(결정 A)은 확인됨. D-078은 PR #9 사용자 머지가 결정 |
+| C4 | 통과 | 1차 판정과 같음. 남은 1단계 관련 미확정은 Q-008(실전 한도 값, CFG-06 ③, 담당 명시) |
+| C5 | 통과 | 표본 9곳 모두 일치. 지난 불일치 1~4는 위 1 ①~④로 해소, 일치하던 5~9는 이번 diff에서 해당 코드·문서 변경 없음(`RuntimeConfigHolder`, `RuntimeConfigStore`, `ConfigLoader`, `V1__lab_baseline.sql`, `StrategyProfile` 모두 diff 밖). 추가 표본: `config-keys.md`의 새 `run/market-feed.sock` ↔ `FeedSocket.java:20` 일치 |
+
+### 과금 검사 (QA 지침 8장)
+| # | 결과 | 근거 |
+|---|---|---|
+| 8.1 | 통과 | 1단계 모듈의 외부 호출 없음(1차와 같음). 새 코드(PR #87)의 연결은 설정 폴더 안 Unix 도메인 소켓뿐(`FeedServer.java:82`, `FeedClient.java:129`)이고 외부 주소 추가 없음 |
+| 8.2 | 통과 | 새 유료 호출 없음 |
+| 8.3 | 통과 | 1차와 같음 |
+| 8.4 | 통과 | 1차와 같음(새 소켓 재연결은 로컬이라 과금 대상 아님) |
+| 8.5 | 통과 | 실전 주문 경로 변경 없음 |
+
+### 재검토 점검표 밖 발견
+- 지난 R1의 D-029 공백은 그대로(권고 유지). R2(OVS-02 ArchUnit 검사)·R3(설정 파일 거부 경고 화면)·R4(CFG-06 ① Run 불변 실패 테스트, 이제 1단계 후속 과제로 확정)·R5 그대로
+- [참고] ADR-001 2.3 `ExperimentRunner` 시드 문구는 ADR-007 3.3이 대체 기록으로 갖고 있어 불일치로 세지 않음(1차와 같음)
+
+### 판정
+승인. 로드맵 1단계 완료 기준 "빌드·테스트 통과, ADR 작성"을 QA 직접 빌드(`--rerun-tasks`, 테스트 1,056건 실패 0)와 ADR-001·ADR-002로 확인했다. 지난 C5 불일치 4건은 PR #89로 모두 고쳐졌고(Q-009 닫음 D-077, ADR-002 채택 D-078, ADR-001 2.4·2.7 정정 기록, 스모크 보강을 QA가 직접 실행), CFG-05·06 범위는 사용자 결정 A로 확인됐다. C1~C5와 과금 검사 8.1~8.5 모두 통과다. 단계 완료 기록(결정 로그)과 결정 A의 결정 번호·기획서 14장 7단계 행 반영은 개발 쪽 완료 기록 PR에서 한다(D-031). 권고 R1~R5는 차단 아님.
