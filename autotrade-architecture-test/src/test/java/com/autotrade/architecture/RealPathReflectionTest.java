@@ -403,8 +403,10 @@ class RealPathReflectionTest {
     static List<String> classAsData(JavaClass c) {
         List<String> out = new ArrayList<>();
         c.getReferencedClassObjects().stream()
-                .filter(r -> r.getRawType().getName().equals("java.lang.Class"))
-                .forEach(r -> out.add(r.getOwner().getFullName() + "가 클래스 객체 Class.class를 참조 (" + r.getSourceCodeLocation() + ")"));
+                // 배열 Class[].class도 원소마다 이름으로 클래스를 만든다(architect PR #108 재검토 AR-8)
+                .filter(r -> r.getRawType().getBaseComponentType().getName().equals("java.lang.Class"))
+                .forEach(r -> out.add(r.getOwner().getFullName() + "가 클래스 객체 " + r.getRawType().getSimpleName()
+                        + ".class를 참조 (" + r.getSourceCodeLocation() + ")"));
         c.getFields().stream()
                 .filter(f -> involvesClass(f.getType()))
                 .forEach(f -> out.add(f.getFullName() + " 필드 타입에 Class"));
@@ -424,11 +426,12 @@ class RealPathReflectionTest {
                 .filter(a -> a.getTarget().getOwner().getName().equals("java.lang.Class")
                         && !ALLOWED_CLASS_METHODS.contains(a.getTarget().getName()))
                 .forEach(a -> out.add("허용 목록 밖 Class 메서드: " + a.getDescription()));
+        c.getSource().ifPresent(src -> out.addAll(GetClassUses.of(src.getUri())));
         return out;
     }
 
     private static boolean involvesClass(com.tngtech.archunit.core.domain.JavaType t) {
-        return t.getAllInvolvedRawTypes().stream().anyMatch(k -> k.getName().equals("java.lang.Class"));
+        return t.getAllInvolvedRawTypes().stream().anyMatch(k -> k.getBaseComponentType().getName().equals("java.lang.Class"));
     }
 
     static ArchRule noReflectionIn(DescribedPredicate<JavaClass> scope) {
@@ -742,7 +745,13 @@ class RealPathReflectionTest {
                 "TypedCommand.type 필드 타입에 Class",
                 "Bean.setTarget(java.lang.Class) 매개변수 타입에 Class",
                 "Bean.count(java.util.List) 매개변수 타입에 Class",
-                "Class.getDeclaredClasses");
+                "Class.getDeclaredClasses",
+                "NameToClassBinding.byNames(java.lang.String)가 클래스 객체 Class[].class를 참조",
+                "NameToClassBinding.viaGetClass의 getClass() 결과를 이름 읽기 밖에서 쓴다",
+                "NameToClassBinding.classOf가 getClass 메서드 참조를 만든다");
+        // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
+        assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
+                .get(ReflectionFreeEngineCode.class).getSource().orElseThrow().getUri())).isEmpty();
         // 형변환만 한 메서드도 클래스 파일 상수로 잡힌다(호출이 없으므로 ArchUnit 의존 목록에는 없다)
         assertThat(ClassFileTypes.of(new ClassFileImporter().importClasses(NameToClassBinding.class)
                 .get(NameToClassBinding.class).getSource().orElseThrow().getUri()))

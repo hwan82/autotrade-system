@@ -23,6 +23,22 @@ public final class NameToClassBinding {
         return M.convertValue(fields, k);
     }
 
+    /** F1 변형(architect 재검토 AR-8): 배열 {@code Class[].class}도 원소마다 이름으로 클래스를 만든다. */
+    public static Class<?>[] byNames(String name) throws JsonProcessingException {
+        return M.readValue("[\"" + name + "\"]", Class[].class);
+    }
+
+    /** F1 변형(architect 재검토 AR-9): 클래스 객체의 {@code getClass()}는 리터럴 없이 {@code Class.class}를 준다. */
+    public static Object viaGetClass(String name) throws JsonProcessingException {
+        Class<?> classOfClass = String.class.getClass();
+        return M.readValue("\"" + name + "\"", classOfClass);
+    }
+
+    /** F1 변형: {@code Object::getClass} 메서드 참조. */
+    public static java.util.function.Function<Object, Class<?>> classOf() {
+        return Object::getClass;
+    }
+
     /** F2: 목록 밖 {@code MapperFeature}를 형변환하고 {@code configure(MapperFeature, boolean)}에 넘긴다. */
     public static ObjectMapper relaxed(Object feature) {
         return JsonMapper.builder().configure((MapperFeature) feature, false).build();
