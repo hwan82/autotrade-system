@@ -155,7 +155,7 @@ class SimulationExperimentRunnerTest {
         // 벤치마크(005930 매수 후 보유): 70,100 → 70,800
         assertThat(hold.summary().metrics().benchmarkReturn()).isEqualByComparingTo("0.009986");
         assertThat(r.result().costTableHash()).isEqualTo(COST.tableHash(FROM, TO));
-        assertThat(r.result().executionModelId()).isEqualTo("BOOK-V4;latency=PT0.5S");
+        assertThat(r.result().executionModelId()).isEqualTo("BOOK-V5;latency=PT0.5S");
     }
 
     @Test

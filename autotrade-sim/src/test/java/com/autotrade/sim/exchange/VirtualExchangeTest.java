@@ -121,6 +121,33 @@ class VirtualExchangeTest {
         }
     };
 
+    /**
+     * 미국 기본 규칙처럼 단일가 구간이 없다: KST 09:00~15:30 접속 매매, 그 밖은 장 밖({@link MarketRules#sessionPhase} 기본 구현).
+     * 폐장 직후 종가 크로스 체결이 장 밖 시각으로 온다.
+     */
+    private static final MarketRules NO_AUCTION = new MarketRules() {
+        @Override
+        public Market market() {
+            return Market.KRX;
+        }
+
+        @Override
+        public ZoneId zone() {
+            return TestKrxRules.INSTANCE.zone();
+        }
+
+        @Override
+        public boolean isRegularSession(Instant instant) {
+            LocalTime t = instant.atZone(zone()).toLocalTime();
+            return !t.isBefore(LocalTime.of(9, 0)) && t.isBefore(LocalTime.of(15, 30));
+        }
+
+        @Override
+        public BigDecimal tickSize(Symbol symbol, BigDecimal price) {
+            return TestKrxRules.INSTANCE.tickSize(symbol, price);
+        }
+    };
+
     /** KST 시각(T0 = 09:00 기준 밀리초). */
     private static long kst(int hour, int minute, int second) {
         return Duration.ofHours(hour - 9).plusMinutes(minute).plusSeconds(second).toMillis();
@@ -330,6 +357,117 @@ class VirtualExchangeTest {
         assertThat(event(book(kst(24 + 9, 5, 0), asks("70100x60"), bids("70000x400")))).isEmpty();
         assertThat(event(trade(kst(24 + 9, 5, 1), "70200", 5_000))).singleElement()
                 .satisfies(a -> assertFill(a, 10, "70200", 1, 0));
+    }
+
+    @Test
+    void 장전_시간외_첫_이벤트_뒤_장중에야_이벤트가_오면_시가_단일가가_지난_것으로_본다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        // PR #83 후속 ②: 그 종목 그날 첫 이벤트가 08:10 장 밖 체결이고 공백 표시 없이 11:00에야 다음 이벤트가 온다.
+        // BOOK-V4는 08:10을 그날 첫 이벤트로 세어 11:00 호가를 시가 단일가 접수로, 11:00:05 체결을 시가 단일가 체결로 봤다
+        event(trade(kst(8, 10, 0), "69000", 100));
+        event(book(kst(11, 0, 0), asks("70100x60", "70200x500"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 100);
+        assertThat(event(book(kst(11, 0, 1), asks("70100x60", "70200x500"), bids("70000x400")))).satisfiesExactly(
+                a -> assertFill(a, 60, "70100", 1, 0),
+                a -> assertFill(a, 40, "70200", 2, 4_000));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+        assertThat(event(trade(kst(11, 0, 5), "70000", 3))).isEmpty();
+    }
+
+    @Test
+    void 장전_시간외_이벤트가_있어도_시가_단일가_접수_이벤트가_오면_첫_체결이_시가_단일가_체결이다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        event(trade(kst(8, 10, 0), "69000", 100));
+        event(book(kst(8, 50, 0), asks("70100x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 10);
+        assertThat(event(book(kst(9, 0, 30), asks("70100x60"), bids("70000x400")))).isEmpty();
+        assertThat(event(trade(kst(9, 0, 31), "70200", 5_000))).singleElement()
+                .satisfies(a -> assertFill(a, 10, "70200", 1, 0));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+    }
+
+    @Test
+    void 시가_단일가_접수_구간의_장전_시간외_체결_뒤_장중에야_이벤트가_오면_시가_단일가가_지난_것으로_본다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        // architect PR #106 F1: 실제 KRX 장전 시간외(08:30~08:40)는 시가 단일가 접수 구간과 겹친다. 접수 구간에는 정규장 체결이
+        // 없으므로 그 체결 이벤트는 그날 첫 정규장 이벤트로 세지 않는다
+        event(trade(kst(8, 35, 0), "69000", 100));
+        event(book(kst(11, 0, 0), asks("70100x60", "70200x500"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 100);
+        assertThat(event(book(kst(11, 0, 1), asks("70100x60", "70200x500"), bids("70000x400")))).satisfiesExactly(
+                a -> assertFill(a, 60, "70100", 1, 0),
+                a -> assertFill(a, 40, "70200", 2, 4_000));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+        assertThat(event(trade(kst(11, 0, 5), "70000", 3))).isEmpty();
+    }
+
+    @Test
+    void 시가_단일가_접수_구간의_장전_시간외_체결_뒤_접수_구간_호가가_오면_첫_체결이_시가_단일가_체결이다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        event(trade(kst(8, 35, 0), "69000", 100));
+        event(book(kst(8, 50, 0), asks("70100x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 10);
+        assertThat(event(book(kst(9, 0, 30), asks("70100x60"), bids("70000x400")))).isEmpty();
+        assertThat(event(trade(kst(9, 0, 31), "70200", 5_000))).singleElement()
+                .satisfies(a -> assertFill(a, 10, "70200", 1, 0));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+    }
+
+    @Test
+    void 개장_뒤_정확히_60초에_온_첫_이벤트는_시가_단일가가_지난_것으로_본다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        // 경계: 창은 [개장, 개장+60초)다. 09:00:59.999까지는 시가 단일가 접수(개장_직후 테스트), 09:01:00부터 접속 매매
+        event(book(kst(9, 1, 0), asks("70100x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 10);
+        assertThat(event(book(kst(9, 1, 1), asks("70100x60"), bids("70000x400")))).singleElement()
+                .satisfies(a -> assertFill(a, 10, "70100", 1, 0));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+    }
+
+    @Test
+    void 종가_단일가_체결_창은_폐장_뒤_정확히_60초에_닫힌다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        event(trade(kst(15, 19, 0), "70200", 5));
+        event(book(kst(15, 20, 10), asks("70100x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 10);
+        event(book(kst(15, 25, 0), asks("70100x60"), bids("70000x400")));
+        assertThat(event(trade(kst(15, 31, 0), "70300", 30))).isEmpty();
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70200");
+        ex.endOfDay();
+        assertThat(state(k)).isEqualTo(OrderState.EXPIRED);
+    }
+
+    @Test
+    void 종가_창_안의_두_번째_장_밖_체결은_종가_단일가_체결이_아니다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        event(book(kst(15, 20, 10), asks("70100x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.MARKET, null, 10);
+        event(book(kst(15, 25, 0), asks("70100x60"), bids("70000x400")));
+        // 종가 단일가 체결 4주만 참여 주문에 쓰고, 같은 창 안 두 번째 체결(15:30:30)로는 남은 6주를 체결하지 않으며 평가도 그대로
+        assertThat(event(trade(kst(15, 30, 5), "70300", 4))).singleElement()
+                .satisfies(a -> assertFill(a, 4, "70300", 1, 0));
+        assertThat(event(trade(kst(15, 30, 30), "70500", 100))).isEmpty();
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70300");
+        ex.endOfDay();
+        assertThat(state(k)).isEqualTo(OrderState.EXPIRED);
+    }
+
+    @Test
+    void 종가_단일가_구간이_없는_시장은_폐장_직후_첫_체결을_평가_가격에만_쓴다() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), NO_AUCTION);
+        // PR #83 후속 ①: 미국 기본 규칙은 종가 단일가 구간이 없어 폐장 직후 종가 크로스 체결이 평가에 쓰이지 않았다
+        event(book(kst(15, 29, 50), asks("70300x60"), bids("70200x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.LIMIT, "70200", 10);
+        assertThat(event(trade(kst(15, 29, 59), "70250", 5))).isEmpty();
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70250");
+        // 종가 크로스 체결: 평가 가격만 갱신하고 주문은 체결하지 않는다(종가 참여 주문 모의 없음, 보수적)
+        assertThat(event(trade(kst(15, 30, 1), "70100", 30_000))).isEmpty();
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70100");
+        // 그 뒤 창 안 두 번째 체결과 시간외 체결은 평가에 쓰지 않는다
+        event(trade(kst(15, 30, 20), "70500", 100));
+        event(trade(kst(16, 10, 0), "71500", 1_000));
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70100");
+        assertThat(state(k)).isEqualTo(OrderState.ACCEPTED);
     }
 
     @Test

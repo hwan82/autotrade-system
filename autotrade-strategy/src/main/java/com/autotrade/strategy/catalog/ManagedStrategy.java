@@ -67,6 +67,7 @@ public abstract class ManagedStrategy implements Strategy {
     private boolean haltedToday;
     private BigDecimal dayStartEquity;
     private final EntryFunnel funnel = new EntryFunnel();
+    private final ExitLog exitLog = new ExitLog();
 
     protected ManagedStrategy(TradingRules rules, MarketRules market) {
         this.rules = rules;
@@ -98,6 +99,11 @@ public abstract class ManagedStrategy implements Strategy {
     /** 이 전략의 진입 깔때기 측정. Run이 끝난 뒤 읽는다(판정에는 쓰지 않음). */
     public final EntryFunnel entryFunnel() {
         return funnel;
+    }
+
+    /** 이 전략의 청산 사유 기록. Run이 끝난 뒤 읽는다(판정에는 쓰지 않음). */
+    public final ExitLog exitLog() {
+        return exitLog;
     }
 
     /** 로직 청산 신호(예: 추세 이탈). 기본은 없음. */
@@ -212,6 +218,7 @@ public abstract class ManagedStrategy implements Strategy {
         }
         pendingExit.put(symbol, reason);
         exitSentAt.put(symbol, now);
+        exitLog.sent(symbol, today, reason);
         return List.of(TradeSignal.marketSell(symbol, reason.intent(), held));
     }
 

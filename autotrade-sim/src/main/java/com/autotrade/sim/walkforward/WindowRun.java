@@ -21,9 +21,11 @@ import java.util.Objects;
  * @param windowEndLots 구간 끝 정리(WINDOW_END)로 생긴 왕복의 lotId
  * @param fills 체결 원장. 비용·회전율 계산이 필요한 Run만 담고 아니면 빈 목록
  * @param funnel 구간 안 진입 깔때기(신호·진입·한도 거절, 예열 제외). 측정하지 않는 전략이면 0
+ * @param exits 구간 안 왕복의 청산 사유 분포(합 = 왕복 수)
  */
 public record WindowRun(int window, String failure, RunMetrics metrics, List<EquityPoint> equity,
-        List<RoundTrip> roundTrips, List<AppliedFill> fills, Set<String> windowEndLots, EntryFunnel.Totals funnel) {
+        List<RoundTrip> roundTrips, List<AppliedFill> fills, Set<String> windowEndLots, EntryFunnel.Totals funnel,
+        ExitMix exits) {
 
     public WindowRun {
         Objects.requireNonNull(failure, "failure");
@@ -32,12 +34,14 @@ public record WindowRun(int window, String failure, RunMetrics metrics, List<Equ
         fills = List.copyOf(fills);
         windowEndLots = Set.copyOf(windowEndLots);
         Objects.requireNonNull(funnel, "funnel");
+        Objects.requireNonNull(exits, "exits");
     }
 
-    public static WindowRun of(int window, RunReport r, boolean keepFills, EntryFunnel.Totals funnel) {
+    static WindowRun of(int window, RunReport r, boolean keepFills, WalkForwardStudy.Probe probe) {
         boolean ok = r.summary().status() == RunStatus.COMPLETED && r.summary().metrics() != null;
         return new WindowRun(window, ok ? "" : (r.summary().failureReason().isEmpty() ? "실패" : r.summary().failureReason()),
-                r.summary().metrics(), r.equityCurve(), r.roundTrips(), keepFills ? r.fills() : List.of(), r.windowEndLots(), funnel);
+                r.summary().metrics(), r.equityCurve(), r.roundTrips(), keepFills ? r.fills() : List.of(), r.windowEndLots(), probe.funnel(),
+                probe.exits());
     }
 
     public boolean completed() {

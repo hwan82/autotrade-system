@@ -18,7 +18,7 @@ class PooledCostShareTest {
     private static WindowRun window(int k, long finalEquity, long costs, String turnover) {
         RunMetrics m = new RunMetrics(Money.of(finalEquity, Money.KRW), BigDecimal.ZERO, null, BigDecimal.ZERO, null, null,
                 null, null, 0, 0, new BigDecimal(turnover), Money.of(costs, Money.KRW), null, null, null);
-        return new WindowRun(k, "", m, List.of(), List.of(), List.of(), Set.of(), EntryFunnel.Totals.ZERO);
+        return new WindowRun(k, "", m, List.of(), List.of(), List.of(), Set.of(), EntryFunnel.Totals.ZERO, ExitMix.ZERO);
     }
 
     @Test
@@ -33,7 +33,8 @@ class PooledCostShareTest {
     @Test
     void 비용_전_손익_합이_0_이하이거나_실패_구간이_있으면_값이_없다() {
         assertThat(Pooled.costShare(SEED, List.of(window(1, 9_000_000, 500_000, "1")))).isNull();
-        WindowRun failed = new WindowRun(2, "실패", null, List.of(), List.of(), List.of(), Set.of(), EntryFunnel.Totals.ZERO);
+        WindowRun failed = new WindowRun(2, "실패", null, List.of(), List.of(), List.of(), Set.of(), EntryFunnel.Totals.ZERO,
+                ExitMix.ZERO);
         assertThat(Pooled.costShare(SEED, List.of(window(1, 13_000_000, 500_000, "1"), failed))).isNull();
         assertThat(Pooled.turnover(List.of(failed))).isNull();
     }
