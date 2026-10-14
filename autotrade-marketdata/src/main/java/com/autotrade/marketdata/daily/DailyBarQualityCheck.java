@@ -1,9 +1,11 @@
 package com.autotrade.marketdata.daily;
 
+import com.autotrade.domain.MarketRules;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.daily.QualityReport.Finding;
 import com.autotrade.marketdata.daily.QualityReport.Rule;
+import com.autotrade.marketdata.rules.BundledMarketRules;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.time.LocalDate;
@@ -21,12 +23,15 @@ import java.util.TreeSet;
  *
  * <p>MISSING_BAR의 "시장 거래일"은 그 시장 일봉에 한 번이라도 나온 날짜로 본다. 캘린더가 없는 과거 기간에도
  * 쓸 수 있게 하려는 것이며, 시장 전체가 빠진 날은 잡지 못한다(한계).
- * UNADJUSTED_JUMP 기준은 KRX 가격제한폭 30%를 조금 넘는 35%, 미국은 제한폭이 없어 50%로 둔다 `[가정]`.
+ * UNADJUSTED_JUMP 기준은 시장 규칙의 하루 가격 제한폭({@link MarketRules#dailyPriceLimit})보다 5%p 큰 값(KRX 주식 35%),
+ * 제한폭이 없으면 50%(미국)로 둔다 `[가정]`. 시장별 값은 여기서 분기하지 않고 {@link MarketRules}에서 읽는다(OVS-02, D-084).
  */
 public final class DailyBarQualityCheck {
 
-    private static final BigDecimal KRX_JUMP = new BigDecimal("0.35");
-    private static final BigDecimal US_JUMP = new BigDecimal("0.50");
+    /** 제한폭 위 여유. 제한폭 끝까지 움직인 정상 거래일을 급변으로 잡지 않게 한다. */
+    private static final BigDecimal JUMP_MARGIN = new BigDecimal("0.05");
+    /** 하루 제한폭이 없는 시장·종목의 급변 기준. */
+    private static final BigDecimal NO_LIMIT_JUMP = new BigDecimal("0.50");
 
     private DailyBarQualityCheck() {}
 
@@ -35,6 +40,7 @@ public final class DailyBarQualityCheck {
         // 스냅샷 기준일은 생성 시각의 거래소 현지 날짜다(시장마다 다르다: 한국 아침은 미국 전날 저녁)
         java.time.Instant createdAt = java.time.Instant.parse(manifest.createdAt());
         // 캘린더 읽기는 비싸다(행마다 하면 20년치 검사가 수십 분): 시장마다 한 번만 계산한다
+        Map<Market, MarketRules> rules = new java.util.EnumMap<>(Market.class);
         Map<Market, LocalDate> snapshotDates = new java.util.EnumMap<>(Market.class);
         List<Finding> findings = new ArrayList<>();
         Map<Symbol, List<DailyBar>> bySymbol = new TreeMap<>();
@@ -58,9 +64,9 @@ public final class DailyBarQualityCheck {
                     findings.add(new Finding(Rule.DUPLICATE_BAR, sym, b.date(), "같은 날짜 행이 둘 이상"));
                     continue;
                 }
-                checkRow(b, ps, snapshotDates.computeIfAbsent(sym.market(), m -> localDate(createdAt, m)), findings);
+                checkRow(b, ps, snapshotDates.computeIfAbsent(sym.market(), m -> rulesOf(rules, m).tradingDate(createdAt)), findings);
                 if (prev != null && valid(prev) && valid(b)) {
-                    checkJump(prev, b, findings);
+                    checkJump(prev, b, rulesOf(rules, sym.market()), findings);
                 }
                 prev = b;
             }
@@ -93,6 +99,7 @@ public final class DailyBarQualityCheck {
             throw new IllegalStateException(SnapshotManifest.DAILY_BARS + " SHA-256이 manifest와 다릅니다");
         }
         java.time.Instant createdAt = java.time.Instant.parse(manifest.createdAt());
+        Map<Market, MarketRules> rules = new java.util.EnumMap<>(Market.class);
         Map<Market, LocalDate> snapshotDates = new java.util.EnumMap<>(Market.class);
         Map<Symbol, List<InstrumentPeriod>> periods = new TreeMap<>();
         for (InstrumentPeriod p : history) {
@@ -148,10 +155,10 @@ public final class DailyBarQualityCheck {
                 today.put(sym, b);
                 seenEver.add(sym);
                 checkRow(b, periods.getOrDefault(sym, List.of()),
-                        snapshotDates.computeIfAbsent(sym.market(), m -> localDate(createdAt, m)), findings);
+                        snapshotDates.computeIfAbsent(sym.market(), m -> rulesOf(rules, m).tradingDate(createdAt)), findings);
                 DailyBar prev = prevBar.put(sym, b);
                 if (prev != null && valid(prev) && valid(b)) {
-                    checkJump(prev, b, findings);
+                    checkJump(prev, b, rulesOf(rules, sym.market()), findings);
                 }
             }
             if (day != null) {
@@ -186,8 +193,8 @@ public final class DailyBarQualityCheck {
         }
     }
 
-    private static LocalDate localDate(java.time.Instant t, Market market) {
-        return t.atZone(com.autotrade.marketdata.calendar.ExchangeCalendar.bundled(market).zone()).toLocalDate();
+    private static MarketRules rulesOf(Map<Market, MarketRules> cache, Market market) {
+        return cache.computeIfAbsent(market, BundledMarketRules::of);
     }
 
     private static void checkRow(DailyBar b, List<InstrumentPeriod> ps, LocalDate snapshotDate, List<Finding> out) {
@@ -214,12 +221,12 @@ public final class DailyBarQualityCheck {
         }
     }
 
-    private static void checkJump(DailyBar prev, DailyBar b, List<Finding> out) {
+    private static void checkJump(DailyBar prev, DailyBar b, MarketRules rules, List<Finding> out) {
         if (prev.adjFactor().compareTo(b.adjFactor()) != 0) {
             return;
         }
         BigDecimal change = b.close().divide(prev.close(), MathContext.DECIMAL64).subtract(BigDecimal.ONE).abs();
-        BigDecimal limit = b.symbol().market() == Market.KRX ? KRX_JUMP : US_JUMP;
+        BigDecimal limit = rules.dailyPriceLimit(b.symbol()).map(JUMP_MARGIN::add).orElse(NO_LIMIT_JUMP);
         if (change.compareTo(limit) > 0) {
             out.add(new Finding(Rule.UNADJUSTED_JUMP, b.symbol(), b.date(),
                     "전일 종가 " + prev.close() + " → " + b.close()));
