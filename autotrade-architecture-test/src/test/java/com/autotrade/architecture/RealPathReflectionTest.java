@@ -407,17 +407,32 @@ class RealPathReflectionTest {
                 .filter(r -> r.getRawType().getBaseComponentType().getName().equals("java.lang.Class"))
                 .forEach(r -> out.add(r.getOwner().getFullName() + "가 클래스 객체 " + r.getRawType().getSimpleName()
                         + ".class를 참조 (" + r.getSourceCodeLocation() + ")"));
+        // Class가 나와도 되는 곳은 바인딩이 아닌 메서드의 매개변수 바로 그 타입(Class<T> type)뿐이다. 필드, 상위 타입 인자,
+        // 반환 타입(설정자 없는 컬렉션 게터를 Jackson이 설정자로 쓴다), 타입 변수 경계, 매개변수의 제네릭 인자는 모두 금지
+        // (architect PR #108 재검토 AR-10)
         c.getFields().stream()
                 .filter(f -> involvesClass(f.getType()))
                 .forEach(f -> out.add(f.getFullName() + " 필드 타입에 Class"));
+        List<com.tngtech.archunit.core.domain.JavaType> supertypes = new ArrayList<>(c.getInterfaces());
+        c.getSuperclass().ifPresent(supertypes::add);
+        supertypes.stream().filter(RealPathReflectionTest::involvesClass)
+                .forEach(t -> out.add(c.getName() + "의 상위 타입 " + t.getName() + "에 Class"));
+        c.getTypeParameters().stream().filter(v -> v.getBounds().stream().anyMatch(RealPathReflectionTest::involvesClass))
+                .forEach(v -> out.add(c.getName() + "의 타입 변수 " + v.getName() + " 경계에 Class"));
         for (com.tngtech.archunit.core.domain.JavaCodeUnit u : c.getCodeUnits()) {
             boolean binding = u.isConstructor() || u.getName().startsWith("set")
                     || u.getAnnotations().stream().anyMatch(a -> a.getRawType().getPackageName().startsWith("com.fasterxml.jackson"));
+            if (involvesClass(u.getReturnType())) {
+                out.add(u.getFullName() + " 반환 타입에 Class");
+            }
+            u.getTypeParameters().stream().filter(v -> v.getBounds().stream().anyMatch(RealPathReflectionTest::involvesClass))
+                    .forEach(v -> out.add(u.getFullName() + "의 타입 변수 " + v.getName() + " 경계에 Class"));
             for (com.tngtech.archunit.core.domain.JavaParameter p : u.getParameters()) {
-                boolean classArgument = p.getType() instanceof com.tngtech.archunit.core.domain.JavaParameterizedType pt
-                        && !pt.toErasure().getName().equals("java.lang.Class")
-                        && pt.getActualTypeArguments().stream().anyMatch(RealPathReflectionTest::involvesClass);
-                if (binding && involvesClass(p.getType()) || classArgument) {
+                com.tngtech.archunit.core.domain.JavaType t = p.getType();
+                boolean plainClassParameter = t.toErasure().getName().equals("java.lang.Class")
+                        && !(t instanceof com.tngtech.archunit.core.domain.JavaParameterizedType pt
+                                && pt.getActualTypeArguments().stream().anyMatch(RealPathReflectionTest::involvesClass));
+                if (involvesClass(t) && (binding || !plainClassParameter)) {
                     out.add(u.getFullName() + " 매개변수 타입에 Class");
                 }
             }
@@ -737,7 +752,8 @@ class RealPathReflectionTest {
 
         // 이름 문자열로 클래스 얻기(QA F1)와 형변환·호출 인자로만 쓴 허용 목록 밖 타입(QA F2), 독립 QA PR #108 Q16
         EvaluationResult byName = rule.evaluate(new ClassFileImporter().importClasses(NameToClassBinding.class,
-                NameToClassBinding.TypedCommand.class, NameToClassBinding.Bean.class));
+                NameToClassBinding.TypedCommand.class, NameToClassBinding.Bean.class, NameToClassBinding.SuperProbe.class,
+                NameToClassBinding.Holder.class, NameToClassBinding.TypeVarProbe.class, NameToClassBinding.GetterProbe.class));
         String byNameDetails = String.join("\n", byName.getFailureReport().getDetails());
         assertThat(byNameDetails).contains(
                 "NameToClassBinding.byName(java.lang.String, java.util.Map)가 클래스 객체 Class.class를 참조",
@@ -748,7 +764,11 @@ class RealPathReflectionTest {
                 "Class.getDeclaredClasses",
                 "NameToClassBinding.byNames(java.lang.String)가 클래스 객체 Class[].class를 참조",
                 "NameToClassBinding.viaGetClass의 getClass() 결과를 이름 읽기 밖에서 쓴다",
-                "NameToClassBinding.classOf가 getClass 메서드 참조를 만든다");
+                "NameToClassBinding.classOf가 getClass 메서드 참조를 만든다",
+                "NameToClassBinding$SuperProbe의 상위 타입 java.util.ArrayList<java.lang.Class<?>>에 Class",
+                "NameToClassBinding$TypeVarProbe의 상위 타입",
+                "NameToClassBinding$GetterProbe.getTypes() 반환 타입에 Class")
+                .doesNotContain("NameToClassBinding$Holder의", "NameToClassBinding$Holder.value");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
                 .get(ReflectionFreeEngineCode.class).getSource().orElseThrow().getUri())).isEmpty();

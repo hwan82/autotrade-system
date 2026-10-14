@@ -70,6 +70,29 @@ public final class NameToClassBinding {
         }
     }
 
+    /** F1 변형(architect 재검토 AR-10 P4): 상위 클래스의 제네릭 인자. */
+    public static final class SuperProbe extends java.util.ArrayList<Class<?>> {
+        private static final long serialVersionUID = 1L;
+    }
+
+    /** 타입 변수만 가진 바인딩 대상(그 자체는 허용). */
+    public static class Holder<T> {
+        public T value;
+    }
+
+    /** F1 변형(AR-10 P5): 상속한 타입 변수에 Class를 넣는다. */
+    public static final class TypeVarProbe extends Holder<Class<?>> {}
+
+    /** F1 변형(AR-10 P6): 설정자 없는 컬렉션 게터(Jackson USE_GETTERS_AS_SETTERS). */
+    public static final class GetterProbe {
+        private final List<Object> types = new java.util.ArrayList<>();
+
+        @SuppressWarnings("unchecked")
+        public List<Class<?>> getTypes() {
+            return (List<Class<?>>) (List<?>) types;
+        }
+    }
+
     /** F1: 정적 의존 없이 다른 클래스 객체에 닿는 {@code Class} 메서드. */
     public static Class<?>[] nested(Class<?> holder) {
         return holder.getDeclaredClasses();
