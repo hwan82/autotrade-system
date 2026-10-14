@@ -388,6 +388,53 @@ class ControlChannelTest {
     }
 
     @Test
+    void 설정_경고가_없는_옛_엔진의_상태는_빈_경고로_읽는다() throws Exception {
+        Files.createDirectories(socket().getParent());
+        try (ServerSocketChannel fake = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+            fake.bind(UnixDomainSocketAddress.of(socket()));
+            Thread engine = Thread.ofVirtual().start(() -> {
+                try (SocketChannel ch = fake.accept()) {
+                    readLine(ch);
+                    ch.write(ByteBuffer.wrap(("{\"ok\":true,\"code\":\"OK\",\"message\":\"\",\"status\":"
+                            + "{\"passwordConfigured\":true,\"lockedUntil\":null,\"accounts\":[]},\"steps\":[]}\n")
+                            .getBytes(StandardCharsets.UTF_8)));
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            try (ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
+                assertThat(client.send(ControlRequest.status()).status().configWarning()).isEmpty();
+            }
+            engine.join(5_000);
+        }
+    }
+
+    @Test
+    void 설정_경고는_상태와_함께_전달된다() throws Exception {
+        EngineStatus warned = new EngineStatus(false, null, List.of(), "runtime-config.json을(를) 쓰지 않고 default로 기동: x");
+        try (ControlServer server = ControlServer.start(socket(), r -> ControlResponse.accepted("", warned, List.of()));
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
+            assertThat(client.send(ControlRequest.status()).status()).isEqualTo(warned);
+        }
+    }
+
+    @Test
+    void 긴_설정_경고는_잘라서_응답_한도_안에_둔다() throws Exception {
+        String huge = "가".repeat(100_000);
+        EngineStatus warned = new EngineStatus(false, null, List.of(), huge);
+        assertThat(warned.configWarning()).hasSize(EngineStatus.MAX_CONFIG_WARNING + EngineStatus.TRUNCATED_MARK.length())
+                .endsWith(EngineStatus.TRUNCATED_MARK);
+        // 서로게이트 쌍 가운데서 자르지 않는다
+        String emoji = "a" + "😀".repeat(EngineStatus.MAX_CONFIG_WARNING);
+        assertThat(new EngineStatus(false, null, List.of(), emoji).configWarning())
+                .isEqualTo("a" + "😀".repeat((EngineStatus.MAX_CONFIG_WARNING - 1) / 2) + EngineStatus.TRUNCATED_MARK);
+        try (ControlServer server = ControlServer.start(socket(), r -> ControlResponse.accepted("", warned, List.of()));
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
+            assertThat(client.send(ControlRequest.status()).status().configWarning()).isEqualTo(warned.configWarning());
+        }
+    }
+
+    @Test
     void 같은_폴더에_엔진이_떠_있으면_소켓을_지워도_시작하지_않는다() throws Exception {
         try (ControlServer first = ControlServer.start(socket(), this::echo)) {
             assertThatThrownBy(() -> ControlServer.start(socket(), this::echo))

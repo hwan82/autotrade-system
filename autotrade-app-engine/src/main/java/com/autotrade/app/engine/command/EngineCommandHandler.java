@@ -42,16 +42,28 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
     private final ActivationStepRunner steps;
     private final PanicLiquidator liquidator;
     private final CommandAuditLog audit;
+    private final String configWarning;
 
     public EngineCommandHandler(
             RealTradingGuard guard, OperatorAuthenticator authenticator, Predicate<String> accountNumberConfigured,
             ActivationStepRunner steps, PanicLiquidator liquidator, CommandAuditLog audit) {
+        this(guard, authenticator, accountNumberConfigured, steps, liquidator, audit, "");
+    }
+
+    /**
+     * @param configWarning 기동 때 설정 로딩 경고({@code LoadedConfig.warning()}). 상태 스냅샷에 그대로 실어 운영 화면이 보인다.
+     *     표시용일 뿐 Guard 전이·명령 검증에는 쓰지 않는다
+     */
+    public EngineCommandHandler(
+            RealTradingGuard guard, OperatorAuthenticator authenticator, Predicate<String> accountNumberConfigured,
+            ActivationStepRunner steps, PanicLiquidator liquidator, CommandAuditLog audit, String configWarning) {
         this.guard = Objects.requireNonNull(guard, "guard");
         this.authenticator = Objects.requireNonNull(authenticator, "authenticator");
         this.accountNumberConfigured = Objects.requireNonNull(accountNumberConfigured, "accountNumberConfigured");
         this.steps = Objects.requireNonNull(steps, "steps");
         this.liquidator = Objects.requireNonNull(liquidator, "liquidator");
         this.audit = Objects.requireNonNull(audit, "audit");
+        this.configWarning = Objects.requireNonNull(configWarning, "configWarning");
     }
 
     @Override
@@ -94,7 +106,7 @@ public final class EngineCommandHandler implements Function<ControlRequest, Cont
                     done.stream().map(Enum::name).toList(), accountNumberConfigured.test(ref.id().value())));
         }
         return new EngineStatus(authenticator.passwordConfigured(),
-                authenticator.lockedUntil().map(Object::toString).orElse(null), accounts);
+                authenticator.lockedUntil().map(Object::toString).orElse(null), accounts, configWarning);
     }
 
     // ---- 명령 ----

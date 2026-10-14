@@ -86,6 +86,39 @@ final class SecretPaths {
         return found;
     }
 
+    /**
+     * 경고에 쓸 비밀값 경로. 맵 비밀값(경로 끝 {@code *})은 사용자가 정한 키 이름 대신 패턴과 개수로 바꾼다. 별칭 자리에
+     * 계좌번호를 잘못 적었을 수 있어 키 이름도 화면·로그에 내보내지 않는다(PR #100 QA R2). 순서는 처음 나온 순서.
+     */
+    static List<String> forWarning(List<String> secretPaths) {
+        java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
+        for (String path : secretPaths) {
+            counts.merge(patternOf(path), 1, Integer::sum);
+        }
+        List<String> out = new ArrayList<>();
+        counts.forEach((pattern, n) -> out.add(pattern.endsWith("/" + ANY_KEY) ? pattern + " " + n + "개" : pattern));
+        return out;
+    }
+
+    /** 값 경로와 맞는 비밀값 패턴. 맞는 패턴이 없으면 경로 그대로. */
+    private static String patternOf(String path) {
+        String[] parts = path.split("/");
+        for (String pattern : PATHS) {
+            String[] p = pattern.split("/");
+            if (p.length != parts.length) {
+                continue;
+            }
+            boolean match = true;
+            for (int i = 0; i < p.length && match; i++) {
+                match = p[i].equals(ANY_KEY) || p[i].equals(parts[i]);
+            }
+            if (match) {
+                return pattern;
+            }
+        }
+        return path;
+    }
+
     /** 비밀값 경로가 아닌 값의 경로. secrets.json 검사용. */
     static List<String> nonSecretLeaves(JsonNode tree) {
         List<String> leaves = new ArrayList<>();

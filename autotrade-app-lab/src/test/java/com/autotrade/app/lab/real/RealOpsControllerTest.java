@@ -126,6 +126,19 @@ class RealOpsControllerTest {
     }
 
     @Test
+    void 엔진이_설정_파일을_버리고_떴으면_상태에_그_경고가_보인다() throws Exception {
+        // 1단계 QA 권고 R3: 운영 화면이 계좌 상태와 함께 "설정 파일 거부됨"을 보여 줄 수 있게 경고를 그대로 넘긴다
+        String warning = "runtime-config.json을(를) 쓰지 않고 default로 기동: 모르는 키 real-trading.acounts";
+        startEngine(r -> ControlResponse.accepted("", new EngineStatus(false, null, List.of(), warning), List.of()));
+
+        mvc.perform(get("/api/real/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.engineState").value("UP"))
+                .andExpect(jsonPath("$.status.accounts").isEmpty())
+                .andExpect(jsonPath("$.status.configWarning").value(warning));
+    }
+
+    @Test
     void 엔진이_답하지_않으면_상태를_알_수_없음으로_보여_준다() throws Exception {
         java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
         startEngine(r -> {
