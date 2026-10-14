@@ -173,6 +173,23 @@ class LiveSessionTest {
     void crashWithLostTailAndUnclosedMetaStillReplaysTheSame() throws Exception {
         List<MarketEvent> events = twoDays();
         int crashAt = events.size() / 3;
+        crashAndResume(events, crashAt, crashAt);
+    }
+
+    @Test
+    void crashOnDayOneThenResumingOnDayTwoStillReplaysTheSame() throws Exception {
+        // 1일차 중간·끝에서 비정상 종료한 뒤 2일차 이벤트로 다시 시작해도(1일차 파일은 다시 열리지 않음) 같다(QA PR #87 R5)
+        List<MarketEvent> events = twoDays();
+        LocalDate dayOne = LocalDate.of(2026, 10, 14);
+        int dayTwoAt = (int) events.stream().filter(e -> e.receivedAt().atZone(SEOUL).toLocalDate().equals(dayOne))
+                .count();
+        assertThat(dayTwoAt).isPositive().isLessThan(events.size());
+        crashAndResume(events, dayTwoAt / 2, dayTwoAt);
+        crashAndResume(events, dayTwoAt, dayTwoAt);
+    }
+
+    /** {@code crashAt}개를 받은 뒤 닫지 않고 꼬리를 잘라 남기고, {@code resumeFrom}번째부터 이어 받아 리플레이와 같은지 본다. */
+    private void crashAndResume(List<MarketEvent> events, int crashAt, int resumeFrom) throws Exception {
         LiveSession crashed = open();
         for (MarketEvent e : events.subList(0, crashAt)) {
             clock.now = e.receivedAt();
@@ -180,7 +197,7 @@ class LiveSessionTest {
         }
         crashed.flush();
         // 비정상 종료: 닫지 않은 채(메타 미종료) 세션 폴더만 남고, 디스크에 다 내리지 못한 꼬리가 잘린다
-        Path copy = tmp.resolve("crashed-sessions");
+        Path copy = Files.createTempDirectory(tmp, "crashed-sessions");
         Path from = sessions.resolve(ID);
         try (var walk = Files.walk(from)) {
             for (Path p : walk.toList()) {
@@ -193,6 +210,7 @@ class LiveSessionTest {
             }
         }
         crashed.close();
+        deleteTree(from);
         Path day = copy.resolve(ID).resolve(LiveSession.JOURNAL_DIR).resolve("KRX").resolve("2026-10-14")
                 .resolve("events.jsonl.gz");
         byte[] bytes = Files.readAllBytes(day);
@@ -200,15 +218,23 @@ class LiveSessionTest {
 
         LiveSession resumed = LiveSession.open(plan, REPO, copy, clock, m -> { });
         assertThat(resumed.status().restored()).isPositive().isLessThanOrEqualTo(crashAt);
-        for (MarketEvent e : events.subList(crashAt, events.size())) {
+        for (MarketEvent e : events.subList(resumeFrom, events.size())) {
             clock.now = e.receivedAt();
-            resumed.accept("KIWOOM-WS", e);
+            assertThat(resumed.accept("KIWOOM-WS", e)).isEqualTo(LiveSession.Accepted.ACCEPTED);
         }
         writeLiveDetail(resumed.finish(new CodeVersion("c", false)));
 
         LiveReplayCheck.Outcome out = LiveReplayCheck.run(experimentDir, REPO, copy, new CodeVersion("c", false),
                 m -> { }, RunGate.NONE);
         assertThat(out.same()).isTrue();
+    }
+
+    private static void deleteTree(Path root) throws Exception {
+        try (var walk = Files.walk(root)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
     }
 
     @Test

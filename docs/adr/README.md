@@ -13,4 +13,4 @@
 | [ADR-007](ADR-007-selection-combination.md) | 선정 프로필과 조합: 형식·해시, `combination_hash`, `POSITION`, 선정 결과 파일, 실험 계약 변경, 실전용 선정 결과 생산자 | 제안(사용자 직접 머지) |
 | [ADR-008](ADR-008-collector.md) | 과거 데이터 수집 일괄 명령(Q-037): Java 수집기, 수집기 전용 키 파일, 일봉·상장주식수·재무 스냅샷 | 제안 |
 | [ADR-009](ADR-009-daily-walkforward-runner.md) | 일봉 워크포워드 판정 실행기: 예열·구간 끝 정리 계약, `study.yaml`, 결과 형식 | 채택(D-072) |
-| [ADR-010](ADR-010-live-feed-and-session.md) | 실시간 시세 전달(게이트웨이 → 실험실, 로컬 소켓)과 실시간 모의 세션: 입력 기록 먼저, 리플레이 확인 명령 | 제안(D-076) |
+| [ADR-010](ADR-010-live-feed-and-session.md) | 실시간 시세 전달(게이트웨이 → 실험실, 로컬 소켓)과 실시간 모의 세션: 입력 기록 먼저, 리플레이 확인 명령 | 채택(D-076) |
