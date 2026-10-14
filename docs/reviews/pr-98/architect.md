@@ -43,3 +43,33 @@
 
 ## 판정
 수정 필요(M1 `study-sha256` CRLF 불일치, M2 비용 비중·회전율 정의와 계산 불일치)
+
+## 재검토 2026-10-14
+
+- 대상: PR #98 / 새 헤드 `60ecf87`(추가 커밋 1개 `60ecf87`) / main `a8633eb` 대비 diff 전체(`git diff a8633eb..60ecf87`)와 직전 검토 이후 변화(`git diff 0e94c75..60ecf87`, 10파일 +220 −13)
+- 점검표: B
+- 직접 실행한 것: 같은 복제본에서 `git fetch /home/claude/autotrade-system claude/project-thread-pb3vv4 && git checkout -q FETCH_HEAD`(HEAD `60ecf87`) 뒤 `./gradlew build --offline` → 종료 코드 0. 테스트 결과 XML 합계 1,070건(직전보다 3건 늘어남), 실패 0, 오류 0, 건너뜀 0. 새 테스트 `PooledCostShareTest` 2건과 `WalkForwardStudyTest#등록_파일_해시는_줄바꿈이_CRLF여도_LF_원본과_같다` 통과. 테스트에 박힌 해시 상수를 `printf 'id: "EXP-1"\nseed: "1"\n' | sha256sum`으로 따로 계산해 `85faebda…0fa75`와 같음을 확인. PR에 들어간 이 파일의 첫 검토 본문(`git show 60ecf87:docs/reviews/pr-98/architect.md`)이 내가 쓴 원문과 바이트까지 같음을 `diff`로 확인(고쳐지지 않음).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 실행: `./gradlew build --offline` 종료 0, 1,070건 실패 0 |
+| B2 | 통과 | `marketdata.recording.Sha256` import를 없애고 JDK `MessageDigest`·`HexFormat`만 쓴다(WalkForwardStudy.java:54-60, :166-174). 새 모듈 의존 없음. ArchUnit 빌드 통과 |
+| B3 | 통과 | 바뀐 정의가 ADR-009 2.7(LF 기준 해시, 구간 원 금액 합 비용 비중, 구간 회전율 합), D-083 1·3번, runbook 7장 대조 명령, 결과 파일 고정 문구(WalkForwardReport.java:179-182)에 똑같이 반영됨 |
+| B4 | 통과 | 새 계산은 구간 순서 그대로의 `BigDecimal` 합이고 시계·난수 없음. 바이트 동일·두 번 실행 테스트 통과 |
+| B5 | 통과 | `Pooled.costShare`·`Pooled.turnover`는 `BigDecimal`, `MC` 나눗셈 뒤 `SCALE` HALF_EVEN(Pooled.java:109-133) |
+| B6 | 통과(m1 권고 남음) | M1·M2 각각 테스트 추가(아래). 지우거나 건너뛴 테스트 없음 |
+| B7 | 해당 없음 | 추가 커밋도 `autotrade-sim/.../walkforward/`와 문서만 바뀜. 실전 경로 무관 |
+| B8 | 통과 | 비밀값 없음 |
+
+### 직전 지적 처리
+- **M1(CRLF) 해소.** `runAndWrite`가 등록 파일을 한 번 읽어 같은 문자열로 파싱과 해시를 하고(WalkForwardStudy.java:183-185), `studySha256`이 `\r\n`→`\n` 정규화 뒤 UTF-8 바이트를 해시한다(:166-174). CRLF 문자열과 LF 문자열이 같은 값이고 그 값이 독립 계산한 `sha256sum`과 같다는 테스트가 있다(WalkForwardStudyTest.java:162-168). runbook 7장의 `git show origin/main:<경로> | sha256sum`은 저장된 블롭 원 바이트를 출력하므로, Linux에서 커밋한 LF 블롭이면 코드 값과 같다.
+- **M2(정의 불일치) 해소.** 리더보드 비용 비중은 `Pooled.costShare(시드, 그 후보의 구간 검증 Run)`: Σ구간 비용 ÷ Σ(구간 최종 평가금액 − 시드 + 구간 비용)이고, 구간 최종 평가금액은 `WindowRun.finalEquity()`의 원 계좌 금액(WindowRun.java:53-55)이라 분자·분모가 같은 원 금액 기준이다. 회전율은 구간 `RunMetrics.turnover`(구간 자신의 평균 평가금액이 분모)의 합. 행 순서는 `validationRuns`가 후보 순서라(WalkForwardResult.java:19) `get(i)`이 같은 후보다. 손 계산 테스트(+30%·−25%·+10%·−5%, 비용 각 50만 원 → 300만 중 200만 = 0.666667, 회전율 1.5+2+0.5+1 = 5)를 내가 다시 계산해 같음을 확인. 비용 전 손익 합 ≤ 0과 실패 구간이면 null도 테스트됨. 평균 보유는 왕복 단위 평균이라 이은 곡선 스케일과 무관해 그대로 둔 것이 맞다.
+
+### 남은 것과 새로 본 것
+- m1(깔때기 연결 예외 경로 직접 테스트)은 반영되지 않았다. 직전 검토대로 권고이며 머지 조건 아니다.
+- n1(참고): 코드 주석·테스트 주석의 검토 번호가 이 원문과 어긋난다. CRLF 수정 주석은 "PR #98 검토 M2"(WalkForwardStudy.java:163, WalkForwardStudyTest.java:164), 비용 비중 주석은 "PR #98 검토 M1"·"strategy-researcher 검토 M1"(Pooled.java:106, PooledCostShareTest.java:13)인데, 이 architect 원문에서는 CRLF가 M1, 정의 불일치가 M2다. strategy-researcher 원문의 번호를 따른 것일 수 있어 동작 문제는 아니다. 다음에 그 파일을 고칠 때 "architect M1/M2"처럼 검토자를 붙이면 추적이 쉽다.
+- n2(참고): 해시가 맞으려면 커밋된 블롭이 LF여야 한다. 등록 파일을 Linux 쪽(Claude)에서 커밋하는 지금 절차에서는 성립한다. 사용자가 Windows에서 직접 커밋하는 절차로 바뀌면 runbook 대조 명령도 정규화(`| tr -d '\r' | sha256sum`)로 바꾸면 된다.
+- 추가 커밋에 들어간 `docs/reviews/pr-98/strategy-researcher.md`는 내 판정 범위 밖이라 내용 판정은 하지 않았다.
+
+## 판정
+승인
