@@ -25,8 +25,26 @@ dependencies {
 }
 
 // bootRun·bootTestRun은 저장소 루트에서 돌려 strategies/ 기본 경로가 저장소 폴더를 가리키게 한다
+// 실시간 모의 세션 보고서(live-detail.txt)에 남길 커밋과 dirty 여부(D-076). 리플레이 확인이 code 줄을 따로 적는다
+val labRepoRoot = rootProject.projectDir
+val labGitCommit = providers.exec {
+    commandLine("git", "rev-parse", "HEAD")
+    workingDir = labRepoRoot
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
+val labGitDirty = providers.exec {
+    commandLine("git", "status", "--porcelain", "--", ".", ":!experiments")
+    workingDir = labRepoRoot
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { it.isNotBlank().toString() }
+// 힙 상한(SIM-14, risk-ops PR #87 R2): 실험실이 실전 엔진 PC 메모리를 끝없이 쓰지 않게 정한다. 실시간 모의 되살리기는 기록일 하나씩
+// 읽으므로 하루치 입력 기록이 들어갈 만큼이면 된다. 조합 실험 결과를 많이 불러오면 -PlabHeap=6g처럼 늘린다
 tasks.named<JavaExec>("bootRun") {
     workingDir = rootProject.projectDir
+    maxHeapSize = (findProperty("labHeap") as String?) ?: "4g"
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-Dautotrade.code-commit=${labGitCommit.get()}", "-Dautotrade.code-dirty=${labGitDirty.get()}")
+    })
 }
 tasks.named<JavaExec>("bootTestRun") {
     workingDir = rootProject.projectDir
