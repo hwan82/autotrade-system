@@ -12,6 +12,7 @@ import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.recording.RecordedMarketDataSet;
+import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunReport;
@@ -37,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -222,6 +224,14 @@ public final class LiveSession implements AutoCloseable {
         if (!inPlan(event)) {
             skippedRange++;
             return Accepted.SKIPPED_RANGE;
+        }
+        Optional<BigDecimal> offTick = RecordingExperiment.offStockTick(setup.rules(), event);
+        if (offTick.isPresent()) {
+            // 계좌는 모든 종목을 주식 호가 단위로 본다(D-075 4번). ETF·ETN이 boards에 있으면 결과가 조용히 틀리므로 멈춘다
+            stopReason = "주식 호가 단위에 맞지 않는 가격이 와서 세션을 멈췄습니다: " + event.symbol().code() + " "
+                    + offTick.get().toPlainString() + ". ETF·ETN 같은 주식 밖 종목은 아직 받지 않으니 boards에서 빼고 새 실험 ID로 "
+                    + "등록하세요(기록에는 쓰지 않음)";
+            return Accepted.STOPPED;
         }
         List<MarketEvent> written;
         try {

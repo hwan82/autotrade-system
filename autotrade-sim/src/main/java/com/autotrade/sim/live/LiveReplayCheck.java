@@ -86,6 +86,12 @@ public final class LiveReplayCheck {
             throw new IllegalArgumentException("입력 기록이 없습니다: " + sessionDir.resolve(LiveSession.JOURNAL_DIR));
         }
         RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(plan.market(), days);
+        for (MarketEvent e : data.events()) {
+            RecordingExperiment.offStockTick(setup.rules(), e).ifPresent(price -> {
+                throw new IllegalArgumentException("입력 기록에 주식 호가 단위에 맞지 않는 가격이 있습니다: " + e.symbol().code() + " "
+                        + price.toPlainString() + " (sequence " + e.sequence() + ")");
+            });
+        }
         for (RecordedMarketDataSet.DayInfo d : data.days()) {
             log.accept("기록일 " + d.date() + ": 줄 " + d.recordedEvents() + ", 정상 종료 " + d.complete() + ", 구간 "
                     + d.segments());

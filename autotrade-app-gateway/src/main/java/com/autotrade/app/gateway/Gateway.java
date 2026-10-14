@@ -55,6 +55,18 @@ public final class Gateway implements AutoCloseable {
         Objects.requireNonNull(watch, "watch");
         Map<Market, MarketHub> hubs = new EnumMap<>(Market.class);
         Map<Market, MarketEventRecorder> recorders = new EnumMap<>(Market.class);
+        try {
+            startHubs(mode, byPriority, watch, recordingRoot, feed, clock, hubs, recorders);
+        } catch (RuntimeException e) {
+            new Gateway(hubs, recorders, feed).close(); // 연 것(전달 소켓 포함)을 닫고 실패를 그대로 올린다
+            throw e;
+        }
+        return new Gateway(hubs, recorders, feed);
+    }
+
+    private static void startHubs(MarketDataMode mode, List<BrokerPlugin> byPriority, WatchList watch,
+            Path recordingRoot, FeedServer feed, Clock clock, Map<Market, MarketHub> hubs,
+            Map<Market, MarketEventRecorder> recorders) {
         for (Market market : Market.values()) {
             WatchList w = watch.forMarket(market);
             List<BrokerPlugin> sources = new ArrayList<>();
@@ -71,12 +83,11 @@ public final class Gateway implements AutoCloseable {
             scopes.put(MarketHub.SOURCE_ID, "소스 전환 공백 표시");
             MarketEventRecorder recorder = new MarketEventRecorder(new RecordingLayout(recordingRoot), market,
                     ExchangeCalendar.bundled(market).zone(), clock, scopes, LICENSE, RECORDER_QUEUE, FLUSH_INTERVAL);
-            MarketHub hub = new MarketHub(market, mode, sources, w, recorder, feed, clock);
             recorders.put(market, recorder);
+            MarketHub hub = new MarketHub(market, mode, sources, w, recorder, feed, clock);
             hubs.put(market, hub);
             hub.start();
         }
-        return new Gateway(hubs, recorders, feed);
     }
 
     Map<Market, MarketHub> hubs() {

@@ -9,6 +9,7 @@
 - 실시간 변경: **즉시** = 다음 틱부터 반영, **재기동** = 해당 프로세스 재기동 필요, **재연결 절차** = 미체결·보유 확인 → 세션 종료 → 재연결(해당 작업에서 구현 전까지 UI 변경 불가).
 - 비밀값(🔒)은 화면·로그·REST 응답에 `****`로만 나온다.
 - 실전 엔진은 설정 폴더 안 `run/engine-control.sock`에 실전 제어 명령 채널을 열고 `run/engine.lock`을 잡는다(ADR-006). 같은 설정 폴더로 엔진을 두 번 띄우면 두 번째는 뜨지 않는다. 단, 엔진이 도는 중에 `run` 폴더나 `engine.lock`을 지우면 이 보호가 사라지므로 지우지 않는다(ADR-006 4장). 실험실 운영 화면은 같은 설정 폴더를 써야 엔진에 닿는다. 소켓 경로가 약 100자를 넘으면 엔진이 뜨지 않으니 설정 폴더는 짧은 경로에 둔다.
+- 시세 게이트웨이는 설정 폴더 안 `run/market-feed.sock`에 실험실 실시간 시세 전달 소켓을 연다(D-076, [ADR-010](../adr/ADR-010-live-feed-and-session.md)). 못 열면 경고만 남기고 녹화만 한다. 실험실 실시간 모의 세션은 같은 설정 폴더의 이 소켓에 붙고, 입력 기록을 설정 폴더 `live-sessions/<실험ID>/journal/`(녹화 형식, 저장소 밖, 재배포 금지)에, 세션 잠금을 `live-sessions/<실험ID>/session.lock`에 둔다. 리플레이 확인 명령(`runLiveReplayCheck`)도 기본으로 이 `live-sessions/`를 읽는다(`-PsessionsDir`로 바꿈).
 
 | 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
 |---|---|---|---|---|---|---|
@@ -38,7 +39,9 @@
 | `server.port` | `8480` (환경 변수 `AUTOTRADE_UI_PORT`) | 대시보드 포트 | ADR-005 |
 | `autotrade.lab.strategies-dir` | `strategies` (실행 폴더 기준, bootRun은 저장소 루트) | 전략 프로필 YAML 폴더 | ADR-005 4장 |
 | `autotrade.lab.selections-dir` | `selections` (실행 폴더 기준, bootRun은 저장소 루트) | 선정 프로필 YAML 폴더. 실험 실행기가 읽는 `selections/`와 같은 폴더를 가리켜야 화면에서 만든 선정이 실험에 쓰인다 | ADR-005 4·5장, ADR-007 2.1, D-060 |
-| `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다. 실험 생성 화면도 이 폴더에 새 실험 폴더와 등록 파일(`experiment.yaml`)을 쓴다 | D-062, D-074 |
+| `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다. 실험 생성 화면도 이 폴더에 새 실험 폴더와 등록 파일(`experiment.yaml`)을 쓴다. 실시간 모의 세션(D-076)도 이 폴더의 `input: "live"` 등록 파일을 읽고 끝낼 때 `live-detail.txt`를 쓴다 | D-062, D-074, D-076 |
+| `autotrade.code-commit` | `unknown` (bootRun은 `git rev-parse HEAD`를 JVM 속성으로 넘김) | 실시간 모의 세션 상세 보고서의 `code` 줄(커밋). 리플레이 확인은 이 줄을 비교에서 뺀다 | D-076 |
+| `autotrade.code-dirty` | `true` (bootRun은 `git status --porcelain`이 비었는지로 넘김) | 같은 보고서의 작업 트리 변경 여부 | D-076 |
 
 ## 아직 없는 키 (담당 작업에서 추가)
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).

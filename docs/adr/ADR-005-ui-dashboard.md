@@ -110,6 +110,10 @@ parameters:
 | `POST /api/experiment-folders/preview` | 등록과 같은 검사를 하고 쓰지 않는다. 응답 `{id, yaml, command, written=false}` |
 | `GET /api/experiment-folders/snapshots?kind=` | 수집 스냅샷(`<설정 폴더>/snapshots/<kind>/<ID>/manifest.json`, `kind`는 `krx-daily`·`dart-financials`, ID 내림차순): `{root, items[{id, firstDate, lastDate, problem}]}`. 일봉 `lastDate`는 마지막 거래일, 재무는 마지막 수집 시각. 파일 해시는 실행 명령이 확인 |
 | `POST /api/experiment-folders/{id}/load` | 결과 묶음(`result-bundle.jsonl.gz`)을 `detail.txt`·`selection-days.tsv`와 대조한 뒤 실험 목록에 올린다(실험을 다시 돌리지 않음, D-062). 응답 `{id}`. 실험 ID 형식이 아니거나 묶음이 깨졌거나 대조가 다르면 400 `INVALID`(사유는 목록 `lastError`에도 남음), 폴더·묶음·`detail.txt`가 없으면 404 `NOT_FOUND`, 이미 올라가 있으면 409 `CONFLICT`, CSRF 토큰이 없으면 403 `CSRF` |
+| `GET /api/live/status` | 실시간 모의 세션(D-076, [ADR-010](ADR-010-live-feed-and-session.md)) 상태: `session`(없으면 null: 실험 ID, 기간, 받은 이벤트·되살린 이벤트·뺀 종목·기간 밖·공백 수, 마지막 수신 시각, 계좌별 현금·평가액·포지션·체결·거절, 계좌별 실패 사유), `feedState`(게이트웨이 전달 연결), `feedError`, `feedReconnects`, `inboxQueued`, `inboxDropped`, `stopReason` |
+| `POST /api/live/sessions/{id}/start` | `experiments/<id>/experiment.yaml`(`input: "live"`)로 세션을 연다(입력 기록이 있으면 되살림). 이미 도는 세션이 있거나 감시 정지 요청 중이면 409 `CONFLICT`, ID 형식·등록 파일 오류면 400 `INVALID`, CSRF 토큰이 없으면 403 |
+| `POST /api/live/stop` | 세션을 멈춘다(기록을 닫음, 다시 시작 가능). 도는 세션이 없으면 아무것도 하지 않는다 |
+| `POST /api/live/finish` | 세션을 끝내고 `experiments/<id>/live-detail.txt`를 쓴다. 응답 `{experimentId, detailFile, accounts, failedAccounts}`. 도는 세션이 없으면 409 `CONFLICT` |
 | `GET /api/settings` | 그룹별 키: 현재 값, 내장 default 값, 비밀값 여부·설정 여부, 편집 가능 여부, 반영 시점 |
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
 

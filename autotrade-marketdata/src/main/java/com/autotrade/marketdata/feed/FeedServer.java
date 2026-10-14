@@ -162,7 +162,8 @@ public final class FeedServer implements AutoCloseable {
     private void checkStalls() {
         long now = System.nanoTime();
         for (Subscriber s : subscribers) {
-            if (s.subscribed && !s.queue.isEmpty() && now - s.lastProgress > stallNanos) {
+            long since = s.writingSince;
+            if (s.subscribed && since != 0 && now - since > stallNanos) {
                 LOG.log(Level.WARNING, "시세 전달 받는 쪽({0})이 {1}초 동안 읽지 않아 연결을 끊습니다", s.client,
                         stallNanos / 1_000_000_000L);
                 s.stop();
@@ -202,7 +203,8 @@ public final class FeedServer implements AutoCloseable {
         private final RecordingCodec codec = new RecordingCodec();
         private volatile java.util.Set<com.autotrade.domain.market.Market> markets = java.util.Set.of();
         private volatile boolean subscribed;
-        private volatile long lastProgress = System.nanoTime();
+        /** 지금 쓰고 있는 줄을 쓰기 시작한 시각(nanoTime), 쓰고 있지 않으면 0. 한 줄 쓰기가 멈춤 판단 시간보다 길면 끊는다. */
+        private volatile long writingSince;
         private volatile String client = "?";
         private Thread thread;
 
@@ -239,7 +241,6 @@ public final class FeedServer implements AutoCloseable {
                 client = sub.client();
                 markets = sub.markets();
                 writeLine(FeedProtocol.helloLine());
-                lastProgress = System.nanoTime();
                 subscribed = true;
                 LOG.log(Level.INFO, "시세 전달 받는 쪽 연결: {0} {1}", client, markets);
                 Thread.ofPlatform().name("feed-conn-watch").daemon(true).start(this::watchClose);
@@ -250,7 +251,6 @@ public final class FeedServer implements AutoCloseable {
                         break;
                     }
                     writeLine(codec.encode(++seq, item.sourceId, item.event));
-                    lastProgress = System.nanoTime();
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -268,8 +268,13 @@ public final class FeedServer implements AutoCloseable {
 
         private void writeLine(String text) throws IOException {
             ByteBuffer buf = ByteBuffer.wrap((text + "\n").getBytes(StandardCharsets.UTF_8));
-            while (buf.hasRemaining()) {
-                channel.write(buf);
+            writingSince = Math.max(1, System.nanoTime());
+            try {
+                while (buf.hasRemaining()) {
+                    channel.write(buf);
+                }
+            } finally {
+                writingSince = 0;
             }
         }
 

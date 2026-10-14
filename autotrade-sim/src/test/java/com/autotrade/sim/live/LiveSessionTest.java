@@ -170,6 +170,64 @@ class LiveSessionTest {
     }
 
     @Test
+    void crashWithLostTailAndUnclosedMetaStillReplaysTheSame() throws Exception {
+        List<MarketEvent> events = twoDays();
+        int crashAt = events.size() / 3;
+        LiveSession crashed = open();
+        for (MarketEvent e : events.subList(0, crashAt)) {
+            clock.now = e.receivedAt();
+            crashed.accept("KIWOOM-WS", e);
+        }
+        crashed.flush();
+        // 비정상 종료: 닫지 않은 채(메타 미종료) 세션 폴더만 남고, 디스크에 다 내리지 못한 꼬리가 잘린다
+        Path copy = tmp.resolve("crashed-sessions");
+        Path from = sessions.resolve(ID);
+        try (var walk = Files.walk(from)) {
+            for (Path p : walk.toList()) {
+                Path to = copy.resolve(ID).resolve(from.relativize(p).toString());
+                if (Files.isDirectory(p)) {
+                    Files.createDirectories(to);
+                } else {
+                    Files.copy(p, to);
+                }
+            }
+        }
+        crashed.close();
+        Path day = copy.resolve(ID).resolve(LiveSession.JOURNAL_DIR).resolve("KRX").resolve("2026-10-14")
+                .resolve("events.jsonl.gz");
+        byte[] bytes = Files.readAllBytes(day);
+        Files.write(day, java.util.Arrays.copyOf(bytes, bytes.length - 20));
+
+        LiveSession resumed = LiveSession.open(plan, REPO, copy, clock, m -> { });
+        assertThat(resumed.status().restored()).isPositive().isLessThanOrEqualTo(crashAt);
+        for (MarketEvent e : events.subList(crashAt, events.size())) {
+            clock.now = e.receivedAt();
+            resumed.accept("KIWOOM-WS", e);
+        }
+        writeLiveDetail(resumed.finish(new CodeVersion("c", false)));
+
+        LiveReplayCheck.Outcome out = LiveReplayCheck.run(experimentDir, REPO, copy, new CodeVersion("c", false),
+                m -> { }, RunGate.NONE);
+        assertThat(out.same()).isTrue();
+    }
+
+    @Test
+    void pricesOffTheStockTickStopTheSessionWithoutWritingThem() {
+        try (LiveSession s = open()) {
+            Instant t = LocalDate.of(2026, 10, 14).atTime(10, 0).atZone(SEOUL).toInstant();
+            clock.now = t;
+            // ETF처럼 5원 단위 가격(주식 60,000원대 호가 단위는 100원)
+            assertThat(s.accept("KIWOOM-WS", new TradeTick(SAMSUNG, 1, t, t, new BigDecimal("60005"), 1)))
+                    .isEqualTo(LiveSession.Accepted.STOPPED);
+            assertThat(s.status().stopReason()).contains("호가 단위").contains("005930");
+            assertThat(s.status().events()).isZero();
+            assertThat(s.journalDays()).isEmpty();
+            assertThat(s.accept("KIWOOM-WS", new TradeTick(SAMSUNG, 2, t, t, new BigDecimal("60000"), 1)))
+                    .isEqualTo(LiveSession.Accepted.STOPPED);
+        }
+    }
+
+    @Test
     void replayCheckDetectsADifferentLiveReport() throws Exception {
         LiveSession s = open();
         for (MarketEvent e : twoDays().subList(0, 300)) {

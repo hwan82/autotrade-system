@@ -4,7 +4,6 @@ import com.autotrade.domain.MarketRules;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.OrderBookSnapshot;
-import com.autotrade.domain.market.PriceLevel;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
@@ -49,6 +48,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeSet;
 import java.util.function.Consumer;
 
@@ -174,24 +174,31 @@ public final class RecordingExperiment {
      * @throws IllegalArgumentException 호가 단위에 맞지 않는 가격이 있을 때
      */
     static void requireStockTicks(MarketRules rules, MarketEvent e) {
-        if (e instanceof TradeTick t) {
-            requireTick(rules, e, t.price());
-        } else if (e instanceof OrderBookSnapshot b) {
-            for (PriceLevel l : b.asks()) {
-                requireTick(rules, e, l.price());
-            }
-            for (PriceLevel l : b.bids()) {
-                requireTick(rules, e, l.price());
-            }
-        }
-    }
-
-    private static void requireTick(MarketRules rules, MarketEvent e, BigDecimal price) {
-        if (rules.roundToTick(e.symbol(), price, RoundingMode.DOWN).compareTo(price) != 0) {
+        offStockTick(rules, e).ifPresent(price -> {
             throw new IllegalArgumentException("주식 호가 단위에 맞지 않는 녹화 가격입니다: " + e.symbol().code() + " "
                     + price.toPlainString() + " (sequence " + e.sequence() + "). ETF·ETN 같은 주식 밖 종목은 녹화 실험이 아직 "
                     + "받지 않으니 녹화 종목에서 빼고 다시 녹화하세요");
+        });
+    }
+
+    /**
+     * 이벤트의 체결가·호가 중 주식 호가 단위에 맞지 않는 첫 가격(없으면 빈 값). 녹화 실험과 실시간 모의(D-076)가 같은 검사를
+     * 쓴다(D-075 4번).
+     */
+    public static Optional<BigDecimal> offStockTick(MarketRules rules, MarketEvent e) {
+        List<BigDecimal> prices = new ArrayList<>();
+        if (e instanceof TradeTick t) {
+            prices.add(t.price());
+        } else if (e instanceof OrderBookSnapshot b) {
+            b.asks().forEach(l -> prices.add(l.price()));
+            b.bids().forEach(l -> prices.add(l.price()));
         }
+        for (BigDecimal price : prices) {
+            if (rules.roundToTick(e.symbol(), price, RoundingMode.DOWN).compareTo(price) != 0) {
+                return Optional.of(price);
+            }
+        }
+        return Optional.empty();
     }
 
     /** 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. 멈추면 결과 파일을 하나도 쓰지 않는다. */
