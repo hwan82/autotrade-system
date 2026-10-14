@@ -119,7 +119,9 @@ ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래�
 | B. 자체 `TradingClock` 인터페이스 | 시장 시간대·거래일 메서드를 붙일 수 있음 | JDK API에 바로 못 넘김, MarketRules와 중복 | 버림 |
 | C. 시각을 매 호출 인자로 전달 | 가장 순수함 | 시그니처가 길어지고 누락을 컴파일러가 못 잡음 | 버림(RiskPolicy처럼 순수 함수가 필요한 곳은 병행) |
 
-시스템 시계(`Clock.systemUTC()`)를 만드는 곳은 4개 진입점(`EngineMain`, `GatewayMain`, `WatchdogMain`, 실험실 `CoreConfiguration`)뿐이다. 시장 현지 시간은 `MarketRules.zone()`으로 변환한다. 되돌릴 조건: 시장별 거래일 계산이 여러 모듈에 흩어지면 B를 MarketRules 확장으로 재검토한다.
+시스템 시계(`Clock.systemUTC()`)를 만드는 곳은 4개 진입점(`EngineMain`, `GatewayMain`, `WatchdogMain`, 실험실 `CoreConfiguration`)뿐이다.
+
+> 정정 기록(2026-10-14, 1단계 QA C5 ③): 위 문장은 2026-10-08 기준이다. 이후 진입점이 늘어 지금 시스템 시계를 만드는 곳은 7곳이다: `EngineMain`, `GatewayMain`, `KiwoomDailyMain`(D-052 키움 일봉 명령), `WatchdogMain`, `CollectorMain`(ADR-008), `ExperimentMain`(D-063), 실험실 `CoreConfiguration`. 규칙 자체는 바뀌지 않았다: ArchUnit `NO_SYSTEM_TIME`의 예외는 `com.autotrade.app.` 패키지의 `*Main`과 `CoreConfiguration`이다(`ArchitectureTest.java` `CLOCK_SOURCE`). 그 밖의 운영 코드는 주입받은 `Clock`만 쓴다. 시장 현지 시간은 `MarketRules.zone()`으로 변환한다. 되돌릴 조건: 시장별 거래일 계산이 여러 모듈에 흩어지면 B를 MarketRules 확장으로 재검토한다.
 
 ### 2.5 금액: `Money(BigDecimal, Currency)` (ARC-08)
 
@@ -193,7 +195,7 @@ SIM-10 대응: 기획서의 `cost_model_version`은 `cost_model_id`(D-021 비용
 
 - 시각은 TIMESTAMPTZ, 거래소 현지 날짜는 `exchange_date`로 따로 둔다(미국 장은 한국 날짜로 이틀에 걸침).
 - 금액은 NUMERIC + 통화 코드. 가격은 소수 6자리(미국 1달러 미만 호가 대비 `[가정]`, overseas-design.md 3장 확인 필요 항목).
-- Flyway와 DB 드라이버는 아직 연결하지 않는다. 3단계에서 저장 구현과 함께 붙인다. 그 전까지 CI `schema` 잡이 빈 PostgreSQL 16에 V*.sql을 순서대로 적용하고 `scripts/ci/schema-smoke.sql`(정상 행 입력, 미래 정보 행 거부, 다른 계좌 행 거부, 매수 행 실현손익 거부)을 돌린다.
+- Flyway와 DB 드라이버는 아직 연결하지 않는다. 3단계에서 저장 구현과 함께 붙인다. 그 전까지 CI `schema` 잡이 빈 PostgreSQL 16에 V*.sql을 순서대로 적용하고 `scripts/ci/schema-smoke.sql`(정상 행 입력, 미래 정보 행 거부, 다른 계좌 행 거부, 매수 행 실현손익 거부)을 돌린다. (2026-10-14 정정, 1단계 QA C5 ④: 매수 행 실현손익 거부 경우는 스모크에 처음부터 빠져 있었다. 같은 날 스모크에 `ok: buy row with realized pnl rejected`를 추가해 이 설명과 맞췄다.)
 
 DB 엔진 대안(Q-009): (A) PostgreSQL 16 **채택**(무료, role-guides.md 3장 저장 구조와 일치, JSONB·파티션·CHECK 제약), (B) SQLite/H2 파일 DB(설치가 없지만 동시 쓰기·파티션·JSONB가 약함). 대용량 시세 녹화는 DB가 아니라 파일(2단계 data-engineer 결정, D-019 스냅샷)이다. 되돌릴 조건: 개인 PC 설치 부담이 운용을 막으면 실험 메타만 SQLite로 옮기는 V2를 검토한다.
 

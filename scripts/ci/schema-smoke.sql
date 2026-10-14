@@ -1,5 +1,5 @@
 -- 스키마 스모크 테스트(V1·V2): 같은 밀리초 체결 같은 정상 행은 들어가고, 미래 정보(체결 순번이 신호 순번보다 앞서거나 같음)와
--- 계좌·Run 불일치는 거부되는지 확인한다. V2(ADR-007): 같은 전략 프로필을 다른 조합으로 한 실험에 넣을 수 있고,
+-- 계좌·Run 불일치, 실현손익이 붙은 매수 행은 거부되는지 확인한다. V2(ADR-007): 같은 전략 프로필을 다른 조합으로 한 실험에 넣을 수 있고,
 -- 같은 조합 중복·잘못된 조합 해시·시드 방식 불일치·기준일 당일 데이터를 쓴 선정 결과는 거부되는지 확인한다.
 \set ON_ERROR_STOP on
 BEGIN;
@@ -39,6 +39,16 @@ BEGIN
         RAISE EXCEPTION 'row for a foreign account was accepted';
     EXCEPTION WHEN foreign_key_violation THEN
         RAISE NOTICE 'ok: foreign account rejected';
+    END;
+    BEGIN
+        INSERT INTO virtual_trade_log (experiment_id, run_id, account_id, profile_hash, combination_hash, idempotency_key, fill_seq, market,
+                                       symbol_code, side, quantity, price, commission, tax, slippage, currency, parameters_snapshot,
+                                       realized_pnl, signal_event_seq, fill_event_seq, signal_time, fill_time, exchange_date)
+        VALUES ('EXP-SMOKE-01', 'RUN-1', 'EXP-SMOKE-01-A01', repeat('a', 64), combination_hash_v1('none', repeat('a', 64)), '20260102-005930-BUY-4', 1, 'KRX', '005930',
+                'BUY', 10, 71500, 0, 0, 0, 'KRW', '{}', 1000, 100, 101, '2026-01-02T00:00:00Z', '2026-01-02T00:00:01Z', '2026-01-02');
+        RAISE EXCEPTION 'buy row with realized pnl was accepted';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'ok: buy row with realized pnl rejected';
     END;
 END $$;
 -- V2(ADR-007): 선정 프로필 × 전략 프로필 조합
