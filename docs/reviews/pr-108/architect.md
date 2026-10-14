@@ -51,3 +51,51 @@
 
 ## 판정
 수정 필요(AR-1, AR-2, AR-3)
+
+## 재검토 2026-10-14
+- 대상: PR #108 / 커밋 618ae22 / main 대비 diff(`git diff origin/main...618ae22`). 앞 검토(884d443) 뒤 바뀐 것은 `git diff 884d443 618ae22`(테스트 1개 파일 수정, 고정 예제 4개 추가, ADR-002 9.5·D-085·결정 로그 갱신)
+- 점검표: B
+- 직접 실행한 것(공유 작업 트리를 건드리지 않으려고 `git worktree add <스크래치>/wt 618ae22`로 만든 별도 작업 트리에서 실행했고, 끝난 뒤 `git worktree remove`로 지웠다):
+  - `./gradlew clean build --no-daemon` → `BUILD SUCCESSFUL in 4m 23s`, 종료 코드 0. `:autotrade-architecture-test:test`가 실제로 실행됐다(UP-TO-DATE 아님). 결과 XML 합계 테스트 1,107건, 실패·오류·건너뜀 0. `RealPathReflectionTest`는 6건, 실패 0
+  - 변조 실험(커밋하지 않음, 별도 작업 트리에서만): `autotrade-config`에 `com.autotrade.config.qaprobe`의 4개 클래스를 넣고 `:autotrade-architecture-test:test --tests '*RealPathReflectionTest'` 실행 → 종료 코드 1, `실전_경로_모듈은_리플렉션을_쓰지_않는다`만 실패(위반 12건). 결과는 아래 표와 같다
+    | 프로브 | 내용 | 결과 |
+    |---|---|---|
+    | `JmxInvoker` | `getMethods()` → `ModelMBeanOperationInfo` → `RequiredModelMBean#invoke` (앞 검토 AR-1) | 잡힘 |
+    | `JacksonWriter` | `new ObjectMapper().readerForUpdating(target).readValue(json)` (앞 검토 AR-2) | 잡힘 |
+    | `ProcessSpawner` | `new ProcessBuilder("jcmd", pid, "JVMTI.agent_load", jar).start()`, `Runtime.getRuntime().exec(..)` | **안 잡힘** |
+    | `CloneByClass` | `new ObjectMapper().readValue(json, live.getClass())` | **안 잡힘** |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew clean build` 종료 코드 0, 테스트 1,107건 실패 0. 아키텍처 테스트도 실제로 실행됨 |
+| B2 | 통과 | 새 규칙은 테스트 모듈 안에만 있고 운영 모듈 의존 방향은 그대로. 규칙 변경은 ADR-002 9.5 5항과 D-085 1·4항에 기록됨. 운영 코드에 대한 기존 규칙과 새 규칙이 모두 위반 0건으로 통과(위 빌드) |
+| B3 | 통과 | 운영 계약 변경 없음. 허용 목록(`ALLOWED_JDK_PACKAGES` 23개, `ALLOWED_REFLECT_TYPES` 3개, `JACKSON_ALLOWLIST` 27개)과 규칙 `GUARD_TYPES_ARE_NOT_DATA`가 D-085·ADR-002 9.5에 적혀 있다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | 새 금지 항목마다 고정 예제가 있다: `JacksonObjectAccess`(5건), `GuardAsData`(3건), `DynamicCode`(8종), `PolymorphicJson.ClassIdIntrospector`, `qa.probe.OutsideReflective`(`#합친_범위는_실전_경로_모듈의_com_autotrade_밖_패키지도_잡는다`). 지우거나 약화한 테스트는 없다. `규칙은_리플렉션_우회를_실제로_잡아낸다`에서 `doesNotContain("ByName")` 단언이 빠졌는데, `@JsonTypeInfo(use = NAME)`이 이제 허용 목록 밖 의존으로 걸리기 때문이다. 대신 `doesNotContain("@JsonTypeInfo(use = NAME)")`로 다형 검사가 NAME을 잡지 않는 것은 계속 확인한다(RealPathReflectionTest.java 618ae22 기준 443행). 약화가 아니라 규칙이 넓어진 결과다 |
+| B7 | risk-ops 검토 필요 | 보호 테스트 강화이고 실전 경로(Guard·2차 확인·실전 엔진 런타임)를 다룬다. risk-ops 재검토 뒤 사용자 머지 |
+| B8 | 통과 | 추가 고정 예제와 문서에 키·계좌번호·토큰 값 없음(`/x.so`, `"x"` 같은 자리 값뿐) |
+
+### 앞 검토 지적의 처리
+- AR-1: 해소. JDK 의존이 허용 패키지 목록(`ALLOWED_JDK_PACKAGES`)으로 바뀌었다. 금지 목록(`DYNAMIC_CODE_PACKAGES`)에는 `javax.management`·`java.lang.management`·`javax.naming`·`java.rmi`·`javax.tools`·`jdk.jshell`·`java.lang.foreign`·`jdk.dynalink`이 더해졌다. `System`·`Runtime`의 `load·loadLibrary`, `native` 선언, `Module#add*`, `Atomic*FieldUpdater`도 금지된다. 변조 실험 `JmxInvoker`가 잡혔다.
+- AR-2: 해소. Jackson은 허용 타입 27개만 쓸 수 있고, 그 안의 위험 메서드(`JACKSON_OBJECT_ACCESS`)도 막힌다. Guard 타입을 바인딩 대상으로 넘기는 표지는 `GUARD_TYPES_ARE_NOT_DATA`가 막는다. 변조 실험 `JacksonWriter`가 잡혔다.
+- AR-3: 해소. `JsonTypeInfo`와 `JsonTypeInfo$Id`가 허용 목록 밖이라, 상수 읽기와 `JacksonAnnotationIntrospector` 상속이 모두 걸린다(고정 예제 `ClassIdIntrospector`).
+
+### 새 지적
+
+#### AR-4 (수정 필요) 허용 패키지 `java.lang`의 외부 프로세스 실행으로 자기 JVM에 에이전트를 붙일 수 있다
+- `[사실]` 변조 실험 `ProcessSpawner`(`ProcessBuilder#start`, `Runtime#exec`)가 규칙에 걸리지 않았다. `reflective()`의 `java.lang.Runtime` 분기는 `load`·`loadLibrary`만 보고, `ProcessBuilder`에 대한 분기는 없다. `java.lang`은 허용 패키지다.
+- `[추론]` `jcmd <자기 pid> JVMTI.agent_load <jar>`(또는 `jattach` 같은 도구)를 실행하면 실전 엔진 JVM 안에 에이전트가 올라간다. 에이전트는 `java.lang.instrument`로 아무 코드나 실행하고 Guard 상태를 바꿀 수 있다. Java 21은 동적 에이전트 적재를 경고만 내고 허용한다(JEP 451). 저장소에는 `-XX:-EnableDynamicAgentLoading`이나 `-XX:+DisableAttachMechanism` 설정이 없다(`grep` 결과는 collector의 `-Xmx2g`뿐). D-085 "보장하지 않는 것"의 "`java.lang` 안의 아직 모르는 간접 호출 수단"에 해당하지만, 이제는 알려진 경로이고 막는 비용이 작다.
+- 실전 경로 운영 코드는 지금 `ProcessBuilder`·`Runtime#exec`를 쓰지 않는다(618ae22 `grep` 결과 없음).
+- 고칠 방향:
+  - (가) `reflective()`에 `java.lang.ProcessBuilder`의 `start`·`startPipeline`과 `java.lang.Runtime#exec`를 더하고, `DynamicCode` 고정 예제에 두 건을 더한다.
+  - (나) 실전 엔진·감시 프로세스 시작 옵션에 `-XX:+DisableAttachMechanism`을 넣는 것을 7단계 실행 절차서 설치본 대조 항목에 함께 적는다(빌드 밖 경로까지 막는다).
+  - (가)는 이 PR에서 해야 한다. (나)는 후속 과제로 기록하면 된다.
+
+#### AR-5 (수정 필요, 작음) `GUARD_TYPES_ARE_NOT_DATA`의 설명이 사실보다 강하다
+- `[사실]` 변조 실험 `CloneByClass`(`readValue(json, live.getClass())`)가 걸리지 않았다. 규칙의 근거 주석(RealPathReflectionTest.java 618ae22 기준 360-364행 "이것이 없으면 Jackson 같은 라이브러리가 Guard 타입 객체를 새로 만들 수 없다")과 D-085 "보장하지 않는 것" 첫 항("Guard 객체를 새로 만들려면 Guard 타입을 넘겨야 하고(4번이 막음)")은 이 경로를 막는다고 적었다. 그러나 이미 받은 Guard 타입 객체의 `getClass()`로도 클래스 객체를 넘길 수 있다.
+- `[추론]` 지금 Guard 패키지 타입(`OrderSessionPermit`은 package-private 생성자에 `@JsonCreator`가 없고, `RealTradingGuard`는 인자 있는 생성자뿐이며, 매개변수 이름 모듈도 실전 경로 런타임에 없다)은 기본 설정 Jackson으로 만들어지지 않을 가능성이 높다. 그래서 실제 위험은 낮다.
+- 고칠 방향: 주석과 D-085의 설명을 "클래스 객체 표지와 Guard 타입에 Jackson이 쓸 생성자가 없다는 것에 함께 기댄다"로 바로잡고, `getClass()` 경로를 남은 한계에 적는다. 할 수 있으면 "Guard 패키지 타입에 `@JsonCreator`·`@JsonProperty`·인자 없는 생성자가 없다"는 규칙을 더해 그 전제를 테스트로 고정한다.
+
+## 판정
+수정 필요(AR-4, AR-5)
