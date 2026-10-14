@@ -384,3 +384,72 @@
 
 ### 판정
 수정 필요 (A2·A14, F7: 상위 타입 인자 `extends ArrayList<Class<?>>`와 게터 반환 타입 `List<Class<?>> getItems()`로 이름 문자열 클래스 찾기가 규칙을 통과해 독립 QA F1이 아직 일부만 해소됨. F6·R5는 해소)
+
+## 재검토 2026-10-14 (헤드 af0a8e3)
+- 대상: PR #108 브랜치 `claude/project-thread-l44wj7`, 헤드 af0a8e3. `git diff origin/main...HEAD` 전체(22파일, +2,379 −3)를 다시 봤다. 직전 재검토(4f44ccc) 뒤 새 운영·시험 커밋은 af0a8e3 하나다. 그 사이 3759fb4·043332f·a8a3c7d는 검토 원문 커밋이다.
+  - 운영 코드 변경은 여전히 0줄이다. af0a8e3가 바꾼 것은 다음과 같다.
+    - `RealPathReflectionTest.java` `classAsData`: 상위 클래스·인터페이스 타입 인자(`:416-419`), 클래스 타입 변수 경계(`:420-421`), 모든 코드 단위의 반환 타입(`:425-427`), 메서드 타입 변수 경계(`:428-429`) 검사를 더했다. 매개변수는 "바인딩이 아닌 메서드의, 제네릭 인자에 `Class`가 없는 `Class<T>` 바로 그 타입"만 허용하도록 바꿨다(`:430-437`).
+    - 고정 예제 `NameToClassBinding$SuperProbe`·`Holder`·`TypeVarProbe`·`GetterProbe`와 단언 3개, 허용 예제 단언 1개(`Holder`는 잡히지 않음, `:771`)
+    - D-086 결정 1번·위험과 한계 47행, ADR-002 9.5 6항(`:239`), `qa-out-status.md` 한 줄
+  - 커밋 메시지와 D-086의 주장은 확인할 주장으로만 봤다.
+  - af0a8e3는 이 파일(risk-ops.md)을 바꾸지 않았다.
+- 점검표: A
+- 직접 실행한 것:
+  - 실행 장소: 별도 작업 트리(af0a8e3)에서 하고 끝난 뒤 지웠다. 공유 작업 트리 소스는 손대지 않았다.
+  - `./gradlew build --no-daemon` → BUILD SUCCESSFUL, EXIT=0, 130개 작업 실행. 시험 결과 XML 합계 1,130건, 실패·오류·건너뜀 0.
+  - 탐침을 지운 뒤 `./gradlew :autotrade-architecture-test:test :autotrade-risk:test :autotrade-app-engine:test --rerun-tasks` → EXIT=0.
+    - `:autotrade-risk:test` 55건
+    - `:autotrade-architecture-test:test` 39건(`RealPathReflectionTest` 7건 포함)
+    - `:autotrade-app-engine:test` 50건
+  - 변조 실험(커밋하지 않음, 지움). 실전 경로 범위인 `autotrade-control`에 `rprobe` 패키지로 10개 탐침을 넣고 `:autotrade-architecture-test:test`를 돌렸다. `실전_경로_모듈은_리플렉션을_쓰지_않는다`만 실패했고 나머지 6건은 통과했다.
+    - R0 `return Class.class;` → 잡힘. 이 배치에서 규칙이 `autotrade-control`을 보고 있음을 확인한 대조군이다.
+    - R1 직전 Q1(`Names extends ArrayList<Class<?>>` + `readValue` + `convertValue`) → 잡힘("상위 타입 … 에 Class")
+    - R2 직전 Q2(`List<Object>` 필드 + `List<Class<?>> getItems()` 게터) → 잡힘("반환 타입에 Class")
+    - R3 익명 클래스 `new ArrayList<Class<?>>() {}` → 잡힘(`R3Anon$1`의 상위 타입)
+    - R4 `extends HashMap<String, Class<?>>` → 잡힘
+    - R5 `Map<String, Class<?>> getM()` 게터 → 잡힘
+    - R6 실전 경로 제네릭 클래스 `H<T>`(설정자 `setV(T)`)의 하위 클래스 `extends H<Class<?>>` → 잡힘
+    - R7 `implements Supplier<Class<?>>` → 잡힘(상위 타입과 `get()` 반환 타입 2건)
+    - R9 `class R9<T extends Class<?>>`, `static <U extends Class<?>> U id(U)` → 잡힘(클래스·메서드 타입 변수 경계, 반환 타입 3건)
+    - R8 `public static R8ValueOf valueOf(Class<?> k)` → 통과(허용 모양). 아래 Jackson 직접 실행으로 이 모양이 바인딩 경로가 아님을 확인했다.
+  - Jackson 2.21.4 직접 실행(작업 트리 밖 임시 폴더, 탐침과 같은 모양):
+    - T1 허용 목록 타입 `ObjectMapper`를 바인딩 대상으로(`readValue("{\"mixIns\":{..}}", ObjectMapper.class)` 뒤 `findMixInClassFor`로 `Class` 값 꺼내기) → `InvalidDefinitionException`(`setDefaultPropertyInclusion` 설정자 충돌)로 매퍼 자체를 만들지 못한다. `JsonMapper`도 같다.
+    - T2 허용 목록의 JDK 클래스 전부(`ALLOWED_JDK_CLASSES`)와 Jackson 타입 전부(`JACKSON_ALLOWLIST`)를 Jackson의 역직렬화 속성 분석(`introspect(..).findProperties()`)에 넣었다. `Class`가 들어간 속성은 `java.lang.Class` 자신(읽기 전용 게터만, 리터럴은 따로 금지)과 `ObjectMapper`·`JsonMapper`의 `mixIns`·`mixInAnnotations`(T1에서 만들 수 없음)뿐이다. 그래서 허용 목록 타입을 바인딩 대상으로 써서 `Class` 값을 얻는 길은 지금 Jackson 버전에서 없다.
+    - T3 `valueOf(Class<?>)` 정적 메서드(R8 모양)를 가진 타입에 `"<이름>"`과 `["<이름>"]`을 읽힘 → 둘 다 "no String-argument constructor/factory method"로 실패. Jackson은 주석 없는 `valueOf`를 이 모양의 생성기로 쓰지 않는다.
+    - `TypeFactory`·`JavaType`·`TypeReference`·`ObjectReader`·`MismatchedInputException`은 허용 목록 밖이라 `JavaType`·`Type`을 거치는 바인딩도 `outsideAllowlist`(호출 서명 대조)가 막는다(`RealPathReflectionTest.java:295-330`, `:357-386`).
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F7 상위 타입 인자·게터 반환 타입 | 해소 | `RealPathReflectionTest.java:416-419`(상위 클래스·인터페이스), `:425-427`(반환 타입), `:420-421`·`:428-429`(타입 변수 경계). `involvesClass`(`:448-450`)가 모든 관련 원래 타입의 원소 타입을 보므로 맵 값·중첩 제네릭·배열도 걸린다. 변조 실험 R1~R7·R9가 모두 잡혔다. `규칙은_리플렉션_우회를_실제로_잡아낸다`(`:689`)가 `SuperProbe`·`TypeVarProbe`·`GetterProbe`를 단언하고(`:768-770`), 타입 변수만 가진 `Holder`가 잡히지 않음도 단언한다(`:771`) |
+| F7 수정 제안 4(문구) | 해소 | D-086 결정 1번(`:23`)과 ADR-002 9.5 6항(`:239`)이 허용 모양 하나와 금지 목록(상위 타입 인자, 반환 타입, 타입 변수 경계)을 적었다. D-086:23에 이 모양으로 또 빈틈이 나오면 실행 시 방어(`Class` 역직렬화기 차단)로 간다는 되돌릴 조건이 생겼다. D-086:47 "`Class`가 나오는 서명 모양을 하나로 줄여 `Class` 값 바인딩을 막는다"는 이번 실험(R0~R9, T1~T3)과 맞는다 |
+| A2(직전) | 해소 | 아래 A2 |
+| A14(직전) | 해소 | 아래 A14 |
+| 근본 원인 대안(직전, 판정 조건 아님) | 반영 | 대안 1(서명의 `Class` 기본 금지, `Class<T>` 매개변수만 허용)이 채택됐다. 대안 2(실행 시 방어)는 D-086:23에 되돌릴 조건으로 남았다 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 0줄. `RealTradingGuard` 기본 OFF·재기동 OFF가 그대로다. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | 기존 `ArchitectureTest` 출구·Guard 규칙 변경은 없다(diff 0줄). 새 규칙이 막겠다고 한 경로(이름 문자열 → `Class` → 정적 의존 없는 객체 생성)가 이번에 시험한 모양에서 모두 막힌다: 직전 Q1·Q2(R1·R2)와 변형 R3~R7·R9, 허용 목록 타입을 바인딩 대상으로 쓰는 길(T1·T2), 허용 모양 `Class<T>` 매개변수가 Jackson 생성기로 쓰이는 길(T3) |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정과 엔진 `processIsolation`이 그대로다. 빌드에서 통과했다 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | 예제 추가분(`NameToClassBinding.java`)과 문서 변경분에 키·계좌번호·토큰 없음 |
+| A11 | 통과 | 보호 시험 삭제·약화 없음. 매개변수 판정은 직전보다 좁아졌다(일반 메서드의 `Class<?>[]`·`Class<List<..>>` 같은 모양도 이제 금지, `:432-435`). 단언 3개와 허용 단언 1개가 늘었다. 운영 코드 전체가 넓어진 규칙을 통과했으므로(빌드) 운영 코드 오탐도 없다 |
+| A12 | 통과 | 장애 대응표 17종, O1~O8, 장애 테스트 8종의 전제를 바꾸는 동작 변경이 없다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 통과 | ADR-002 9.5 6항(`:239`), D-086 결정 1번(`:23`)·위험과 한계(`:47`), `classAsData` 주석(`RealPathReflectionTest.java:410-412`)이 규칙의 실제 동작(허용 모양 하나, 나머지 서명의 `Class` 금지)과 맞는다. 남은 한계(허용 목록 타입 안의 모르는 객체 접근 API, 설치본 jar·JVM 옵션)는 D-086:44-50에 `[추론]`과 함께 그대로 적혀 있다 |
+
+### 점검표 밖 발견
+- 차단 발견 없음.
+- R6(권고, 차단 아님): 허용 모양 `Class<T>` 매개변수가 안전한 근거는 "Jackson이 주석 없는 일반 메서드를 생성기로 쓰지 않는다"는 Jackson 동작이다(T3로 2.21.4에서 확인). 그런데 이를 고정하는 시험은 없다. Jackson 버전을 올리는 PR에서 T3과 같은 실행 시험(주석 없는 `valueOf(Class<?>)`·`of(Class<?>)`가 이름 문자열로 불리지 않음)을 함께 넣기를 권한다. D-086:44가 이미 "Jackson 버전을 올리는 PR은 이 목록과 함께 검토한다"고 적고 있어 문서와는 어긋나지 않는다.
+- 직전 R5와 같은 이유로, 7단계에서 실전 경로 Jackson에 날짜 처리(jsr310)를 넣는 PR이 오면 risk-ops는 `SecondConfirmation` 위조 경로가 이 규칙으로 막혔는지를 다시 승인 조건으로 본다(QA R1).
+- 이 PR은 보호 테스트를 강화하므로 실전 관련 PR이다. 지침 10장·11장에 따라 머지 전에 사용자 확인과 독립 QA 재검토를 거쳐야 한다.
+
+### 판정
+승인 (F7·A2·A14 해소, 권고 R6. 실전 관련 PR이므로 머지는 사용자 확인과 독립 QA 재검토 뒤)
