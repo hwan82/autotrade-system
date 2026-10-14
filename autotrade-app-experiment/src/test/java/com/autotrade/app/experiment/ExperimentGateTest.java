@@ -220,6 +220,47 @@ class ExperimentGateTest {
     }
 
     @Test
+    void 주간_점검도_정지_요청과_장_시간에는_시작하지_않는다(@TempDir Path root) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261015-LIVE01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261015-LIVE01\n");
+        String[] tail = {root.toString(), "abc", "false", "EXP-20261015-LIVE01", "--sessions-dir",
+                root.resolve("sessions").toString(), "--recordings-dir", root.resolve("rec").toString()};
+
+        assertThat(ExperimentMain.run(concat("live-weekly", null, tail), Clock.fixed(Instant.parse(KRX_SESSION),
+                ZoneOffset.UTC), config)).isEqualTo(4);
+        stopRequest();
+        assertThat(ExperimentMain.run(concat("live-weekly", "--allow-during-session", tail),
+                Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC), config)).isEqualTo(4);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).extracting(p -> p.getFileName().toString()).containsExactly("experiment.yaml");
+        }
+    }
+
+    @Test
+    void 주간_점검_인자가_틀리면_입력_오류다(@TempDir Path root) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261015-LIVE01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261015-LIVE01\n");
+        Clock weekend = Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC);
+        String r = root.toString();
+
+        assertThat(ExperimentMain.run(new String[] {"live-weekly", r, "abc", "false"}, weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"live-weekly", r, "abc", "false", "../EXP"}, weekend, config))
+                .isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"live-weekly", r, "abc", "false", "EXP-20261015-LIVE01", "--x"},
+                weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"live-weekly", r, "abc", "false", "EXP-20261015-LIVE01", "--to",
+                "2026-13-01"}, weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"live-weekly", r, "abc", "false", "EXP-20261015-NONE"}, weekend, config))
+                .isEqualTo(1);
+        // 등록 파일이 실시간 모의 입력이 아니면 해석 단계의 입력 오류
+        assertThat(ExperimentMain.run(new String[] {"live-weekly", r, "abc", "false", "EXP-20261015-LIVE01"}, weekend,
+                config)).isEqualTo(1);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).hasSize(1);
+        }
+    }
+
+    @Test
     void 정지_요청이_있으면_합성_시세_비교_실험도_시작하지_않는다(@TempDir Path root) throws IOException {
         stopRequest();
 
