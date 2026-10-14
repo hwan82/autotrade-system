@@ -9,6 +9,7 @@ import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.feed.FeedClient;
+import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.recording.JournalWriter;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.sim.run.CodeVersion;
@@ -160,8 +161,23 @@ class LiveWeeklyCheckTest {
         int endAt = events.size() - 3; // 2일차 마지막 3개는 세션을 끝낸 뒤
         expected.merge(LiveWeeklyCheck.OUTSIDE_SESSION, 3L, Long::sum);
         Instant overflowSince = null;
+        int feedFrom = 300;
+        Instant feedSince = null;
         while (i < endAt) {
             MarketEvent e = events.get(i);
+            if (i >= feedFrom && i < feedFrom + 20 && e.symbol().equals(HYNIX)) {
+                // 게이트웨이 전달 큐 넘침: SK하이닉스만 버리고, 다음 SK하이닉스 이벤트 앞에 게이트웨이가 그 종목 공백
+                feedSince = feedSince == null ? e.receivedAt() : feedSince;
+                expected.merge(FeedServer.SOURCE_ID, 1L, Long::sum);
+                i++;
+                continue;
+            }
+            if (feedSince != null && e.symbol().equals(HYNIX)) {
+                clock.now = e.receivedAt();
+                s.accept(FeedServer.SOURCE_ID, new DataGap(HYNIX, 0, e.receivedAt(), e.receivedAt(), feedSince,
+                        e.receivedAt(), DataGap.GapReason.CONSUMER_OVERFLOW));
+                feedSince = null;
+            }
             if (i >= inboxFrom && i < inboxFrom + 20 && e.symbol().equals(SAMSUNG)) {
                 // 실험실 받는 큐 넘침: 삼성전자만 버리고, 다음 삼성전자 이벤트 앞에 그 종목 공백
                 overflowSince = overflowSince == null ? e.receivedAt() : overflowSince;
@@ -211,11 +227,11 @@ class LiveWeeklyCheckTest {
         }
         expected.forEach((k, v) -> assertThat(missing.get(k)).as(k).isEqualTo(v));
         assertThat(missing.get(LiveWeeklyCheck.UNEXPLAINED)).isZero();
-        assertThat(missing.get(com.autotrade.marketdata.feed.FeedServer.SOURCE_ID)).isZero();
         assertThat(out.defect()).isFalse();
         LiveWeeklyCheck.DayRow first = out.days().get(0);
         assertThat(first.reconnects()).isEqualTo(1);
-        assertThat(first.labGaps()).containsEntry(FeedClient.SOURCE_ID, 2L).containsEntry(LiveSession.INBOX_SOURCE, 1L);
+        assertThat(first.labGaps()).containsEntry(FeedClient.SOURCE_ID, 2L).containsEntry(LiveSession.INBOX_SOURCE, 1L)
+                .containsEntry(FeedServer.SOURCE_ID, 1L);
         assertThat(out.days().get(1).labGaps().get(LiveWeeklyCheck.RECORDER_SOURCE)).isPositive();
         long dropped = expected.values().stream().mapToLong(Long::longValue).sum();
         assertThat(out.days().stream().mapToLong(LiveWeeklyCheck.DayRow::matched).sum())
@@ -251,6 +267,52 @@ class LiveWeeklyCheckTest {
         assertThat(r.extraUnexplained()).isEqualTo(1);
         assertThat(out.defect()).isTrue();
         assertThat(out.report()).contains("**확인 필요**");
+    }
+
+    @Test
+    void silentStopWhileTheSessionIsOpenIsADefectNotOutsideTheSession() {
+        // 세션이 열린 채 전달이 공백 없이 끊기고(받는 쪽이 끊김을 모름) 장 끝에 닫으면, 그 뒤 녹화 줄은 세션 구간 안이라
+        // 설명 없음이다(architect PR #107 R1)
+        List<MarketEvent> events = recordGateway(List.of(DAY1));
+        int stopAt = events.size() / 2;
+        LiveSession s = open();
+        for (MarketEvent e : events.subList(0, stopAt)) {
+            clock.now = e.receivedAt();
+            s.accept(SRC, e);
+        }
+        clock.now = events.get(events.size() - 1).receivedAt().plusSeconds(60);
+        s.close();
+
+        LiveWeeklyCheck.Outcome out = check(Optional.empty());
+
+        LiveWeeklyCheck.DayRow r = out.days().get(0);
+        assertThat(r.missing()).containsEntry(LiveWeeklyCheck.UNEXPLAINED, (long) (events.size() - stopAt))
+                .containsEntry(LiveWeeklyCheck.OUTSIDE_SESSION, 0L);
+        assertThat(out.defect()).isTrue();
+    }
+
+    @Test
+    void dayTheLabNeverOpenedIsCountedAsMissingAndStillInTheRecordingReplay() {
+        // 실험실을 하루 통째로 끈 날(입력 기록 없음, 녹화만 있음)도 행으로 나오고 녹화 줄은 모두 세션 밖 빠짐이다(R2)
+        List<MarketEvent> events = recordGateway(List.of(DAY1, DAY2));
+        int day2 = indexOfDay(events, DAY2);
+        try (LiveSession s = open()) {
+            for (MarketEvent e : events.subList(day2, events.size())) {
+                clock.now = e.receivedAt();
+                s.accept(SRC, e);
+            }
+        }
+
+        LiveWeeklyCheck.Outcome out = check(Optional.empty());
+
+        assertThat(out.days()).extracting(LiveWeeklyCheck.DayRow::journalPresent).containsExactly(false, true);
+        LiveWeeklyCheck.DayRow off = out.days().get(0);
+        assertThat(off.recordedEvents()).isEqualTo(day2);
+        assertThat(off.missing()).containsEntry(LiveWeeklyCheck.OUTSIDE_SESSION, (long) day2);
+        assertThat(off.matched()).isZero();
+        assertThat(out.defect()).isFalse();
+        assertThat(out.accountsCompared()).isTrue();
+        assertThat(out.report()).contains("| 2026-10-14 | 기록 없음 |").contains("점검일 2일 누계, 그중 입력 기록 있는 날 1일");
     }
 
     @Test

@@ -74,7 +74,12 @@ public final class LiveWeeklyCheck {
     /** 실험실 쪽(전달·받는 쪽·받는 큐·세션 재기동)이 입력 기록에 남기는 공백 출처. 녹화에는 없다. */
     static final List<String> LAB_GAP_SOURCES =
             List.of(FeedClient.SOURCE_ID, RECORDER_SOURCE, FeedServer.SOURCE_ID, LiveSession.INBOX_SOURCE);
-    /** 그 공백이 모든 종목의 수신이 끊긴 구간인지(끊김·재기동). 아니면(큐 넘침) 그 종목만. */
+    /**
+     * 그 공백이 모든 종목의 수신이 끊긴 구간인지(끊김·재기동). 아니면(큐 넘침) 그 종목만. 끊김·재기동 공백 줄은 앞 구간에 나온
+     * 종목마다 하나씩이지만(FeedClient, DayWriter), 그 사이에는 연결이나 프로세스 자체가 없어 처음 나오는 종목도 받지 못했다. 그래서
+     * 종목과 상관없이 그 시각 구간으로 원인을 매긴다(architect PR #107 N3). 큐 넘침은 버리기 시작한 종목에만 공백이 남고 다른
+     * 종목은 계속 들어오므로 그 종목만 본다.
+     */
     private static final Set<String> ALL_SYMBOL_SOURCES = Set.of(FeedClient.SOURCE_ID, RECORDER_SOURCE);
     static final String OUTSIDE_SESSION = "세션 밖";
     static final String UNEXPLAINED = "설명 없음";
@@ -94,9 +99,10 @@ public final class LiveWeeklyCheck {
      * @param labGaps 실험실 쪽 공백 줄 수(출처별)
      * @param forwardedGaps 녹화에서 전달된 공백 줄 수(증권사 끊김, 소스 전환 등)
      * @param reconnects 받는 쪽 재연결 횟수(FEED-CLIENT 공백의 서로 다른 구간 수)
+     * @param journalPresent 같은 날 입력 기록이 있는지(없으면 실험실이 그날 세션을 열지 않았고, 녹화 줄은 모두 빠짐이다)
      * @param recordingPresent 같은 날 녹화가 있는지(없으면 대조 칸은 비어 있다)
      */
-    public record DayRow(LocalDate date, long journalLines, long recordedEvents, long matched, Map<String, Long> missing,
+    public record DayRow(LocalDate date, boolean journalPresent, long journalLines, long recordedEvents, long matched, Map<String, Long> missing,
             long extraInRecorderGap, long extraUnexplained, Map<String, Long> labGaps, long forwardedGaps, int reconnects,
             boolean journalComplete, boolean recordingPresent, boolean recordingComplete) {
         public DayRow {
@@ -146,22 +152,30 @@ public final class LiveWeeklyCheck {
         RecordingLayout journal = new RecordingLayout(
                 sessionsRoot.toAbsolutePath().resolve(plan.id().value()).resolve(LiveSession.JOURNAL_DIR));
         RecordingLayout recordings = new RecordingLayout(recordingsRoot.toAbsolutePath());
+        // 점검 날짜는 입력 기록이 있는 날과 게이트웨이 녹화가 있는 날을 합친다. 실험실을 하루 통째로 끈 날도 빠짐으로 나와야
+        // 한다(architect PR #107 R2)
         List<LocalDate> journalDays = new ArrayList<>();
+        TreeSet<LocalDate> allDays = new TreeSet<>();
         for (LocalDate d = plan.from(); !d.isAfter(plan.to()); d = d.plusDays(1)) {
             if (Files.isRegularFile(journal.dayDir(plan.market(), d).resolve(RecordingLayout.EVENTS_FILE))) {
                 journalDays.add(d);
+                allDays.add(d);
+            }
+            if (Files.isRegularFile(recordings.dayDir(plan.market(), d).resolve(RecordingLayout.EVENTS_FILE))) {
+                allDays.add(d);
             }
         }
         if (journalDays.isEmpty()) {
             throw new IllegalArgumentException("운용 기간 안에 입력 기록이 없습니다: " + journal.root());
         }
-        LocalDate end = to.orElse(journalDays.get(journalDays.size() - 1));
+        LocalDate end = to.orElse(allDays.last());
         if (end.isBefore(plan.from()) || end.isAfter(plan.to())) {
             throw new IllegalArgumentException("점검 마지막 날이 운용 기간 밖입니다: " + end + " (" + plan.from() + " ~ "
                     + plan.to() + ")");
         }
-        List<LocalDate> days = journalDays.stream().filter(d -> !d.isAfter(end)).toList();
-        if (days.isEmpty()) {
+        List<LocalDate> days = allDays.stream().filter(d -> !d.isAfter(end)).toList();
+        List<LocalDate> liveDays = journalDays.stream().filter(d -> !d.isAfter(end)).toList();
+        if (liveDays.isEmpty()) {
             throw new IllegalArgumentException("점검 마지막 날까지 입력 기록이 없습니다: " + end);
         }
         LocalDate weekFrom = end.minusDays(6).isBefore(plan.from()) ? plan.from() : end.minusDays(6);
@@ -174,15 +188,16 @@ public final class LiveWeeklyCheck {
         for (LocalDate d : days) {
             gate.check();
             Path rDir = recordings.dayDir(plan.market(), d);
-            RecordedDay jDay = openStable(journal.dayDir(plan.market(), d));
+            Path jDir = journal.dayDir(plan.market(), d);
+            RecordedDay jDay = Files.isRegularFile(jDir.resolve(RecordingLayout.EVENTS_FILE)) ? openStable(jDir) : null;
             RecordedDay rDay = Files.isRegularFile(rDir.resolve(RecordingLayout.EVENTS_FILE)) ? openStable(rDir) : null;
             DayRow row = compareDay(setup, codec, d, jDay, rDay, recordedForReplay);
             rows.add(row);
             if (!row.recordingPresent()) {
                 skipAccounts.add(d + " 녹화 없음");
             }
-            log.accept(d + ": 기록 " + row.journalLines() + "줄, 녹화(boards) " + row.recordedEvents() + ", 빠짐 "
-                    + row.missingTotal() + ", 녹화에 없는 기록 줄 " + (row.extraInRecorderGap() + row.extraUnexplained()));
+            log.accept(d + ": 기록 " + (row.journalPresent() ? row.journalLines() + "줄" : "없음") + ", 녹화(boards) "
+                    + row.recordedEvents() + ", 빠짐 " + row.missingTotal() + ", 녹화에 없는 기록 줄 " + (row.extraInRecorderGap() + row.extraUnexplained()));
         }
 
         String accounts;
@@ -204,7 +219,7 @@ public final class LiveWeeklyCheck {
                         + "). 실시간 세션도 이 가격에서 멈춥니다(D-075 4번).\n";
             } else {
                 gate.check();
-                accounts = compareAccounts(setup, journal, days, recordedForReplay, end, code, log, gate);
+                accounts = compareAccounts(setup, journal, liveDays, days.size(), recordedForReplay, end, code, log, gate);
                 compared = true;
             }
         }
@@ -230,11 +245,10 @@ public final class LiveWeeklyCheck {
 
     /** 읽는 동안 파일이 바뀌면(세션·게이트웨이가 아직 쓰는 중) 거부한다. */
     private static RecordedDay openStable(Path dir) {
-        Path events = dir.resolve(RecordingLayout.EVENTS_FILE);
         try {
-            String before = Sha256.ofFile(events);
+            String before = fingerprint(dir);
             RecordedDay day = RecordedDay.open(dir);
-            if (!before.equals(Sha256.ofFile(events))) {
+            if (!before.equals(fingerprint(dir))) {
                 throw new IllegalStateException("아직 쓰이는 중입니다(읽는 동안 파일이 바뀜). 장이 끝나고 수신이 멈춘 뒤 다시 돌리세요: "
                         + dir);
             }
@@ -244,7 +258,21 @@ public final class LiveWeeklyCheck {
         }
     }
 
+    /** events 파일과 meta 파일(있으면)의 SHA-256. 메타의 정상 종료·구간도 보고서와 원인 판정에 쓰므로 둘 다 본다(architect PR #107 N2). */
+    private static String fingerprint(Path dir) throws IOException {
+        Path meta = dir.resolve(RecordingLayout.META_FILE);
+        return Sha256.ofFile(dir.resolve(RecordingLayout.EVENTS_FILE)) + "|"
+                + (Files.exists(meta) ? Sha256.ofFile(meta) : "");
+    }
+
     private record Seen(Symbol symbol, Instant receivedAt) {}
+
+    /** 세션이 그날 기록을 열고 있던 구간(양끝 포함). */
+    record Span(Instant start, Instant end) {
+        boolean contains(Instant at) {
+            return !at.isBefore(start) && !at.isAfter(end);
+        }
+    }
 
     private record Gap(String source, DataGap gap) {
         boolean covers(Symbol s, Instant at, boolean anySymbol) {
@@ -263,9 +291,9 @@ public final class LiveWeeklyCheck {
             return c != 0 ? c : a.get(1).compareTo(b.get(1));
         });
         long forwarded = 0;
-        Instant first = null;
-        Instant last = null;
-        for (RecordingCodec.Line l : jDay.lines()) {
+        List<Span> spans = jDay == null ? List.of() : sessionSpans(jDay);
+        List<RecordingCodec.Line> jLines = jDay == null ? List.of() : jDay.lines();
+        for (RecordingCodec.Line l : jLines) {
             MarketEvent e = l.event();
             if (e instanceof DataGap g && labGaps.containsKey(l.sourceId())) {
                 labGaps.merge(l.sourceId(), 1L, Long::sum);
@@ -279,13 +307,11 @@ public final class LiveWeeklyCheck {
                 forwarded++;
             }
             jEntries.add(Map.entry(key(codec, l), new Seen(e.symbol(), e.receivedAt())));
-            first = first == null || e.receivedAt().isBefore(first) ? e.receivedAt() : first;
-            last = last == null || e.receivedAt().isAfter(last) ? e.receivedAt() : last;
         }
-        boolean jComplete = jDay.meta().map(RecordingMeta::complete).orElse(false);
+        boolean jComplete = jDay != null && jDay.meta().map(RecordingMeta::complete).orElse(false);
         if (rDay == null) {
-            return new DayRow(date, jDay.lines().size(), 0, 0, Map.of(), 0, 0, labGaps, forwarded, reconnects.size(),
-                    jComplete, false, false);
+            return new DayRow(date, jDay != null, jLines.size(), 0, 0, Map.of(), 0, 0, labGaps, forwarded,
+                    reconnects.size(), jComplete, false, false);
         }
         List<Gap> recorderGaps = new ArrayList<>();
         List<Map.Entry<String, Seen>> rEntries = new ArrayList<>();
@@ -313,7 +339,7 @@ public final class LiveWeeklyCheck {
                 matched++;
                 continue;
             }
-            missing.merge(missingCause(r.getValue(), first, last, ownGaps), 1L, Long::sum);
+            missing.merge(missingCause(r.getValue(), spans, ownGaps), 1L, Long::sum);
         }
         long extraInGap = 0;
         long extraUnexplained = 0;
@@ -330,21 +356,88 @@ public final class LiveWeeklyCheck {
                 extraUnexplained++;
             }
         }
-        return new DayRow(date, jDay.lines().size(), rEntries.size(), matched, missing, extraInGap, extraUnexplained,
+        return new DayRow(date, jDay != null, jLines.size(), rEntries.size(), matched, missing, extraInGap, extraUnexplained,
                 labGaps, forwarded, reconnects.size(), jComplete, true, rDay.meta().map(RecordingMeta::complete).orElse(false));
     }
 
-    /** 녹화에만 있는 이벤트의 원인: 그날 세션 수신 범위 밖, 실험실 공백 안(출처), 그 밖은 설명 없음. */
-    private static String missingCause(Seen s, Instant first, Instant last, List<Gap> ownGaps) {
-        if (first == null || s.receivedAt().isBefore(first) || s.receivedAt().isAfter(last)) {
-            return OUTSIDE_SESSION;
-        }
+    /**
+     * 녹화에만 있는 이벤트의 원인. 먼저 그 수신 시각을 덮는 실험실 쪽 공백(출처)을 찾는다. 공백이 없으면 세션이 그날 기록을 열고
+     * 있던 구간 안인지 본다: 안이면 세션이 열린 채 공백 없이 빠진 것이라 설명 없음(MD-05 위반 후보), 밖이면 세션 밖(실험실이
+     * 꺼져 있었거나 그날 세션이 없음)이다(architect PR #107 R1).
+     */
+    private static String missingCause(Seen s, List<Span> spans, List<Gap> ownGaps) {
         for (Gap g : ownGaps) {
             if (g.covers(s.symbol(), s.receivedAt(), ALL_SYMBOL_SOURCES.contains(g.source()))) {
                 return g.source();
             }
         }
-        return UNEXPLAINED;
+        for (Span span : spans) {
+            if (span.contains(s.receivedAt())) {
+                return UNEXPLAINED;
+            }
+        }
+        return OUTSIDE_SESSION;
+    }
+
+    /**
+     * 세션이 그날 기록을 열고 있던 구간들: 기록 메타의 구간(이 프로세스가 그날 파일을 연 시각 ~ 닫은 시각). 시작은 그 구간 첫 줄
+     * 수신 시각과 비교해 이른 쪽(메타 시각은 실험실 시계로 첫 줄을 받은 뒤에 찍힘)으로 잡는다. 닫힌 시각이 없는 구간(비정상 종료,
+     * 아직 쓰는 중)은 그 구간 마지막 줄 수신 시각에서 끝낸다. 메타가 없으면 그날 첫 줄 ~ 마지막 줄 하나로 본다.
+     */
+    static List<Span> sessionSpans(RecordedDay day) {
+        List<RecordingCodec.Line> lines = day.lines();
+        List<RecordingMeta.Segment> segs = day.meta().map(RecordingMeta::segments).orElse(List.of());
+        List<Span> out = new ArrayList<>();
+        if (segs.isEmpty()) {
+            if (!lines.isEmpty()) {
+                out.add(new Span(minRx(lines, 0, lines.size()), maxRx(lines, 0, lines.size())));
+            }
+            return out;
+        }
+        for (int k = 0; k < segs.size(); k++) {
+            RecordingMeta.Segment seg = segs.get(k);
+            long nextFirst = k + 1 < segs.size() ? segs.get(k + 1).firstSeq() : Long.MAX_VALUE;
+            int from = 0;
+            while (from < lines.size() && lines.get(from).seq() < seg.firstSeq()) {
+                from++;
+            }
+            int to = from;
+            while (to < lines.size() && lines.get(to).seq() < nextFirst) {
+                to++;
+            }
+            Instant start = Instant.parse(seg.startedAt());
+            if (from < to && minRx(lines, from, to).isBefore(start)) {
+                start = minRx(lines, from, to);
+            }
+            Instant end;
+            if (!seg.endedAt().isEmpty()) {
+                end = Instant.parse(seg.endedAt());
+            } else if (from < to) {
+                end = maxRx(lines, from, to);
+            } else {
+                end = start;
+            }
+            out.add(new Span(start, end.isBefore(start) ? start : end));
+        }
+        return out;
+    }
+
+    private static Instant minRx(List<RecordingCodec.Line> lines, int from, int to) {
+        Instant m = lines.get(from).event().receivedAt();
+        for (int i = from + 1; i < to; i++) {
+            Instant t = lines.get(i).event().receivedAt();
+            m = t.isBefore(m) ? t : m;
+        }
+        return m;
+    }
+
+    private static Instant maxRx(List<RecordingCodec.Line> lines, int from, int to) {
+        Instant m = lines.get(from).event().receivedAt();
+        for (int i = from + 1; i < to; i++) {
+            Instant t = lines.get(i).event().receivedAt();
+            m = t.isAfter(m) ? t : m;
+        }
+        return m;
     }
 
     /** 줄을 맞추는 열쇠: 원래 소스, 소스 순번, 내용(녹화 순번 빼고). 전달은 녹화와 같은 줄 형식이라 같은 이벤트면 같다. */
@@ -369,7 +462,7 @@ public final class LiveWeeklyCheck {
         return true;
     }
 
-    private static String compareAccounts(LiveSetup setup, RecordingLayout journal, List<LocalDate> days,
+    private static String compareAccounts(LiveSetup setup, RecordingLayout journal, List<LocalDate> days, int checkedDays,
             List<MarketEvent> recorded, LocalDate end, CodeVersion code, Consumer<String> log, RunGate gate) {
         List<Path> dirs = days.stream().map(d -> journal.dayDir(setup.plan().market(), d)).toList();
         RecordedMarketDataSet live = RecordedMarketDataSet.fromDirs(setup.plan().market(), dirs);
@@ -382,8 +475,9 @@ public final class LiveWeeklyCheck {
         int diff = LiveReplayCheck.firstDifference(LiveReplayCheck.withoutCodeLine(ReportWriter.render(a)),
                 LiveReplayCheck.withoutCodeLine(ReportWriter.render(b)));
         StringBuilder sb = new StringBuilder();
-        sb.append("- 기간: ").append(setup.plan().from()).append(" ~ ").append(end).append(" (기록일 ").append(days.size())
-                .append("일 누계)\n");
+        sb.append("- 기간: ").append(setup.plan().from()).append(" ~ ").append(end).append(" (점검일 ").append(checkedDays)
+                .append("일 누계, 그중 입력 기록 있는 날 ").append(days.size())
+                .append("일. 기록 없는 날의 녹화도 녹화 리플레이에 든다)\n");
         sb.append("- 이벤트: 입력 기록 ").append(live.events().size()).append(", 녹화(boards) ").append(rec.events().size())
                 .append('\n');
         sb.append("- 상세 보고서: ").append(diff < 0 ? "같음(체결 원장까지 일치)"
@@ -437,19 +531,21 @@ public final class LiveWeeklyCheck {
                 + "| 녹화에 없는 기록 줄(녹화 공백 안/설명 없음) | 기록·녹화 정상 종료 |\n");
         sb.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|\n");
         for (DayRow r : week) {
+            String journalCell = r.journalPresent() ? String.valueOf(r.journalLines()) : "기록 없음";
             if (!r.recordingPresent()) {
-                sb.append("| ").append(r.date()).append(" | ").append(r.journalLines())
+                sb.append("| ").append(r.date()).append(" | ").append(journalCell)
                         .append(" | 녹화 없음 | - | - | - | - | - | - | - | - | - | ").append(yn(r.journalComplete()))
                         .append("/- |\n");
                 continue;
             }
-            sb.append("| ").append(r.date()).append(" | ").append(r.journalLines()).append(" | ").append(r.recordedEvents())
+            sb.append("| ").append(r.date()).append(" | ").append(journalCell).append(" | ").append(r.recordedEvents())
                     .append(" | ").append(r.matched()).append(" | ").append(r.missingTotal());
             for (String k : missingKeys()) {
                 sb.append(" | ").append(r.missing().getOrDefault(k, 0L));
             }
             sb.append(" | ").append(r.extraInRecorderGap()).append('/').append(r.extraUnexplained()).append(" | ")
-                    .append(yn(r.journalComplete())).append('/').append(yn(r.recordingComplete())).append(" |\n");
+                    .append(r.journalPresent() ? yn(r.journalComplete()) : "-").append('/').append(yn(r.recordingComplete()))
+                    .append(" |\n");
         }
         appendTotal(sb, "이번 주 합계", week);
         appendTotal(sb, "운용 시작부터 누계", rows);
@@ -460,7 +556,7 @@ public final class LiveWeeklyCheck {
         sb.append("| 날짜 | 공백 줄 합계 | 끊김(FEED-CLIENT) | 재연결 수 | 재기동(RECORDER) | 게이트웨이 큐(FEED) | 실험실 큐(LAB-INBOX) "
                 + "| 녹화에서 전달된 공백 |\n");
         sb.append("|---|---:|---:|---:|---:|---:|---:|---:|\n");
-        for (DayRow r : week) {
+        for (DayRow r : week.stream().filter(DayRow::journalPresent).toList()) {
             long own = r.labGaps().values().stream().mapToLong(Long::longValue).sum();
             sb.append("| ").append(r.date()).append(" | ").append(own + r.forwardedGaps()).append(" | ")
                     .append(r.labGaps().get(FeedClient.SOURCE_ID)).append(" | ").append(r.reconnects()).append(" | ")
