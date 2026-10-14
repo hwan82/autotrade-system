@@ -163,6 +163,25 @@ final class DayWriter implements AutoCloseable {
     }
 
     /**
+     * 앞 프로세스가 다른 날 기록하던 중 멈췄다가 이 새 날 파일로 이어 갈 때, 첫 이벤트 앞에 앞 날의 종목마다 재기동 공백을
+     * 남기게 한다(날짜를 넘긴 재기동, QA PR #91 R1). 공백 시작은 앞 날 프로세스가 살아 있던 마지막 시각이다. 같은 날 이어 쓰기
+     * 공백(D-065)과 같은 줄 모양이다. 아직 쓴 줄이 없는 새 파일에서만 부른다.
+     *
+     * @param previousDayDir 앞 프로세스가 마지막으로 쓴 날 폴더
+     */
+    void carryRestartFrom(Path previousDayDir) {
+        if (seq != 0 || !restartSymbols.isEmpty()) {
+            throw new IllegalStateException("새 날 파일의 첫 줄 전에만 앞 날 재기동 공백을 넘겨받을 수 있습니다: " + dir);
+        }
+        RecordedDay previous = RecordedDay.open(previousDayDir);
+        for (RecordingCodec.Line l : previous.lines()) {
+            restartSymbols.add(l.event().symbol());
+        }
+        List<RecordingMeta.Segment> segs = previous.meta().map(RecordingMeta::segments).orElse(List.of());
+        restartGapStart = lastAlive(segs, previous.lastReceivedAt());
+    }
+
+    /**
      * 이벤트 한 줄을 쓴다. 이어 쓰기 첫 이벤트면 그 앞에 재기동 공백 줄을 먼저 쓴다.
      *
      * @return 이 호출로 이벤트 앞에 쓴 재기동 공백(쓴 순서, sequence는 그 줄의 녹화 순번). 대부분 빈 목록이다

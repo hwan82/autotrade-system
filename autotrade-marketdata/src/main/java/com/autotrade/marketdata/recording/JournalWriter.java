@@ -32,6 +32,8 @@ public final class JournalWriter implements AutoCloseable {
     private final String license;
     private DayWriter day;
     private boolean closed;
+    /** 앞 프로세스가 마지막으로 쓴 날. 이 프로세스가 처음 여는 날이 그 뒤면 첫 줄 앞에 재기동 공백을 남긴다. */
+    private LocalDate resumedAfter;
 
     /**
      * @param sourceScopes 소스 이름 → 데이터 범위(메타에 남는다)
@@ -68,7 +70,11 @@ public final class JournalWriter implements AutoCloseable {
             if (day != null) {
                 day.close(now);
             }
+            boolean first = day == null;
             day = new DayWriter(layout.dayDir(market, date), market, date, zone, sourceScopes, license, now);
+            if (first && resumedAfter != null && date.isAfter(resumedAfter) && day.lastSeq() == 0) {
+                day.carryRestartFrom(layout.dayDir(market, resumedAfter));
+            }
         }
         try {
             List<DataGap> gaps = day.write(sourceId, event);
@@ -79,6 +85,19 @@ public final class JournalWriter implements AutoCloseable {
         } catch (IOException e) {
             throw new UncheckedIOException("실시간 모의 기록을 쓸 수 없습니다: " + layout.dayDir(market, date), e);
         }
+    }
+
+    /**
+     * 기록을 이어 가는 프로세스가 첫 줄을 쓰기 전에 부른다: 앞 프로세스가 마지막으로 쓴 날을 알린다. 이 프로세스의 첫 줄이 그날이면
+     * 같은 날 이어 쓰기 공백(D-065)이 남고, 그 뒤 날이면 새 날 파일 첫 줄 앞에 앞 날 종목마다 재기동 공백(RECORDER_RESTART,
+     * 앞 날 마지막 수신 시각부터)이 남는다. 그래서 멈춘 동안 빠진 앞 날 나머지와 새 날 앞부분이 공백 없이 사라지지 않는다
+     * (QA PR #91 R1).
+     */
+    public void resumeAfter(LocalDate lastDay) {
+        if (day != null) {
+            throw new IllegalStateException("첫 줄을 쓰기 전에만 부를 수 있습니다");
+        }
+        this.resumedAfter = Objects.requireNonNull(lastDay, "lastDay");
     }
 
     /** 쓴 줄을 디스크로 내린다(비정상 종료 때 남는 범위). */

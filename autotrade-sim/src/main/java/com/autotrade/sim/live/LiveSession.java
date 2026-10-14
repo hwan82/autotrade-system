@@ -51,8 +51,8 @@ import java.util.function.Consumer;
  * 그래서 기록을 리플레이 실행기로 다시 돌리면 상세 보고서가 바이트까지 같아야 한다({@link LiveReplayCheck}).
  *
  * <p><b>재기동</b>. 실험실이 다시 뜨면 기록을 처음부터 다시 돌려 계좌 상태를 되살린 뒤 이어서 받는다. 상태는 기록에서만 나오므로
- * 비정상 종료로 기록 꼬리(마지막 flush 뒤)가 사라져도 되살린 상태와 기록이 어긋나지 않는다. 사라진 구간은 재기동 공백
- * (RECORDER_RESTART)으로 남는다.
+ * 비정상 종료로 기록 꼬리(마지막 flush 뒤)가 사라져도 되살린 상태와 기록이 어긋나지 않는다. 멈춘 구간은 재기동 공백
+ * (RECORDER_RESTART)으로 남는다. 다음 날로 넘어가 이어 받으면 새 날 첫 줄 앞에 앞 날 마지막 수신 시각부터의 공백이 남는다.
  *
  * <p><b>받지 않는 이벤트</b>: 등록 파일 boards에 없는 종목, 운용 기간(거래일과 수신 날짜 모두) 밖. 기록에도 쓰지 않고 건수만 센다.
  *
@@ -187,9 +187,13 @@ public final class LiveSession implements AutoCloseable {
             return;
         }
         long offset = 0;
+        Path lastWithLines = null;
         for (Path day : days) {
             beforeEachDay.run();
             RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(setup.plan().market(), List.of(day));
+            if (!data.events().isEmpty()) {
+                lastWithLines = day;
+            }
             for (MarketEvent e : data.events()) {
                 if (!inPlan(e)) {
                     throw new IllegalStateException("입력 기록에 운용 범위 밖 이벤트가 있습니다: " + day + " seq " + e.sequence());
@@ -199,6 +203,12 @@ public final class LiveSession implements AutoCloseable {
             offset += data.events().size();
         }
         restored = position;
+        // 다음 날로 넘어가 이어 받으면 앞 날 나머지가 빠진 것을 공백으로 남긴다(같은 날이면 기록기가 이미 남긴다).
+        // 새 날 파일만 열고 첫 줄을 내리기 전에 죽어 읽을 줄이 없는 날은 건너뛰고, 줄이 있는 마지막 날을 기준으로 한다
+        // (risk-ops PR #94 N1, architect R1)
+        if (lastWithLines != null) {
+            journal.resumeAfter(LocalDate.parse(lastWithLines.getFileName().toString()));
+        }
         log.accept("입력 기록으로 계좌를 되살렸습니다: 이벤트 " + restored + ", 기록일 " + days.size());
     }
 
