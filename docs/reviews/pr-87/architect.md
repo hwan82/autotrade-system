@@ -41,3 +41,39 @@
 
 ## 판정
 수정 필요(R1 실시간 경로 주식 호가 단위 검사, R2 config-keys.md·ADR-005 API 표 갱신). R3·R4는 권고. B7은 risk-ops 검토가 별도로 필요하다(게이트웨이 수신 경로 변경, 지침 10장에 따라 머지 권한도 risk-ops 판정 뒤 정함).
+
+## 재검토 2026-10-14
+- 대상: PR #87 / 커밋 b4c9227f0620214b695a9ce3cb2fb05de805f920 (앞 검토 eb227f1 뒤에 3ecb2e8, 4286534, b4c9227) / `git diff origin/main...HEAD` 전체(origin/main 56917c0 기준 46개 파일 +4382 −256). origin/main이 4e32d75(#84, 문서)로 나아가 브랜치에 들어 있지 않지만 `git merge-tree --write-tree origin/main HEAD`로 충돌 없음 확인
+- 점검표: B
+- 직접 실행한 것:
+  - 앞 검토와 같은 방식(Maven Central 429 회피용 미러 init 스크립트, 저장소 밖, `-I`)으로 `./gradlew build --rerun-tasks --continue --max-workers=2` → **BUILD SUCCESSFUL, EXIT=0**(2분 24초). 결과 XML 합계 **1055개, 실패 0, 오류 0, 건너뜀 0**. FeedServerTest 8, AcceptBackoffTest 2, GatewayFeedTest 2, LiveSessionTest 9, LiveLabServiceTest 5, ArchitectureTest 18 통과
+  - `git diff eb227f1 b4c9227` 전부 읽음(22개 파일). 테스트 삭제·`@Disabled` 없음. GatewayFeedTest 변경은 try-with-resources를 명시 `close()`로 바꾼 것뿐이고 어서션 같음
+  - 하루씩 되살리기의 순번 동치: `RecordedMarketDataSet`이 녹화일마다 `seen`·구간 경계를 따로 처리하고 순번만 `events.size()+1`로 이어 매김을 코드로 확인(RecordedMarketDataSet.java:136~172). 그래서 하루씩 읽어 `offset + e.sequence()`로 민 순번(LiveSession.java:189~199)이 전체 읽기와 같다. LiveSessionTest의 재기동·비정상 종료 시험이 이 경로로 리플레이와 바이트 일치
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 실행. EXIT=0, 1055/0/0/0 |
+| B2 | 통과 | 새 운영 클래스 `AcceptBackoff`는 `com.autotrade.marketdata.feed`(autotrade-marketdata, 순수, JDK만). `RecordingExperiment.offStockTick` 공개는 sim 모듈 안. 실험실은 Spring 쪽만 바뀜. verifyPureDependencies·ArchitectureTest·ModuleOwnershipTest 통과 |
+| B3 | 실패(경미) | 앞 R2는 대부분 반영: config-keys.md 11행 근처에 `run/market-feed.sock`·`live-sessions/` 설명, 표에 `autotrade.code-commit`·`code-dirty`, ADR-005 API 표에 `/api/live/*` 4행. 그러나 이번 커밋이 만든 계약이 빠짐: ① 새 설정 키 `autotrade.lab.live.min-free-gb`(LabWebConfiguration.java:106, 기본 20, 0 이상)가 config-keys.md 표에 없음(절차서·ADR-010·장애 문서에만 나옴) ② `POST /api/live/sessions/{id}/start` 응답이 `LiveSession.Status`에서 `LiveLabService.View`로 바뀌고 `View`에 `experimentId`·`restoring`이 더해졌는데(LiveSessionController.java, LiveLabService `View`) ADR-005 표의 status·start 행에 없음. 디스크 여유 부족(409), 되살리는 중 `finish`(409) 사유도 표에 없음(R2') |
+| B4 | 통과 | 새 코드에 시스템 시계는 FeedServer의 `System.nanoTime()`(전달 멈춤 판정·로그 간격, 결과와 무관)과 LiveLabService `Clock`·디스크 조회뿐. 계좌 입력 경로는 그대로 "기록 먼저 → 쓴 줄"이고 호가 단위 검사는 기록 전에 하므로 기록에 없는 이벤트가 계좌에 가지 않음(LiveSession.java:247~253). 되살리기 순번 동치는 위 확인. 골든 테스트 그대로 통과 |
+| B5 | 통과 | 새 가격 비교 `BigDecimal.compareTo`(RecordingExperiment `offStockTick`), 디스크 여유 `long` 바이트. 금액 계산 변경 없음 |
+| B6 | 통과 | 새 동작마다 시험: 호가 단위 밖 가격 멈춤 `pricesOffTheStockTickStopTheSessionWithoutWritingThem`, 비정상 종료 `crashWithLostTailAndUnclosedMetaStillReplaysTheSame`(꼬리 20바이트 자름), 블랙리스트 `blacklistedSymbolIsNeverBoughtInTheLiveSession`(같은 시세 대조 포함), 디스크 하한 `lowDiskRefusesStartAndStopsARunningSession`, 되살리는 중 멈춤 `restoreCanBeStoppedAndResumesFromTheJournal`, `AcceptBackoffTest` 2개. 다만 전달 멈춤 판정 변경(R3 반영)에는 "오래 조용한 뒤 첫 이벤트에 끊지 않음" 시험이 없음(아래 권고) |
+| B7 | risk-ops 검토 필요 | 게이트웨이 수신·연결 받기·기동 실패 정리 경로(FeedServer acceptLoop 백오프, Gateway.java:53~62 기동 실패 시 닫기)와 장애 문서(broker-and-fault-design 5.2 2번, 장애표 #9·#10)가 바뀜. D-076도 이 PR을 실전 관련(사용자 머지) 대상으로 바꿨다. `docs/reviews/pr-87/risk-ops.md`의 마지막 판정은 "수정 필요"이고 이 커밋 뒤 risk-ops 재검토 결과는 아직 커밋에 없음 |
+| B8 | 통과 | 새 로그는 실패 횟수·예외 클래스 이름·버린 건수·디스크 GB뿐. 비밀값 없음 |
+
+### 앞 검토 항목 처리
+- **R1 해소.** `LiveSession.accept`가 기록 전에 `offStockTick`으로 검사해 맞지 않으면 기록하지 않고 세션을 멈춘다(LiveSession.java:247~253). `LiveReplayCheck`도 입력 기록 전체를 같은 함수로 검사(LiveReplayCheck.java:89~94). 녹화 실험 `requireStockTicks`는 같은 함수를 쓰도록 바뀌어 검사가 하나뿐. 시험 있음.
+- **R2 대부분 해소, 남은 것은 위 B3(R2').**
+- **R3 해소.** 판정 기준을 "한 줄 쓰기가 30초 넘게 막힘"(`writingSince`, FeedServer.java:190, 232, 296)으로 바꿔 조용한 뒤 첫 이벤트로 끊는 일이 없어짐. 읽지 않는 받는 쪽은 소켓 버퍼가 차 쓰기가 막히므로 `stalledSubscriberIsDisconnected`가 그대로 통과.
+- **R4 해소.** 비정상 종료 시험 커밋됨(앞 검토의 임시 시험보다 강하게 gzip 꼬리를 잘라 봄).
+- **R5 해소.** 되살리기를 최저 우선순위 별도 스레드에서 기록일 하나씩, 날마다 정지 요청·디스크 확인(LiveLabService.java:156~, `restoring` 상태). 상태 조회가 막히지 않음.
+- **R6 ① 해소**(Gateway 기동 실패 시 연 것 닫기). ②는 그대로이며 리플레이 확인이 잡으므로 막지 않음.
+
+### 이번 변경에서 새로 본 것
+1. **(수정 필요, 문서) R2'** 위 B3.
+2. (권고, 낮음) `writingSince = Math.max(1, System.nanoTime())`(FeedServer.java:296)는 0을 "쓰지 않음" 표시로 쓴다. `System.nanoTime()`은 명세상 음수일 수 있고, 음수면 1이 들어가 `now - 1`이 커져 정상 쓰기 중에도 바로 끊는다. Linux·Windows의 실제 JDK 구현은 부팅 기준 단조 시계라 양수로 보인다 `[추론]`, 컨테이너에서 확인 못 함. 별도 `volatile boolean writing`이나 `Long.MIN_VALUE` 같은 표시값을 쓰면 가정이 없어진다. 같이 "오래 조용한 뒤 첫 이벤트에 끊지 않음" 시험을 하나 두면 R3 반영이 회귀 시험으로 남는다.
+3. (참고) 되살리는 동안 멈추면 그날 기록 하나를 다 읽을 때까지(기록일 경계) 스레드가 남고 세션 잠금을 쥔다. 그동안 시작은 "정리하는 중"으로 거부된다(LiveLabService `lingering`). 사용자가 다시 시도하면 되므로 막지 않음.
+4. (참고) `bootRun` 힙 상한 4GB는 Gradle 작업 설정이라 `-PlabHeap`으로 바뀐다. 설정 키가 아니므로 config-keys.md 대상은 아니고 절차서·ADR-010에 적혀 있음.
+
+### 재검토 판정
+수정 필요(R2': config-keys.md에 `autotrade.lab.live.min-free-gb` 행, ADR-005 `/api/live` 행에 `View`의 `experimentId`·`restoring`과 디스크 부족·되살리는 중 409 사유). 코드 쪽 앞 항목(R1·R3·R4·R5·R6①)은 해소됐다. B7은 risk-ops 재검토가 따로 필요하고, D-076대로 사용자 머지 대상이다.

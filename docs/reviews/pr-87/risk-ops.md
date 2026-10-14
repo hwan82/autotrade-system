@@ -61,3 +61,48 @@
 
 ## 판정
 수정 필요(A8: R1·R2·R3, A12·A14: R4)
+
+## 재검토 2026-10-14
+- 대상: PR #87 / 브랜치 `claude/project-thread-go4oua` / 커밋 `b4c9227` / `git diff origin/main...HEAD` 전체. 앞 검토(`3ecb2e8`) 뒤 커밋 `4286534`(architect 검토 반영)와 `b4c9227`(risk-ops 검토 반영)을 포함해 다시 봤다.
+- 점검표: A
+- 직접 실행한 것:
+  - 다른 세션의 빌드와 출력 폴더가 겹치지 않게 `b4c9227`을 검토용 폴더에 새로 복제하고, 앞 검토와 같은 저장소 밖 init 스크립트(Maven Central 429 회피용 Google 미러)로 `./gradlew --no-daemon build --rerun-tasks --continue`를 돌렸다 → **BUILD SUCCESSFUL, 130개 작업 모두 실행**. 건너뜀 0, 실패 0. 모듈별: risk 55(RealTradingGuardTest 31, GuardedOrderGatewayTest 8), architecture-test 31(ArchitectureTest 18), app-engine 48, marketdata 128, app-gateway 40, sim 199, app-lab 145, app-experiment 17, 나머지 모듈 전부 통과.
+  - 새 테스트와 바뀐 테스트: AcceptBackoffTest 2, LiveSessionTest 9(`blacklistedSymbolIsNeverBoughtInTheLiveSession`, `pricesOffTheStockTickStopTheSessionWithoutWritingThem`, `crashWithLostTailAndUnclosedMetaStillReplaysTheSame` 추가), LiveLabServiceTest 5(`lowDiskRefusesStartAndStopsARunningSession`, `restoreCanBeStoppedAndResumesFromTheJournal` 추가), FeedServerTest 8, GatewayFeedTest 2. 모두 통과.
+  - 코드 확인: `3ecb2e8..b4c9227` 전체 diff(21파일), 바뀐 `FeedServer`·`AcceptBackoff`·`Gateway.start` 정리 경로, `LiveLabService`(되살리기 스레드, 디스크 하한, 멈춤·정리 경쟁), `LiveSession.restore`(기록일 단위 순번 이어 매기기), `RecordingExperiment.offStockTick`, 문서(broker-and-fault-design 5.2·#9·#10, D-076, ADR-010, config-keys, 절차서).
+  - 이 파일 앞부분(첫 검토)은 `b4c9227`에 커밋된 내용이 작업 트리와 같고, 판정 줄도 그대로임을 확인했다.
+
+### 앞 검토 항목 처리
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| R1 디스크 하한 | 해결 | `LiveLabService.stopReason()`이 세션 폴더 디스크 여유를 보고(`FileStore.getUsableSpace`), 확인할 수 없으면 멈추는 쪽으로 처리한다. 기본 20GB이고 `autotrade.lab.live.min-free-gb`로 바꿀 수 있다(`LabWebConfiguration`). 확인 지점은 시작 전, 처리 스레드의 1초 점검, 되살리기의 기록일마다다. `LiveLabServiceTest.lowDiskRefusesStartAndStopsARunningSession`: 19GB면 시작 거부, 운용 중 5GB로 떨어지면 멈추고 `stopReason`에 남음 |
+| R2 되살리기 메모리·스레드 | 해결 | `LiveSession.restore`가 기록일 하나씩 `fromDirs(List.of(day))`로 읽고, 앞 날짜 이벤트 수만큼 순번을 밀어 처리한다. 날마다 `beforeEachDay`로 정지 요청·디스크·취소를 확인한다. 되살리기는 요청 스레드가 아니라 `live-restore` 스레드(MIN_PRIORITY)에서 돌고, 그동안 `restoring=true`이며 `finish`는 거부한다. 멈춘 되살리기가 끝날 때까지 다시 시작하지 못한다(`lingering`). 실험실 `bootRun`에 `maxHeapSize` 4g(`-PlabHeap`)가 생겼다. 순번이 전체 읽기와 같다는 것은 `liveResultEqualsJournalReplayAcrossLabRestartAndFeedGap`이 보여 준다(이틀치 중 2/3 지점 재기동, 즉 하루 넘게 되살린 뒤 전체 읽기 리플레이와 보고서 바이트 일치). 멈춤·재개는 `restoreCanBeStoppedAndResumesFromTheJournal`이 확인한다 |
+| R3 accept 실패 반복 | 해결 | `FeedServer.acceptLoop`이 실패 때 `AcceptBackoff`로 10ms→1s 쉬고, 로그는 2의 거듭제곱 번째 실패에만 남긴다. 닫힌 뒤면 바로 끝난다. 정책은 `AcceptBackoffTest` 2건으로 확인했다. 루프 자체를 실패 주입으로 돌리는 시험은 없지만, 루프는 그 정책을 `Thread.sleep(backoff.delayMillis())`로 그대로 쓴다(코드 확인) |
+| R4 장애 문서 | 해결 | broker-and-fault-design 5.2 2번: 실시간 세션이 `experiment-state/stop-request`와 디스크 하한으로 멈춘다는 내용 추가. 장애표 #9: 전달 버림·끊기·소켓 실패 시 녹화만 함, 실험실 공백 처리 추가. #10: 세션 자체 정지, 입력 기록 크기, 되살리기, 힙 상한 추가. D-076 상태 줄은 실전 관련 PR(사용자 머지 대상)로 고쳐졌다. ADR-010 2.5~2.7과 4장이 서로 맞는다 |
+| N1~N6 | 반영 또는 후속 등록 | N1: ADR-010 2.3 문구를 "한 소스 안 순서만 같음"으로 고침. N2: `blacklistedSymbolIsNeverBoughtInTheLiveSession` 추가. N3: 버린 수를 1분에 한 번까지 게이트웨이 로그에 남김(`FeedServer.checkStalls`). N4: D-076 7번에 "Linux에서는 효과 없음" 명시. N5·N6: ADR-010 5장 후속 표에 7단계 전 확인 항목으로 등록 |
+
+### 점검표 A (b4c9227 기준)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | diff에 `autotrade-risk`·RealTradingGuard·설정 로더 변경 없음. `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | 실전 주문 출구·ArchUnit 규칙 변경 없음(`autotrade-architecture-test` 변경 0). ArchitectureTest 18·ModuleOwnershipTest 13 통과. 새 코드에 `OrderGateway`·증권사 주문 호출 없음 |
+| A3 | 통과 | 게이트웨이 변경은 전달 출구, 기동 실패 정리(`Gateway.start` catch에서 연 것 닫기), accept 백오프뿐이다. 주문·증권사 선택 코드 변경 없음 |
+| A4 | 해당 없음 | 실전 주문 송신 코드 변경 없음. 가상 제출은 `RunStepper.submit`으로 옮겨졌고 내용 동일 |
+| A5 | 해당 없음 | 실전 멱등 키 경로 변경 없음. 가상 `SimOrderKeys` 그대로 |
+| A6 | 통과 | 실전 블랙리스트 코드 변경 없음. 실시간 세션도 같은 `RiskChain`을 쓰고(`LiveSetup.java:59-62`), 블랙리스트 종목을 사지 않는 것을 `LiveSessionTest.blacklistedSymbolIsNeverBoughtInTheLiveSession`이 확인한다 |
+| A7 | 해당 없음 | 실전 계좌 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 게이트웨이: `publish`는 기다리지 않고, 받는 쪽마다 큐·쓰기 스레드가 따로 있고, 한 줄 쓰기가 30초 넘게 막히면 끊는다(`writingSince`). accept 실패에는 백오프가 걸리고, 소켓을 못 열면 녹화만 한다(`GatewayFeedTest` 2, `FeedServerTest` 8). 실험실: 정지 요청 파일과 디스크 하한으로 시작 거부·운용 중 정지, 되살리기는 기록일 단위·최저 우선순위 스레드에서 날마다 정지 확인, 힙 상한 4g(R1·R2 근거). 실전 엔진은 sim·lab·gateway를 의존하지 못한다(`autotrade-app-engine/build.gradle.kts` processIsolation, `verifyProcessIsolation` 통과) |
+| A9 | 통과 | 실전 엔진·보호 시세 경로·서버 측 손절 코드 변경 없음. 게이트웨이 수신·녹화 경로는 전달 실패와 무관하다(녹화 먼저, 전달은 큐에 넣기만) |
+| A10 | 통과 | 추가된 줄에 키·계좌번호·토큰 없음(grep). 소켓 폴더 700·파일 600. 오류 메시지에는 예외 클래스 이름과 경로만 남는다 |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음. 새 동작마다 실패 경우를 포함한 테스트가 있다(디스크 하한, 되살리기 중 멈춤, 호가 단위 밖 가격 정지, 블랙리스트, 백오프 정책) |
+| A12 | 통과 | 바뀐 동작이 broker-and-fault-design 5.2 2번과 장애표 #9·#10에 반영됐다(R4). 장애 테스트 8종의 전제(실전 엔진 격리, 시세 전환, 엔진 재기동)를 깨는 변경은 없다. 게이트웨이 쪽은 기다리지 않는 성질이 유지된다 |
+| A13 | 해당 없음 | 실시간 세션은 KRX만 받는다(`LivePlan.java:80-81`). 시간대는 캘린더에서 받고 금액은 기존 실행기 그대로 |
+| A14 | 통과 | D-076 상태·결정 7개 항목, ADR-010 2장·4장·5장·6장, config-keys, 절차서가 코드와 맞다. 문서와 코드를 대조한 곳: 디스크 기본 20GB(`LiveLabService.DEFAULT_MIN_FREE_GB`·`@Value` 기본값), 힙 4g(`build.gradle.kts`), accept 10ms→1s(`AcceptBackoff`), 멈춤 판정은 한 줄 쓰기 30초(`FeedServer.STALL_LIMIT`·`writingSince`) |
+
+### 점검표 밖 발견(차단 아님)
+- M1: 멈춤 판정의 표시값 `writingSince = Math.max(1, System.nanoTime())`에서 0은 "쓰는 중 아님"을 뜻한다. `System.nanoTime()`의 기준점은 JVM이 정하므로 음수가 될 수 있다는 것이 명세상 허용된다. 그러면 표시값이 1로 고정되고, `now - 1`이 30초를 넘어 정상 받는 쪽이 끊길 수 있다 `[추론]`. Linux·Windows HotSpot에서는 단조 시계가 양수라 실제 영향은 낮다 `[추론]`. 끊겨도 게이트웨이에는 영향이 없고, 실험실은 재접속하며 공백으로 남긴다. 표시값을 별도 boolean으로 두기를 권한다(data-engineer).
+- M2: 되살리기 중 멈춤은 기록일 사이에서만 확인한다. 하루치가 큰 날에는 정지 요청 뒤 그날 처리가 끝날 때까지 실험실이 계속 계산한다(최저 우선순위 스레드, 힙 상한 안). 하루 안 N개 이벤트마다 확인하도록 넓히는 것은 6단계 첫 재기동 측정(ADR-010 4장 `[가정]`) 뒤 정해도 된다.
+- M3: `AcceptBackoff`는 정책 단위 시험만 있고, `acceptLoop`에 실패를 주입하는 시험은 없다. 코드가 정책을 그대로 쓰므로 차단하지 않는다.
+- 머지 절차: D-076 상태 줄에 적힌 대로 이 PR은 실전 관련 PR(프로세스 격리·장애 대응 문서)이다. 이 승인은 risk-ops 역할 검토에 한한다. 지침 10·11장에 따라 독립 QA 검토와 **사용자 직접 머지**가 남아 있다.
+
+### 판정
+승인

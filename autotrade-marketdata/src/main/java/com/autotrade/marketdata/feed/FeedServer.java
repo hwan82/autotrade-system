@@ -187,8 +187,7 @@ public final class FeedServer implements AutoCloseable {
             droppedLoggedAt = now;
         }
         for (Subscriber s : subscribers) {
-            long since = s.writingSince;
-            if (s.subscribed && since != 0 && now - since > stallNanos) {
+            if (s.subscribed && s.writing && now - s.writingSince > stallNanos) {
                 LOG.log(Level.WARNING, "시세 전달 받는 쪽({0})이 {1}초 동안 읽지 않아 연결을 끊습니다", s.client,
                         stallNanos / 1_000_000_000L);
                 s.stop();
@@ -228,8 +227,10 @@ public final class FeedServer implements AutoCloseable {
         private final RecordingCodec codec = new RecordingCodec();
         private volatile java.util.Set<com.autotrade.domain.market.Market> markets = java.util.Set.of();
         private volatile boolean subscribed;
-        /** 지금 쓰고 있는 줄을 쓰기 시작한 시각(nanoTime), 쓰고 있지 않으면 0. 한 줄 쓰기가 멈춤 판단 시간보다 길면 끊는다. */
+        /** 지금 쓰고 있는 줄을 쓰기 시작한 시각(nanoTime). {@link #writing}일 때만 뜻이 있다. */
         private volatile long writingSince;
+        /** 한 줄을 쓰는 중. 한 줄 쓰기가 멈춤 판단 시간보다 길면 끊는다(nanoTime 값의 부호와 상관없게 따로 둔다). */
+        private volatile boolean writing;
         private volatile String client = "?";
         private Thread thread;
 
@@ -293,13 +294,14 @@ public final class FeedServer implements AutoCloseable {
 
         private void writeLine(String text) throws IOException {
             ByteBuffer buf = ByteBuffer.wrap((text + "\n").getBytes(StandardCharsets.UTF_8));
-            writingSince = Math.max(1, System.nanoTime());
+            writingSince = System.nanoTime();
+            writing = true;
             try {
                 while (buf.hasRemaining()) {
                     channel.write(buf);
                 }
             } finally {
-                writingSince = 0;
+                writing = false;
             }
         }
 

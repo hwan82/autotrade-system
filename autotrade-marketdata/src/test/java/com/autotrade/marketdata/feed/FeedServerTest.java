@@ -222,6 +222,25 @@ class FeedServerTest {
     }
 
     @Test
+    void quietConnectionIsNotDisconnectedOnItsFirstEvent() throws Exception {
+        // 멈춤 판단은 "한 줄 쓰기가 막힌 시간"이라, 장 밖처럼 오래 조용하다가 첫 이벤트가 와도 정상 연결은 끊지 않는다(PR #87 R3)
+        Path socket = FeedSocket.path(dir);
+        FeedServer server = keep(FeedServer.open(socket, 3, Duration.ofMillis(300)));
+        List<Got> got = new CopyOnWriteArrayList<>();
+        FeedClient c = client(socket, got);
+        c.start();
+        await(() -> server.subscriberCount() == 1 && c.state() == ConnectionState.CONNECTED);
+        Thread.sleep(1_000);
+        for (int i = 1; i <= 3; i++) {
+            server.publish("KIWOOM-WS", tick(SAMSUNG, i));
+        }
+        await(() -> got.size() == 3);
+        Thread.sleep(600);
+        assertThat(server.subscriberCount()).isEqualTo(1);
+        assertThat(c.reconnectCount()).isZero();
+    }
+
+    @Test
     void subscriberLimitAndBadSubscribeLineAreRefused() throws Exception {
         Path socket = FeedSocket.path(dir);
         FeedServer server = keep(FeedServer.open(socket));
