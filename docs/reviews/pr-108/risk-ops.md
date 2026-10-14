@@ -178,3 +178,57 @@
 
 ### 판정
 수정 필요(F5 `System#setProperty`·`setProperties`·`clearProperty` 금지와 고정 예제, A14 D-085·ADR-002 9.5 문구 반영)
+
+## 재검토 2026-10-14 (4)
+- 대상: PR #108 / 헤드 87863e8 / `git diff origin/main...HEAD` 전체.
+  - 3차 재검토 뒤 바뀐 것:
+    - `reflective()`의 `java.lang.System` 분기에 `setProperty`·`setProperties`·`clearProperty`를 더했다.
+    - 고정 예제 `DynamicCode#viaSystemProperty`를 더하고, 그 예제가 걸리는지 단언했다.
+    - D-085 결정 1번, 위험과 한계(`-D` 실행 옵션을 설치본 대조 항목으로), ADR-002 9.5를 정정했다.
+  - 87863e8은 이 파일(risk-ops.md)을 바꾸지 않았다.
+- 점검표: A
+- 직접 실행한 것:
+  - 실행 장소: 별도 작업 트리(87863e8)에서 하고 끝난 뒤 지웠다. 공유 작업 트리 소스는 손대지 않았다.
+  - `./gradlew build --no-daemon` → EXIT=0. 실패·오류·건너뜀 0.
+    - `:autotrade-risk:test` 55건
+    - `:autotrade-architecture-test:test` 39건(`RealPathReflectionTest` 7건 포함)
+    - `:autotrade-app-engine:test` 50건
+  - 변조 실험(커밋하지 않음, 지움): `autotrade-control`에 `PropProbe`를 넣었다. `System.setProperty(k, v)`와 우회형 `System.getProperties().put(k, v)` 두 가지다.
+    - 결과: 둘 다 `RealPathReflectionTest` 실패로 잡혔다.
+    - `setProperty`는 금지 메서드에 걸렸다.
+    - `getProperties()`는 반환 타입 "허용 목록 밖 타입 java.util.Properties"로 걸렸다.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F5 시스템 속성 쓰기 | 해소 | RealPathReflectionTest.java `reflective()`의 `java.lang.System` 분기, `규칙은_리플렉션_우회를_실제로_잡아낸다`가 `System.setProperty`·`setProperties`·`clearProperty`를 단언, 변조 실험 2종이 실패로 잡힘 |
+| A14 | 해소 | D-085 결정 1번과 위험과 한계(허용 클래스 안 위험 메서드 목록에 `setProperty`, `-D` 실행 옵션은 7단계 설치본 대조), ADR-002 9.5 규칙 문구에 시스템 속성 쓰기 금지가 들어감 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 없음(diff는 `autotrade-architecture-test`, 문서, 검토 원문뿐). `RealTradingGuard`를 만들면 모든 계좌가 OFF인 것은 그대로다. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | 기존 `ArchitectureTest` 규칙 변경 없음. 실전 경로 운영 클래스에서 막는 것은 다음과 같다. 수단마다 고정 예제와 1~4차 변조 실험으로 걸리는 것을 확인했다(앞 절들).<br>- 리플렉션, 동적 코드, 클래스 로더, `ResourceBundle`<br>- 외부 명령(허용 목록 비어 있음), 보안 제공자, 시스템 속성 쓰기<br>- Jackson 객체 접근·모듈 발견, Guard 타입·2차 확인의 데이터 바인딩<br>- 허용 목록 밖 JDK·외부 타입 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정과 `processIsolation`(autotrade-app-engine/build.gradle.kts)이 그대로다 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음. 감시 쪽 `ProcessHandle`(조회·종료)은 허용되어 있다 |
+| A10 | 통과 | 새 예제에 비밀값 없음 |
+| A11 | 통과 | 기존 단언 삭제·약화 없음, 단언 3개 추가 |
+| A12 | 통과 | 장애 대응표 17종, O1~O8, 장애 테스트 8종의 전제를 바꾸는 동작 변경이 없다. #8·#9 감시 재기동은 `ALLOWED_PROCESS_LAUNCHERS` 경로로 정해져 있다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 통과 | D-085, 결정 로그, ADR-002 9.5, 기획서 TST-07 (9)이 규칙과 일치한다. 남은 한계는 `[추론]`으로 적혀 있다:<br>- 허용 범위 안의 아직 모르는 수단<br>- `Object`로 받은 확인의 `getClass()`<br>- 설치본·JVM 옵션(7단계 절차서로 넘김) |
+
+### 점검표 밖 발견
+- 차단 사항은 없다.
+- 남은 위험은 D-085 "보장하지 않는 것"에 적힌 그대로다. 그중 다음 셋은 7단계 실행 절차서를 검토할 때 risk-ops가 다시 확인한다.
+  - 설치본 대조
+  - `-D` 실행 옵션
+  - `-XX:+DisableAttachMechanism`
+- 이 PR은 보호 테스트를 강화하므로 실전 관련 PR이다. 지침 10장·11장에 따라 머지 전에 사용자 확인과 독립 QA 관문을 거쳐야 한다.
+
+### 판정
+승인
