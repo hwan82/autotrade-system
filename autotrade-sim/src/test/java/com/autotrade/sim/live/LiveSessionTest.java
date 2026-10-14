@@ -173,7 +173,7 @@ class LiveSessionTest {
     void crashWithLostTailAndUnclosedMetaStillReplaysTheSame() throws Exception {
         List<MarketEvent> events = twoDays();
         int crashAt = events.size() / 3;
-        crashAndResume(events, crashAt, crashAt);
+        crashAndResume(events, crashAt, crashAt, false);
     }
 
     @Test
@@ -184,12 +184,15 @@ class LiveSessionTest {
         int dayTwoAt = (int) events.stream().filter(e -> e.receivedAt().atZone(SEOUL).toLocalDate().equals(dayOne))
                 .count();
         assertThat(dayTwoAt).isPositive().isLessThan(events.size());
-        crashAndResume(events, dayTwoAt / 2, dayTwoAt);
-        crashAndResume(events, dayTwoAt, dayTwoAt);
+        crashAndResume(events, dayTwoAt / 2, dayTwoAt, false);
+        crashAndResume(events, dayTwoAt, dayTwoAt, false);
+        // 2일차 파일만 열고 첫 줄을 내리기 전에 다시 죽어 읽을 줄 없는 2일차 파일이 남아도 공백이 남는다(risk-ops PR #94 N1)
+        crashAndResume(events, dayTwoAt, dayTwoAt, true);
     }
 
     /** {@code crashAt}개를 받은 뒤 닫지 않고 꼬리를 잘라 남기고, {@code resumeFrom}번째부터 이어 받아 리플레이와 같은지 본다. */
-    private void crashAndResume(List<MarketEvent> events, int crashAt, int resumeFrom) throws Exception {
+    private void crashAndResume(List<MarketEvent> events, int crashAt, int resumeFrom, boolean emptyDayTwo)
+            throws Exception {
         LiveSession crashed = open();
         for (MarketEvent e : events.subList(0, crashAt)) {
             clock.now = e.receivedAt();
@@ -215,6 +218,11 @@ class LiveSessionTest {
                 .resolve("events.jsonl.gz");
         byte[] bytes = Files.readAllBytes(day);
         Files.write(day, java.util.Arrays.copyOf(bytes, bytes.length - 20));
+        if (emptyDayTwo) {
+            Path dayTwo = day.getParent().resolveSibling("2026-10-15");
+            Files.createDirectories(dayTwo);
+            Files.write(dayTwo.resolve("events.jsonl.gz"), new byte[0]);
+        }
 
         LiveSession resumed = LiveSession.open(plan, REPO, copy, clock, m -> { });
         assertThat(resumed.status().restored()).isPositive().isLessThanOrEqualTo(crashAt);

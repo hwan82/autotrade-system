@@ -187,9 +187,13 @@ public final class LiveSession implements AutoCloseable {
             return;
         }
         long offset = 0;
+        Path lastWithLines = null;
         for (Path day : days) {
             beforeEachDay.run();
             RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(setup.plan().market(), List.of(day));
+            if (!data.events().isEmpty()) {
+                lastWithLines = day;
+            }
             for (MarketEvent e : data.events()) {
                 if (!inPlan(e)) {
                     throw new IllegalStateException("입력 기록에 운용 범위 밖 이벤트가 있습니다: " + day + " seq " + e.sequence());
@@ -199,8 +203,12 @@ public final class LiveSession implements AutoCloseable {
             offset += data.events().size();
         }
         restored = position;
-        // 다음 날로 넘어가 이어 받으면 앞 날 나머지가 빠진 것을 공백으로 남긴다(같은 날이면 기록기가 이미 남긴다)
-        journal.resumeAfter(LocalDate.parse(days.get(days.size() - 1).getFileName().toString()));
+        // 다음 날로 넘어가 이어 받으면 앞 날 나머지가 빠진 것을 공백으로 남긴다(같은 날이면 기록기가 이미 남긴다).
+        // 새 날 파일만 열고 첫 줄을 내리기 전에 죽어 읽을 줄이 없는 날은 건너뛰고, 줄이 있는 마지막 날을 기준으로 한다
+        // (risk-ops PR #94 N1, architect R1)
+        if (lastWithLines != null) {
+            journal.resumeAfter(LocalDate.parse(lastWithLines.getFileName().toString()));
+        }
         log.accept("입력 기록으로 계좌를 되살렸습니다: 이벤트 " + restored + ", 기록일 " + days.size());
     }
 
