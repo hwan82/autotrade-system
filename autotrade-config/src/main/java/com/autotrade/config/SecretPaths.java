@@ -130,8 +130,8 @@ final class SecretPaths {
 
     /**
      * 경고에 쓸 secrets.json의 비밀값 아닌 키 경로. 설정 구조에 있는 키 이름은 그대로 두고, 맵 키 자리와 구조에 없는 키 중
-     * 키 이름 모양이 아닌 것은 {@code *}로 바꾼다. 구조에 없는 키 아래는 {@code /*}로 줄인다. {@code *}가 든 경로는
-     * 개수를 붙인다. 위치가 틀린 키 이름 자리에 계좌번호를 적었을 수 있어서다(PR #100 QA R4). 순서는 처음 나온 순서.
+     * 키 이름 모양이 아닌 것과 구조의 잎(값 자리) 아래 키는 {@code *}로 바꾼다. 구조에 없는 키 아래는 {@code /*}로
+     * 줄인다. {@code *}가 든 경로는 개수를 붙인다. 위치가 틀린 키 이름 자리에 계좌번호를 적었을 수 있어서다(PR #100 QA R4). 순서는 처음 나온 순서.
      * 예: {@code real-trading/acount-numbers/99990000-01} → {@code real-trading/acount-numbers/* 1개}.
      */
     static List<String> forNonSecretWarning(List<String> paths) {
@@ -158,8 +158,11 @@ final class SecretPaths {
                 shown.add(ANY_KEY);
                 schemaPrefix = any + "/";
             } else {
-                // 구조에 없는 키: 오타로 보이는 키 이름만 보이고 그 아래는 줄인다
-                shown.add(isKeyLike(parts[i]) ? parts[i] : ANY_KEY);
+                // 구조에 없는 키: 레코드 안의 오타로 보이는 키 이름만 보이고 그 아래는 줄인다. 값 자리(비밀값·숫자 같은
+                // 구조의 잎) 아래 키는 오타일 수 없어 힌트 가치가 없으므로 모양과 상관없이 가린다(PR #101 QA R1)
+                String parent = schemaPrefix;
+                boolean underRecord = parent.isEmpty() || SCHEMA.stream().anyMatch(p -> p.startsWith(parent));
+                shown.add(underRecord && isKeyLike(parts[i]) ? parts[i] : ANY_KEY);
                 if (i < parts.length - 1) {
                     shown.add(ANY_KEY);
                 }

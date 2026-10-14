@@ -142,11 +142,12 @@ class ConfigLoaderTest {
     @Test
     void 범위를_벗어난_값은_키_이름과_함께_경고한다() throws IOException {
         runtime("""
-                { "lab": { "max-parallel-runs": 0 } }
+                { "lab": { "max-parallel-runs": 99990001 } }
                 """);
         LoadedConfig loaded = loader.load(paths);
         assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
-        assertThat(loaded.warning()).contains("lab.max-parallel-runs");
+        // 값은 싣지 않는다(PR #102 risk-ops F7): 숫자 자리에 계좌번호를 적었을 수 있다
+        assertThat(loaded.warning()).contains("lab.max-parallel-runs").doesNotContain("99990001");
     }
 
     @Test
@@ -364,6 +365,48 @@ class ConfigLoaderTest {
         LoadedConfig loaded = loader.load(paths);
 
         assertThat(loaded.warning()).contains("at real-trading/accounts/0/nmae");
+    }
+
+    @Test
+    void secrets의_계좌번호_맵_키_자리는_아래에_키가_있어도_가린다() throws IOException {
+        // PR #101 QA Q1: 맵 키 자리(account-numbers/*) 갈래를 지키는 시험
+        secrets("""
+                { "real-trading": { "account-numbers": { "99990000-01": { "x": "y" } } } }
+                """);
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.warning()).contains("real-trading/account-numbers/*/* 1개").doesNotContain("99990000");
+    }
+
+    @Test
+    void secrets의_값_자리_아래_키는_모양과_상관없이_가린다() throws IOException {
+        // PR #101 QA R1: 구조의 잎 아래 키는 오타일 수 없어 이름을 보일 이유가 없다
+        secrets("""
+                { "real-trading": { "operator-password-hash": { "abc-def": "x" } },
+                  "brokers": { "kis": { "app-key": { "ghi": "y" } } },
+                  "lab": { "max-parallel-runs": { "jkl": "z" } } }
+                """);
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.warning()).contains("real-trading/operator-password-hash/* 1개")
+                .contains("brokers/kis/app-key/* 1개").contains("lab/max-parallel-runs/* 1개")
+                .doesNotContain("abc-def").doesNotContain("ghi").doesNotContain("jkl");
+    }
+
+    @Test
+    void 겹친_계좌_id는_값_없이_위치만_알린다() throws IOException {
+        // PR #101 QA R2: id 자리에 계좌번호를 적었을 수 있다
+        runtime("""
+                { "real-trading": { "accounts": [
+                    { "id": "99990000-01", "broker": "KIS", "market": "KRX" },
+                    { "id": "99990000-01", "broker": "KIS", "market": "US" } ] } }
+                """);
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.warning()).contains("id가 겹칩니다(0번과 1번, 0부터)").doesNotContain("99990000");
     }
 
     @Test
