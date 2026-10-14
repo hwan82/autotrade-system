@@ -37,3 +37,35 @@
 
 ## 판정
 수정 필요(1 Ctrl+C 종료 코드, 2 내리기 표기, 3 symbolMaster 종료 코드 2, 4 replayCheck 시각)
+
+## 재검토 2026-10-14
+- 대상: PR #103 / 커밋 3bf034c(지적 반영) / `git diff origin/main...HEAD` 전체(origin/main 59e9eb0 기준, 커밋 4개: e1cf82d, 4ba2b0d risk-ops 원문, 4434d3b 이 파일, 3bf034c). 3bf034c는 `docs/runbooks/README.md` 1파일 +10/-8
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks` (헤드 3bf034c, 작업 트리 깨끗) -> BUILD SUCCESSFUL in 2m 54s, 130 actionable tasks 모두 실행. 테스트 결과 XML 합계 1,101건, 실패 0, 오류 0, 건너뜀 0. (첫 시도는 Maven Central 429로 의존성 해석 실패, 재시도 통과.)
+  - 고친 문장마다 코드·ADR과 다시 대조(아래).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 결과 |
+| B2 | 해당 없음 | 코드·빌드 스크립트·ArchUnit 변경 없음 |
+| B3 | 해당 없음 | 계약 변경 없음. 옵션 범위 설명이 `autotrade-app-experiment/build.gradle.kts:41,56,82,102,126` 및 `runLiveReplayCheck`(`:143-160`, verify 없음)와 일치 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 코드 없음, 테스트 변경 없음 |
+| B7 | 통과 | 문서 4장 실전 운영 안내를 고쳤으므로 risk-ops 검토 필요. 브랜치에 risk-ops 원문 있음(그 판정은 이 검토에 쓰지 않음) |
+| B8 | 통과 | 3bf034c diff에 키·토큰·계좌번호 없음(정규식 검색 결과 설명 문구뿐) |
+
+### 앞 지적 처리 확인
+1. Ctrl+C 종료 코드: 해결. `docs/runbooks/README.md:64`의 0 칸을 `-`로 바꾸고 `:66`에 "0이 아니다(130 실측, Windows `[추론]`), 게이트웨이는 `meta.json` 정상 종료 표시나 `replayCheck`가 3이 아닌지, 엔진은 로그로 본다"를 더함. `ReplayCheck.java:59`(3 = 녹화 불완전)와 일치.
+2. 내리기 표기: 대부분 해결, 새 부정확 1건(아래 발견 1). OPEN -> PROTECTIVE, ACTIVATING -> 원래 상태, 신규 진입만 차단·손절 계속은 `RealTradingGuard.java:236-251`, ADR-002 표(33-39행), ADR-006 2.5 6단계 "보호 모드 유지(손절·서버 측 손절 계속)"와 일치.
+3. symbolMaster 종료 코드 2: 해결(`:63`, `SymbolMasterUpdate.java:29-30`).
+4. replayCheck 시각: 해결. `:17`, `:45-46`이 16:00~18:30(늦춘 날 17:00~)로 옮겨졌고 `docs/runbooks/collector.md:71`과 일치.
+5. [권고였음] 옵션 범위: 반영됨(`:36`), 코드와 일치.
+6. 저장소 밖 안내서: "저장소 밖"으로 명시(`:90`). 존재는 여전히 확인 못 함(점검표 항목 아님).
+
+## 점검표 밖 발견
+1. **[수정 필요] "Guard OFF는 PANIC SELL의 증권사 단계가 모두 끝났을 때만 된다"가 계약과 다름** (`docs/runbooks/README.md:77`). Guard 계약에는 PROTECTIVE -> OFF 전이가 PANIC 6단계 말고도 있다: 보유·미체결이 0이 되면 `holdingsCleared`(`RealTradingGuard.java:254-262`), 킬스위치 `shutdown`(`:266`, ADR-002 2.1 그림 25-30행 "shutdown: 어떤 상태에서든 OFF (PANIC SELL 마지막 단계, 킬스위치)"), 그리고 엔진 재기동(모든 계좌 OFF로 시작, 같은 문서 4장 둘째 줄). "만"이라고 쓰면 운영자가 보호 모드 계좌가 PANIC 없이는 OFF가 되지 않는다고 오해하고, 문서 안에서도 재기동 OFF 설명과 어긋난다. 고칠 예: "보호 모드 계좌는 보유·미체결이 0이 되면 OFF가 된다. 보유가 남은 채 OFF로 만드는 길은 PANIC SELL 증권사 단계를 모두 마치는 것과 킬스위치뿐이고, 엔진 재기동 때도 OFF로 시작한다(ADR-002 2.1)."
+
+## 판정
+수정 필요(재검토 발견 1: 77행 Guard OFF 전이 설명)
