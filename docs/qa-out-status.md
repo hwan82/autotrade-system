@@ -52,3 +52,4 @@
 | 2026-10-14 | docs/reviews/pr-108/qa.md 첫 판정 | FAIL(A14, F1·F2, 권고 R1) | PR #108 브랜치에서 수정: F1 `Class.class`·`Class` 바인딩 속성·목록 밖 `Class` 메서드 금지, F2 허용 목록을 호출 대상 서명과 클래스 파일 상수 풀(형변환 포함)로 대조, QA 탐침 Q16 재현 시 실패 확인, 고정 예제 `NameToClassBinding`. R1은 D-086 위험과 한계에 반영(날짜 처리 Jackson 모듈 PR 때 함께 검토). architect·risk-ops 재검토 뒤 QA 재검토 요청 |
 | 2026-10-14 | docs/reviews/pr-108/architect.md·risk-ops.md 재검토 (헤드 743545c) | 수정 필요(AR-8·AR-9 / F6, 권고 R5) | `Class[].class` 배열 클래스 객체 금지(AR-8·F6), `getClass()`는 바로 다음 명령이 이름 읽기일 때만(바이트코드 순서 검사 GetClassUses, AR-9·R5), 고정 예제 3건 추가. 같은 검토자 재검토 요청 |
 | 2026-10-14 | docs/reviews/pr-108/architect.md·risk-ops.md 재검토 (헤드 4f44ccc) | 수정 필요(AR-10 / F7) | 서명의 `Class`를 바인딩이 아닌 메서드의 `Class<T>` 매개변수 하나로 제한(상위 타입 인자·반환 타입·타입 변수 경계 금지), 고정 예제 P4~P6. 같은 검토자 재검토 요청 |
+| 2026-10-14 | docs/reviews/pr-108/architect.md·risk-ops.md 재검토 (헤드 af0a8e3) | 승인(권고 R6 두 검토 공통) | R6(Jackson 실행 동작에 기댄 근거, 매퍼 클래스 객체)은 D-086 위험과 한계에 한 줄, Jackson 버전 올림 PR 후속. 독립 QA 재검토 요청 |
