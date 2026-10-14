@@ -74,7 +74,7 @@
 - **실전 활성화는 7단계에서 다음이 모두 끝난 뒤에만 가능하다**: 증권사 주문 연동 구현과 risk-ops 검토, 장애 테스트 8종 합격([장애 설계](../team/broker-and-fault-design.md)), 승격 후보 정리, 독립 QA 판정, 그리고 사용자 결정(지침 10장). 활성화는 어떤 경우에도 자동으로 진행하지 않는다.
 - 그때의 화면 절차(참고): 운영자 비밀번호 해시를 만들어 `secrets.json`에 넣고 → 실전 엔진과 실험실을 다시 시작 → `#/real`에서 계좌별 "실전 활성화"를 누르고 2차 확인(계좌 별칭 그대로 입력 + 운영자 비밀번호)을 통과해야 한다. 5번 연속 실패하면 15분 잠긴다. 세부는 [ADR-006](../adr/ADR-006-real-control-channel.md) 2.4·2.7과 [설정 키](../config/config-keys.md) `real-trading.operator-password-hash`.
   - 비밀번호 해시는 **설치본을 터미널에서 직접** 실행해 만든다(`gradlew run`으로는 비밀번호 입력 창이 없어 종료 코드 2로 끝난다): `.\gradlew :autotrade-app-engine:installDist` 후 `.\autotrade-app-engine\build\install\autotrade-engine\bin\autotrade-engine.bat hash-password`. 비밀번호는 15자 이상, 출력된 해시만 `secrets.json`에 넣는다.
-- **내리기와 PANIC SELL의 보호 모드 고정**은 비밀번호 없이도, 잠금 중에도 된다(ADR-006 2.4·2.5). 내리기는 Guard를 OFF로 만들지 않는다: 열린(OPEN) 계좌는 **보호 모드(PROTECTIVE)**가 되어 신규 진입만 막히고 보유 손절·서버 측 손절은 계속 돌며, 활성화 중(ACTIVATING)이면 원래 상태로 돌아간다. Guard OFF는 PANIC SELL의 증권사 단계(미체결 취소·매도·체결 확인)가 모두 끝났을 때만 된다.
+- **내리기와 PANIC SELL의 보호 모드 고정**은 비밀번호 없이도, 잠금 중에도 된다(ADR-006 2.4·2.5). 내리기는 Guard를 OFF로 만들지 않는다: 열린(OPEN) 계좌는 **보호 모드(PROTECTIVE)**가 되어 신규 진입만 막히고 보유 손절·서버 측 손절은 계속 돌며, 활성화 중(ACTIVATING)이면 원래 상태로 돌아간다. 보호 모드 계좌는 보유·미체결이 0이 되면 OFF가 된다. 보유가 남은 채 OFF가 되는 길은 PANIC SELL 증권사 단계(미체결 취소, 서버 측 손절 취소, 매도, 체결 확인)를 모두 마치는 것과 킬스위치뿐이고, 엔진 재기동 때도 모든 계좌가 OFF로 시작한다([ADR-002](../adr/ADR-002-real-trading-guard.md) 2.1, ADR-006 2.5).
 
 ## 5. 하지 말 것
 
