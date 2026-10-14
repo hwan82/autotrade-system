@@ -118,3 +118,63 @@
 
 ### 판정
 수정 필요(F4 외부 명령 전면 금지와 장애 #8·#9 감시 자동 재기동 설계의 정합: 비어 있는 실행기 허용 목록과 테스트 또는 OS 서비스 관리자 위임 기록, A12·A14 해당 문서 정리)
+
+## 재검토 2026-10-14 (3)
+- 대상: PR #108 / 헤드 4006964 / `git diff origin/main...HEAD` 전체. 2차 재검토 뒤 바뀐 것은 다음과 같다.
+  - `ALLOWED_PROCESS_LAUNCHERS`를 두었다(비어 있고 테스트로 고정).
+  - `java.lang`·`java.util`·`java.security`·`java.net`·`java.io`는 클래스 단위로만 허용한다(`ALLOWED_JDK_CLASSES`).
+  - `JACKSON_OBJECT_ACCESS`에 모듈 자동 발견을 더했다.
+  - 고정 예제 `DynamicCode#viaProvider`·`JacksonObjectAccess#discoverModules`를 더했다.
+  - ADR-002 9.5와 D-085를 정정했다.
+  - 4006964는 이 파일을 바꾸지 않았다(`git diff 8258105 4006964 -- docs/reviews`에 변경 없음).
+- 점검표: A
+- 직접 실행한 것: 모두 별도 작업 트리(4006964)에서 했고, 끝난 뒤 작업 트리를 지웠다. 공유 작업 트리 소스는 건드리지 않았다. 공유 작업 트리에 다른 사람의 커밋 안 된 변경이 있어서, 이 원문은 origin 브랜치에서 만든 별도 작업 트리에서 커밋했다.
+  - `./gradlew build --no-daemon`: EXIT=0. 테스트 결과는 다음과 같고, 모두 실패·오류·건너뜀 0이다.
+    - `:autotrade-risk:test` 55건
+    - `:autotrade-architecture-test:test` 39건(이 중 `RealPathReflectionTest` 7건)
+    - `:autotrade-app-engine:test` 50건
+  - 변조 실험 ①: 감시 모듈 `autotrade-app-watchdog`에 `com.autotrade.app.watchdog.qaprobe.LaunchProbe`를 넣었다. 네 호출 모두 실패로 잡혔다. 감시 프로세스도 실제 규칙 범위 안이라는 뜻이다.
+    - `new ProcessBuilder(..).start()`: 외부 명령 금지 규칙
+    - `ServiceLoader.load(Class, ClassLoader)`: ServiceLoader 금지
+    - `URLClassLoader.getSystemClassLoader()`: 로더 금지
+    - `URL#getContent()`: 허용 목록 밖 타입 `java.net.URL`
+  - 변조 실험 ②: `autotrade-control`에 `PropProbe`(`System.setProperty(k, v)`)를 넣었다. `RealPathReflectionTest`가 그대로 통과했다(잡지 못함). 실험 파일은 모두 지웠다.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| F4 외부 명령 금지와 #8·#9 재기동 정합 | 해소((a)안) | RealPathReflectionTest.java `ALLOWED_PROCESS_LAUNCHERS = Set.of()`. `reflective()`의 `Runtime#exec`·`ProcessBuilder` 분기는 이 목록에 든 클래스만 예외로 둔다. 목록이 비어 있음은 `실전_경로_런타임_구성은_고정_목록과_같다`가 단언한다. D-085 결정 1번과 ADR-002 9.5에 구현 경로가 적혀 있다(감시 실행기 클래스 하나만 허용, 실행 명령도 그 PR에서 고정, 보호 테스트 변경). 대응표(broker-and-fault-design.md 6장)는 바뀌지 않았다 |
+| A12 | 해소 | #8·#9의 전제(감시 프로세스가 재기동한다)는 그대로이고, 구현 경로는 보호 테스트 변경으로 정해졌다 |
+| A14 (2차) | 해소 | D-085와 ADR-002 9.5가 클래스 단위 허용과 외부 명령 허용 목록을 실제 규칙대로 적었다 |
+| R4 Jackson 모듈 자동 발견 | 해소 | `JACKSON_OBJECT_ACCESS`에 `findAndRegisterModules|findModules|findAndAddModules`를 더했다. `JacksonObjectAccess#discoverModules`가 걸리는 것을 `규칙은_리플렉션_우회를_실제로_잡아낸다`가 확인한다 |
+
+### 점검표 A
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 운영 코드 변경 없음(diff는 `autotrade-architecture-test`, 문서, 검토 원문뿐). `RealTradingGuard`는 생성 시 전 계좌 OFF 그대로이고 `:autotrade-risk:test` 55건이 통과했다 |
+| A2 | 수정 필요 | 기존 `ArchitectureTest` 규칙은 바뀌지 않았고, 새 규칙도 변조 실험 ①과 고정 예제로 걸리는 것을 확인했다. 다만 F5가 남아 있다. 허용 클래스 `java.lang.System`의 `setProperty`·`setProperties`·`clearProperty`가 막혀 있지 않다(4006964 RealPathReflectionTest.java:197은 `load`·`loadLibrary`만 막는다). 변조 실험 ②로 실제로 잡지 못함을 확인했다 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재발주 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | `FORBIDDEN_PROJECTS` 고정과 `processIsolation`(autotrade-app-engine/build.gradle.kts)이 그대로다 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음. 감시 쪽 `ProcessHandle`(조회·종료)은 허용 목록에 있어서, 자원 부족 시 정지 순서를 구현하는 데 걸리지 않는다 |
+| A10 | 통과 | 새 예제에 비밀값 없음(`"X"`, `"MessageDigest.Y"`는 자리 문자열) |
+| A11 | 통과 | 기존 단언 삭제·약화 없음. 허용 범위는 줄었고(5개 패키지를 클래스 단위로) 단언은 늘었다 |
+| A12 | 통과 | 장애 대응표 17종, O1~O8, 장애 테스트 8종의 전제를 바꾸는 동작 변경이 없다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 수정 필요 | F5를 고친 뒤 D-085 결정 1번(허용 클래스 안의 위험 메서드 목록)과 ADR-002 9.5에 JVM 속성 변경 금지를 더해야 한다 |
+
+### 점검표 밖 발견
+- **F5 (작음, 수정 필요)**: 실전 경로 코드가 JVM 시스템 속성을 바꿀 수 있다. architect 3차 재검토 AR-7과 같은 지적이고, risk-ops가 따로 확인했다. 확인 방법은 두 가지다. 하나는 위 규칙 코드 197행을 직접 읽은 것이고, 다른 하나는 변조 실험 ②로 규칙이 잡지 못함을 본 것이다.
+  - JDK에는 이름 문자열로 클래스를 만들게 하는 속성이 있다. 예를 들면 `java.util.logging.LogManager`가 처음 초기화될 때 `java.util.logging.config.class`에 적힌 클래스를 만든다(LogManager API 문서). 그래서 이 수단은 `ResourceBundle`·`Provider`와 같은 종류다 `[사실]`.
+  - 실제로 그 클래스가 만들어지는지 실행해 보는 실험은 하지 않았다.
+  - 실전 경로 운영 코드는 지금 `System.setProperty`·`setProperties`·`clearProperty`를 쓰지 않는다(`git grep` 결과 0건). 그래서 막아도 깨지는 코드가 없다. 설정은 RuntimeConfigHolder로 읽게 되어 있으므로, 실전 경로가 JVM 속성을 바꿀 이유도 없다.
+  - 요구:
+    - `reflective()`의 `java.lang.System` 분기에 세 메서드를 더한다.
+    - `DynamicCode`에 고정 예제를 더하고 그 예제가 걸리는지 단언한다.
+    - 실행 옵션으로 주는 `-D` 속성은 7단계 실행 절차서의 설치본 대조 항목에 넣는다.
+
+### 판정
+수정 필요(F5 `System#setProperty`·`setProperties`·`clearProperty` 금지와 고정 예제, A14 D-085·ADR-002 9.5 문구 반영)
