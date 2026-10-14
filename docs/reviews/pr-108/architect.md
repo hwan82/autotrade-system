@@ -225,3 +225,64 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-14 (헤드 743545c)
+- 대상: PR #108 / 커밋 743545c / main 대비 diff 전체(`git diff origin/main...743545c`, 21파일 +1,932 −3). 직전 재검토(87863e8) 뒤 바뀐 것은 main 병합(89daece, 결정 번호 D-086·기획서 v14.32), 독립 QA 원문(679c916), 그리고 QA F1·F2 반영 커밋 743545c다. 743545c가 바꾼 것(`git show 743545c --stat`):
+  - 새 `ClassFileTypes.java`(클래스 파일 상수 풀의 타입 이름 수집)와 `outsideAllowlist`의 확장(호출 대상 매개변수·반환 타입, 상수 풀 전체. `RealPathReflectionTest.java:357`)
+  - 새 `classAsData`(`Class.class` 클래스 객체, `Class`가 들어간 필드·바인딩 매개변수·제네릭 인자, 목록 밖 `Class` 메서드. `RealPathReflectionTest.java:403`)와 `ALLOWED_CLASS_METHODS`(`:390`), `JAVAC_BOOTSTRAP_TYPES`(`:347`)
+  - 허용 목록 추가: JDK 패키지 `java.security.spec`·`java.time.chrono`·`java.time.temporal`, JDK 클래스 13개, Jackson 타입 7개
+  - 고정 예제 `NameToClassBinding`(Q16 모양), 허용 예제 `ReflectionFreeEngineCode.parse`, ADR-002 9.5 6항·남은 한계, D-086 1항·위험과 한계·검증
+- 점검표: B
+- PR 본문, 커밋 메시지, D-086의 검증 주장은 사실로 받지 않고 아래 실행으로만 판정했다
+- 직접 실행한 것(별도 작업 트리 `/tmp/claude-0/wt-architect-5`, `origin/claude/project-thread-l44wj7` = 743545c. 공유 작업 트리는 건드리지 않았다):
+  - `./gradlew build --rerun-tasks`: `BUILD SUCCESSFUL in 3m 4s`, 130개 작업 모두 실행, 종료 코드 0. 결과 XML 합계 테스트 1,130건, 실패·오류·건너뜀 0. `RealPathReflectionTest`는 7건 실행, 실패 0
+  - 변조 실험(커밋하지 않음, 끝난 뒤 원복하고 `git status` 깨끗함 확인):
+
+    | 프로브 | 위치 | 내용 | 규칙 결과 | 단독 실행 결과(Jackson 2.21.4) |
+    |---|---|---|---|---|
+    | Q16 재현 | `autotrade-app-engine`의 `com.autotrade.app.engine.command.QProbe`, 엔진에 `jackson-databind` `implementation` 추가 | QA Q16과 같은 `readValue(.., Class.class)` + `convertValue(fields, k)` + `(MapperFeature) f` + `configure(..)` | **잡힘**(`Class.class를 참조`, `MapperFeature`의 매개변수·반환 타입) | 해당 없음 |
+    | 배열 Class 필드 | 같은 패키지 `record QArrField(Class<?>[] types)` | 레코드 구성 요소가 `Class[]` | **잡힘**(`QArrField.types 필드 타입에 Class`) | 해당 없음 |
+    | P1 배열 클래스 객체 | `autotrade-control`의 `com.autotrade.control.zprobe.ArrProbe` | `Class<?>[] ks = M.readValue("[\"" + name + "\"]", Class[].class)` | **안 잡힘**. `:autotrade-control:build :autotrade-architecture-test:test` `BUILD SUCCESSFUL`(리플렉션·소유·ArchitectureTest 규칙 모두 통과) | `class java.util.concurrent.atomic.AtomicLong`을 이름 문자열에서 얻음 |
+    | P2 `Class`의 `getClass()` | 같은 패키지 `GetClassProbe` | `Class<?> cc = String.class.getClass(); M.readValue("\"" + name + "\"", cc)` | **안 잡힘**(위와 같은 실행) | `class java.util.concurrent.atomic.AtomicLong`을 얻음 |
+    | P3 주석 없는 `valueOf(Class)` 정적 팩토리 | 단독 실행만 | `static ValueOfProbe valueOf(Class<?> c)` 위임 생성자 | 확인 안 함(아래 이유) | Jackson이 위임 생성자로 쓰지 않음("no String-argument constructor/factory method"). 경로가 아니다 |
+
+  - 바이트코드 확인: `javap -c`로 P1이 `ldc class "[Ljava/lang/Class;"` 뒤 `ObjectMapper.readValue:(Ljava/lang/String;Ljava/lang/Class;)`를 부르는 것, P2와 `Class<?> c; c.getClass()` 모두 `invokevirtual java/lang/Object.getClass`로 나오는 것을 확인했다(D-086 위험과 한계의 javac 설명은 사실이다)
+  - 새 허용 목록 항목의 근거: `grep`으로 실전 경로 운영 코드에서 `java.security.spec`(`OperatorPasswordHash`), `Thread.ofPlatform`(`FeedServer`·`ControlServer`), `ProtocolFamily`(`FeedServer` 등), `PropertyNamingStrategy`·`JsonSerializer`·`StdSerializer`(`ConfigJson`), `TreeNode`·`readTree`(`RecordingCodec`·`KisTokenClient` 등) 사용을 확인했다. 상수 풀 검사로 새로 드러난 서술자 타입을 넣은 것이고, 위험 API를 여는 항목은 찾지 못했다 `[추론]`(`databind.Module`은 `Module$SetupContext`가 목록 밖이라 직접 만든 모듈의 `setupModule`이 걸린다)
+  - 실전 경로 운영 코드의 `getClass()` 20곳은 모두 바로 뒤에 `getSimpleName()`·`getName()`을 부른다(`grep -rn "getClass()"`에서 그 밖의 모양 0건)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` 종료 코드 0, 테스트 1,130건 실패·오류·건너뜀 0 |
+| B2 | 실패 | 규칙 변경에 ADR-002 9.5 6항이 있으나, 그 6항과 D-086 1항이 금지한다고 적은 "Jackson의 `Class` 역직렬화로 이름 문자열에서 클래스를 얻는 길"이 P1(`Class[].class`)로 그대로 열려 있다. `classAsData`가 클래스 객체를 `r.getRawType().getName().equals("java.lang.Class")`로만 비교해 배열 `[Ljava.lang.Class;`를 놓친다(`RealPathReflectionTest.java:406`). AR-8 |
+| B3 | 통과 | 운영 계약 변경 없음. 규칙 계약 변경은 ADR-002 9.5 6항과 D-086에 적혀 있다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | 새 규칙마다 고정 예제와 단언이 있다(`규칙은_리플렉션_우회를_실제로_잡아낸다`의 `NameToClassBinding` 단언 6개와 `ClassFileTypes` 단언). 기존 단언 삭제·약화, `@Disabled` 없음. 다만 배열 클래스 객체와 `getClass()` 경로의 고정 예제는 없다(AR-8·AR-9) |
+| B7 | risk-ops 검토 필요 | 보호 테스트(`autotrade-architecture-test`) 변경이고 2차 확인 위조(Guard) 경로를 다룬다. risk-ops 재검토와 독립 QA 재검토 뒤 사용자가 머지한다 |
+| B8 | 통과 | 새 파일·예제에 키·계좌번호·토큰 없음 |
+
+### 독립 QA 지적의 처리
+- F2(형변환·호출 서술자의 허용 목록 밖 타입): 해소. Q16 재현이 `MapperFeature`로 잡혔고, `NameToClassBinding.castOnly`(형변환만)도 상수 풀로 잡힌다(단언 확인). 상수 풀 검사는 문자열 상수를 빼고 클래스 상수·서술자·서명을 모두 보므로, 목록 밖 타입을 이름 없이 쓰는 경로는 찾지 못했다.
+- F1(이름 문자열 클래스 찾기): **부분 해소**. `Class.class` 리터럴, `Class` 필드·레코드 구성 요소(배열 포함)·설정자·제네릭 인자, 목록 밖 `Class` 메서드는 잡힌다. 그러나 아래 AR-8·AR-9 두 길이 남아 Q16과 같은 일(이름 문자열 → 클래스 → `convertValue(fields, k)`)을 한 줄 바꿔 그대로 할 수 있다.
+- R1: D-086 위험과 한계에 반영됐다. 그런데 AR-8·AR-9가 남아 있는 동안은 2차 확인 위조를 막는 것이 여전히 `Instant` 필드 하나다(QA 시나리오 2와 같다).
+
+### 새 지적
+
+#### AR-8 (수정 필요) 배열 클래스 객체 `Class[].class`로 이름 문자열에서 클래스를 얻는다
+- `[사실]` 위 P1. `M.readValue("[\"<이름>\"]", Class[].class)`가 규칙을 모두 통과하고, 실행하면 이름의 클래스(정적 초기화 포함)를 돌려준다. `classAsData`의 클래스 객체 검사가 배열을 비교하지 않고(`:406`), `outsideAllowlist`는 배열의 원소 타입 `java.lang.Class`가 허용이라 통과한다. `Class[][]`·`convertValue(.., Class[].class)`·`treeToValue(.., Class[].class)`도 같은 모양이다 `[추론]`.
+- ADR-002 9.5 6항과 D-086 1항("`Class.class` 클래스 객체 … 를 쓰지 않는다")이 막는다고 적은 것과 다르다.
+- 고칠 방향: 클래스 객체 검사를 `getRawType().getBaseComponentType()`으로 비교한다. 고정 예제 `NameToClassBinding`에 `Class[].class` 읽기를 더하고 단언한다.
+
+#### AR-9 (수정 필요) `Class`의 `getClass()`로 리터럴 없이 `Class` 타입 객체를 얻는다
+- `[사실]` 위 P2. `String.class.getClass()`는 `Class<Class>` 값을 돌려주고, javac가 `Object.getClass`로 부르므로 `ALLOWED_CLASS_METHODS` 검사(`:424`, 대상 소유자가 `java.lang.Class`일 때만)와 `Class.class` 검사를 모두 비켜 간다. 이 값을 `readValue`에 넘기면 F1과 같다.
+- D-086 위험과 한계와 ADR-002 9.5 남은 한계는 이것을 "리뷰로 막는다 `[추론]`"로 남겼다. 문서는 정직하지만, QA가 차단으로 본 F1의 핵심 경로가 한 줄 바꿔 다시 열리는 것이라 리뷰에 맡길 수 있는 한계로 보지 않는다. 그리고 "정적으로 못 잡는다"는 전제가 틀렸다: 실전 경로 운영 코드의 `getClass()` 20곳은 모두 바로 뒤에 `getSimpleName()`·`getName()`을 부르므로 닫는 비용이 작다.
+- 고칠 방향(둘 중 하나, 추천 ①):
+  - ① 바이트코드 규칙: 이미 클래스 파일을 읽는 `ClassFileTypes`처럼 `Code` 속성을 읽어, `invokevirtual java/lang/Object.getClass` 바로 다음 명령이 `java/lang/Class.getSimpleName|getName`인 경우만 허용한다(또는 `getClass()`를 이름 문자열을 돌려주는 도우미 하나에서만 부르게 하고 ArchUnit으로 호출 위치를 고정). 버린 안: `getClass()` 전면 금지는 예외 이름 기록 20곳을 바꿔야 해 비용 대비 이득이 같다(①이 같은 효과).
+  - ② 실행 시 방어: 실전 경로 `ObjectMapper`를 한 생성 지점(지금 18곳)으로 모으고 `java.lang.Class` 역직렬화기를 늘 실패하는 것으로 등록, 그 밖의 `new ObjectMapper`·`JsonMapper.builder`를 규칙으로 금지. 버린 이유: 생성 지점 18곳을 옮기는 운영 코드 변경이 커서 이 PR(시험만 바꾸는 PR)의 범위를 넘는다. ①로 부족해지면 되돌릴 조건으로 둔다.
+- 고정 예제 `NameToClassBinding`에 `String.class.getClass()` 읽기를 더하고, 허용 예제에 `e.getClass().getSimpleName()`를 둔다. D-086·ADR-002의 해당 한계 문장은 고친 뒤 지운다.
+
+### 그 밖
+- 직전 재검토까지의 AR-1~AR-7은 해소 상태 그대로다(이번 빌드에서 해당 고정 예제 단언 통과).
+
+## 판정
+수정 필요(AR-8, AR-9)
