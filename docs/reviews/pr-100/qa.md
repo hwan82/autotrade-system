@@ -54,3 +54,62 @@
 
 ## 판정
 승인 (권고 Q1·R1·R2·R3, 차단 아님. 실전 관련이라 머지는 사용자)
+
+## 재검토 2026-10-14
+- 대상: PR #100 / 커밋 0f39ef4 (1차 dd80a1d 이후 6커밋: fa50f3f 코드·시험·ADR, e298e7b qa-out-status.md, 774638a·3a528d0·0f39ef4 검토 원문, 0f9d5d2 pending.md) / main 대비 diff 전체
+- 점검표: A 전체 + B1, B6 + 과금 검사
+- 직접 실행한 것:
+  - `git diff 6f6465e origin/pr100`: 12파일, +178 −9. 운영 코드 4파일(`EngineStatus.java` 길이 상한, `SecretPaths.java` `forWarning`, `ConfigLoader.java` 호출 1줄, `real.js` 문구), 시험 3파일(+4건), 문서 5파일. 보호 영역(`autotrade-architecture-test`, `autotrade-risk`, `autotrade-broker*`) diff 0줄. 이 QA 보고서(1차 절) 변경 없음
+  - 검토 원문: 3a528d0에서 architect 재검토 절이 지워졌다가 0f39ef4에서 복구됨. `git diff 774638a 0f39ef4 -- docs/reviews/pr-100/architect.md` 0줄(774638a 내용과 동일). dd80a1d 대비 두 원문 모두 덧붙이기만(+28, +35, 삭제 0)
+  - `./gradlew build --no-daemon`(head 0f39ef4): 1회째 **BUILD SUCCESSFUL**, tests **1,076**, 실패·오류·건너뜀 0
+  - **현재 main과 병합 빌드**: origin/main(04b5925, #98·#99 포함) + 이 PR(충돌 없음) → `./gradlew build --offline` **BUILD SUCCESSFUL**, tests **1,093**, 실패·오류·건너뜀 0
+  - CI(head 0f39ef4, check-runs 3건): Gradle build, DB schema, Secret scan 모두 success
+  - **1차 탐침 재실행**(같은 `QaProbePr100Test`, P1 단언을 "응답이 온다"로 바꿔 실행, 확인 뒤 삭제):
+    - P1(경고 82,941자): `status`·`deactivate`·`panicAll` 세 명령 모두 **응답 옴**(예외 없음). 1차의 응답 끊김 해소
+    - P2(무시 경고): 경고 문구 그대로("…1개를 무시했습니다"). 화면 제목은 "기동할 때 설정 파일에 문제가 있었습니다"로 바뀌고 "쓰지 않고"=파일 전체 버림, "무시했습니다"=그 항목만 뺌을 설명(`real.js:66-72`). 1차 R1 해소
+    - P3(runtime-config.json `account-numbers` 키 자리에 계좌번호 모양 문자열): 경고 = "…비밀값은 secrets.json에만 둡니다: [real-trading/account-numbers/* 1개]". 키 이름이 사라짐. 1차 R2의 그 경로 해소
+  - **새 탐침 P4·P5**(`autotrade-config` 임시 시험, 확인 뒤 삭제): 부모 키를 오타(`acount-numbers`)로 적고 그 아래 키 자리에 계좌번호 모양 문자열(가짜 `99990000-01`)
+    - P4 secrets.json: 경고 = "secrets.json을(를) 쓰지 않고 비밀값 없이 기동: 비밀값이 아닌 키가 있습니다: [real-trading/acount-numbers/99990000-01]" → **키 이름이 그대로 화면까지 나감**(아래 R4)
+    - P5 runtime-config.json: 경고 = "UnrecognizedPropertyException at …RealTrading[\"acount-numbers\"]" → 첫 모르는 키까지만, 아래 키 이름 없음
+  - **변이 탐침**(확인 뒤 원복, `git status` 깨끗):
+    - M1 `EngineStatus` 자르기 끔 → `ControlChannelTest.긴_설정_경고는_잘라서_응답_한도_안에_둔다`, `EngineMainTest.경고가_아주_길어도_상태_조회와_내리기는_응답한다` FAILED(잡힘)
+    - M2 `ConfigLoader`가 `forWarning` 대신 원래 목록을 씀 → `ConfigLoaderTest` 2건 FAILED(잡힘)
+  - 응답 크기 계산: 경고 최대 2,000자 + 표시. JSON에서 문자당 최대 6바이트(`\u00XX` 이스케이프)로 쳐도 약 12KB로 64KB 한도 안 `[추론]`. 자르기는 레코드 생성자에서 하므로 엔진이 보내는 쪽과 실험실이 읽는 쪽 모두 적용된다(`EngineStatus.java:26-36`). 서로게이트 쌍 가운데서 자르지 않음은 시험으로 확인
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 코드 diff 0줄. `configWarning`은 여전히 표시용(`EngineCommandHandler.java` 사용처 변화 없음). 새 시험 `경고가_아주_길어도…`에서 Guard 계좌 0개. 위 빌드 통과 |
+| A2 | 통과 | 주문 출구·`ArchitectureTest` 변경 없음, 두 빌드의 ArchUnit 통과 |
+| A3 | 해당 없음 | 변경 없음 |
+| A4 | 해당 없음 | 변경 없음 |
+| A5 | 해당 없음 | 변경 없음 |
+| A6 | 해당 없음 | 변경 없음 |
+| A7 | 통과 | 1차와 같음. 경고는 엔진 전체 값 하나 |
+| A8 | 통과 | 1차의 "큰 경고면 명령 채널 응답 전체가 끊김"이 해소됨(P1 재실행, M1 잡힘). 엔진 동작 변화 없음 |
+| A9 | 해당 없음 | 변경 없음 |
+| A10 | 통과 | 추가 줄에 키·계좌번호·토큰 없음. runtime-config.json의 맵 비밀값 키 이름은 패턴과 개수로 바뀜(`SecretPaths.java:89-120`, P3). 남은 노출 경로(P4)는 사용자가 부모 키를 오타로 적고 그 아래 키 자리에 계좌번호를 적은 경우뿐이며, 엔진 로그에는 이 PR 전부터 남던 내용이다(R4) |
+| A11 | 통과 | 보호 테스트 변경 없음. 새 동작 시험 4건(경고 자르기·서로게이트, 엔진 기동 후 긴 경고 응답, 키 이름 숨김 2건), 변이 M1·M2 모두 잡힘. 기존 `ConfigLoaderTest` 단언은 키 이름(`KIS-US-1`)이 경고에 **없어야** 한다로 바뀌었고, 이는 약화가 아니라 강화다 |
+| A12 | 통과 | 대응표·장애 테스트 전제 변경 없음 |
+| A13 | 해당 없음 | 변경 없음 |
+| A14 | 통과 | ADR-006 2.3에 2,000자 자르기와 표시 문구, 맵 비밀값 키 이름 대신 패턴·개수가 적혀 있고 코드(`EngineStatus.MAX_CONFIG_WARNING`, `TRUNCATED_MARK`, `SecretPaths.forWarning`)와 일치. `docs/qa-out-status.md`에 1차 판정 처리 기록이 있다 |
+| B1 | 통과 | 위 `./gradlew build` 직접 실행 성공(PR 헤드 1,076건, main 병합 1,093건) |
+| B6 | 통과 | A11과 같음 |
+
+### 과금 검사
+| # | 결과 | 근거 |
+|---|---|---|
+| 과금 | 통과 | 새 외부 호출·의존성 없음 |
+
+### 시나리오 시도
+1. **경고가 매우 김(P1)**: 이제 상태·내리기·PANIC 응답이 오고 경고는 2,000자 + "…(잘림, 전체는 실전 엔진 로그)". 전체 경고는 엔진 로그에 그대로 남는다(`ProcessStartup.java:20-21`). 해소.
+2. **잘린 경고 때문에 중요한 내용이 가려짐**: 경고는 파일별로 "runtime-config.json …; secrets.json …" 순서로 이어지므로(`ConfigLoader.java:55-125`) runtime-config.json 쪽 목록이 2,000자를 넘으면 secrets.json도 버렸다는 뒷부분이 잘릴 수 있다 `[추론]`. 이 경우 화면 표시와 별개로 비밀번호 해시가 없으면 `passwordConfigured=false`로 활성화가 막히고 화면에도 따로 나온다. 주문 쪽 위험 없음, 차단 아님.
+3. **키 자리에 계좌번호(P3·P4)**: 올바른 위치(`account-numbers`) 아래면 숨겨지고, 부모 키 오타면 secrets.json 쪽에서 그대로 보인다(R4).
+4. **옛 실험실 ↔ 새 엔진**: 자르기는 새 레코드 쪽 동작이고 필드 모양은 같아 1차 판단(LENIENT 읽기) 그대로.
+
+### 점검표 밖 발견
+- 1차 Q1·R1·R2: 해소(위 P1~P3, M1·M2).
+- 1차 R3(화면 자동 시험 없음): 그대로(참고). `real.js` 문법 검사(`node --check`) 통과, 렌더링은 직접 보지 않음.
+- **R4 secrets.json의 비밀값 아닌 키 목록에는 키 이름 숨김이 적용되지 않음**(권고, 새로): P4. `nonSecretLeaves` 경고(`ConfigLoader.java:77-80`)는 경로를 그대로 쓴다. 부모 키 오타 아래 키 자리에 계좌번호를 적으면 화면·실험실 API까지 나간다. 위치가 틀린 키의 자식 키 이름은 감추고(예: `real-trading/acount-numbers/* 1개`) 개수만 쓰는 것을 권한다. 사용자의 두 겹 실수가 필요하고 엔진 로그에는 이미 남던 내용이라 차단하지 않는다.
+
+### 판정
+승인 (1차 권고 Q1·R1·R2 해소. 새 권고 R4, 참고 R3, 차단 아님. 실전 관련이라 머지는 사용자)
