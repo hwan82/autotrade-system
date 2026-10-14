@@ -39,6 +39,7 @@
 | 2026-10-13 | docs/reviews/gates/stage-3.md 첫 판정 | FAIL(수정 필요 C1) | D-069로 처리(BOOK-V3 단일가 체결, 녹화 실험 명령, 실녹화 실험 EXP-20261013-REC01). 재판정 요청은 실녹화 실험 증거 커밋 뒤 docs/qa/pending.md에 올림 |
 | 2026-10-13 | docs/reviews/gates/stage-3.md 재검토 2026-10-13 (main `2b6acd2` 기준) | PASS | D-070 3단계 완료 기록(PR #77). 권고 R3·R4는 D-070 후속 |
 | 2026-10-14 | docs/reviews/gates/stage-5.md 첫 판정(+ 사용자 결정 기록 2026-10-14) | FAIL(수정 필요 C5, 사용자 결정 2건) | 사용자 결정 D-079 기록, C5 4곳 정정(기획서 UI-01 SSE 이연·14장 5단계 행, ADR README ADR-005·006 상태, ADR-005 상태), 재판정 요청을 docs/qa/pending.md에 올림. 권고 R1~R4는 후속 과제 |
+| 2026-10-14 | docs/reviews/gates/stage-5.md 재검토 2026-10-14 (main `5eb0885` 기준) | PASS | D-080 5단계 완료 기록. 권고 R1~R5는 D-080 후속(ui-dev) |
 | 2026-10-14 | docs/reviews/gates/stage-1.md 첫 판정 | FAIL(수정 필요 C5, 사용자 결정 1건) | 사용자 결정 A를 대조표 4장에 기록(PR #84). C5 4건은 다음 재검토 뒤 PR #89에서 정리 |
 | 2026-10-14 | docs/reviews/gates/stage-1.md 재검토 2026-10-14 (main `4e32d75` 기준) | FAIL(수정 필요 C5) | PR #89(D-077 Q-009 닫음, D-078 ADR-002 채택, ADR-001 2.4·2.7 정정, 스모크 보강). 결정 A 사용자 확인은 QA 스레드 2026-10-14T02:15:55Z |
 | 2026-10-14 | docs/reviews/gates/stage-1.md 재검토 2026-10-14 (2) (main `5eb0885` 기준) | PASS | D-081 결정 A 번호, D-082 1단계 완료 기록. 권고 R1은 PR #89에서 처리됨, R2~R5는 D-082 후속 |
