@@ -39,3 +39,4 @@
 | 2026-10-13 | docs/reviews/gates/stage-3.md 첫 판정 | FAIL(수정 필요 C1) | D-069로 처리(BOOK-V3 단일가 체결, 녹화 실험 명령, 실녹화 실험 EXP-20261013-REC01). 재판정 요청은 실녹화 실험 증거 커밋 뒤 docs/qa/pending.md에 올림 |
 | 2026-10-13 | docs/reviews/gates/stage-3.md 재검토 2026-10-13 (main `2b6acd2` 기준) | PASS | D-070 3단계 완료 기록(PR #77). 권고 R3·R4는 D-070 후속 |
 | 2026-10-14 | docs/reviews/gates/stage-5.md 첫 판정(+ 사용자 결정 기록 2026-10-14) | FAIL(수정 필요 C5, 사용자 결정 2건) | 사용자 결정 D-079 기록, C5 4곳 정정(기획서 UI-01 SSE 이연·14장 5단계 행, ADR README ADR-005·006 상태, ADR-005 상태), 재판정 요청을 docs/qa/pending.md에 올림. 권고 R1~R4는 후속 과제 |
+| 2026-10-14 | docs/reviews/gates/stage-5.md 재검토 2026-10-14 (main `5eb0885` 기준) | PASS | D-080 5단계 완료 기록. 권고 R1~R5는 D-080 후속(ui-dev) |
