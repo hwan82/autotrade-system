@@ -14,7 +14,7 @@
 | 실험실(화면) | 상주 | 화면을 볼 때, 실시간 모의 운용 중 | `.\gradlew :autotrade-app-lab:bootRun` | 그 창에서 Ctrl+C | 브라우저 `http://127.0.0.1:8480` 열림 | [6단계 실시간 모의](stage-6-live-session.md), [조합 실험](../strategy/combination-experiments.md) 5장 4번 |
 | 수집기 | 단발 | 거래일 서울 18:30~21:30, 또는 주말 | `.\gradlew :autotrade-app-collector:run --args="krx-daily ..."` | 끝나면 스스로 종료 | 스냅샷 ID와 품질 리포트 경로 출력 | [수집기](collector.md) |
 | 실험 명령 | 단발 | 장 시간 보호 구간 밖(긴 것은 토요일 아침) | `.\gradlew :autotrade-app-experiment:run<종류> -Pexperiment=<실험ID>` | 끝나면 스스로 종료 | `experiments/<실험ID>/`에 `results.md` 등 생성 | 아래 1.1 |
-| 녹화 리플레이 점검 | 단발 | 녹화한 날 장 마감 뒤 | `.\gradlew :autotrade-app-gateway:replayCheck --args="<날짜> replay-<날짜>.md"` | 스스로 종료 | 종료 코드 0, 저장소 루트에 보고서 | [2단계 녹화](stage-2-real-recording.md) 7번 |
+| 녹화 리플레이 점검 | 단발 | 녹화한 날 서울 16:00~18:30(아래 2장) | `.\gradlew :autotrade-app-gateway:replayCheck --args="<날짜> replay-<날짜>.md"` | 스스로 종료 | 종료 코드 0, 저장소 루트에 보고서 | [2단계 녹화](stage-2-real-recording.md) 7번 |
 | 키움 일봉 대조표 | 단발 | 게이트웨이를 끈 뒤 | `.\gradlew :autotrade-app-gateway:kiwoomDaily --args="<날짜> kiwoom-daily-<날짜>.md"` | 스스로 종료 | 종료 코드 0 | [2단계 녹화](stage-2-real-recording.md) 8번 |
 | 종목명 표 | 단발 | 처음 한 번, 상장 종목이 바뀌었을 때 | `.\gradlew :autotrade-app-gateway:symbolMaster` | 스스로 종료 | `<설정 폴더>\symbols\KRX.csv` 생성. 실험실 다시 시작 | [설정 키](../config/config-keys.md) 종목명 표 |
 | 실전 엔진 | 상주 | **지금은 켤 필요 없음**(아래 4장) | `.\gradlew :autotrade-app-engine:run` | Ctrl+C | 로그 `RealTradingGuard 모두 OFF로 시작` | [ADR-006](../adr/ADR-006-real-control-channel.md) |
@@ -33,7 +33,7 @@
 | `runLiveReplayCheck` | 실시간 모의 세션 결과를 리플레이와 대조 | 끝낸 세션의 `live-detail.txt` | [6단계 실시간 모의](stage-6-live-session.md) 4장 |
 | `runStrategyStudy` | 합성 시세 비교(4단계 첫 실험 재현용) | 없음 | `autotrade-app-experiment/build.gradle.kts` 주석 |
 
-공통 옵션: `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상), `-Pheap=8g`(메모리), `-PallowDuringSession`(**실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림).
+옵션: `-PallowDuringSession`(다섯 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드 실험만).
 
 ## 2. 하루 흐름 (거래일 기준, 서울 시각)
 
@@ -42,8 +42,8 @@
 | 08:00 전 | `git pull`. 장 시간 보호 구간이 08:00에 시작하므로 수집·실험 명령은 이 전에 끝나 있어야 한다 |
 | 08:40 전 | 게이트웨이 시작(녹화·실시간 모의를 하는 날). 실시간 모의를 하면 실험실을 띄우고 세션 시작 |
 | 장중 | 게이트웨이 창을 닫지 않는다. 실험실 `#/live` 화면에서 상태 확인 |
-| 15:40 뒤 | 게이트웨이 Ctrl+C. 녹화한 날은 `replayCheck` |
-| 16:00~18:30 | 빌드·`installDist` 같은 반영 작업을 하는 시간([수집기](collector.md) 3.6의 6번) |
+| 15:40 뒤 | 게이트웨이 Ctrl+C |
+| 16:00~18:30 (수능일 등 늦춘 날은 17:00~18:30) | 녹화한 날은 `replayCheck`. 빌드·`installDist` 같은 반영 작업도 이 시간에 한다. 이 명령들은 장 시간 보호를 스스로 확인하지 않는다([수집기](collector.md) 3.6의 2·6번) |
 | 18:30~21:30 | 수집기 `krx-daily` → `dart-financials`(서머타임이 아니면 22:30 전까지) |
 | 주말 | 오래 걸리는 실험 명령(토요일 아침 시작 추천) |
 
@@ -60,8 +60,10 @@
 | `runLiveReplayCheck` | 실시간과 리플레이 같음(합격) | 입력 오류 | 실시간 경로 결함이나 실패 계좌 | - | 장 시간 보호·정지 요청 | [6단계 실시간 모의](stage-6-live-session.md) 4장 |
 | `replayCheck` | 두 번 같고 녹화 완전 | 두 결과 다름 | 녹화를 읽지 못함 | 같지만 녹화 불완전(다른 날 다시 녹화) | - | [2단계 녹화](stage-2-real-recording.md) 7번 |
 | `kiwoomDaily` | 표 작성 | - | 설정·인자 오류나 조회 실패 | - | - | `KiwoomDailyMain` 주석 |
-| `symbolMaster` | 성공 | 받은 파일 검증 실패(파일을 쓰지 않음) | - | - | - | `SymbolMasterUpdate` 주석 |
-| 게이트웨이·실전 엔진 | Ctrl+C로 정상 종료 | 기동 실패(로그의 ERROR 줄을 본다) | - | - | - | `GatewayMain`, `EngineMain` |
+| `symbolMaster` | 성공 | 받은 파일 검증 실패(파일을 쓰지 않음) | 내려받기·읽기·쓰기 실패(기존 `KRX.csv`는 그대로) | - | - | `SymbolMasterUpdate` 주석 |
+| 게이트웨이·실전 엔진 | - | 기동 실패(로그의 ERROR 줄을 본다) | - | - | - | `GatewayMain`, `EngineMain` |
+
+게이트웨이·실전 엔진을 Ctrl+C로 끄면 종료 코드가 0이 아니다(Linux JDK 21 실측 130, Windows는 확인 전 `[추론]`). 정상 종료는 종료 코드로 보지 않고, 게이트웨이는 녹화 `meta.json`의 정상 종료 표시(또는 `replayCheck`가 3이 아닌지)로, 실전 엔진은 로그로 본다.
 
 0이 아니면 출력 마지막 20줄쯤을 이 스레드에 붙여 준다. 키·토큰·계좌번호가 보이면 지우고 붙인다.
 
@@ -72,7 +74,7 @@
 - **실전 활성화는 7단계에서 다음이 모두 끝난 뒤에만 가능하다**: 증권사 주문 연동 구현과 risk-ops 검토, 장애 테스트 8종 합격([장애 설계](../team/broker-and-fault-design.md)), 승격 후보 정리, 독립 QA 판정, 그리고 사용자 결정(지침 10장). 활성화는 어떤 경우에도 자동으로 진행하지 않는다.
 - 그때의 화면 절차(참고): 운영자 비밀번호 해시를 만들어 `secrets.json`에 넣고 → 실전 엔진과 실험실을 다시 시작 → `#/real`에서 계좌별 "실전 활성화"를 누르고 2차 확인(계좌 별칭 그대로 입력 + 운영자 비밀번호)을 통과해야 한다. 5번 연속 실패하면 15분 잠긴다. 세부는 [ADR-006](../adr/ADR-006-real-control-channel.md) 2.4·2.7과 [설정 키](../config/config-keys.md) `real-trading.operator-password-hash`.
   - 비밀번호 해시는 **설치본을 터미널에서 직접** 실행해 만든다(`gradlew run`으로는 비밀번호 입력 창이 없어 종료 코드 2로 끝난다): `.\gradlew :autotrade-app-engine:installDist` 후 `.\autotrade-app-engine\build\install\autotrade-engine\bin\autotrade-engine.bat hash-password`. 비밀번호는 15자 이상, 출력된 해시만 `secrets.json`에 넣는다.
-- **내리기(Guard OFF)와 PANIC SELL의 보호 모드 고정**은 비밀번호 없이도, 잠금 중에도 된다(ADR-006 2.4·2.5).
+- **내리기와 PANIC SELL의 보호 모드 고정**은 비밀번호 없이도, 잠금 중에도 된다(ADR-006 2.4·2.5). 내리기는 Guard를 OFF로 만들지 않는다: 열린(OPEN) 계좌는 **보호 모드(PROTECTIVE)**가 되어 신규 진입만 막히고 보유 손절·서버 측 손절은 계속 돌며, 활성화 중(ACTIVATING)이면 원래 상태로 돌아간다. Guard OFF는 PANIC SELL의 증권사 단계(미체결 취소·매도·체결 확인)가 모두 끝났을 때만 된다.
 
 ## 5. 하지 말 것
 
@@ -85,7 +87,7 @@
 
 ## 6. 막혔을 때
 
-- 처음 설치(Java 21, Git, 저장소 받기)는 프로젝트 공유 폴더의 `guides/stage-2-recording-guide.md` 1단계에 그림처럼 풀어 두었다.
+- 처음 설치(Java 21, Git, 저장소 받기)는 저장소 밖 프로젝트 공유 폴더의 `guides/stage-2-recording-guide.md` 1단계에 그림처럼 풀어 두었다.
 - 증권사 키 거절·연결 실패: [2단계 녹화](stage-2-real-recording.md) "실패했을 때"와 5번(키움 `return_code` 뜻).
 - 수집 오류(`HTTP 401/403` 등): [수집기](collector.md) 2장.
 - 실시간 모의가 붙지 않음(`feedState`, `stopReason`): [6단계 실시간 모의](stage-6-live-session.md) 2장 4·5번, 5장.
