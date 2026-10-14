@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Currency;
+import java.util.Optional;
 
 /**
  * 시장별 차이(시간대, 통화, 거래 시간, 가격 단위, 수량 단위)를 한곳에 모은 계약.
@@ -21,7 +22,7 @@ import java.util.Currency;
  *   <li>호가 단위·거래 시간 같은 수치는 공식 출처를 구현 클래스 주석에 남긴다.</li>
  * </ul>
  * 구현(KRX, US)은 2단계(데이터)와 3단계(실험실)에서 추가한다. 세션 구분(단일가·장외)은 {@link #sessionPhase}(D-069)로
- * 더했다. 가격 제한(상하한가·LULD), 허용 주문 유형, 거래일 캘린더(개장·폐장 시각) 조회는 그 단계의 ADR에서 이 계약에 더한다.
+ * 더했다. 하루 가격 제한폭은 {@link #dailyPriceLimit}(D-084)로 더했다. 가격 제한 밴드 계산(상하한가 가격·LULD), 허용 주문 유형, 거래일 캘린더(개장·폐장 시각) 조회는 그 단계의 ADR에서 이 계약에 더한다.
  */
 public interface MarketRules {
 
@@ -59,6 +60,15 @@ public interface MarketRules {
      * 미국 1달러 미만 종목은 단위가 다를 수 있다.
      */
     BigDecimal tickSize(Symbol symbol, BigDecimal price);
+
+    /**
+     * 종목의 하루 가격 변동 제한폭(기준가 대비 비율, 예: 0.30은 ±30%). 시장 전체에 고정된 제한폭이 없거나(미국은 종목 단위
+     * LULD 밴드만 있음) 이 구현이 그 종목의 제한폭을 모르면 비어 있다. 기본은 비어 있다.
+     * 지금은 일봉 품질 검사(급변 의심 임계)만 쓴다. 주문 가격 검증에 쓰려면 기준가 계산 규칙을 같은 ADR에서 더한다.
+     */
+    default Optional<BigDecimal> dailyPriceLimit(Symbol symbol) {
+        return Optional.empty();
+    }
 
     /** 주문 수량 단위. 1단계는 소수점 매매를 쓰지 않으므로 기본 1주(D-015). */
     default long quantityStep() {
