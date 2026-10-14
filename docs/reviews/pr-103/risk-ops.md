@@ -86,3 +86,40 @@
 
 ### 판정
 승인
+
+## 재검토 2026-10-14 (2차)
+- 대상: PR #103 / 커밋 424c0c3f3256574373c0d6a2d42d8de353b58f7c / main 대비 diff (`README.md`, `docs/runbooks/README.md`, `docs/reviews/pr-103/architect.md`, `docs/reviews/pr-103/risk-ops.md`. 코드·설정·스키마·테스트 변경 0건)
+- 점검표: A
+- 직접 실행한 것: `./gradlew build --continue`(HEAD 424c0c3) **BUILD SUCCESSFUL**. 테스트 결과 XML 집계: `:autotrade-risk:test` 55건, `:autotrade-architecture-test:test` 32건, `:autotrade-app-engine:test` 50건, 모두 실패 0·오류 0·건너뜀 0. `git show 424c0c3`(docs/runbooks/README.md 1줄 변경)을 ADR-002 2.1, RealTradingGuard.java, EngineCommandHandler.java와 대조
+
+### 바뀐 문장 대조 (docs/runbooks/README.md:77)
+| 주장 | 결과 | 근거 |
+|---|---|---|
+| 내리기는 OFF로 만들지 않음. OPEN → PROTECTIVE(신규 진입만 차단, 보유 손절·서버 측 손절 계속), ACTIVATING → 원래 상태 | 일치 | RealTradingGuard.java:240 `deactivate`, EngineCommandHandler.java:30, ADR-002 2.1 표(PROTECTIVE: 진입 차단, 청산·손절 허용, 세션 허가 발급) |
+| 보호 모드 계좌는 보유·미체결이 0이 되면 OFF | 일치 | RealTradingGuard.java:254-262 `holdingsCleared`(PROTECTIVE에서만 OFF), RealTradingGuardTest#보호_모드에서_보유가_0이_되면_OFF로_내려간다 통과 |
+| 그 밖에 OFF가 되는 길은 PANIC SELL 증권사 단계(미체결 취소, 서버 측 손절 취소, 매도, 체결 확인)를 모두 마친 경우와 킬스위치, 그리고 엔진 재기동 | 일치 | RealTradingGuard.java:265-272 `shutdown`(어떤 상태에서든 OFF), 운영 코드의 호출은 EngineCommandHandler.java:278(PANIC 증권사 단계 모두 DONE일 때만) 한 곳. 킬스위치는 ADR-002 2.1에 계약으로만 있고 감시 프로세스 구현은 아직 없음(WatchdogMain.java:8, 매뉴얼 70행도 "후속 작업"으로 안내). 재기동 OFF는 EngineMain.java:94-98, RealTradingGuardTest#재기동하면_열려_있던_계좌도_OFF로_시작한다 |
+
+- 1차 재검토의 비차단 권고(괄호에 서버 측 손절 취소 단계 누락)는 이번 문장에서 해소됨.
+- 1차 검토 권고 3(보유가 있는 날 재기동하면 OFF로 시작해 엔진 손절 감시가 멈춤)은 이번 문장이 "엔진 재기동 때도 모든 계좌가 OFF로 시작"을 OFF 경로로 명시해 일부 반영됨. "재기동 직후 2차 확인으로 보호 모드에 올린다(RealTradingGuard.java:210 `enterProtective`)"는 절차 안내는 7단계 매뉴얼 risk-ops 후속으로 유지(지금은 보유가 생길 수 없어 위험 없음).
+- 표현 하나: "보유가 남은 채 OFF가 되는 길은 PANIC SELL 증권사 단계를 모두 마치는 것"은 PANIC이 끝나면 매도가 체결돼 보유가 남지 않는 것이 정상이라 어색하다. Guard 코드상 `shutdown`이 보유와 상관없이 OFF로 만든다는 뜻으로는 맞고, 사람이 보호 상태를 낙관하게 만드는 방향의 오해는 아니므로 비차단.
+
+### 점검표 A (재확인)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드 변경 없음. 매뉴얼 72-73·77행의 재기동 OFF 안내가 EngineMain.java:94-98과 일치. RealTradingGuardTest#생성_직후_모든_계좌는_OFF다, #재기동하면_열려_있던_계좌도_OFF로_시작한다, #상태를_받아_열린_채로_만드는_생성_경로가_없다 통과 |
+| A2 | 통과 | 코드·ArchUnit 변경 없음, `:autotrade-architecture-test:test` 32건 통과. 활성화 안내는 ADR-006 2차 확인 경로만 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 경로 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·계좌 격리 변경 없음 |
+| A8 | 통과 | 코드 변경 없음. 매뉴얼 5장(java.exe 강제 종료 금지, 정지 요청 파일은 감시만 지움)이 broker-and-fault-design.md 5.2 0번과 일치, 반영 작업 시간 안내도 장중 회피(1차 재검토와 같음) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 코드 변경 없음. 바뀐 문장은 보호 모드에서 손절이 계속되고 OFF 경로가 제한적임을 정확히 안내 |
+| A10 | 통과 | diff 전체에 키·계좌번호·토큰·해시 값 없음 |
+| A11 | 통과 | 테스트 파일 변경 0건, 보호 테스트 그대로 통과 |
+| A12 | 통과 | 장애 대응표 17행·O1~O8·장애 테스트 8종 문서와 코드 변경 없음 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 해당 없음 | 동작 변경 없음. 매뉴얼의 Guard 전이 설명이 ADR-002 2.1·ADR-006 2.5와 일치 |
+
+### 판정
+승인
