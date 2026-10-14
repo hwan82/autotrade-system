@@ -4,6 +4,9 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.app.engine.archfixture.DataBoundConfirmation;
+import com.autotrade.app.engine.archfixture.DynamicCode;
+import com.autotrade.app.engine.archfixture.GuardAsData;
+import com.autotrade.app.engine.archfixture.JacksonObjectAccess;
 import com.autotrade.app.engine.archfixture.PolymorphicJson;
 import com.autotrade.app.engine.archfixture.ReflectionFreeEngineCode;
 import com.autotrade.app.engine.archfixture.ReflectiveRaiser;
@@ -37,6 +40,7 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import qa.probe.OutsideReflective;
 
 /**
  * 실전 경로의 리플렉션 금지(D-085, 독립 QA PR #21 Q-4, risk-ops PR #21 R-8, 기획서 TST-07 (9)).
@@ -130,8 +134,10 @@ class RealPathReflectionTest {
 
     /** 클래스 파일이 실전 경로 프로젝트의 운영 출력에서 나왔는지(패키지 이름과 무관). */
     static DescribedPredicate<JavaClass> fromRealPathModule() {
-        Layout layout = OurModules.layout();
-        Set<String> projects = components().projects();
+        return fromRealPathModule(OurModules.layout(), components().projects());
+    }
+
+    static DescribedPredicate<JavaClass> fromRealPathModule(Layout layout, Set<String> projects) {
         return DescribedPredicate.describe("실전 경로 런타임 프로젝트의 운영 출력", c -> c.getSource()
                 .map(src -> OurModules.containingOutput(OurModules.fileOf(src.getUri()), layout))
                 .flatMap(o -> o)
@@ -152,8 +158,13 @@ class RealPathReflectionTest {
         String type = owner.getName();
         String name = t.getName();
         if (type.startsWith("java.lang.invoke.") || type.equals("java.lang.reflect.Proxy")
-                || owner.isAssignableTo("java.io.ObjectInputStream")) {
+                || owner.isAssignableTo("java.io.ObjectInputStream")
+                // 필드 이름 문자열로 필드를 읽고 쓴다(risk-ops PR #108 R1)
+                || type.matches("java\\.util\\.concurrent\\.atomic\\.Atomic(Integer|Long|Reference)FieldUpdater")) {
             return true;
+        }
+        if (type.startsWith("com.fasterxml.jackson.")) {
+            return JACKSON_OBJECT_ACCESS.matcher(name).matches();
         }
         if (type.equals("java.util.ServiceLoader")) {
             return !ALLOWED_SERVICE_LOADERS.contains(access.getOriginOwner().getName());
@@ -163,20 +174,127 @@ class RealPathReflectionTest {
             case "java.lang.reflect.Constructor" -> name.equals("newInstance");
             case "java.lang.reflect.Field" -> FIELD_ACCESSORS.matcher(name).matches() || name.endsWith("Accessible");
             case "java.lang.Class" -> name.equals("forName") || name.equals("newInstance");
+            // JNI 네이티브 코드 적재(risk-ops PR #108 F2)
+            case "java.lang.System", "java.lang.Runtime" -> name.equals("load") || name.equals("loadLibrary");
+            // 다른 모듈에 깊은 리플렉션을 연다
+            case "java.lang.Module" -> name.startsWith("add");
             default -> owner.isAssignableTo("java.lang.reflect.AccessibleObject") && name.endsWith("Accessible")
                     || owner.isAssignableTo(ClassLoader.class)
                             && (name.equals("<init>") || name.equals("loadClass") || name.equals("defineClass"));
         };
     }
 
+    /**
+     * Jackson이 이미 있는 객체의 필드를 쓰거나(기존 객체 갱신), 가시성·주석 해석·믹스인을 바꿔 private 필드와 다형 타입 주석을
+     * 열거나, 문자열로 클래스를 찾는 API(risk-ops PR #108 F1). 기본 설정의 {@code readValue}·{@code writeValueAsString}은 허용.
+     */
+    static final Pattern JACKSON_OBJECT_ACCESS = Pattern.compile(
+            "readerForUpdating|updateValue|withValueToUpdate"
+            + "|setVisibility|setDefaultVisibility|changeDefaultVisibility|visibility|withVisibility|configOverride"
+            + "|setAnnotationIntrospector|annotationIntrospector|setAnnotationIntrospectors"
+            + "|addMixIn|addMixIns|setMixIns|addMixInAnnotations|setMixInResolver|mixIn|addMixin|setMixInAnnotation"
+            + "|setDeserializerModifier|setSerializerModifier|insertAnnotationIntrospector|appendAnnotationIntrospector"
+            + "|findClass|constructFromCanonical");
+
+    /** 동적 코드 실행·간접 호출·원격 클래스 적재 수단(패키지 의존 자체를 막는다, risk-ops PR #108 F2). */
+    static final String[] DYNAMIC_CODE_PACKAGES = {
+        "java.beans..", "javax.script..", "java.lang.instrument..", "com.sun.tools.attach..",
+        "sun.misc..", "sun.reflect..", "jdk.internal..",
+        "java.lang.management..", "javax.management..", "javax.tools..", "jdk.jshell..", "java.lang.foreign..",
+        "jdk.dynalink..", "javax.naming..", "java.rmi..",
+    };
+
+    /**
+     * 실전 경로가 쓸 수 있는 JDK 패키지(정확히 이 패키지, 하위 패키지는 따로 적는다, architect PR #108 AR-1). 금지 목록만으로는
+     * 반사 호출을 대신해 주는 JDK API(MBean, JNDI 등)를 다 셀 수 없어 허용 목록으로 둔다. 지금 운영 코드가 쓰는 것만 넣었다.
+     * 늘리는 PR은 보호 테스트 변경이다. 허용 패키지 안의 위험 API({@code Class#forName}, {@code System#loadLibrary},
+     * {@code ServiceLoader} 등)는 {@link #reflective}가 따로 막는다.
+     */
+    static final Set<String> ALLOWED_JDK_PACKAGES = Set.of(
+            "java.io", "java.lang", "java.math", "java.net", "java.net.http",
+            "java.nio", "java.nio.channels", "java.nio.charset", "java.nio.file", "java.nio.file.attribute",
+            "java.security", "java.text", "java.time", "java.time.format",
+            "java.util", "java.util.concurrent", "java.util.concurrent.atomic", "java.util.function", "java.util.regex",
+            "java.util.stream", "java.util.zip", "javax.crypto", "javax.crypto.spec");
+
+    /** {@code java.lang.reflect}에서 구조를 읽는 타입만(호출·필드 접근 수단은 아니다). {@code SecretPaths}가 레코드 구조를 읽는다. */
+    static final Set<String> ALLOWED_REFLECT_TYPES = Set.of(
+            "java.lang.reflect.Type", "java.lang.reflect.ParameterizedType", "java.lang.reflect.RecordComponent");
+
+    /**
+     * 실전 경로가 쓸 수 있는 Jackson 타입(architect PR #108 AR-2·AR-3, risk-ops F1). 매퍼·트리·기능 플래그·직렬화기처럼 지금
+     * 운영 코드가 쓰는 것만 넣었다. 리플렉션을 직접 다루는 타입({@code ClassUtil}, {@code AnnotatedField}, {@code SettableBeanProperty},
+     * {@code AnnotationIntrospector}, {@code BeanDeserializerModifier}, {@code JsonTypeInfo} 등)은 목록 밖이라 쓸 수 없다. 목록 안 타입의
+     * 위험 메서드(기존 객체 갱신, 가시성·믹스인 변경)는 {@link #JACKSON_OBJECT_ACCESS}가 막는다.
+     */
+    static final Set<String> JACKSON_ALLOWLIST = Set.of(
+            "com.fasterxml.jackson.annotation.JsonCreator",
+            "com.fasterxml.jackson.annotation.JsonCreator$Mode",
+            "com.fasterxml.jackson.annotation.JsonIgnore",
+            "com.fasterxml.jackson.core.JsonGenerator",
+            "com.fasterxml.jackson.core.JsonParser$Feature",
+            "com.fasterxml.jackson.core.StreamReadFeature",
+            "com.fasterxml.jackson.core.json.JsonReadFeature",
+            "com.fasterxml.jackson.databind.DeserializationFeature",
+            "com.fasterxml.jackson.databind.JsonMappingException",
+            "com.fasterxml.jackson.databind.JsonMappingException$Reference",
+            "com.fasterxml.jackson.databind.JsonNode",
+            "com.fasterxml.jackson.databind.ObjectMapper",
+            "com.fasterxml.jackson.databind.PropertyNamingStrategies",
+            "com.fasterxml.jackson.databind.PropertyNamingStrategies$KebabCaseStrategy",
+            "com.fasterxml.jackson.databind.SerializationFeature",
+            "com.fasterxml.jackson.databind.SerializerProvider",
+            "com.fasterxml.jackson.databind.cfg.CoercionAction",
+            "com.fasterxml.jackson.databind.cfg.CoercionInputShape",
+            "com.fasterxml.jackson.databind.cfg.MutableCoercionConfig",
+            "com.fasterxml.jackson.databind.json.JsonMapper",
+            "com.fasterxml.jackson.databind.json.JsonMapper$Builder",
+            "com.fasterxml.jackson.databind.module.SimpleModule",
+            "com.fasterxml.jackson.databind.node.ArrayNode",
+            "com.fasterxml.jackson.databind.node.JsonNodeFactory",
+            "com.fasterxml.jackson.databind.node.ObjectNode",
+            "com.fasterxml.jackson.databind.ser.std.StdSerializer",
+            "com.fasterxml.jackson.databind.type.LogicalType");
+
+    /** 허용 목록 밖 JDK·외부 타입에 대한 의존(우리 타입과 기본 타입은 제외). */
+    static List<String> outsideAllowlist(JavaClass c) {
+        List<String> out = new ArrayList<>();
+        for (com.tngtech.archunit.core.domain.Dependency d : c.getDirectDependenciesFromSelf()) {
+            JavaClass t = d.getTargetClass().getBaseComponentType();
+            String n = t.getName();
+            if (t.isPrimitive() || n.startsWith("com.autotrade.")) {
+                continue;
+            }
+            boolean allowed = n.startsWith("com.fasterxml.jackson.")
+                    ? JACKSON_ALLOWLIST.contains(n)
+                    : ALLOWED_JDK_PACKAGES.contains(t.getPackageName()) || ALLOWED_REFLECT_TYPES.contains(n);
+            if (!allowed) {
+                out.add("허용 목록 밖 타입 " + n + ": " + d.getDescription());
+            }
+        }
+        return out;
+    }
+
     static ArchRule noReflectionIn(DescribedPredicate<JavaClass> scope) {
         return noClasses()
                 .that(scope)
                 .should().accessTargetWhere(DescribedPredicate.describe(
-                        "리플렉션·MethodHandle·동적 프록시·직렬화·허용 목록 밖 ServiceLoader", RealPathReflectionTest::reflective))
-                .orShould().dependOnClassesThat().resideInAnyPackage(
-                        "java.beans..", "javax.script..", "java.lang.instrument..", "com.sun.tools.attach..",
-                        "sun.misc..", "sun.reflect..", "jdk.internal..")
+                        "리플렉션·MethodHandle·동적 프록시·직렬화·네이티브 적재·Jackson 객체 접근 설정·허용 목록 밖 ServiceLoader", RealPathReflectionTest::reflective))
+                .orShould().dependOnClassesThat().resideInAnyPackage(DYNAMIC_CODE_PACKAGES)
+                .orShould(new ArchCondition<JavaClass>("허용 목록 밖 JDK·외부 타입에 의존한다") {
+                    @Override
+                    public void check(JavaClass c, ConditionEvents events) {
+                        outsideAllowlist(c).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
+                    }
+                })
+                .orShould(new ArchCondition<JavaClass>("native 메서드를 선언한다") {
+                    @Override
+                    public void check(JavaClass c, ConditionEvents events) {
+                        c.getMethods().stream()
+                                .filter(m -> m.getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.NATIVE))
+                                .forEach(m -> events.add(SimpleConditionEvent.satisfied(c, m.getFullName() + "는 native 메서드")));
+                    }
+                })
                 .orShould(new ArchCondition<JavaClass>("Jackson이 JSON 내용으로 만들 클래스를 고르게 한다") {
                     @Override
                     public void check(JavaClass c, ConditionEvents events) {
@@ -184,6 +302,7 @@ class RealPathReflectionTest {
                         polymorphicJackson(c).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
                     }
                 })
+                .allowEmptyShould(true)
                 .because("실전 경로는 바이트코드에 드러나는 호출로만 Guard·출구에 닿아야 ArchUnit 규칙이 지켜진다(D-085, QA PR #21 Q-4)");
     }
 
@@ -237,6 +356,62 @@ class RealPathReflectionTest {
             .should().dependOnClassesThat().areAssignableTo(SecondConfirmation.class)
             .because("2차 확인은 비밀번호 검증기만 만들고 데이터 바인딩으로 만들어지면 안 된다(D-085, RSK-01)");
 
+    static final String GUARD_PACKAGE = "com.autotrade.risk.guard";
+
+    /**
+     * Guard 패키지 타입을 데이터 바인딩 대상으로 넘기는 표지: 클래스 객체({@code RealTradingGuard.class}), 제네릭 상위 타입 인자
+     * ({@code new TypeReference<GuardState>() {}}), 주석 값의 클래스({@code @JsonDeserialize(as = ...)}). 이것이 없으면 Jackson
+     * 같은 라이브러리가 Guard 타입 객체를 새로 만들 수 없다(문자열로 클래스를 찾는 API는 실전 경로에서 금지, risk-ops PR #108 F1).
+     */
+    static List<String> guardTypeAsData(JavaClass c) {
+        List<String> out = new ArrayList<>();
+        c.getReferencedClassObjects().stream()
+                .filter(r -> r.getRawType().getPackageName().startsWith(GUARD_PACKAGE))
+                .forEach(r -> out.add(r.getOwner().getFullName() + "가 클래스 객체 " + r.getRawType().getName() + "를 참조 (" + r.getSourceCodeLocation() + ")"));
+        List<com.tngtech.archunit.core.domain.JavaType> supertypes = new ArrayList<>(c.getInterfaces());
+        c.getSuperclass().ifPresent(supertypes::add);
+        // 상위 타입 자체(GuardAuditLog 구현 등)는 허용하고 타입 인자만 본다
+        supertypes.stream()
+                .filter(t -> t instanceof com.tngtech.archunit.core.domain.JavaParameterizedType)
+                .flatMap(t -> ((com.tngtech.archunit.core.domain.JavaParameterizedType) t).getActualTypeArguments().stream())
+                .flatMap(t -> t.getAllInvolvedRawTypes().stream())
+                .filter(t -> t.getPackageName().startsWith(GUARD_PACKAGE))
+                .forEach(t -> out.add(c.getName() + "의 상위 타입 인자 " + t.getName()));
+        List<JavaAnnotation<?>> annotations = new ArrayList<>(c.getAnnotations());
+        c.getFields().forEach(f -> annotations.addAll(f.getAnnotations()));
+        c.getCodeUnits().forEach(u -> {
+            annotations.addAll(u.getAnnotations());
+            u.getParameters().forEach(p -> annotations.addAll(p.getAnnotations()));
+        });
+        for (JavaAnnotation<?> a : annotations) {
+            a.getProperties().values().stream().flatMap(RealPathReflectionTest::classValues)
+                    .filter(k -> k.getPackageName().startsWith(GUARD_PACKAGE))
+                    .forEach(k -> out.add(c.getName() + "의 @" + a.getRawType().getSimpleName() + " 값 " + k.getName()));
+        }
+        return out;
+    }
+
+    private static Stream<JavaClass> classValues(Object value) {
+        return switch (value) {
+            case JavaClass k -> Stream.of(k);
+            case Object[] array -> Stream.of(array).flatMap(RealPathReflectionTest::classValues);
+            case JavaAnnotation<?> nested -> nested.getProperties().values().stream().flatMap(RealPathReflectionTest::classValues);
+            default -> Stream.empty();
+        };
+    }
+
+    /** Guard 패키지 밖은 Guard 타입을 데이터 바인딩 대상으로 넘기지 않는다(운영 코드 전체, risk-ops PR #108 F1). */
+    static final ArchRule GUARD_TYPES_ARE_NOT_DATA = noClasses()
+            .that().resideOutsideOfPackage(GUARD_PACKAGE + "..")
+            .should(new ArchCondition<JavaClass>("Guard 타입을 클래스 객체·제네릭 상위 타입 인자·주석 값으로 넘긴다") {
+                @Override
+                public void check(JavaClass c, ConditionEvents events) {
+                    guardTypeAsData(c).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
+                }
+            })
+            .allowEmptyShould(true)
+            .because("Guard 상태는 Guard 코드만 만들고 바꾼다. 데이터 바인딩이 Guard 객체를 만들면 전이 검사를 건너뛴다(D-085)");
+
     @Test
     void 실전_경로_런타임_구성은_고정_목록과_같다() {
         Components c = components();
@@ -285,6 +460,7 @@ class RealPathReflectionTest {
     @Test
     void 이차_확인은_검증기_밖에서_데이터로_다루지_않는다() {
         SECOND_CONFIRMATION_IS_NOT_DATA.check(ArchitectureTest.PRODUCTION);
+        GUARD_TYPES_ARE_NOT_DATA.check(ArchitectureTest.PRODUCTION);
     }
 
     @Test
@@ -301,12 +477,22 @@ class RealPathReflectionTest {
         assertThat(raiser.getFailureReport().getDetails()).anyMatch(d -> d.contains("references method")
                 && d.contains("Method.invoke"));
         // 람다·레코드·enum·클래스 이름 읽기, @JsonTypeInfo(use = NAME)은 허용
-        assertThat(details).doesNotContain("ReflectionFreeEngineCode", "ByName");
+        assertThat(details).doesNotContain("ReflectionFreeEngineCode");
 
         EvaluationResult json = rule.evaluate(new ClassFileImporter().importClasses(
                 PolymorphicJson.class, PolymorphicJson.ByClass.class, PolymorphicJson.HoldsMinimalClass.class,
-                PolymorphicJson.ByName.class, PolymorphicJson.ByName.Only.class));
-        assertThat(json.getFailureReport().getDetails()).hasSize(4);
+                PolymorphicJson.ByName.class, PolymorphicJson.ByName.Only.class, PolymorphicJson.ClassIdIntrospector.class));
+        // 기본 타입 지정 2건, Id.CLASS·Id.MINIMAL_CLASS 주석 2건. Id.NAME 주석은 다형 검사에는 걸리지 않고(허용 목록 밖 타입이라
+        // JsonTypeInfo 의존으로는 걸린다), Id 상수 읽기(AR-3)도 허용 목록 밖 의존으로 걸린다
+        String jsonDetails = String.join("\n", json.getFailureReport().getDetails());
+        assertThat(json.getFailureReport().getDetails().stream().filter(d -> d.contains("DefaultTyping")
+                && d.startsWith("Method <"))).hasSize(2);
+        assertThat(json.getFailureReport().getDetails().stream().filter(d -> d.contains("@JsonTypeInfo(use ="))).hasSize(2);
+        assertThat(jsonDetails).doesNotContain("@JsonTypeInfo(use = NAME)")
+                .contains("허용 목록 밖 타입 com.fasterxml.jackson.annotation.JsonTypeInfo",
+                        "허용 목록 밖 타입 com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator",
+                        "허용 목록 밖 타입 com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector",
+                        "허용 목록 밖 타입 com.fasterxml.jackson.annotation.JsonTypeInfo$Id");
 
         // 2차 확인을 데이터로: DTO 필드, 클래스 객체, 제네릭 타입 참조
         EvaluationResult data = SECOND_CONFIRMATION_IS_NOT_DATA.evaluate(
@@ -316,5 +502,48 @@ class RealPathReflectionTest {
         // 실제 검증기·명령 처리기·Guard는 통과한다
         assertThat(SECOND_CONFIRMATION_IS_NOT_DATA.evaluate(new ClassFileImporter().importClasses(
                 OperatorAuthenticator.class, EngineCommandHandler.class, RealTradingGuard.class)).hasViolation()).isFalse();
+
+        // Jackson으로 객체 필드 쓰기·가시성·믹스인·문자열 클래스 찾기(F1): 5건
+        EvaluationResult jackson = rule.evaluate(new ClassFileImporter().importClasses(JacksonObjectAccess.class));
+        assertThat(String.join("\n", jackson.getFailureReport().getDetails()))
+                .contains("readerForUpdating", "updateValue", "setVisibility", "addMixIn", "findClass");
+        // Guard 타입을 데이터 바인딩 대상으로(F1): 클래스 객체, TypeReference 상위 타입 인자, 주석 값
+        EvaluationResult guardData = GUARD_TYPES_ARE_NOT_DATA.evaluate(
+                new ClassFileImporter().importPackagesOf(GuardAsData.class));
+        assertThat(String.join("\n", guardData.getFailureReport().getDetails()))
+                .contains("viaClassLiteral", "GuardAsData$1의 상위 타입 인자 com.autotrade.risk.guard.GuardState",
+                        "@JsonDeserialize 값 com.autotrade.risk.guard.RealTradingGuard");
+        // Guard 패키지 안의 클래스 객체(로거 이름, EnumSet)는 허용
+        assertThat(GUARD_TYPES_ARE_NOT_DATA.evaluate(new ClassFileImporter().importClasses(RealTradingGuard.class))
+                .hasViolation()).isFalse();
+
+        // 동적 코드·간접 호출 수단(F2·R1)
+        EvaluationResult dynamic = rule.evaluate(new ClassFileImporter().importClasses(DynamicCode.class));
+        assertThat(String.join("\n", dynamic.getFailureReport().getDetails())).contains(
+                "System.loadLibrary", "Runtime.load", "raise()는 native", "ManagementFactory", "ToolProvider",
+                "InitialContext", "AtomicReferenceFieldUpdater.newUpdater", "Module.addOpens");
+    }
+
+    @Test
+    void 합친_범위는_실전_경로_모듈의_com_autotrade_밖_패키지도_잡는다() {
+        // 이 모듈의 테스트 출력을 실전 엔진의 운영 출력으로 둔 배치표: qa.probe 예제가 "실전 엔진 모듈 안 밖 패키지"가 된다(R2)
+        Layout real = OurModules.layout();
+        List<Output> outputs = real.outputs().stream()
+                .filter(o -> o.project().equals(OurModules.SELF) && o.kind() == Kind.TEST)
+                .map(o -> new Output(":autotrade-app-engine", Kind.MAIN, o.file()))
+                .toList();
+        assertThat(outputs).isNotEmpty();
+        Layout fake = new Layout(real.dirs(), outputs);
+        JavaClasses probe = new ClassFileImporter().importClasses(OutsideReflective.class);
+
+        ArchRule combined = noReflectionIn(DescribedPredicate.or(
+                fromRealPathModule(fake, Set.of(":autotrade-app-engine")), IN_REAL_PATH_PACKAGE));
+        assertThat(String.join("\n", combined.evaluate(probe).getFailureReport().getDetails()))
+                .contains("OutsideReflective.open", "calls method <java.lang.reflect.Method.invoke");
+        // 패키지 판정만으로는 놓친다: 모듈 판정이 이 경우를 맡는다
+        assertThat(noReflectionIn(IN_REAL_PATH_PACKAGE).evaluate(probe).hasViolation()).isFalse();
+        // 실전 경로가 아닌 프로젝트로 두면 걸리지 않는다(판정이 모두 받아들이는 오류 방지)
+        assertThat(noReflectionIn(fromRealPathModule(fake, Set.of(":autotrade-app-lab"))).evaluate(probe).hasViolation())
+                .isFalse();
     }
 }
