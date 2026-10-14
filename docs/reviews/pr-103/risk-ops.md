@@ -44,3 +44,45 @@
 
 ## 판정
 수정 필요(1: README.md:75 "내리기(Guard OFF)"를 보호 모드 전이로 정정, 2: README.md:64 게이트웨이·실전 엔진 Ctrl+C 종료 코드 0을 실제 값(130)으로 정정)
+
+## 재검토 2026-10-14
+- 대상: PR #103 / 커밋 3bf034cdacffa96838da6a807fb3daf654c62e1f / main 대비 diff (`README.md`, `docs/runbooks/README.md`, `docs/reviews/pr-103/architect.md`, `docs/reviews/pr-103/risk-ops.md`. 코드·설정·스키마·테스트 변경 0건)
+- 점검표: A
+- 직접 실행한 것: `./gradlew build --continue`(HEAD 3bf034c) **BUILD SUCCESSFUL**. 테스트 결과 XML 집계: `:autotrade-risk:test` 55건, `:autotrade-architecture-test:test` 32건, `:autotrade-app-engine:test` 50건, 모두 실패 0·오류 0·건너뜀 0. 수정 커밋 `git show 3bf034c`의 바뀐 문장을 코드·문서와 다시 대조
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| 1 "내리기(Guard OFF)" | 해결 | docs/runbooks/README.md:77이 "내리기는 Guard를 OFF로 만들지 않는다: OPEN은 보호 모드(PROTECTIVE), ACTIVATING은 원래 상태, Guard OFF는 PANIC SELL 증권사 단계가 모두 끝났을 때만"으로 바뀜. EngineCommandHandler.java:30, ADR-006:59·99, RealTradingGuard.java:31과 일치 |
+| 2 Ctrl+C 종료 코드 0 | 해결 | docs/runbooks/README.md:64의 0 칸이 `-`로 바뀌고 66행에 "Ctrl+C로 끄면 0이 아니다(Linux JDK 21 실측 130, Windows는 확인 전 `[추론]`). 정상 종료는 게이트웨이는 녹화 meta의 정상 종료 표시(또는 replayCheck가 3이 아닌지), 실전 엔진은 로그로 본다"를 추가. 정상 종료 표시는 RecordingMeta.java:22·37 `complete`, replayCheck 3 = 녹화 불완전(같은 문서 61행)과 일치. 미확인 값을 `[추론]`으로 표시함 |
+
+### 수정 커밋의 다른 변경 대조(실전 경로 관점)
+- `-PallowDuringSession`을 다섯 명령 모두에, "실전 엔진과 게이트웨이를 모두 끈 날에만"으로 안내(README.md:36): autotrade-app-experiment/build.gradle.kts:61·87·107·131·156 다섯 태스크 모두 전달. 안내가 코드 주석(39행, 실전 엔진을 끈 날)보다 엄격해 안전 방향.
+- `replayCheck`·`build`·`installDist`를 서울 16:00~18:30(수능일 등 17:00~)에 하고 "장 시간 보호를 스스로 확인하지 않는다"고 명시(README.md:17, 46): collector.md 3.6의 6번(반영 작업 시간, 보호 미확인, PR #62 QA Q3)과 일치. 장중 실전 PC 자원을 쓰지 않게 하는 방향이라 A8에 유리.
+- `symbolMaster` 종료 코드 2 추가(README.md:63): SymbolMasterUpdate.java:63·93 `return 2`와 일치. 실전 경로와 무관.
+
+### 점검표 A (재확인)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드 변경 없음. README.md:72-73 재기동 시 모두 OFF 안내가 EngineMain.java:94-98과 일치. RealTradingGuardTest#생성_직후_모든_계좌는_OFF다, #재기동하면_열려_있던_계좌도_OFF로_시작한다 통과 |
+| A2 | 통과 | 코드·ArchUnit 변경 없음, `:autotrade-architecture-test:test` 32건 통과. 활성화는 ADR-006 2차 확인 경로로만 안내 |
+| A3 | 해당 없음 | 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 경로 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·계좌 격리 변경 없음 |
+| A8 | 통과 | 코드 변경 없음. java.exe 강제 종료 금지·정지 요청 파일은 감시만 지움(README.md 5장)이 broker-and-fault-design.md 5.2 0번과 일치. 반영 작업·실험 명령 시간 안내가 장중을 피하도록 바뀜(위 대조) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 코드 변경 없음. 내리기 설명이 "보유 손절·서버 측 손절은 계속"으로 바뀌어 보유 보호를 사람이 오해할 여지가 줄었음 |
+| A10 | 통과 | diff 전체에 키·계좌번호·토큰·해시 값 없음, 자리표시자만 |
+| A11 | 통과 | 테스트 파일 변경 0건, 보호 테스트 그대로 통과 |
+| A12 | 통과 | 장애 대응표 17행·O1~O8·장애 테스트 8종 문서와 코드 변경 없음. 활성화 전제로 장애 테스트 8종 합격 명시 유지 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 해당 없음 | 동작 변경 없음. 앞 검토의 ADR-006 불일치 문구는 해결됨 |
+
+### 점검표 밖 (비차단)
+- README.md:77 괄호 "(미체결 취소·매도·체결 확인)"에 ADR-006 2.5의 3단계(서버 측 손절 취소)가 빠져 있다. "모두 끝났을 때만"이라는 조건은 맞아 안전 판단을 흐리지 않으므로 차단하지 않지만, 다음 수정 때 "(미체결 취소·서버 측 손절 취소·매도·체결 확인)"으로 맞추기를 권고한다.
+- 앞 검토 권고 3(보유가 있는 날 재기동하면 엔진 손절 감시가 멈추고 사람이 보호 모드로 올려야 함, RealTradingGuard.java:204-206, Q-016)은 7단계 매뉴얼에서 다룰 risk-ops 후속으로 유지한다. 지금은 보유가 생길 수 없어 위험 없음.
+- Windows에서 Ctrl+C 종료 코드 실측은 여전히 못 했고 문서에 `[추론]`으로 표시되어 있다. 정상 판단을 종료 코드에 기대지 않도록 바뀌었으므로 판정에 영향 없음.
+
+### 판정
+승인
