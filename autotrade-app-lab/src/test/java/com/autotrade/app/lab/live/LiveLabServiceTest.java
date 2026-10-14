@@ -160,6 +160,11 @@ class LiveLabServiceTest {
                     dir -> Long.MAX_VALUE, bad)).isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("min-free-gb");
         }
+        // 경계값은 받아들인다(QA PR #91 R2)
+        for (long ok : new long[] {1, LiveLabService.MAX_MIN_FREE_GB}) {
+            new LiveLabService(experiments, REPO, config.resolve("live-sessions"), FeedSocket.path(config), stopRequest,
+                    new CodeVersion("abc", false), Clock.systemUTC(), dir -> Long.MAX_VALUE, ok).close();
+        }
     }
 
     @Test
