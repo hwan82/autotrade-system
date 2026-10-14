@@ -82,7 +82,7 @@
 | Gradle 모듈 의존 | 허용되지 않은 모듈 참조(컴파일 오류) | 각 `build.gradle.kts` |
 | `verifyPureDependencies` | 순수 모듈 런타임 클래스패스의 Spring·JDBC 드라이버·HikariCP·Flyway·Hibernate·JPA·H2 | `build-logic/.../autotrade.pure-java-conventions.gradle.kts`, `check`에 연결 |
 | `verifyProcessIsolation` | 프로세스 런타임 클래스패스의 금지 모듈과 Spring (2.1절 표) | `build-logic/.../autotrade.process-conventions.gradle.kts`, `check`에 연결 |
-| ArchUnit (`ArchitectureTest`의 규칙 전체) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 실전 주문 출구·Guard 올림·2차 확인 생성·명령 채널 서버/클라이언트 위치(ADR-002·006), `RiskPolicy` 구현 클래스는 리스크 모듈 산출물에만(패키지와 클래스 파일 위치, D-032), 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
+| ArchUnit (`ArchitectureTest`의 규칙 전체) | 순수 패키지의 프레임워크 참조, 실험실 외 프로세스의 Spring, domain의 바깥 참조, sim→broker, 재사용 jar의 도메인 참조, `now()`·`currentTimeMillis()` 등 시스템 시계, 시드 없는 난수, 게이트웨이의 주문 포트 참조, 프로세스 진입점끼리 참조, 금액에 `double`·`float`, 실전 주문 출구·Guard 올림·2차 확인 생성·명령 채널 서버/클라이언트 위치(ADR-002·006), `RiskPolicy` 구현 클래스는 리스크 모듈 산출물에만(패키지와 클래스 파일 위치, D-032), 엔진 패키지(risk, app.engine, sim exchange·account·run)의 시장 분기(`Market` 상수·`Symbol.krx`/`us`, OVS-02, D-084), 그리고 규칙 자체가 위반을 잡는지 | `autotrade-architecture-test/.../ArchitectureTest.java` |
 | `-Xlint:all -Werror` | 경고 방치 | `autotrade.java-conventions` |
 | CI `guards` 잡 | 저장소 전 이력의 비밀값(gitleaks), Python 수집기의 실시간·SDK·주문·키 코드 | `.github/workflows/ci.yml`, `scripts/ci/check-python-collectors.sh` |
 
@@ -108,7 +108,7 @@ ArchUnit을 별도 모듈로 둔 이유: 이전 초안은 app 테스트 클래�
 | `RiskPolicy` | 순수 함수, I/O·현재 시각·난수 금지. 운영 구현 클래스는 리스크 모듈(autotrade-risk)의 `com.autotrade.risk..`에만(ArchUnit, 람다 제외) | 거절은 값(`RiskDecision.Rejected`) | 필수 |
 | `RiskChain` | 가상·실전 공통 체인(D-032). `builder(BlacklistSnapshot)`만 있어 블랙리스트 없는 체인은 없음. 순서 고정: 블랙리스트·수동 보유(모든 의도, 거절 ID `BLACKLIST`·`MANUAL_HOLDING`, 청산·손절도 차단, D-035) → 청산·손절 승인 → 진입 규칙(첫 거절에서 멈춤). 진입 규칙 예외·null, 주문·스냅샷 계좌 불일치는 `RISK_RULE_ERROR` 거절 | 없음(거절은 값) | 불변, 필수 |
 | `ExperimentRunner` | 결정론(스레드 수와 무관), 미래 정보 금지, Run 간 상태 공유 금지, Run 시드는 실험 시드와 프로필 해시로 파생, 실전과 같은 리스크·상태머신·블랙리스트 코드 | 한 Run 실패는 그 Run만 FAILED(사유 기록) | 동기 실행 |
-| `MarketRules` | 불변, 시간은 거래소 현지 시간대, 통화는 시장 통화, 호가 단위 반올림 방향을 호출자가 지정, 수치는 공식 출처 주석 | 0 이하 가격 거부 | 필수 |
+| `MarketRules` | 불변, 시간은 거래소 현지 시간대, 통화는 시장 통화, 호가 단위 반올림 방향을 호출자가 지정, 하루 가격 제한폭 `dailyPriceLimit`(없거나 모르면 비어 있음, D-084), 수치는 공식 출처 주석 | 0 이하 가격 거부 | 필수 |
 | `Clock` | 비즈니스 로직은 주입된 `java.time.Clock`만 사용. 리플레이는 `ReplayClock`(앞으로만 이동, `advanceToAtLeast`) | 과거로 이동 시 예외 | 필수 |
 
 ### 2.4 시간: `java.time.Clock` 주입

@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 
 /**
@@ -42,6 +43,8 @@ public final class KrxMarketRules implements MarketRules {
     };
     private static final BigDecimal STOCK_TOP_TICK = new BigDecimal("1000");
     private static final BigDecimal FUND_TICK = new BigDecimal("5");
+    /** 주식 가격제한폭 ±30%(2015-06-15 시행). */
+    private static final BigDecimal STOCK_PRICE_LIMIT = new BigDecimal("0.30");
     /** 시가 단일가 접수 시간(개장 전). */
     static final Duration OPENING_AUCTION = Duration.ofMinutes(30);
     /** 종가 단일가 접수 시간(폐장 전). */
@@ -119,6 +122,18 @@ public final class KrxMarketRules implements MarketRules {
             }
         }
         return STOCK_TOP_TICK;
+    }
+
+    /**
+     * 주식은 ±30% `[사실]`(2015-06-15 시행, 한국거래소 유가증권시장·코스닥시장 업무규정의 가격제한폭). ETF·ETN은 비어 있다:
+     * 레버리지·인버스 상품은 제한폭에 배율을 곱하는데(`[추론]`, 업무규정 원문 대조 남음) 배율을 이 클래스가 모른다.
+     */
+    @Override
+    public Optional<BigDecimal> dailyPriceLimit(Symbol symbol) {
+        if (symbol.market() != Market.KRX) {
+            throw new IllegalArgumentException("KRX 종목이 아닙니다: " + symbol);
+        }
+        return kinds.apply(symbol) == InstrumentKind.STOCK ? Optional.of(STOCK_PRICE_LIMIT) : Optional.empty();
     }
 
     public ExchangeCalendar calendar() {

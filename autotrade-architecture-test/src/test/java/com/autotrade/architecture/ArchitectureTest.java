@@ -26,10 +26,13 @@ import com.autotrade.broker.fixturea.PluginA;
 import com.autotrade.broker.fixtureb.PluginB;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlServer;
+import com.autotrade.domain.market.Market;
+import com.autotrade.domain.market.Symbol;
 import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskPolicy;
 import com.autotrade.risk.archfixture.SplitPackageApproveAll;
 import com.autotrade.sim.combo.CombinationExperiment;
+import com.autotrade.sim.exchange.archfixture.BranchesOnMarket;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.study.StrategyStudy;
@@ -291,6 +294,33 @@ class ArchitectureTest {
                             && (a.getTargetOwner().isAssignableTo(Process.class) || a.getTargetOwner().isAssignableTo(ProcessHandle.class))))
             .because("감시는 정지 요청 파일로만 멈추게 한다(D-058)");
 
+    /**
+     * 엔진 코드(리스크 검증, 실전 엔진, 가상 거래소·계좌·Run 실행)는 시장을 분기하지 않는다(OVS-02, 프로젝트 지침 4장 9항).
+     * 시장 차이는 {@code MarketRules}로만 묻는다. {@link Market} 상수 읽기(enum switch가 만드는 보조 클래스 포함)와 시장을
+     * 박은 종목 팩토리({@code Symbol.krx}·{@code Symbol.us})를 막는다. 시장 구현 선택은 marketdata의 규칙·캘린더와 프로세스
+     * 진입점·조립 코드에 둔다(1단계 QA 판정 권고 R2).
+     */
+    static final String[] ENGINE = {
+        "com.autotrade.risk..", "com.autotrade.app.engine..",
+        "com.autotrade.sim.exchange..", "com.autotrade.sim.account..", "com.autotrade.sim.run..",
+    };
+
+    static final ArchRule ENGINE_HAS_NO_MARKET_BRANCH = noClasses()
+            .that().resideInAnyPackage(ENGINE)
+            .should().accessTargetWhere(DescribedPredicate.describe("Market 상수나 시장 고정 Symbol 팩토리",
+                    a -> marketSpecific(a.getTarget())))
+            .because("시장별 차이는 MarketRules로만 다룬다(OVS-02)");
+
+    private static boolean marketSpecific(AccessTarget t) {
+        if (t instanceof AccessTarget.FieldAccessTarget f) {
+            return f.getOwner().isEquivalentTo(Market.class)
+                    && f.resolveMember().map(m -> m.getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.ENUM))
+                            .orElse(false);
+        }
+        return t instanceof AccessTarget.MethodCallTarget m && m.getOwner().isEquivalentTo(Symbol.class)
+                && (m.getName().equals("krx") || m.getName().equals("us"));
+    }
+
     /** 프로세스 진입점끼리 서로 참조하지 않는다(D-013). */
     static final ArchRule PROCESSES_ARE_INDEPENDENT = slices()
             .matching("com.autotrade.app.(*)..")
@@ -403,6 +433,17 @@ class ArchitectureTest {
                 new ClassFileImporter().importClasses(KillsBatchProcess.class));
         assertThat(r.hasViolation()).isTrue();
         assertThat(String.join("\n", r.getFailureReport().getDetails())).contains("destroyForcibly", "Process.destroy()");
+    }
+
+    @Test
+    void 엔진_코드는_시장을_분기하지_않는다() {
+        ENGINE_HAS_NO_MARKET_BRANCH.check(PRODUCTION);
+        // 위반 고정 예제: enum switch(보조 클래스의 상수 읽기), == 비교, Symbol.krx. MarketRules 호출은 허용
+        EvaluationResult r = ENGINE_HAS_NO_MARKET_BRANCH.evaluate(
+                new ClassFileImporter().importPackagesOf(BranchesOnMarket.class));
+        assertThat(r.hasViolation()).isTrue();
+        String details = String.join("\n", r.getFailureReport().getDetails());
+        assertThat(details).contains("BranchesOnMarket$1", "isKrx", "Symbol.krx").doesNotContain("tick(");
     }
 
     @Test

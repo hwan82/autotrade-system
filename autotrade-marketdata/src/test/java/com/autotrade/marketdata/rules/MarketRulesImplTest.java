@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -97,5 +98,22 @@ class MarketRulesImplTest {
         assertThat(us.tradingDate(Instant.parse("2026-10-09T02:00:00Z"))).isEqualTo(LocalDate.of(2026, 10, 8));
         assertThat(krx.isRegularSession(Instant.parse("2026-10-08T01:00:00Z"))).isTrue();
         assertThat(us.isRegularSession(Instant.parse("2026-10-08T01:00:00Z"))).isFalse();
+    }
+
+    @Test
+    void 하루_가격_제한폭은_KRX_주식만_있다() {
+        assertThat(krx.dailyPriceLimit(Symbol.krx("005930"))).contains(new BigDecimal("0.30"));
+        // ETF·ETN은 레버리지 배율을 몰라 비어 있고, 미국은 시장 단위 제한폭이 없다(D-084)
+        assertThat(krx.dailyPriceLimit(ETF)).isEqualTo(Optional.empty());
+        assertThat(us.dailyPriceLimit(Symbol.us("AAPL"))).isEqualTo(Optional.empty());
+        assertThatThrownBy(() -> krx.dailyPriceLimit(Symbol.us("AAPL"))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 번들_규칙은_시장마다_그_시장_구현이다() {
+        for (Market m : Market.values()) {
+            assertThat(BundledMarketRules.of(m).market()).isEqualTo(m);
+        }
+        assertThat(BundledMarketRules.of(Market.KRX).dailyPriceLimit(ETF)).contains(new BigDecimal("0.30"));
     }
 }

@@ -103,6 +103,8 @@
 | KRX ETF·ETN | 5원 | 같은 규정 |
 | 미국 | 1달러 이상 0.01, 미만 0.0001 | SEC Rule 612 |
 
+하루 가격 제한폭(`MarketRules.dailyPriceLimit`, D-084): KRX 주식 ±30%(2015-06-15 시행 업무규정). KRX ETF·ETN은 레버리지 배율을 곱하므로 배율을 모르는 지금은 비어 있음, 미국은 시장 단위 제한폭이 없어(LULD는 종목·시간 밴드) 비어 있음. 지금 쓰는 곳은 일봉 품질 검사의 급변 의심 임계(제한폭 + 5%p, 없으면 50%)뿐이다. 시장 enum에서 규칙 구현을 고르는 곳은 `BundledMarketRules.of`(종목 마스터 없이 KRX 종목을 주식으로 봄)와 `ExchangeCalendar.bundled`다.
+
 ### 2.6 일봉 스냅샷과 품질 검사 (MD-07·09)
 
 - D-019대로 과거 일봉은 수집기가 **버전 스냅샷 파일**로 넘긴다. 2단계는 Java 쪽 읽기와 검사만 만든다. 수집기는 D-051(Java 단발 명령 `autotrade-app-collector`)과 [ADR-008](ADR-008-collector.md)로 구현했고, 상장주식수 선택 파일과 manifest `coverage` 칸을 더했다(ADR-008 2.3·2.4).
