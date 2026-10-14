@@ -106,7 +106,7 @@ public final class RecordingExperiment {
             log.accept("녹화일 " + d.date() + ": 줄 " + d.recordedEvents() + ", 정상 종료 " + d.complete() + ", 잘림 "
                     + d.truncated() + ", 구간 " + d.segments() + ", 끼운 공백 " + d.insertedGaps());
         }
-        // 녹화에는 상품 유형이 없다. 주식 호가 단위로 보고, 그 단위에 맞지 않는 가격이 있으면 거절한다(D-074)
+        // 녹화에는 상품 유형이 없다. 주식 호가 단위로 보고, 그 단위에 맞지 않는 가격이 있으면 거절한다(D-075)
         KrxMarketRules rules = new KrxMarketRules(calendar, s -> InstrumentKind.STOCK);
         TreeSet<Symbol> symbols = new TreeSet<>();
         for (MarketEvent e : data.events()) {
@@ -167,7 +167,7 @@ public final class RecordingExperiment {
     }
 
     /**
-     * 녹화 가격이 주식 호가 단위에 맞는지 본다(D-074, architect PR #74 R2). ETF·ETN(5원 단위)은 주식 단위에 맞지 않는 가격이
+     * 녹화 가격이 주식 호가 단위에 맞는지 본다(D-075, architect PR #74 R2). ETF·ETN(5원 단위)은 주식 단위에 맞지 않는 가격이
      * 나와 여기서 걸린다. 비용 표에 ETF·ETN 과세 구분이 없어(증권거래세 비과세 `[추론]`, docs/research/q-004-trading-costs.md)
      * 녹화 실험은 아직 주식만 받는다.
      *
