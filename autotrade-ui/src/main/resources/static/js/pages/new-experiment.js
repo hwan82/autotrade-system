@@ -32,7 +32,7 @@ export async function newExperimentPage() {
   const ymd = today();
 
   const field = (id, attrs = {}) => h('input', { id, autocomplete: 'off', ...attrs });
-  const idInput = field('xid', { value: `EXP-${ymd}-CMB01`, pattern: '[A-Za-z0-9][A-Za-z0-9._-]{0,127}', required: true });
+  const idInput = field('xid', { value: `EXP-${ymd}-CMB01`, pattern: '[A-Z0-9][A-Z0-9-]{0,47}', required: true });
   const question = h('textarea', { id: 'xq', rows: 2, maxlength: 500,
     placeholder: '예: (나) 선정이 같은 스윙 지표의 선정 없음보다 비용 차감 후 나은가(한 문장)' });
   const market = h('select', { id: 'xmarket' }, Object.entries(MARKET).map(([k, v]) =>
@@ -172,7 +172,7 @@ export async function newExperimentPage() {
     h('p', { class: 'muted' }, '같은 기간·시드·비용 모델로 돌릴 조합(선정 × 매매지표)을 고릅니다. 실험실은 실험을 돌리지 않고 등록 파일만 씁니다. '
       + '등록 파일을 커밋하고 실행 명령으로 돌린 뒤 실험 폴더에서 불러와 비교합니다.'),
     h('div', { class: 'form-grid' },
-      h('label', { for: 'xid' }, '실험 ID'), h('div', {}, idInput, h('p', { class: 'hint' }, '폴더 이름이 됩니다. 이미 있는 ID는 쓸 수 없습니다.')),
+      h('label', { for: 'xid' }, '실험 ID'), h('div', {}, idInput, h('p', { class: 'hint' }, '폴더 이름이 됩니다. 영문 대문자·숫자·하이픈 48자 이내이고, 이미 있는 ID는 쓸 수 없습니다.')),
       h('label', { for: 'xq' }, '질문'), question,
       h('label', { for: 'xmarket' }, '시장'), market,
       h('label', { for: 'xstyle' }, '매매 스타일'), h('div', {}, style, h('p', { class: 'hint' }, '이 스타일의 선정·전략 프로필만 조합으로 보입니다.')),

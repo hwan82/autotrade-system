@@ -212,6 +212,10 @@ class ExperimentCreationEndToEndTest {
         // 경로를 벗어나는 ID
         postJson("/api/experiment-folders", request("../escape", "SWING", List.of("none x kr-ma-trend@1")), true)
                 .andExpect(status().isBadRequest());
+        // ExperimentId 모양이 아닌 ID(소문자)
+        postJson("/api/experiment-folders/preview", request("exp-lower", "SWING", List.of("none x kr-ma-trend@1")), true)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("대문자")));
         // 미국 시장(조합 실험 실행 명령이 아직 국내만)
         Map<String, Object> us = request("EXP-BAD-04", "SWING", List.of("none x kr-ma-trend@1"));
         us.put("market", "US");

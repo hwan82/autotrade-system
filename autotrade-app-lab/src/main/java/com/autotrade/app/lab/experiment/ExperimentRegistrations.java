@@ -40,8 +40,8 @@ public final class ExperimentRegistrations {
 
     /** 조합 수 상한(SIM-14 {@code SimulationExperimentRunner.MAX_COMBINATIONS}와 같은 값). */
     static final int MAX_COMBINATIONS = 128;
-    /** {@code ExperimentFolders}·{@code CombinationMain}과 같은 실험 ID 모양. */
-    private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+    /** 등록 파일이 받는 실험 ID 모양({@code ExperimentId}와 같음). 경로 구분자와 {@code ..}가 들어갈 수 없다. */
+    private static final Pattern ID = Pattern.compile("[A-Z0-9][A-Z0-9-]{0,47}");
     private static final int MAX_QUESTION = 500;
     private static final String COMMAND = "./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=%s"
             + " -PverifyDeterminism";
@@ -105,6 +105,13 @@ public final class ExperimentRegistrations {
             Files.writeString(tmp, yaml, StandardCharsets.UTF_8);
             Files.move(tmp, dir.resolve("experiment.yaml"), StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
+            // 빈 폴더를 남기면 목록에는 안 보이는데 같은 ID가 계속 409가 된다
+            try {
+                Files.deleteIfExists(tmp);
+                Files.deleteIfExists(dir);
+            } catch (IOException ignored) {
+                // 지우지 못하면 원래 오류만 알린다
+            }
             throw new UncheckedIOException("등록 파일을 쓸 수 없습니다: " + id, e);
         }
         return new Registration(id, yaml, COMMAND.formatted(id), true);
@@ -116,7 +123,7 @@ public final class ExperimentRegistrations {
         }
         String id = required(r.id(), "실험 ID");
         if (!ID.matcher(id).matches()) {
-            throw new IllegalArgumentException("실험 ID는 영문·숫자로 시작하고 영문·숫자·.·_·- 128자 이내여야 합니다");
+            throw new IllegalArgumentException("실험 ID는 영문 대문자·숫자로 시작하고 영문 대문자·숫자·- 48자 이내여야 합니다(예: EXP-20261014-CMB01)");
         }
         String question = required(r.question(), "질문");
         if (question.length() > MAX_QUESTION || question.chars().anyMatch(c -> c == '\n' || c == '\r')) {
@@ -199,7 +206,7 @@ public final class ExperimentRegistrations {
         }
         if (!plan.id().value().equals(id) || !plan.question().equals(question)
                 || !plan.combinations().stream().map(CombinationPlan.Entry::text).toList().equals(combos)) {
-            throw new IllegalStateException("등록 파일을 다시 읽은 값이 입력과 다릅니다");
+            throw new IllegalArgumentException("등록 파일을 다시 읽은 값이 입력과 다릅니다(값에 쓸 수 없는 글자가 있는지 확인하세요)");
         }
         return yaml;
     }
