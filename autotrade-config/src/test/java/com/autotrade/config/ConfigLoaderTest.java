@@ -142,11 +142,12 @@ class ConfigLoaderTest {
     @Test
     void 범위를_벗어난_값은_키_이름과_함께_경고한다() throws IOException {
         runtime("""
-                { "lab": { "max-parallel-runs": 0 } }
+                { "lab": { "max-parallel-runs": 99990001 } }
                 """);
         LoadedConfig loaded = loader.load(paths);
         assertThat(loaded.source()).isEqualTo(ConfigSource.DEFAULT_FILE_INVALID);
-        assertThat(loaded.warning()).contains("lab.max-parallel-runs");
+        // 값은 싣지 않는다(PR #102 risk-ops F7): 숫자 자리에 계좌번호를 적었을 수 있다
+        assertThat(loaded.warning()).contains("lab.max-parallel-runs").doesNotContain("99990001");
     }
 
     @Test
