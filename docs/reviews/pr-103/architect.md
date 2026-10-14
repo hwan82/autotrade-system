@@ -69,3 +69,32 @@
 
 ## 판정
 수정 필요(재검토 발견 1: 77행 Guard OFF 전이 설명)
+
+## 재검토 2026-10-14 (2차)
+- 대상: PR #103 / 커밋 424c0c3(재검토 발견 반영) / `git diff origin/main...HEAD` 전체(origin/main 59e9eb0 기준, 커밋 7개. 코드·문서 본문 변경은 e1cf82d, 3bf034c, 424c0c3이고 나머지는 검토 원문). 424c0c3은 `docs/runbooks/README.md` 1행 변경(+1/-1)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks` (헤드 424c0c3, 작업 트리 깨끗) -> BUILD SUCCESSFUL in 2m 48s, 130 actionable tasks 모두 실행. 테스트 결과 XML 합계 1,101건, 실패 0, 오류 0, 건너뜀 0. (첫 시도는 Maven Central 429로 실패, 재시도 통과.)
+  - 바뀐 77행을 `RealTradingGuard.java`와 ADR-002·ADR-006에 다시 대조
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 결과 |
+| B2 | 해당 없음 | 코드·빌드 스크립트·ArchUnit 변경 없음 |
+| B3 | 해당 없음 | 계약 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 코드 없음, 테스트 변경 없음 |
+| B7 | 통과 | 문서 4장 실전 운영 안내 변경이라 risk-ops 검토 필요. 브랜치에 risk-ops 원문 있음(그 판정은 이 검토에 쓰지 않음) |
+| B8 | 통과 | 424c0c3 diff에 비밀값 없음 |
+
+### 앞 재검토 발견 처리 확인
+1. Guard OFF 전이 설명: 해결. `docs/runbooks/README.md:77`이 이제 보유·미체결 0이면 OFF(`RealTradingGuard.java:254-262` `holdingsCleared`), 보유가 남은 채 OFF는 PANIC 증권사 단계 완료(ADR-006 2.5 6단계)와 킬스위치(`RealTradingGuard.java:266` `shutdown`, ADR-002 2.1 30행), 재기동 시 모두 OFF(`EngineMain.java:98`, ADR-002)로 적는다. PANIC 증권사 단계 목록(미체결 취소, 서버 측 손절 취소, 매도, 체결 확인)도 ADR-006 2.5 2~5단계와 일치. ADR-002 링크 대상 파일 있음.
+
+앞 두 차례에서 해결 확인한 항목(Ctrl+C 종료 코드, 내리기 표기, symbolMaster 종료 코드 2, replayCheck 시각, 옵션 범위)은 424c0c3에서 바뀌지 않았다(diff 1행).
+
+## 점검표 밖 발견
+- 없음. (참고: 77행 "보유가 남은 채 OFF가 되는 길"에 PANIC 완료를 넣은 것은 매도·체결 확인을 마치면 보유가 없어지므로 표현이 엄밀하지는 않지만, 뜻은 "보호 모드에서 OFF로 가는 명시적 경로"로 읽히고 계약과 어긋나지 않아 지적하지 않는다. 저장소 밖 안내서 존재와 Windows에서의 Ctrl+C 종료 코드는 여전히 직접 확인 못 했고, 문서에도 저장소 밖·`[추론]`으로 표시돼 있다. 점검표 항목이 아니다.)
+
+## 판정
+승인
