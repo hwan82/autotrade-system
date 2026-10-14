@@ -28,3 +28,35 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-14
+- 대상: PR #94 / head `8e861a8` / `git diff origin/main...HEAD` 전체(커밋 2개 `bd0efde`·`8e861a8`, 파일 9개: DayWriter, JournalWriter, JournalWriterTest, LiveSession, LiveSessionTest, ADR-010, qa-out-status, 검토 원문 2개). 이번 커밋 `8e861a8`의 코드 변경은 `LiveSession.restore`(LiveSession.java:190-212)와 `LiveSessionTest.crashAndResume`(인자 `emptyDayTwo` 추가, LiveSessionTest.java:186-235), ADR-010:58 한 줄.
+- 점검표: B
+- 직접 실행한 것:
+  - `git archive 8e861a8`로 스크래치 폴더에 꺼낸 사본에서 `./gradlew build --no-daemon`: **BUILD SUCCESSFUL**(3분 4초, 130 task). 테스트 결과 XML 합계 1060건, 실패 0·오류 0·건너뜀 0. `ArchitectureTest` 18, `ModuleOwnershipTest` 13, `LiveSessionTest` 10, `JournalWriterTest` 6 모두 통과.
+  - 변이 시험(사본에서만, 되돌림): `LiveSession.java:210`을 수정 전처럼 마지막 기록일(`days.get(days.size() - 1)`)로 되돌리고 `:autotrade-sim:test --tests '*LiveSessionTest'` → `crashOnDayOneThenResumingOnDayTwoStillReplaysTheSame` 실패(10건 중 1건, 공백 증가 단언 LiveSessionTest.java:235). 새 `emptyDayTwo=true` 경우가 R1 수정을 실제로 판별한다.
+  - 실제 상태 재현(사본에서만, 되돌림): PR 시험은 2일차에 0바이트 `events.jsonl.gz`만 둔다. 실제로 남는 상태는 `DayWriter` 생성자가 쓴 gzip 머리(10바이트)와 `meta.json`(complete=false, 끝 없는 구간)이다. 시험 안에서 `JournalWriter`로 `resumeAfter(10-14)` 뒤 2일차 첫 이벤트를 `append`하고 flush·close 없이 버려 그 상태를 만들었다(2일차 폴더: `meta.json`, `events.jsonl.gz` 10바이트, `RecordedDay` 읽힌 줄 0). 이 상태에서도 수정된 코드는 통과(공백 증가, `LiveReplayCheck` 같음), 변이(마지막 기록일 사용)는 같은 단언에서 실패. 즉 0바이트 픽스처가 실제 경우를 대표한다.
+  - 저장소 작업 폴더는 이 파일 외에 바꾸지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 격리 사본(`8e861a8`) `./gradlew build` BUILD SUCCESSFUL, 1060건 실패·오류·건너뜀 0 |
+| B2 | 통과 | 이번 커밋은 `autotrade-sim` 안의 기존 호출 인자만 바꿈(LiveSession.java:190-212). 새 의존·패키지 없음. `verifyPureDependencies`, `ArchitectureTest` 18, `ModuleOwnershipTest` 13 통과 |
+| B3 | 통과 | 공개 계약은 1차와 같음(`JournalWriter.resumeAfter(LocalDate)`, JournalWriter.java:96). 이번 커밋은 계약 변경 없이 호출 쪽 기준 날만 바꿨고 ADR-010:58에 "읽을 줄이 있는 마지막 기록일" 규칙을 같은 PR에서 적음. 스키마·설정 키·REST 변경 없음 |
+| B4 | 통과 | 기준 날 선택은 `journalDays()`의 날짜 오름차순 순회(LiveSession.java:214-224)와 각 날 읽힌 줄 수로만 정해짐. 시스템 시계·난수 없음. 공백 줄은 기록에 먼저 쓰이고 같은 줄을 계좌에 주므로 실시간 = 리플레이 유지(`crashOnDayOneThenResumingOnDayTwoStillReplaysTheSame` 3경우 모두 `LiveReplayCheck.same()` 참) |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 기존 `crashAndResume` 두 호출은 `emptyDayTwo=false`로 그대로 유지(LiveSessionTest.java:176, 187-188), 새 경우 1개 추가(:190). 지우거나 약화한 단언 없음. 변이 시험으로 판별력 확인, 실제 상태(gzip 머리+meta) 재현에서도 통과 |
+| B7 | 해당 없음 | 실전 주문 경로, RealTradingGuard, 블랙리스트, 리스크 한도, 장애 대응, 증권사 주문 연동 변경 없음(broker·risk·app-engine·architecture-test 경로 diff 없음). 바뀐 코드는 실험실 실시간 모의 세션(`autotrade-sim`)뿐이고 엔진은 `autotrade-sim` 의존 금지 |
+| B8 | 통과 | diff에 비밀값·계좌번호·토큰 없음. 새 로그·예외 문자열 없음 |
+
+### 이전 권고 처리
+- **R1 (빈 새 날 파일이면 공백 빠짐)**: 해소. `restore`가 읽힌 줄이 1개 이상인 마지막 날을 `resumeAfter`에 준다(LiveSession.java:194-196, 209-211). 빈 2일차가 남아도 `JournalWriter`의 `date.isAfter(resumedAfter) && day.lastSeq()==0` 조건(JournalWriter.java:75)으로 `carryRestartFrom(1일차)`가 돈다. 시험·변이·실제 상태 재현으로 확인.
+- **R2 (앞 날 기록 두 번 읽기)**: 그대로. 권고 유지(6단계 주간 점검의 되살리기 시간으로 판단).
+
+### 점검표 밖 발견
+- **R3 (참고, 막지 않음) 모든 기록일이 비어 있으면 `resumeAfter`를 부르지 않는다**(LiveSession.java:209). 이때 이어 쓰기는 기존 같은 날 경로이고, 앞서 본 종목이 없으므로 남길 공백도 없다. 동작은 맞으나 이 분기를 직접 거치는 시험은 없다[사실: LiveSessionTest에 해당 경우 없음]. 영향이 없어 추가는 선택.
+- **R4 (참고) 빈 2일차의 meta에 끝 없는 구간이 남는다.** 실제 상태 재현에서 2일차 `meta.json`은 앞 프로세스 구간의 `endedAt`이 비어 있고, 다음 기동이 열 때 `closeOpenSegments`는 마지막 수신 시각이 없어 그 구간을 닫지 못한다(DayWriter.java:89, 135-141). 같은 폴더에 `events.jsonl.gz.before-segment-2` 보관본도 생긴다[추론: meta complete=false 경로, DayWriter.java:94-99. 파일 생성 자체는 확인하지 않음]. 리플레이와 공백 판정에는 영향 없음(재현 시험에서 `LiveReplayCheck` 같음). 녹화 점검 도구가 "끝 없는 구간"을 이상으로 셀 경우에만 의미가 있다[추론].
+- ADR-010 6장 `LiveSessionTest` 설명(ADR-010:119)은 빈 새 날 경우를 따로 적지 않지만 2장 규칙(ADR-010:58)에 있고 시험 수(10)는 맞다. 고칠 필요 없음.
+
+## 판정
+승인

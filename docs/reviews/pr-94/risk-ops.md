@@ -41,3 +41,44 @@
 승인
 
 (근거: 실전 주문 경로·Guard·블랙리스트·장애 대응·프로세스 격리에 영향 없음을 코드 호출처와 금지 의존 검사로 확인했고, A 전 항목에 확인 못 함이 없다. N1은 실험실 입력 기록의 정확성 문제로 risk-ops 차단 사유가 아니며 후속 수정을 권고한다.)
+
+## 재검토 2026-10-14
+- 대상: PR #94 / 커밋 `8e861a8` / `git diff origin/main...HEAD` 전체(커밋 2개 `bd0efde`·`8e861a8`, 파일 9개, +192 −9). 새 커밋의 코드 변경은 `LiveSession.restore`(LiveSession.java:190-211)와 `LiveSessionTest`(:180-226), ADR-010:58 한 줄. 나머지는 검토 원문 2개.
+- 점검표: A
+- 직접 실행한 것:
+  - `8e861a8`을 `git archive`로 별도 폴더에 풀어 `./gradlew build --continue` → **BUILD SUCCESSFUL**, 테스트 결과 XML 합계 1060개, 실패 0·오류 0·건너뜀 0. `:autotrade-risk:test` 55, `:autotrade-architecture-test:test` 31, `:autotrade-app-engine:test` 48, `:autotrade-sim:test` 200(`LiveSessionTest` 10), `:autotrade-marketdata:test` 131(`JournalWriterTest` 6), `verifyPureDependencies`·`verifyProcessIsolation` 통과.
+  - 같은 사본의 첫 실행(`--continue` 없이)은 `LiveLabServiceTest#receivesGatewayFeedAndWritesTheLiveReportOnFinish`(LiveLabServiceTest.java:111, `skippedSymbol` 기대 1 실제 0) 한 건 실패로 멈췄고, 다시 돌린 실행에서는 통과했다. 이 PR이 건드리지 않는 `autotrade-app-lab` 시험이며, `events == 20`을 기다린 뒤 21번째(뺄 종목) 이벤트 처리를 기다리지 않고 단언하는 시험 자체의 경합으로 본다[추론]. 같은 장비에서 다른 검토자의 Gradle이 동시에 돌던 부하 중이었다. 아래 점검표 밖 발견 F2.
+  - 변이 시험(격리 사본, 저장소 미반영): `LiveSession.java:210`을 수정 전처럼 `days`의 마지막 날로 되돌리고 `:autotrade-sim:test --tests '*LiveSessionTest'` → `crashOnDayOneThenResumingOnDayTwoStillReplaysTheSame` 실패. 새 경우(`emptyDayTwo=true`)가 N1을 실제로 판별한다. 되돌린 뒤 다시 통과.
+  - 탐색 시험(격리 사본, 저장소 미반영): 저장소 시험은 2일차를 **0바이트 파일, meta 없음**으로 흉내 낸다(LiveSessionTest.java:221-225). 실제 비정상 종료에 가까운 상태를 따로 만들었다: 세션이 2일차 첫 이벤트까지 받아 `meta.json`(complete=false)이 생긴 뒤, 2일차 `events.jsonl.gz`를 0바이트 또는 gzip 머리 10바이트만 남기고 이어 받기. 두 경우 모두 되살린 뒤 공백 0 → 2(종목 2개마다 `RECORDER_RESTART`), `LiveReplayCheck` 바이트 일치 통과. 같은 시험이 변이(수정 전 동작)에서는 두 경우 모두 실패.
+
+## 앞 판정의 N1·N2 처리 확인
+- N1: [사실] `restore`가 읽힌 이벤트가 1개 이상인 마지막 날(`lastWithLines`, LiveSession.java:190-196)을 `resumeAfter`에 넘기고, 그런 날이 없으면 부르지 않는다(:209-211). 빈 2일차가 남은 상태에서 2일차 이벤트가 오면 `JournalWriter.append`의 조건 `first && resumedAfter != null && date.isAfter(resumedAfter) && day.lastSeq() == 0`(JournalWriter.java:75)이 참이 되고, 빈 파일이라 `DayWriter` 생성자의 `restartSymbols`가 비어 있어 `carryRestartFrom`의 사전 조건(DayWriter.java:173)도 통과한다. 위 탐색 시험으로 meta 유무·gzip 머리 유무 모두 확인. **해결.**
+- N2: `carryRestartFrom` 예외 뒤 재시작해 빈 새 날 파일이 남는 경우도 같은 경로로 덮인다. **해결.**
+- 줄이 하나도 없는 날만 있을 때 `resumeAfter`를 부르지 않는 것은 맞다: 앞 프로세스가 쓴 줄이 없으면 빠진 종목 구간도 없다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 새 커밋 포함 diff 전체에 RealTradingGuard·설정 로딩 변경 없음(바뀐 운영 코드는 `autotrade-marketdata` recording 2파일, `autotrade-sim` `LiveSession` 1파일). 보호 테스트 포함 `:autotrade-risk:test` 55개 통과 |
+| A2 | 해당 없음 | 주문 출구·Guard 팩토리·ArchUnit 규칙 파일 변경 없음. `:autotrade-architecture-test:test` 31개 통과 |
+| A3 | 해당 없음 | broker-* 모듈 diff 없음. 증권사 주문 연동 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 주문 멱등 키 변경 없음. 바뀐 순번은 입력 기록 줄 번호(DayWriter `seq`)로 주문 키와 무관 |
+| A6 | 해당 없음 | 블랙리스트 경로 변경 없음. `LiveSessionTest#blacklistedSymbolIsNeverBoughtInTheLiveSession` 통과(LiveSessionTest 10개 전부 통과) |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷 변경 없음 |
+| A8 | 통과 | 새 코드는 실험실 프로세스의 `LiveSession.restore` 안에서만 돈다. 운영 코드 호출처: `resumeAfter`는 LiveSession.java:210 하나, `carryRestartFrom`은 JournalWriter.java:76 하나(grep). 엔진은 `:autotrade-sim` 금지 의존(autotrade-app-engine/build.gradle.kts `processIsolation.forbiddenProjects`), 엔진·감시 소스에 `marketdata.recording`·`com.autotrade.sim` 사용 없음(grep), `verifyProcessIsolation` 통과. 새 커밋이 더한 비용은 이미 읽은 날의 빈 여부 확인뿐(추가 I/O 없음) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 코드 변경 없음 |
+| A10 | 통과 | diff 전체에 키·계좌번호·토큰 없음. 시험 픽스처는 종목코드·시각·날짜 폴더명만 |
+| A11 | 통과 | 보호 테스트 변경 없음. 기존 시험 삭제·약화 없음: `crashAndResume`에 인자 하나를 더했고 기존 호출 3곳은 `false`로 같은 동작(LiveSessionTest.java:176, :187-188), 새 경우 1개 추가(:190). 새 경우가 수정 전 코드에서 실패함을 변이 시험으로 확인 |
+| A12 | 통과 | 장애표 #9 실험실 열(broker-and-fault-design.md:168 "실험실 재기동 구간을 `RECORDER_RESTART` 공백으로 남기고")을 빈 새 날 파일이 남은 경우까지 지키게 한다. 대응표 17종·O1~O8·장애 테스트 8종의 전제(실전 엔진)는 바뀌지 않음 |
+| A13 | 통과 | 기준 날짜는 기록 폴더 이름(`LocalDate.parse`, 폴더는 `JournalWriter`가 세션 `MarketRules` 시간대로 정함, JournalWriter.java:69)에서 나온다. 시장 분기·금액 계산 추가 없음 |
+| A14 | 통과 | ADR-010:58이 "기준이 되는 앞 날은 읽을 줄이 있는 마지막 기록일"로 새 동작과 일치. D-065(게이트웨이 녹화)는 그대로. 실험실 내부 기록 동작이라 새 D 번호 불필요[추론]. qa-out-status.md 처리 줄은 앞 커밋 그대로 |
+
+## 점검표 밖 발견
+- **F1 (참고, 막지 않음)** 저장소의 새 경우는 2일차를 0바이트·meta 없음으로만 흉내 낸다(LiveSessionTest.java:221-225). 실제 비정상 종료는 `DayWriter` 생성자가 gzip 머리와 `meta.json`(complete=false)을 바로 쓰므로 그 모양에 더 가깝다. 이번 재검토에서 그 모양(meta 있음, 0바이트 또는 gzip 머리 10바이트)을 탐색 시험으로 확인해 통과했으나 저장소에는 없다. 다음에 이 부분을 손볼 때 meta가 남은 경우를 시험에 넣기를 권한다(담당 sim-engine).
+- **F2 (참고, 이 PR과 무관)** `LiveLabServiceTest#receivesGatewayFeedAndWritesTheLiveReportOnFinish`가 부하 중 한 번 실패했다(LiveLabServiceTest.java:111). 시험이 `events(service) == 20`만 기다리고 바로 뒤 21번째 이벤트(boards 밖 000660)의 `skippedSymbol` 증가를 기다리지 않는 경합으로 보인다[추론]. 실험실 시험이라 실전 영향은 없지만 CI에서 거짓 실패가 날 수 있다. `await(() -> skippedSymbol == 1)`처럼 기다리게 고치기를 권한다(담당 ui-dev/sim-engine, 별도 작업).
+- 빌드는 격리 사본에서 돌렸다. 같은 장비에서 다른 검토자의 Gradle이 동시에 돌았다.
+
+## 판정
+승인
+
+(근거: 앞 판정의 N1·N2가 해결됐고 변이·탐색 시험으로 판별력을 확인했다. 실전 주문 경로·Guard·블랙리스트·장애 대응·프로세스 격리에 영향 없음을 호출처와 금지 의존 검사로 확인했으며, A 전 항목에 확인 못 함이 없다. F1·F2는 차단 사유가 아니다.)
