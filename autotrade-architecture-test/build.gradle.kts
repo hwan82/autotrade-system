@@ -16,8 +16,42 @@ plugins {
 val architectureTest = project
 val otherProjects = rootProject.subprojects.filter { it != architectureTest }
 
+// 실전 경로 런타임(D-085, 독립 QA PR #21 Q-4·risk-ops R-8): 실전 엔진·감시 프로세스와, 7단계에 실전 엔진이 불러올 증권사
+// 플러그인을 실제로 해석한 런타임 클래스패스. 손 목록이 아니라 Gradle이 해석한 결과에서 (1) 우리 프로젝트 목록(리플렉션 금지
+// 규칙의 모듈 범위)과 (2) 외부 라이브러리 목록(허용 목록과 대조)을 뽑아 테스트에 넘긴다. 실전 엔진에 새 모듈이나 외부 jar가
+// 들어오면 빌드 파일 수정 없이도 자동으로 범위에 들어오고, 허용 목록에 없는 외부 jar는 RealPathReflectionTest가 실패시킨다.
+// 이 구성은 해석에만 쓰고 테스트 클래스패스에는 올리지 않는다.
+val realPathProcesses = listOf(":autotrade-app-engine", ":autotrade-app-watchdog")
+val realPathRuntime = configurations.create("realPathRuntime") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    description = "실전 엔진·감시·증권사 플러그인의 런타임 클래스패스(아키텍처 테스트 범위 계산용)"
+}
+
 dependencies {
     testImplementation(libs.archunit.junit5)
+    // Jackson 다형 역직렬화 규칙의 위반 고정 예제(archfixture)용
+    testImplementation(platform(libs.jackson.bom))
+    testImplementation(libs.jackson.databind)
+}
+
+// 다른 모듈의 런타임 변형(jar)을 고른다(java 플러그인의 runtimeClasspath와 같은 속성)
+realPathRuntime.attributes {
+    attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+    attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+    attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+    attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling.EXTERNAL))
+    attribute(TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE, objects.named(TargetJvmEnvironment.STANDARD_JVM))
+}
+
+realPathProcesses.forEach { path ->
+    architectureTest.dependencies.add(realPathRuntime.name, architectureTest.dependencies.project(mapOf("path" to path)))
+}
+// 증권사 플러그인(:autotrade-broker-*)은 7단계에 실전 엔진이 불러온다. 지금 엔진 의존에 없어도 범위에 넣는다
+otherProjects.filter { it.name.startsWith("autotrade-broker-") }.forEach { module ->
+    module.pluginManager.withPlugin("java") {
+        architectureTest.dependencies.add(realPathRuntime.name, architectureTest.dependencies.project(mapOf("path" to module.path)))
+    }
 }
 
 otherProjects.forEach { module ->
@@ -65,8 +99,25 @@ tasks.test {
             }
         items.joinToString("|")
     }
+    // 실전 경로 런타임의 구성 요소. 형식: "PROJECT\t:경로", "MODULE\tgroup:name", 그 밖(파일 의존 등)은 "OTHER\t..."를
+    // "|"로 잇는다(정렬). 해석 그래프의 구성 요소(플랫폼 포함)와 실제 산출물의 출처를 합친다. 파일 의존(files(...))은 그래프에
+    // 없고 산출물로만 보이므로 산출물도 본다
+    fun describe(id: org.gradle.api.artifacts.component.ComponentIdentifier): String = when (id) {
+        is org.gradle.api.artifacts.component.ProjectComponentIdentifier -> "PROJECT\t" + id.projectPath
+        is org.gradle.api.artifacts.component.ModuleComponentIdentifier -> "MODULE\t" + id.group + ":" + id.module
+        else -> "OTHER\t" + id.displayName
+    }
+    val realPathComponents = provider {
+        val result = realPathRuntime.incoming.resolutionResult
+        // 해석의 뿌리(이 모듈 자신)는 실전 경로 구성 요소가 아니다
+        val fromGraph = result.allComponents.filter { it != result.root }.map { describe(it.id) }
+        val fromArtifacts = realPathRuntime.incoming.artifacts.artifacts.map { describe(it.id.componentIdentifier) }
+        (fromGraph + fromArtifacts).distinct().sorted().joinToString("|")
+    }
     inputs.property("autotrade.projectLayout", projectLayout)
+    inputs.property("autotrade.realPathComponents", realPathComponents)
     doFirst {
         systemProperty("autotrade.projectLayout", projectLayout.get())
+        systemProperty("autotrade.realPathComponents", realPathComponents.get())
     }
 }
