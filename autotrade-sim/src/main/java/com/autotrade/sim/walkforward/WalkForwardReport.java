@@ -222,6 +222,28 @@ final class WalkForwardReport {
                 .append(" C10은 \"후보의 진입 + 청산\" 대 \"무작위 진입 + 대조군 청산\"의 비교다. 후보의 평균 보유(위 리더보드)와")
                 .append(" 이 표의 평균 보유를 같이 읽는다(사전 등록 문구, PR #79 strategy-researcher 권고 1).\n\n");
 
+        sb.append("## 청산 사유 분포 (검증 구간 왕복 수, 판정에 쓰지 않음)\n\n");
+        sb.append("왕복 하나의 사유는 그 왕복의 진입일부터 청산일까지 전략이 낸 마지막 매도 신호의 사유이고, 구간 끝 정리 로트는")
+                .append(" \"구간 끝 정리\"로 센다. 합은 왕복 수와 같다. \"미상\"은 전략 기록과 왕복이 이어지지 않은 수로, 0이 아니면")
+                .append(" 이 표를 해석에 쓰지 않는다. C10을 읽을 때 위 평균 보유와 함께 후보와 대조군의 청산 구성(손절·최대 보유·로직")
+                .append(" 청산) 차이를 본다(PR #98 strategy-researcher 권고 R2). 대조군은 완료된 시드의 왕복만 합한다.\n\n");
+        sb.append("| 조합 |");
+        ExitMix.LABELS.forEach(l -> sb.append(' ').append(l).append(" |"));
+        sb.append(" 합 |\n|---|");
+        ExitMix.LABELS.forEach(l -> sb.append("---:|"));
+        sb.append("---:|\n");
+        for (int i = 0; i < r.candidates().size(); i++) {
+            ExitMix x = ExitMix.ZERO;
+            for (WindowRun wr : r.validationRuns().get(i)) {
+                x = x.plus(wr.exits());
+            }
+            exitRow(sb, "`" + r.candidates().get(i).text() + "`", x);
+        }
+        for (NullSummary n : r.nulls().values()) {
+            exitRow(sb, "`" + n.pairKey() + "` (대조군, 완료 시드 합)", n.exits());
+        }
+        sb.append('\n');
+
         sb.append("## 구간 끝 정리(WINDOW_END) 왕복: 구간별 수 / 손익 합(원)\n\n");
         sb.append("구간 마지막 거래일 종가에 팔았다고 보고 비용을 뺀 왕복이다. 전체 왕복 수·PF·C10에 포함돼 있다.\n\n");
         sb.append("| 조합 |");
@@ -313,6 +335,20 @@ final class WalkForwardReport {
         sb.append("- 대조군 `random-daily` 계열은 예열 구간에서도 난수를 쓰므로 예열 일수가 바뀌면 같은 시드의 진입 일이 달라진다(결정론에는 영향 없음).\n");
         sb.append("- 이 표만으로 승격을 결정하지 않는다. 승격은 사용자 결정이다.\n");
         return sb.toString();
+    }
+
+    private static void exitRow(StringBuilder sb, String name, ExitMix x) {
+        long total = x.total();
+        sb.append("| ").append(name).append(" |");
+        for (long n : x.counts()) {
+            sb.append(' ').append(n);
+            if (total > 0) {
+                sb.append(" (").append(ScreeningCriteria.pct(BigDecimal.valueOf(n)
+                        .divide(BigDecimal.valueOf(total), 6, java.math.RoundingMode.HALF_EVEN))).append(')');
+            }
+            sb.append(" |");
+        }
+        sb.append(' ').append(total).append(" |\n");
     }
 
     private static void funnelRow(StringBuilder sb, String name, EntryFunnel.Totals f) {

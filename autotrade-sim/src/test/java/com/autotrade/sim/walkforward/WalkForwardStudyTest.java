@@ -152,6 +152,16 @@ class WalkForwardStudyTest {
         // 깔때기가 Run과 실제로 이어졌다: 후보 검증 행의 진입 시도가 0이 아니다(PR #79 architect R6)
         assertThat(out.files().get("runs.tsv").lines().filter(l -> l.startsWith("VALIDATION\t"))
                 .mapToLong(l -> Long.parseLong(l.split("\t", -1)[14])).sum()).isPositive();
+        // 청산 사유 분포(PR #98 strategy-researcher 권고 R2): 미상 0, 후보 합 = 검증 왕복 수 합
+        String exits = results.substring(results.indexOf("## 청산 사유 분포"), results.indexOf("## 구간 끝 정리"));
+        assertThat(exits).contains("| 조합 | 손절 | 익절 | 추적 손절 | 시간·최대 보유 | 로직 청산 | 장 마감 | 구간 끝 정리 | 미상 | 합 |")
+                .contains("(대조군, 완료 시드 합)");
+        List<String[]> exitRows = exits.lines().filter(l -> l.startsWith("| `")).map(l -> l.split("\\|", -1)).toList();
+        assertThat(exitRows).hasSize(2).allSatisfy(c -> assertThat(c[9].trim()).as("미상").isEqualTo("0 (0.00%)"));
+        long validationTrips = out.files().get("runs.tsv").lines().filter(l -> l.startsWith("VALIDATION\t"))
+                .mapToLong(l -> Long.parseLong(l.split("\t", -1)[11])).sum();
+        assertThat(validationTrips).isPositive();
+        assertThat(Long.parseLong(exitRows.get(0)[10].trim())).isEqualTo(validationTrips);
         // 해석 칸(D-083): 리더보드 비용 비중·평균 보유·회전율, 대조군 평균 보유, 등록 파일 해시
         assertThat(results).contains("| 비용 비중 | 평균 보유(일) | 회전율 |").contains("| 최대 | 평균 보유(일) |")
                 .contains("무작위 진입 + 대조군 청산");
