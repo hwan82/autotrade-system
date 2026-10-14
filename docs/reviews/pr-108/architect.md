@@ -141,3 +141,44 @@
 
 ## 판정
 수정 필요(AR-6)
+
+## 재검토 2026-10-14 (3)
+- 대상: PR #108 / 커밋 4006964 / main 대비 diff(`git diff origin/main...4006964`). 앞 재검토(dbdb953) 뒤 바뀐 것은 `git diff dbdb953 4006964`(`RealPathReflectionTest.java`, `DynamicCode.java`, `JacksonObjectAccess.java`, ADR-002 9.5, D-085, 검토 원문 2개)
+  - JDK 5개 패키지(`java.lang`·`java.util`·`java.security`·`java.net`·`java.io`)를 클래스 단위로 허용하도록 바꿨다(`CLASS_LEVEL_JDK_PACKAGES`, `ALLOWED_JDK_CLASSES`)
+  - 외부 명령 실행 허용 목록 `ALLOWED_PROCESS_LAUNCHERS`를 비어 있는 채로 추가하고, 비어 있음을 테스트가 고정한다
+  - Jackson 모듈 발견(`findAndRegisterModules` 등)을 금지했다
+- 점검표: B
+- 직접 실행한 것(별도 작업 트리 `git worktree add <스크래치>/wt3 4006964`에서 실행하고 끝난 뒤 `git worktree remove`로 지웠다. 공유 작업 트리 소스는 건드리지 않았다):
+  - `./gradlew clean build --no-daemon` → `BUILD SUCCESSFUL in 3m 25s`, 종료 코드 0. 결과 XML 합계 테스트 1,108건, 실패·오류·건너뜀 0. `RealPathReflectionTest`는 7건, 실패 0
+  - 변조 실험(커밋하지 않음): `autotrade-config`에 `com.autotrade.config.qaprobe`의 2개 클래스를 넣고 `:autotrade-architecture-test:test --tests '*RealPathReflectionTest'` 실행 → 종료 코드 1, 위반 5건
+    | 프로브 | 내용 | 결과 |
+    |---|---|---|
+    | `ProviderProbe` | `Provider` 익명 하위 클래스, `put`, `getService(..).newInstance(null)` (AR-6) | 잡힘(`ProviderProbe$1`·`byName`) |
+    | `PropertyProbe` | `System.setProperty("java.util.logging.config.class", className)` 뒤 `System.getLogger("x").log(..)` | **안 잡힘** |
+  - 별도 확인(저장소 밖 스크래치, 실행 후 지움): 같은 두 줄을 넣은 단독 Java 21 프로그램이 `Main$Hook`을 이름으로 생성했다(생성자의 `HOOK CONSTRUCTED by name` 출력 확인). JUL `LogManager`가 `java.util.logging.config.class` 속성의 클래스를 리플렉션으로 적재·생성하기 때문이다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew clean build` 종료 코드 0, 테스트 1,108건 실패 0 |
+| B2 | 통과 | 규칙 변경은 테스트 모듈 안에만 있다. ADR-002 9.5와 D-085가 갱신됐다. 운영 코드는 클래스 단위 허용에서도 위반 0건이다(위 빌드). 허용 클래스 목록이 실제 사용 클래스로 채워져 있어 빈 목록으로 통과하는 일은 없다 |
+| B3 | 통과 | 운영 계약 변경 없음. 새 목록 `ALLOWED_JDK_CLASSES`·`ALLOWED_PROCESS_LAUNCHERS`가 D-085에 적혔다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | 새 항목마다 고정 예제와 단언이 있다: `DynamicCode#viaProvider`(`허용 목록 밖 타입 java.security.Provider`, `Provider$Service.newInstance`, `java.security.Security`), `JacksonObjectAccess#discoverModules`(`findAndRegisterModules`), `ALLOWED_PROCESS_LAUNCHERS` 비어 있음 단언. 기존 단언은 하나도 빠지지 않았다 |
+| B7 | risk-ops 검토 필요 | 보호 테스트 강화이고, 7단계 감시 재기동(외부 명령 허용 목록)과 연결된다. risk-ops 재검토 뒤 사용자가 머지한다 |
+| B8 | 통과 | 비밀값 없음 |
+
+### 앞 재검토 지적의 처리
+- AR-6: 해소. `java.security`가 클래스 단위 허용으로 바뀌어 `Provider`·`Provider$Service`·`Security` 의존이 걸린다. 변조 실험 `ProviderProbe`가 잡혔다.
+- 참고(클래스 단위 허용): 반영됐다. 5개 패키지를 클래스 단위로 좁혀서, SPI 구현(`CharsetProvider`, `System$LoggerFinder` 등)도 허용 목록 밖 타입으로 걸린다. `java.util.concurrent`·`java.nio.*`·`javax.crypto` 등은 패키지 단위로 남았다. 이 패키지들에서 로더나 `Provider`를 주고받는 API는 로더 인자 규칙과 `Provider` 타입 금지로 걸린다고 본다 `[추론]`.
+
+### 새 지적
+
+#### AR-7 (수정 필요, 작음) `System#setProperty`로 JDK가 이름 문자열의 클래스를 만들게 할 수 있다
+- `[사실]` `java.lang.System`은 허용 클래스이고, `reflective()`의 `System` 분기는 `load`·`loadLibrary`만 막는다(RealPathReflectionTest.java 4006964 기준 196-197행). 변조 실험 `PropertyProbe`가 걸리지 않았다. 단독 실행에서 `System.setProperty("java.util.logging.config.class", <이름>)` + `System.getLogger(..)` 호출로 그 이름의 클래스가 생성되는 것을 확인했다.
+- AR-6(`Provider`)·`ResourceBundle`과 같은 종류다("이름으로 클래스를 찾아 만든다"). 같은 방식으로 JDK 동작을 바꾸는 속성이 더 있다 `[추론]`: `java.util.logging.config.file`의 `handlers=`, `java.rmi.server.codebase`, 프록시·TLS 속성.
+- 실전 경로 운영 코드는 지금 `System.setProperty`·`setProperties`·`clearProperty`를 쓰지 않는다(4006964에서 `grep` 결과 없음). 그래서 막아도 깨지는 코드는 없다.
+- 고칠 방향: `reflective()`의 `java.lang.System` 분기에 `setProperty`·`setProperties`·`clearProperty`를 더하고, `DynamicCode`에 고정 예제를 더한다. 설정은 `RuntimeConfigHolder`로 읽으므로 실전 경로가 JVM 속성을 바꿀 이유는 없다. 실행 옵션으로 줄 속성은 7단계 실행 절차서의 설치본 대조 항목에서 다룬다.
+
+## 판정
+수정 필요(AR-7)
