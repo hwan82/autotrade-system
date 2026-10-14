@@ -286,3 +286,54 @@
 
 ## 판정
 수정 필요(AR-8, AR-9)
+
+## 재검토 2026-10-14 (헤드 4f44ccc)
+- 대상: PR #108 / 커밋 4f44ccc / main 대비 diff 전체(`git diff origin/main...4f44ccc`, 22파일 +2,211 −3, 병합 기준 4b24550). 직전 재검토(743545c) 뒤 바뀐 것은 검토 원문 커밋 2개(a8907ec·3911b88)와 그 병합(389f201, 원문 파일 2개만 바뀜을 `git diff --stat 743545c 389f201`로 확인), 그리고 수정 커밋 4f44ccc다. 4f44ccc가 바꾼 것:
+  - `classAsData`의 클래스 객체 검사와 `involvesClass`를 `getBaseComponentType()`으로 비교(`RealPathReflectionTest.java:407`, `:434`)
+  - 새 `GetClassUses.java`(ASM으로 명령 순서를 읽어 `getClass()` 바로 다음이 `Class.getSimpleName|getName`이 아니면 위반, `getClass` 메서드 핸들도 위반)와 `classAsData`에서의 호출(`:429`)
+  - 고정 예제 `NameToClassBinding.byNames`·`viaGetClass`·`classOf`와 단언 3개, 허용 예제 `ReflectionFreeEngineCode`의 `GetClassUses` 무위반 단언(`:752`)
+  - D-086 1항·위험과 한계·검증, ADR-002 9.5 6항·남은 한계 문구, `docs/qa-out-status.md` 한 줄
+- 점검표: B
+- PR 본문, 커밋 메시지, D-086의 주장은 사실로 받지 않고 아래 실행으로만 판정했다
+- 직접 실행한 것(별도 작업 트리 `/tmp/claude-0/wt-architect-6`, `origin/claude/project-thread-l44wj7` = 4f44ccc. 공유 작업 트리는 건드리지 않았다):
+  - `./gradlew build --rerun-tasks`: 종료 코드 0. 결과 XML 합계 테스트 1,130건, 실패·오류·건너뜀 0. `RealPathReflectionTest` 7건 실행, 실패 0
+  - 변조 실험(커밋하지 않음, 끝난 뒤 지우고 `git status` 깨끗함 확인). 위치는 모두 실전 경로 범위인 `autotrade-control`의 `com.autotrade.control.zprobe`, 실행은 `:autotrade-control:build :autotrade-architecture-test:test`. 단독 실행은 Jackson 2.21.4 기본 `new ObjectMapper()`, 이름 `java.util.concurrent.atomic.AtomicLong`:
+
+    | 프로브 | 내용 | 규칙 결과 | 단독 실행 결과 |
+    |---|---|---|---|
+    | AR-8 확인 | `return Class[].class;` | **잡힘**(`Sanity.k()가 클래스 객체 Class[].class를 참조`). 범위가 이 패키지를 보는 것도 이것으로 확인 | 해당 없음 |
+    | AR-9 확인 | 람다 안 `String.class.getClass()`, 허용 모양 `o.getClass().getSimpleName()` | **잡힘**(`lambda$k$0의 getClass() 결과를 이름 읽기 밖에서 쓴다`), 허용 모양은 위반 없음 | 해당 없음 |
+    | P4 상위 클래스 제네릭 인자 | `final class SuperProbe extends ArrayList<Class<?>>` + `M.readValue("[\"<이름>\"]", SuperProbe.class).get(0)` | **안 잡힘**(`BUILD SUCCESSFUL`) | `class java.util.concurrent.atomic.AtomicLong`(타입 `java.lang.Class`) |
+    | P5 상위 클래스 타입 변수 | `class Holder<T> { public T value; }`, `final class TypeVarProbe extends Holder<Class<?>>` + `readValue("{\"value\":\"<이름>\"}", TypeVarProbe.class).value` | **안 잡힘** | `class java.util.concurrent.atomic.AtomicLong` |
+    | P6 설정자 없는 컬렉션 게터 | 필드 `List<Object> raw`, `public List<Class<?>> getTypes() { return (List) raw; }` + `readValue("{\"types\":[\"<이름>\"]}", GetterProbe.class)` (`USE_GETTERS_AS_SETTERS` 기본값) | **안 잡힘** | `class java.util.concurrent.atomic.AtomicLong` |
+
+  - 운영 코드 확인: 실전 경로 14개 모듈 `src/main`에서 `Class`를 상위 타입 제네릭 인자로 쓰거나 메서드 반환 타입에 쓰는 곳을 `grep`으로 찾았다. 0건(걸린 것은 매개변수 `ProfileParams.choice(String, Class<E>)` 하나뿐이고 이것은 허용 모양이다)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` 종료 코드 0, 테스트 1,130건 실패·오류·건너뜀 0 |
+| B2 | 실패 | 규칙 변경에 ADR-002 9.5 6항과 D-086 1항이 있으나, 두 문서가 막는다고 적은 "`Class` 속성을 가진 바인딩 대상"이 P4·P5·P6으로 열려 있다. 그리고 4f44ccc의 D-086 위험과 한계는 "R1(`Instant`)에 기대지 않는다(위 1번이 `Class` 값 바인딩을 막는다)"로 바뀌어, 문서가 코드보다 강하게 주장한다. AR-10 |
+| B3 | 통과 | 운영 계약 변경 없음. 규칙 계약 변경은 ADR-002 9.5 6항과 D-086에 적혀 있다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | AR-8·AR-9 고정 예제와 단언 3개, 허용 예제 단언 1개 추가(`RealPathReflectionTest.java:748`~`:754`). 기존 단언 삭제·약화, `@Disabled` 없음. 다만 P4~P6 모양의 고정 예제는 없다(AR-10) |
+| B7 | risk-ops 검토 필요 | 보호 테스트(`autotrade-architecture-test`) 변경이고 2차 확인 위조(Guard) 경로를 다룬다. risk-ops 재검토와 독립 QA 재검토 뒤 사용자가 머지한다 |
+| B8 | 통과 | 새 파일·예제에 키·계좌번호·토큰 없음 |
+
+### 직전 지적의 처리
+- AR-8(`Class[].class`): **해소**. 위 확인 프로브가 잡히고, `involvesClass`도 배열 원소로 비교한다.
+- AR-9(`Class`의 `getClass()`): **해소**. `GetClassUses`는 `getClass` 이름·서술자만 보고 소유자를 가리지 않으므로 `invokevirtual`·`invokespecial`(`super.getClass()`) 모두 걸리고, 람다 본문(합성 메서드)과 메서드 참조 핸들도 본다. 이름 읽기 뒤 결과는 `String`이라 클래스 객체로 돌아갈 길이 없다 `[추론]`.
+- AR-1~AR-7: 해소 상태 그대로(이번 빌드에서 해당 고정 예제 단언 통과).
+
+### 새 지적
+
+#### AR-10 (수정 필요) `Class`를 상위 타입 제네릭 인자나 게터 반환 타입에 두면 Jackson이 이름 문자열로 클래스를 만든다
+- `[사실]` 위 P4·P5·P6. 세 모양 모두 규칙을 통과하고, 기본 설정 `ObjectMapper`로 실행하면 이름의 클래스(정적 초기화 포함)를 돌려준다. Q16과 같은 다음 단계(`convertValue(fields, k)`)로 그대로 이어진다.
+- 원인: `classAsData`(`RealPathReflectionTest.java:403`)가 `Class`를 찾는 곳이 클래스 객체 리터럴, 필드 타입, 바인딩 메서드(생성자·`set*`·Jackson 주석)의 매개변수, 매개변수의 제네릭 인자뿐이다. Jackson은 이 밖에 (1) 상위 클래스·인터페이스의 제네릭 인자로 컬렉션 원소 타입과 상속한 필드의 타입 변수를 풀고(P4·P5), (2) 설정자 없는 `Collection`·`Map` 게터를 설정자로 쓴다(`MapperFeature.USE_GETTERS_AS_SETTERS` 기본 켜짐, P6). 둘 다 검사 대상이 아니다.
+- 고칠 방향(추천 ①):
+  - ① `Class`가 나올 수 있는 모양을 허용 목록으로 뒤집는다: "바인딩이 아닌 메서드의 매개변수 바로 그 타입이 `Class<T>`"만 허용하고, 그 밖에 클래스·필드·메서드 서명(상위 클래스·인터페이스 제네릭 인자, 모든 메서드의 반환 타입과 그 제네릭 인자, 타입 변수 경계)에 `java/lang/Class`가 나오면 위반으로 한다. 이미 클래스 파일을 읽는 `ClassFileTypes`가 `Signature` 속성을 보므로 같은 자리에서 서명 단위로 판정하면 빠뜨림이 적다. 지금 운영 코드 위반 0건이라 비용이 작다(위 grep).
+  - ② 실행 시 방어: 실전 경로 `ObjectMapper` 생성 지점을 하나로 모으고 `java.lang.Class` 역직렬화기를 늘 실패하는 것으로 등록, 그 밖의 매퍼 생성을 규칙으로 금지. 정적 규칙이 Jackson의 타입 해석 규칙을 하나씩 따라가는 일을 끝내는 확실한 방법이지만 운영 코드 18곳을 옮기는 변경이라 이 PR의 범위를 넘는다. ①로 또 빈틈이 나오면 ②로 가는 것을 되돌릴 조건으로 D-086에 적는다.
+- 고정 예제 `NameToClassBinding`(또는 새 예제)에 P4·P5·P6 세 모양을 넣고 단언한다. D-086 위험과 한계의 "위 1번이 `Class` 값 바인딩을 막는다" 문장은 고친 뒤에야 사실이 된다.
+
+## 판정
+수정 필요(AR-10)
