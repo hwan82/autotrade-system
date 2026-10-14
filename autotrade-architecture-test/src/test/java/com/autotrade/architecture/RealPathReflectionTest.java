@@ -43,7 +43,7 @@ import org.junit.jupiter.api.Test;
 import qa.probe.OutsideReflective;
 
 /**
- * 실전 경로의 리플렉션 금지(D-085, 독립 QA PR #21 Q-4, risk-ops PR #21 R-8, 기획서 TST-07 (9)).
+ * 실전 경로의 리플렉션 금지(D-086, 독립 QA PR #21 Q-4, risk-ops PR #21 R-8, 기획서 TST-07 (9)).
  *
  * <p>왜 필요한가: {@link ArchitectureTest}의 실전 경로 규칙(Guard 상향은 명령 채널만, 2차 확인은 검증기만, 출구는 Guard
  * 팩토리만)은 바이트코드의 호출만 본다. 문자열로 만든 이름과 {@code Method#invoke}·{@code MethodHandle}로 부르면 호출이
@@ -362,7 +362,7 @@ class RealPathReflectionTest {
                     }
                 })
                 .allowEmptyShould(true)
-                .because("실전 경로는 바이트코드에 드러나는 호출로만 Guard·출구에 닿아야 ArchUnit 규칙이 지켜진다(D-085, QA PR #21 Q-4)");
+                .because("실전 경로는 바이트코드에 드러나는 호출로만 Guard·출구에 닿아야 ArchUnit 규칙이 지켜진다(D-086, QA PR #21 Q-4)");
     }
 
     static final Set<String> CLASS_CHOOSING_TYPE_IDS = Set.of("CLASS", "MINIMAL_CLASS", "CUSTOM");
@@ -413,7 +413,7 @@ class RealPathReflectionTest {
             .that().resideOutsideOfPackage("com.autotrade.risk.guard..")
             .and().doNotHaveFullyQualifiedName(OperatorAuthenticator.class.getName())
             .should().dependOnClassesThat().areAssignableTo(SecondConfirmation.class)
-            .because("2차 확인은 비밀번호 검증기만 만들고 데이터 바인딩으로 만들어지면 안 된다(D-085, RSK-01)");
+            .because("2차 확인은 비밀번호 검증기만 만들고 데이터 바인딩으로 만들어지면 안 된다(D-086, RSK-01)");
 
     static final String GUARD_PACKAGE = "com.autotrade.risk.guard";
 
@@ -469,7 +469,7 @@ class RealPathReflectionTest {
                 }
             })
             .allowEmptyShould(true)
-            .because("Guard 상태는 Guard 코드만 만들고 바꾼다. 데이터 바인딩이 Guard 객체를 만들면 전이 검사를 건너뛴다(D-085)");
+            .because("Guard 상태는 Guard 코드만 만들고 바꾼다. 데이터 바인딩이 Guard 객체를 만들면 전이 검사를 건너뛴다(D-086)");
 
     /** Jackson이 만들 수 있는 모양(레코드)으로 둔 Guard 패키지 타입. 바꾸면 risk-ops 검토. */
     static final Set<String> GUARD_RECORDS = Set.of(

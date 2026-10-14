@@ -16,7 +16,7 @@ plugins {
 val architectureTest = project
 val otherProjects = rootProject.subprojects.filter { it != architectureTest }
 
-// 실전 경로 런타임(D-085, 독립 QA PR #21 Q-4·risk-ops R-8): 실전 엔진·감시 프로세스와, 7단계에 실전 엔진이 불러올 증권사
+// 실전 경로 런타임(D-086, 독립 QA PR #21 Q-4·risk-ops R-8): 실전 엔진·감시 프로세스와, 7단계에 실전 엔진이 불러올 증권사
 // 플러그인을 실제로 해석한 런타임 클래스패스. 손 목록이 아니라 Gradle이 해석한 결과에서 (1) 우리 프로젝트 목록(리플렉션 금지
 // 규칙의 모듈 범위)과 (2) 외부 라이브러리 목록(허용 목록과 대조)을 뽑아 테스트에 넘긴다. 실전 엔진에 새 모듈이나 외부 jar가
 // 들어오면 빌드 파일 수정 없이도 자동으로 범위에 들어오고, 허용 목록에 없는 외부 jar는 RealPathReflectionTest가 실패시킨다.

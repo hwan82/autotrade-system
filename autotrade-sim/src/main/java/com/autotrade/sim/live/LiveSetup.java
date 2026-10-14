@@ -1,5 +1,6 @@
 package com.autotrade.sim.live;
 
+import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.rules.InstrumentKind;
@@ -19,6 +20,7 @@ import com.autotrade.sim.recording.RecordingPlan;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -67,8 +69,36 @@ record LiveSetup(
 
     /** @param dataVersion 실시간 세션은 {@link #LIVE_DATA_VERSION_PREFIX} + 실험 ID, 리플레이 확인은 입력 기록 데이터셋 버전 */
     ExperimentSpec spec(ClockMode mode, String dataVersion) {
-        return new ExperimentSpec(plan.id(), plan.from(), plan.to(), plan.seed(), plan.seedCapital(), cost.id(),
+        return spec(mode, dataVersion, plan.to());
+    }
+
+    /** 운용 기간 중 {@code to}까지만 도는 실험 명세(주간 점검이 운용 중간까지 다시 돌릴 때). */
+    ExperimentSpec spec(ClockMode mode, String dataVersion, LocalDate to) {
+        return new ExperimentSpec(plan.id(), plan.from(), to, plan.seed(), plan.seedCapital(), cost.id(),
                 dataVersion, mode, combinations);
+    }
+
+    /**
+     * 세션이 받는 이벤트인지: 수신 날짜와 거래일이 모두 운용 기간 안. 캘린더 수록 범위 밖 등 판단할 수 없으면 받지 않는다.
+     * 종목(boards) 확인은 따로 한다.
+     */
+    boolean inPlan(MarketEvent e) {
+        LocalDate received = e.receivedAt().atZone(rules.zone()).toLocalDate();
+        if (received.isBefore(plan.from()) || received.isAfter(plan.to())) {
+            return false;
+        }
+        LocalDate trading;
+        try {
+            trading = rules.tradingDate(e.exchangeTime());
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        return !trading.isBefore(plan.from()) && !trading.isAfter(plan.to());
+    }
+
+    /** 세션이 받는 종목인지(등록 파일 boards, 같은 시장). */
+    boolean onBoards(MarketEvent e) {
+        return e.symbol().market() == plan.market() && plan.boards().containsKey(e.symbol().code());
     }
 
     /** 녹화 실험 보고서 형식({@link RecordingExperiment#results})을 그대로 쓰기 위한 같은 내용의 녹화 등록. */
