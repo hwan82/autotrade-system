@@ -159,3 +159,31 @@ val runLiveReplayCheck by tasks.registering(JavaExec::class) {
         }
     })
 }
+
+// 6단계 주간 점검(D-088): ./gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=<실험ID>
+//     [-Pto=YYYY-MM-DD] [-PsessionsDir=폴더] [-PrecordingsDir=폴더] [-PallowDuringSession] [-Pheap=4g]
+// 실시간 모의 세션의 입력 기록과 같은 날 게이트웨이 녹화를 대조해(받은 줄·빠진 줄과 원인, 공백 출처, 계좌 성과)
+// experiments/<실험ID>/weekly/<마지막 날>.md에 쓴다. 설명되지 않는 차이가 있으면 종료 코드 2.
+val runLiveWeeklyCheck by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "실시간 모의 입력 기록과 같은 날 녹화를 대조해 주간 점검표를 쓴다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "4g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val to = providers.gradleProperty("to")
+    val sessionsDir = providers.gradleProperty("sessionsDir")
+    val recordingsDir = providers.gradleProperty("recordingsDir")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            add("live-weekly")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            to.orNull?.let { addAll(listOf("--to", it)) }
+            sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }
+            recordingsDir.orNull?.let { addAll(listOf("--recordings-dir", it)) }
+        }
+    })
+}
