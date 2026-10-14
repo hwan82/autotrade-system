@@ -11,6 +11,7 @@ import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.feed.FeedSocket;
 import com.autotrade.sim.live.LiveSession;
 import com.autotrade.sim.run.CodeVersion;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -112,12 +114,17 @@ class LiveLabServiceTest {
         await(() -> events(service) == 20
                 && service.status().session().map(LiveSession.Status::skippedSymbol).orElse(0L) == 1);
         assertThat(service.status().session().orElseThrow().skippedSymbol()).isEqualTo(1);
+        assertThat(service.status().market()).isEqualTo("KRX"); // 화면 시간대는 서버가 준 시장으로(PR #96 R4)
+        assertThat(service.status().stopKind()).isEqualTo(LiveLabService.StopKind.NONE);
 
         LiveLabService.Finished done = service.finish();
         assertThat(done.accounts()).isEqualTo(1);
         assertThat(done.failedAccounts()).isZero();
         assertThat(experiments.resolve(ID).resolve(LiveSession.LIVE_DETAIL_FILE)).isRegularFile();
         assertThat(service.status().session()).isEmpty();
+        assertThat(service.status().market()).isEmpty();
+        assertThat(service.status().stopReason()).isEqualTo("끝냄");
+        assertThat(service.status().stopKind()).isEqualTo(LiveLabService.StopKind.NORMAL);
         await(() -> gateway.subscriberCount() == 0); // 끝내면 전달 연결도 끊는다
     }
 
@@ -130,6 +137,7 @@ class LiveLabServiceTest {
         Files.writeString(stopRequest, "");
         await(() -> service.status().session().isEmpty());
         assertThat(service.status().stopReason()).contains("정지를 요청");
+        assertThat(service.status().stopKind()).isEqualTo(LiveLabService.StopKind.PROBLEM);
         assertThatThrownBy(() -> service.start(ID)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("정지를 요청");
 
@@ -152,6 +160,7 @@ class LiveLabServiceTest {
         free.set(5 * gb); // 운용 중 디스크가 줄면 1초 안에 멈춘다
         await(() -> service.status().session().isEmpty() && service.status().experimentId().isEmpty());
         assertThat(service.status().stopReason()).contains("디스크 여유");
+        assertThat(service.status().stopKind()).isEqualTo(LiveLabService.StopKind.PROBLEM);
     }
 
     @Test
@@ -180,6 +189,7 @@ class LiveLabServiceTest {
         gateway.publish("KIWOOM-WS", new TradeTick(SAMSUNG, 1, t, t, new BigDecimal("60000"), 5));
         await(() -> events(service) == 1);
         service.stop("시험");
+        assertThat(service.status().stopKind()).isEqualTo(LiveLabService.StopKind.NORMAL);
 
         // 되살리는 중에 멈추면 기록일 사이에서 그만두고 잠금을 푼다. 정리가 끝나면 다시 시작할 수 있다
         service.start(ID);
@@ -285,5 +295,42 @@ class LiveLabServiceTest {
                 .hasMessageNotContaining(experiments.toString());
         assertThat(service.status().experimentId()).isEmpty();
         assertThat(service.status().stopReason()).contains("보고서를 쓰지 못했습니다");
+    }
+
+    @Test
+    void finishFailureBeforeTheReportLeavesOnlyTheExceptionKind() throws Exception {
+        // PR #96 N1: 마감·기록 닫기 실패 분기. 기록 파일을 지우면 DayWriter.close의 SHA-256 계산이 실패한다
+        gateway = FeedServer.open(FeedSocket.path(config));
+        service.start(ID);
+        await(() -> gateway.subscriberCount() == 1 && service.status().feedState() == ConnectionState.CONNECTED);
+        Instant t = LocalDate.of(2026, 10, 14).atTime(9, 30).atZone(ZoneId.of("Asia/Seoul")).toInstant();
+        gateway.publish("KIWOOM-WS", new TradeTick(SAMSUNG, 1, t, t, new BigDecimal("60000"), 5));
+        await(() -> events(service) == 1);
+        Path events;
+        try (Stream<Path> files = Files.walk(config.resolve("live-sessions"))) {
+            events = files.filter(f -> f.getFileName().toString().equals("events.jsonl.gz")).findFirst().orElseThrow();
+        }
+        Files.delete(events);
+
+        assertThatThrownBy(service::finish).isInstanceOf(UncheckedIOException.class);
+        LiveLabService.View after = service.status();
+        assertThat(after.experimentId()).isEmpty();
+        assertThat(after.stopReason()).isEqualTo("끝내기 실패(UncheckedIOException). 실험실 로그를 확인하세요")
+                .doesNotContain(config.toString());
+        assertThat(after.stopKind()).isEqualTo(LiveLabService.StopKind.PROBLEM);
+        assertThat(experiments.resolve(ID).resolve(LiveSession.LIVE_DETAIL_FILE)).doesNotExist();
+    }
+
+    @Test
+    void startFailureShowsTheExceptionKindWithoutPaths() throws Exception {
+        // PR #96 N2: 세션 폴더 자리에 파일이 있으면 세션을 열 수 없다. 화면 사유에는 예외 종류만, 절대 경로는 남기지 않는다
+        Files.createDirectories(config.resolve("live-sessions"));
+        Files.writeString(config.resolve("live-sessions").resolve(ID), "not a folder");
+        service.start(ID);
+        await(() -> service.status().experimentId().isEmpty());
+        LiveLabService.View after = service.status();
+        assertThat(after.stopReason()).startsWith("시작 실패(").endsWith("). 실험실 로그를 확인하세요")
+                .doesNotContain(config.toString());
+        assertThat(after.stopKind()).isEqualTo(LiveLabService.StopKind.PROBLEM);
     }
 }
