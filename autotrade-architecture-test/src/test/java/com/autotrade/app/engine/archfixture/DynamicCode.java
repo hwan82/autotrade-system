@@ -58,4 +58,14 @@ public final class DynamicCode {
         new ProcessBuilder("jcmd", Long.toString(pid), "JVMTI.agent_load", "/x.jar").start();
         return Runtime.getRuntime().exec(new String[] {"jcmd", Long.toString(pid), "JVMTI.agent_load", "/x.jar"});
     }
+
+    /** 보안 제공자에 클래스 이름을 등록하고 서비스로 만든다(Class.forName + newInstance와 같은 일, architect 2차 재검토 AR-6). */
+    public static Object viaProvider(String className) throws Exception {
+        java.security.Provider p = new java.security.Provider("X", "1", "x") {
+            private static final long serialVersionUID = 1L;
+        };
+        p.put("MessageDigest.Y", className);
+        java.security.Security.addProvider(p);
+        return p.getService("MessageDigest", "Y").newInstance(null);
+    }
 }

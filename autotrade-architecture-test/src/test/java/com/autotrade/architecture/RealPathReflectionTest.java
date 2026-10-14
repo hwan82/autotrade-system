@@ -99,6 +99,13 @@ class RealPathReflectionTest {
             "com.fasterxml.jackson.core:jackson-core",
             "com.fasterxml.jackson.core:jackson-databind");
 
+    /**
+     * 외부 명령을 실행해도 되는 클래스(FQN). 지금은 없다. 장애 대응표 #8·#9의 감시 자동 재기동(broker-and-fault-design 6장)을
+     * 감시 프로세스가 직접 하는 7단계 구현 PR에서 감시의 실행기 클래스 하나만 넣는다. 보호 테스트 변경이라 risk-ops 검토 뒤 사용자
+     * 머지(risk-ops PR #108 2차 재검토 F4). 그 클래스가 실행하는 명령도 그 PR에서 고정한다.
+     */
+    static final Set<String> ALLOWED_PROCESS_LAUNCHERS = Set.of();
+
     /** ServiceLoader를 써도 되는 클래스(FQN). 지금은 없다. */
     static final Set<String> ALLOWED_SERVICE_LOADERS = Set.of();
 
@@ -189,8 +196,9 @@ class RealPathReflectionTest {
             // JNI 네이티브 코드 적재(risk-ops PR #108 F2)
             case "java.lang.System" -> name.equals("load") || name.equals("loadLibrary");
             // 자기 JVM에 에이전트를 붙이는 외부 명령(jcmd <pid> JVMTI.agent_load)도 막는다(architect PR #108 재검토 AR-4)
-            case "java.lang.Runtime" -> name.equals("load") || name.equals("loadLibrary") || name.equals("exec");
-            case "java.lang.ProcessBuilder" -> true;
+            case "java.lang.Runtime" -> name.equals("load") || name.equals("loadLibrary")
+                    || name.equals("exec") && !ALLOWED_PROCESS_LAUNCHERS.contains(access.getOriginOwner().getName());
+            case "java.lang.ProcessBuilder" -> !ALLOWED_PROCESS_LAUNCHERS.contains(access.getOriginOwner().getName());
             // 다른 모듈에 깊은 리플렉션을 연다
             case "java.lang.Module" -> name.startsWith("add");
             default -> owner.isAssignableTo("java.lang.reflect.AccessibleObject") && name.endsWith("Accessible");
@@ -207,7 +215,9 @@ class RealPathReflectionTest {
             + "|setAnnotationIntrospector|annotationIntrospector|setAnnotationIntrospectors"
             + "|addMixIn|addMixIns|setMixIns|addMixInAnnotations|setMixInResolver|mixIn|addMixin|setMixInAnnotation"
             + "|setDeserializerModifier|setSerializerModifier|insertAnnotationIntrospector|appendAnnotationIntrospector"
-            + "|findClass|constructFromCanonical");
+            + "|findClass|constructFromCanonical"
+            // 클래스패스에서 모듈을 찾아 등록(ServiceLoader와 같은 일, risk-ops PR #108 2차 재검토 R4)
+            + "|findAndRegisterModules|findModules|findAndAddModules");
 
     /** 동적 코드 실행·간접 호출·원격 클래스 적재 수단(패키지 의존 자체를 막는다, risk-ops PR #108 F2). */
     static final String[] DYNAMIC_CODE_PACKAGES = {
@@ -224,11 +234,44 @@ class RealPathReflectionTest {
      * {@code ServiceLoader} 등)는 {@link #reflective}가 따로 막는다.
      */
     static final Set<String> ALLOWED_JDK_PACKAGES = Set.of(
-            "java.io", "java.lang", "java.math", "java.net", "java.net.http",
+            "java.math", "java.net.http",
             "java.nio", "java.nio.channels", "java.nio.charset", "java.nio.file", "java.nio.file.attribute",
-            "java.security", "java.text", "java.time", "java.time.format",
-            "java.util", "java.util.concurrent", "java.util.concurrent.atomic", "java.util.function", "java.util.regex",
+            "java.text", "java.time", "java.time.format",
+            "java.util.concurrent", "java.util.concurrent.atomic", "java.util.function", "java.util.regex",
             "java.util.stream", "java.util.zip", "javax.crypto", "javax.crypto.spec");
+
+    /**
+     * 클래스 단위로만 허용하는 JDK 패키지(architect PR #108 2차 재검토 AR-6 참고). 이 패키지들에는 이름 문자열로 클래스를 만들거나
+     * 코드를 불러오는 API가 섞여 있다({@code java.security.Provider$Service#newInstance}, {@code java.util.ResourceBundle},
+     * {@code java.net.URLClassLoader}, {@code java.io.ObjectInputStream} 등). 그래서 지금 운영 코드가 쓰는 클래스만 넣었다.
+     * 늘리는 PR은 보호 테스트 변경이다. 목록 안 클래스의 위험 메서드({@code Class#forName}, {@code System#loadLibrary} 등)는
+     * {@link #reflective}가 따로 막는다.
+     */
+    static final Set<String> CLASS_LEVEL_JDK_PACKAGES = Set.of("java.lang", "java.util", "java.security", "java.net", "java.io");
+
+    static final Set<String> ALLOWED_JDK_CLASSES = Set.of(
+            "java.util.Base64", "java.util.Base64$Decoder", "java.util.Base64$Encoder",
+            "java.io.BufferedReader", "java.io.BufferedWriter", "java.io.ByteArrayOutputStream", "java.io.Console",
+            "java.io.FilterInputStream", "java.io.IOException", "java.io.InputStream", "java.io.InputStreamReader",
+            "java.io.OutputStream", "java.io.OutputStreamWriter", "java.io.PrintStream",
+            "java.io.UncheckedIOException", "java.lang.AutoCloseable", "java.lang.Boolean", "java.lang.CharSequence",
+            "java.lang.Character", "java.lang.Class", "java.lang.Comparable", "java.lang.Enum", "java.lang.Exception",
+            "java.lang.FunctionalInterface", "java.lang.IllegalArgumentException", "java.lang.IllegalStateException",
+            "java.lang.Integer", "java.lang.InterruptedException", "java.lang.Long", "java.lang.MatchException",
+            "java.lang.Math", "java.lang.Object", "java.lang.ProcessHandle", "java.lang.Record", "java.lang.Runnable",
+            "java.lang.Runtime", "java.lang.RuntimeException", "java.lang.StackTraceElement", "java.lang.String",
+            "java.lang.StringBuilder", "java.lang.System", "java.lang.System$Logger", "java.lang.System$Logger$Level",
+            "java.lang.Thread", "java.lang.Thread$Builder$OfPlatform", "java.lang.Throwable",
+            "java.lang.UnsupportedOperationException", "java.net.ConnectException", "java.net.StandardProtocolFamily",
+            "java.net.URI", "java.net.URLEncoder", "java.net.UnixDomainSocketAddress", "java.security.MessageDigest",
+            "java.security.SecureRandom", "java.util.ArrayList", "java.util.Arrays", "java.util.Collection",
+            "java.util.Collections", "java.util.Comparator", "java.util.Currency", "java.util.EnumMap",
+            "java.util.EnumSet", "java.util.HashMap", "java.util.HashSet", "java.util.HexFormat",
+            "java.util.Iterator", "java.util.LinkedHashMap", "java.util.List", "java.util.Locale", "java.util.Map",
+            "java.util.Map$Entry", "java.util.NavigableMap", "java.util.NavigableSet", "java.util.Objects",
+            "java.util.Optional", "java.util.OptionalInt", "java.util.OptionalLong", "java.util.Set",
+            "java.util.SortedMap", "java.util.SortedSet", "java.util.SplittableRandom", "java.util.StringJoiner",
+            "java.util.TreeMap", "java.util.TreeSet");
 
     /** {@code java.lang.reflect}에서 구조를 읽는 타입만(호출·필드 접근 수단은 아니다). {@code SecretPaths}가 레코드 구조를 읽는다. */
     static final Set<String> ALLOWED_REFLECT_TYPES = Set.of(
@@ -280,6 +323,7 @@ class RealPathReflectionTest {
             }
             boolean allowed = n.startsWith("com.fasterxml.jackson.")
                     ? JACKSON_ALLOWLIST.contains(n)
+                    : CLASS_LEVEL_JDK_PACKAGES.contains(t.getPackageName()) ? ALLOWED_JDK_CLASSES.contains(n)
                     : ALLOWED_JDK_PACKAGES.contains(t.getPackageName()) || ALLOWED_REFLECT_TYPES.contains(n);
             if (!allowed) {
                 out.add("허용 목록 밖 타입 " + n + ": " + d.getDescription());
@@ -475,6 +519,7 @@ class RealPathReflectionTest {
                 .containsExactlyInAnyOrderElementsOf(EXTERNAL_ALLOWLIST);
         assertThat(c.others()).as("프로젝트도 외부 모듈도 아닌 구성 요소(파일 의존 등)").isEmpty();
         assertThat(ALLOWED_SERVICE_LOADERS).as("ServiceLoader 허용 목록은 7단계 플러그인 로딩 PR 전까지 비어 있다").isEmpty();
+        assertThat(ALLOWED_PROCESS_LAUNCHERS).as("외부 명령 실행 허용 목록은 7단계 감시 재기동 PR 전까지 비어 있다").isEmpty();
     }
 
     @Test
@@ -560,7 +605,8 @@ class RealPathReflectionTest {
         // Jackson으로 객체 필드 쓰기·가시성·믹스인·문자열 클래스 찾기(F1): 5건
         EvaluationResult jackson = rule.evaluate(new ClassFileImporter().importClasses(JacksonObjectAccess.class));
         assertThat(String.join("\n", jackson.getFailureReport().getDetails()))
-                .contains("readerForUpdating", "updateValue", "setVisibility", "addMixIn", "findClass");
+                .contains("readerForUpdating", "updateValue", "setVisibility", "addMixIn", "findClass",
+                        "findAndRegisterModules");
         // Guard 타입을 데이터 바인딩 대상으로(F1): 클래스 객체, TypeReference 상위 타입 인자, 주석 값
         EvaluationResult guardData = GUARD_TYPES_ARE_NOT_DATA.evaluate(
                 new ClassFileImporter().importPackagesOf(GuardAsData.class));
@@ -577,7 +623,8 @@ class RealPathReflectionTest {
                 "System.loadLibrary", "Runtime.load", "raise()는 native", "ManagementFactory", "ToolProvider",
                 "InitialContext", "AtomicReferenceFieldUpdater.newUpdater", "Module.addOpens",
                 "URLClassLoader.newInstance", "ResourceBundle.getBundle", "Thread.getContextClassLoader",
-                "ProcessBuilder.<init>", "ProcessBuilder.start", "Runtime.exec");
+                "ProcessBuilder.<init>", "ProcessBuilder.start", "Runtime.exec",
+                "허용 목록 밖 타입 java.security.Provider", "Provider$Service.newInstance", "허용 목록 밖 타입 java.security.Security");
     }
 
     @Test
