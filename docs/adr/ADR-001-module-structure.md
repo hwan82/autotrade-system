@@ -246,7 +246,7 @@ DB 엔진 대안(Q-009): (A) PostgreSQL 16 **채택**(무료, role-guides.md 3�
 
 ## 6. 추천안 채택(자율) 목록
 
-결정 로그 번호는 pm-lead가 다음 정리 때 부여한다.
+결정 로그 번호는 pm-lead가 다음 정리 때 부여한다. (2026-10-14 부여: [D-077](../decisions/README.md))
 
 1. 프로세스별 부트 모듈 4개, Spring은 실험실에만(ARC-03).
 2. OrderGateway·MarketEvent를 domain에 둔다.
