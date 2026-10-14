@@ -66,7 +66,7 @@ class RecordingExperimentTest {
         assertThat(inputs)
                 .contains("data-set: \"" + first.data().version() + "\"")
                 .contains("adapter: REC-ADAPTER-V1")
-                .contains("execution-model: \"BOOK-V4;latency=PT0.5S\"")
+                .contains("execution-model: \"BOOK-V5;latency=PT0.5S\"")
                 .contains("  - date: 2026-03-03\n")
                 .contains("    recorded-events: 14\n")
                 .contains("    complete: true\n")
