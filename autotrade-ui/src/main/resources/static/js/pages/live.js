@@ -33,13 +33,18 @@ export async function livePage() {
   const host = h('div', { 'aria-live': 'polite' });
   const message = h('div', {});
   let busy = false;
-  const refresh = async () => {
+  // 등록 파일 목록은 모든 실험 폴더를 읽으므로 폴링마다 읽지 않는다. 화면에 들어올 때, 새로 읽기, 명령 뒤, 세션이 끝나 목록으로 돌아올 때만
+  let regs = null;
+  const refresh = async (withRegistrations = true) => {
     const view = await get('/api/live/status');
     const active = view.experimentId !== '';
-    const [gaps, regs] = await Promise.all([
+    const needRegs = !active && (withRegistrations || regs === null);
+    const [gaps, fresh] = await Promise.all([
       active && !view.restoring ? get(`/api/live/gaps?limit=${GAP_LIMIT}`).catch(e => ({ error: e.message })) : null,
-      active ? null : get('/api/live/registrations').catch(e => ({ error: e.message })),
+      needRegs ? get('/api/live/registrations').catch(e => ({ error: e.message })) : null,
     ]);
+    if (needRegs) regs = fresh;
+    if (active) regs = null;
     host.replaceChildren(active ? sessionView(view, gaps, act) : idleView(view, regs, act));
   };
   // 명령 하나가 끝날 때까지 다른 명령 버튼을 막는다(두 번 누름 방지)
@@ -60,7 +65,7 @@ export async function livePage() {
   await refresh();
   timer = setInterval(() => {
     if (!document.body.contains(host)) { stopPolling(); return; }
-    if (!busy) refresh().catch(() => { /* 다음 주기에 다시 읽는다. 실패를 매번 띄우지 않는다 */ });
+    if (!busy) refresh(false).catch(() => { /* 다음 주기에 다시 읽는다. 실패를 매번 띄우지 않는다 */ });
   }, POLL_MS);
   return h('div', {},
     h('div', { class: 'page-head' },

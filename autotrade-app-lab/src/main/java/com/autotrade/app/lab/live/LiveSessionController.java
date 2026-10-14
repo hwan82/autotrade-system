@@ -1,7 +1,6 @@
 package com.autotrade.app.lab.live;
 
 import com.autotrade.app.lab.web.ApiException;
-import java.io.UncheckedIOException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -72,8 +71,9 @@ public class LiveSessionController {
             return service.finish();
         } catch (IllegalStateException e) {
             throw ApiException.conflict(e.getMessage());
-        } catch (UncheckedIOException e) {
-            // 세션은 끝났고 보고서만 못 썼다. 메시지는 서비스가 만든 것(경로는 저장소 상대, 입력값 없음)이라 그대로 보인다
+        } catch (LiveLabService.ReportNotWrittenException e) {
+            // 세션은 끝났고 보고서만 못 썼다. 메시지는 서비스가 만든 것(경로는 저장소 상대, 입력값 없음)이라 그대로 보인다.
+            // 그 밖의 실패(마감·기록 닫기)는 공통 처리기로 가서 메시지 없이 500이 된다(사유는 상태 stopReason)
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "REPORT_NOT_WRITTEN", e.getMessage());
         }
     }

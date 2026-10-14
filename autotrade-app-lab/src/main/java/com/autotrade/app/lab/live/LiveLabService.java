@@ -12,7 +12,6 @@ import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.SimulationReport;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -221,6 +220,7 @@ public class LiveLabService implements AutoCloseable {
      * 이어 쓰지 않는다(리플레이 확인 {@code runLiveReplayCheck}으로 넘어감).
      *
      * @throws IllegalStateException 돌고 있는 세션이 없거나 아직 되살리는 중일 때
+     * @throws ReportNotWrittenException 세션은 끝냈고(입력 기록은 정상 종료로 닫힘) 보고서만 못 썼을 때. 메시지는 화면에 보여도 된다
      */
     public synchronized Finished finish() {
         if (running == null) {
@@ -232,7 +232,15 @@ public class LiveLabService implements AutoCloseable {
         Running r = running;
         running = null;
         r.halt();
-        SimulationReport report = r.session.finish(code);
+        SimulationReport report;
+        try {
+            report = r.session.finish(code);
+        } catch (RuntimeException e) {
+            // 마감이나 입력 기록 닫기 실패(메시지에 절대 경로가 있을 수 있어 사유에는 종류만 남김). 기록이 정상 종료로 닫혔는지 모른다
+            lastStopReason = "끝내기 실패(" + e.getClass().getSimpleName() + "). 실험실 로그를 확인하세요";
+            log.warn("실시간 모의 세션을 끝내지 못했습니다: {} ({})", r.plan.id(), e.getClass().getSimpleName());
+            throw e;
+        }
         Path target = experimentsRoot.resolve(r.plan.id().value()).resolve(LiveSession.LIVE_DETAIL_FILE);
         String shown = "experiments/" + r.plan.id() + "/" + LiveSession.LIVE_DETAIL_FILE;
         try {
@@ -241,12 +249,22 @@ public class LiveLabService implements AutoCloseable {
             // 세션은 이미 끝났고(기록은 정상 종료로 닫힘) 보고서만 못 썼다. 다시 시작하면 기록으로 되살린 뒤 끝내기를 다시 할 수 있다
             lastStopReason = "끝냈지만 보고서를 쓰지 못했습니다(" + e.getClass().getSimpleName() + "): " + shown;
             log.warn("실시간 보고서를 쓸 수 없습니다: {} ({})", target, e.getClass().getSimpleName());
-            throw new UncheckedIOException(lastStopReason + ". 공간·권한을 확인한 뒤 세션을 다시 시작하고 끝내기를 다시 하세요", e);
+            throw new ReportNotWrittenException(
+                    lastStopReason + ". 공간·권한을 확인한 뒤 세션을 다시 시작하고 끝내기를 다시 하세요", e);
         }
         lastStopReason = "끝냄";
         log.info("실시간 모의 세션 끝: {} → {}", r.plan.id(), target);
         long failed = report.runs().stream().filter(x -> !x.summary().failureReason().isEmpty()).count();
         return new Finished(r.plan.id().value(), shown, report.runs().size(), (int) failed);
+    }
+
+    /** 세션은 끝냈고 입력 기록도 정상 종료로 닫았지만 상세 보고서를 쓰지 못했다. 메시지에는 저장소 상대 경로만 있다. */
+    public static final class ReportNotWrittenException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        ReportNotWrittenException(String message, IOException cause) {
+            super(message, cause);
+        }
     }
 
     /** 세션을 끝낸 결과. */

@@ -59,4 +59,28 @@ class LiveSessionControllerTest {
         assertThat(controller.registrations()).isEmpty();
         assertThat(controller.gaps(100).total()).isZero();
     }
+
+    @Test
+    void reportWriteFailureIsReportNotWrittenWithoutAbsolutePath() throws Exception {
+        String id = "EXP-TEST-LIVE03";
+        Path dir = Files.createDirectories(experiments.resolve(id));
+        Files.writeString(dir.resolve("experiment.yaml"), String.join("\n", "id: \"" + id + "\"", "question: \"q\"",
+                "input: \"live\"", "market: \"KRX\"", "from: \"2026-10-14\"", "to: \"2026-10-14\"", "seed: \"1\"",
+                "seed-capital: \"10000000\"", "profiles:", "  - \"kr-bh-baseline@1\"", "boards:", "  - \"005930 KOSPI\"", ""),
+                java.nio.charset.StandardCharsets.UTF_8);
+        controller.start(id);
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (service.status().session().isEmpty()) {
+            assertThat(System.nanoTime()).isLessThan(deadline);
+            Thread.sleep(20);
+        }
+        Files.createDirectories(dir.resolve(com.autotrade.sim.live.LiveSession.LIVE_DETAIL_FILE));
+        assertThatThrownBy(controller::finish).isInstanceOfSatisfying(ApiException.class, e -> {
+            assertThat(e.status()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+            assertThat(e.code()).isEqualTo("REPORT_NOT_WRITTEN");
+            assertThat(e.getMessage()).contains("experiments/" + id + "/live-detail.txt")
+                    .doesNotContain(experiments.toString());
+        });
+        assertThat(controller.status().stopReason()).contains("보고서를 쓰지 못했습니다");
+    }
 }

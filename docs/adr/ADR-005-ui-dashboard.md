@@ -115,7 +115,7 @@ parameters:
 | `GET /api/live/gaps?limit=` | 도는 세션이 계좌에 준 공백(되살린 기록 포함) 중 최근 `limit`개(1~200, 기본 100), 최근 것부터: `{total, items[{symbol, reason, gapStart, gapEnd, receivedAt}]}`. `reason`은 `DataGap.GapReason`. 세션이 없거나 되살리는 중이면 `{0, []}`, `limit`이 범위 밖이면 400 `INVALID` |
 | `POST /api/live/sessions/{id}/start` | `experiments/<id>/experiment.yaml`(`input: "live"`)을 검사하고 되살리기를 시작한다. 응답은 위와 같은 `View`(`restoring=true`). 되살리기와 게이트웨이 연결은 뒤에서 하고, 실패하면 상태 `stopReason`에 남는다. 이미 도는(되살리는 중 포함) 세션이 있거나, 앞서 멈춘 세션을 정리하는 중이거나, 감시 정지 요청 중이거나, 입력 기록 디스크 여유가 하한 미만이거나, 등록 파일을 읽을 수 없으면(다른 프로그램이 잡음·권한·UTF-8 아님) 409 `CONFLICT`. ID 형식·등록 파일 형식 오류면 400 `INVALID`, CSRF 토큰이 없으면 403 |
 | `POST /api/live/stop` | 세션을 멈춘다(되살리는 중이면 그만둠, 기록을 닫음, 다시 시작 가능). 응답 `View`. 도는 세션이 없으면 아무것도 하지 않는다 |
-| `POST /api/live/finish` | 세션을 끝내고 `experiments/<id>/live-detail.txt`를 쓴다. 응답 `{experimentId, detailFile, accounts, failedAccounts}`. 도는 세션이 없거나 아직 되살리는 중이면 409 `CONFLICT`. 세션은 끝냈는데 보고서를 못 쓰면 500 `REPORT_NOT_WRITTEN`(메시지에 사유와 다시 할 방법, 상태 `stopReason`에도 남음, 입력 기록은 정상 종료로 닫혀 다시 시작하면 되살린 뒤 끝내기를 다시 할 수 있음) |
+| `POST /api/live/finish` | 세션을 끝내고 `experiments/<id>/live-detail.txt`를 쓴다. 응답 `{experimentId, detailFile, accounts, failedAccounts}`. 도는 세션이 없거나 아직 되살리는 중이면 409 `CONFLICT`. 마감과 입력 기록 닫기는 끝났는데 보고서 파일만 못 쓰면 500 `REPORT_NOT_WRITTEN`(메시지에 저장소 상대 경로와 다시 할 방법, 상태 `stopReason`에도 남음, 기록이 정상 종료로 닫혔으므로 다시 시작하면 되살린 뒤 끝내기를 다시 할 수 있음). 마감이나 기록 닫기 자체가 실패하면 공통 500 `INTERNAL`(메시지 없음, 상태 `stopReason`에 `끝내기 실패(예외 종류)`) |
 | `GET /api/settings` | 그룹별 키: 현재 값, 내장 default 값, 비밀값 여부·설정 여부, 편집 가능 여부, 반영 시점 |
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
 

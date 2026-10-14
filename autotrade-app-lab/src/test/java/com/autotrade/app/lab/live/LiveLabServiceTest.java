@@ -279,7 +279,7 @@ class LiveLabServiceTest {
         await(() -> service.status().session().isPresent());
         // 보고서 자리에 폴더가 있으면 쓰기가 실패한다(권한 시험은 root에서 재현되지 않음)
         Files.createDirectories(experiments.resolve(ID).resolve(LiveSession.LIVE_DETAIL_FILE));
-        assertThatThrownBy(service::finish).isInstanceOf(java.io.UncheckedIOException.class)
+        assertThatThrownBy(service::finish).isInstanceOf(LiveLabService.ReportNotWrittenException.class)
                 .hasMessageContaining("보고서를 쓰지 못했습니다")
                 .hasMessageContaining("experiments/" + ID + "/" + LiveSession.LIVE_DETAIL_FILE)
                 .hasMessageNotContaining(experiments.toString());
