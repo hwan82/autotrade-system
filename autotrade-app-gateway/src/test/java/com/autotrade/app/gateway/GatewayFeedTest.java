@@ -95,11 +95,11 @@ class GatewayFeedTest {
         Files.writeString(dir.resolve("run"), "소켓 폴더 자리에 파일"); // 폴더를 만들 수 없다
         assertThat(GatewayMain.openFeed(dir)).isNull();
 
-        try (Gateway g = Gateway.start(MarketDataMode.AUTO, List.of(kiwoom, kis),
-                new WatchList(List.of(GatewayTest.SAMSUNG), List.of()), dir.resolve("recordings"), null, clock)) {
-            kiwoom.source.set(ConnectionState.CONNECTED);
-            kiwoom.source.emit(new TradeTick(GatewayTest.SAMSUNG, 1, clock.now, clock.now, new BigDecimal("70000"), 1));
-        }
+        Gateway g = Gateway.start(MarketDataMode.AUTO, List.of(kiwoom, kis),
+                new WatchList(List.of(GatewayTest.SAMSUNG), List.of()), dir.resolve("recordings"), null, clock);
+        kiwoom.source.set(ConnectionState.CONNECTED);
+        kiwoom.source.emit(new TradeTick(GatewayTest.SAMSUNG, 1, clock.now, clock.now, new BigDecimal("70000"), 1));
+        g.close();
         assertThat(RecordedDay.open(new RecordingLayout(dir.resolve("recordings")).dayDir(Market.KRX,
                 LocalDate.of(2026, 10, 8))).lines()).extracting(RecordingCodec.Line::sourceId).contains("KIWOOM-FAKE");
     }
