@@ -15,3 +15,4 @@
 | 2026-10-14 | main 기준으로 1단계 완료 판정해줘 | docs/reviews/gates/stage-1.md | 단계 완료 판정(1단계 뼈대, PR #7·#9. 개발 쪽 대조표 docs/qa/stage-1-completion-check.md) |
 | 2026-10-14 | main 기준으로 5단계 완료 판정해줘 | docs/reviews/gates/stage-5.md | 단계 완료 판정(5단계 UI, D-074 PR #82 머지 f292fee. 개발 쪽 대조표 docs/qa/stage-5-readiness.md, 3장 이연 항목의 판정 범위 포함 여부는 사용자 확인 대상) |
 | 2026-10-14 | PR #87 검토해줘 | docs/reviews/pr-87/qa.md | 실전 관련 PR(D-076 게이트웨이 시세 전달 소켓·실시간 모의 세션. 게이트웨이를 실전 엔진과 공유, 장애 대응 표 #9·#10, 브랜치 claude/project-thread-go4oua) |
+| 2026-10-14 | main 기준으로 5단계 완료 재판정해줘 | docs/reviews/gates/stage-5.md(재검토 절) | 단계 완료 재판정(1차 수정 필요 C5 → 사용자 결정 D-079 기록과 C5 4곳 정정, 이 줄이 들어간 문서 PR 머지 뒤 main) |
