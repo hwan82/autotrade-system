@@ -13,3 +13,4 @@
 | 2026-10-13 | main 기준으로 3단계 완료 판정해줘 | docs/reviews/gates/stage-3.md | 단계 완료 판정(3단계 실험실 MVP, D-068 머지 후 main) |
 | 2026-10-13 | main 기준으로 3단계 완료 재판정해줘 | docs/reviews/gates/stage-3.md(재검토 절) | 단계 완료 재판정(1차 수정 필요 C1 → D-069 BOOK-V3·녹화 실험 명령 PR #74, 실녹화 실험 두 번 실행 experiments/EXP-20261013-REC01/report.md) |
 | 2026-10-14 | main 기준으로 1단계 완료 판정해줘 | docs/reviews/gates/stage-1.md | 단계 완료 판정(1단계 뼈대, PR #7·#9. 개발 쪽 대조표 docs/qa/stage-1-completion-check.md) |
+| 2026-10-14 | main 기준으로 5단계 완료 판정해줘 | docs/reviews/gates/stage-5.md | 단계 완료 판정(5단계 UI, D-074 PR #82 머지 f292fee. 개발 쪽 대조표 docs/qa/stage-5-readiness.md, 3장 이연 항목의 판정 범위 포함 여부는 사용자 확인 대상) |
