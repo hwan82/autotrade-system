@@ -337,3 +337,55 @@
 
 ## 판정
 수정 필요(AR-10)
+
+## 재검토 2026-10-14 (헤드 af0a8e3)
+- 대상: PR #108 / 커밋 af0a8e3 / main 대비 diff 전체(`git diff origin/main...af0a8e3`, 22파일 +2,379 −3, 병합 기준 4b24550). 직전 재검토(4f44ccc) 뒤 바뀐 것은 검토 원문 커밋 2개(architect 원문 a8a3c7d, risk-ops 원문 043332f)와 그 병합(3759fb4), 그리고 수정 커밋 af0a8e3다(`git diff --stat 4f44ccc af0a8e3`: 원문 2개 외에 아래 5파일). af0a8e3가 바꾼 것:
+  - `classAsData`: 상위 클래스·인터페이스 타입 인자, 클래스·메서드 타입 변수 경계, 모든 코드 단위의 반환 타입에 `Class`가 나오면 위반. 매개변수는 "바인딩이 아닌 메서드의 매개변수 바로 그 타입이 `Class<T>`이고 타입 인자에 `Class`가 없을 때"만 허용(`RealPathReflectionTest.java:410`~`:438`)
+  - 고정 예제 `NameToClassBinding.SuperProbe`·`Holder`·`TypeVarProbe`·`GetterProbe`와 단언 3개, `Holder` 무위반 단언(`:755`~`:771`)
+  - D-086 1항(허용 모양 하나, 되돌릴 조건: 실행 시 `Class` 역직렬화기 차단)·위험과 한계·검증, ADR-002 9.5 6항, `docs/qa-out-status.md` 한 줄
+- 점검표: B
+- PR 본문, 커밋 메시지, D-086의 주장은 사실로 받지 않고 아래 실행으로만 판정했다
+- 직접 실행한 것(별도 작업 트리 `/tmp/claude-0/wt-architect-7`, `origin/claude/project-thread-l44wj7` = af0a8e3. 공유 작업 트리는 건드리지 않았다):
+  - `./gradlew build --rerun-tasks`: `BUILD SUCCESSFUL`, 130개 작업 모두 실행, 종료 코드 0. 결과 XML 143개 합계 테스트 1,130건, 실패·오류·건너뜀 0. `RealPathReflectionTest` 7건 실행, 실패 0
+  - 변조 실험 1(커밋하지 않음, 끝난 뒤 지우고 `git status` 깨끗함 확인). 위치는 실전 경로 범위인 `autotrade-control`의 `com.autotrade.control.zprobe`, 실행은 `:autotrade-control:build :autotrade-architecture-test:test`:
+
+    | 프로브 | 내용 | 규칙 결과 |
+    |---|---|---|
+    | P4 | `final class SuperProbe extends ArrayList<Class<?>>` | **잡힘**(`상위 타입 java.util.ArrayList<java.lang.Class<?>>에 Class`) |
+    | P5 | `Holder<T> { public T value; }`, `TypeVarProbe extends Holder<Class<?>>` | **잡힘**(상위 타입). `Holder` 자체는 위반 없음 |
+    | P6 | 설정자 없는 `public List<Class<?>> getTypes()` | **잡힘**(`getTypes() 반환 타입에 Class`) |
+    | P7 와일드카드 | `public List<? extends Class<?>> getTypes()` | **잡힘**(반환 타입) |
+    | P8 인터페이스 기본 메서드 | `interface HasTypes { default List<Class<?>> getTypes() }` + 구현 클래스 | **잡힘**(`HasTypes.getTypes() 반환 타입`) |
+    | P9 중첩 타입 인자 | `extends HashMap<String, List<Class<?>>>` | **잡힘**(상위 타입) |
+    | P10 타입 변수 게터를 하위 클래스에서 묶기 | `Base<T> { public List<T> getItems() }`, `BaseSub extends Base<Class<?>>` | **잡힘**(`BaseSub`의 상위 타입). `Base`는 위반 없음 |
+    | P11 Map 키 | `extends HashMap<Class<?>, String>` | **잡힘**(상위 타입) |
+    | 허용 모양 | `static <T> T pick(List<Object> xs, Class<T> type)` | 위반 없음(의도대로) |
+
+  - 변조 실험 2(규칙 약화, 커밋하지 않음, 원복 확인): `classAsData`의 상위 타입 검사와 반환 타입 검사를 끄면 `규칙은_리플렉션_우회를_실제로_잡아낸다`가 실패한다. 새 단언이 새 검사를 실제로 고정한다
+  - 허용 목록 안 외부 타입의 바인딩 속성 조사: JDK 리플렉션으로 허용 목록의 JDK 패키지 전체·JDK 클래스·`java.lang.reflect` 3개·Jackson 34개를 훑어, 상위 타입 인자·공개 필드·단일 인자 `set*`·컬렉션 게터·단일 인자 생성자·정적 팩토리에 `Class`가 나오는 공개 타입을 찾았다(스크래치 도구, 커밋하지 않음). 나온 것은 `ObjectMapper`·`JsonMapper`의 `setMixIns(Map<Class<?>,Class<?>>)`·`setMixInAnnotations`, 박싱 타입의 정적 `TYPE` 필드(Jackson이 바인딩하지 않는 정적 필드), `EnumMap(Class)`·`EnumSet.noneOf/allOf`(Jackson 전용 역직렬화기), `Class` 자신(리터럴은 이미 금지)뿐이다. `ObjectMapper`를 바인딩 대상으로 쓰는 `readValue("{\"mixIns\":{..}}", ObjectMapper.class)`와 `convertValue(.., ObjectMapper.class)`, `JsonMapper.class`는 Jackson 2.21.4에서 `Conflicting setter definitions for property "defaultPropertyInclusion"`으로 실패한다(단독 실행으로 확인). 하위 클래스로 충돌을 풀려면 `JsonInclude$Value`(허용 목록 밖)를 서명에 써야 하므로 규칙에 걸린다 `[추론]`. 아래 R6으로 남긴다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` 종료 코드 0, 테스트 1,130건 실패·오류·건너뜀 0 |
+| B2 | 통과 | 규칙 변경은 테스트 모듈 안에만 있고 ADR-002 9.5 6항(`ADR-002-real-trading-guard.md:239`)과 D-086 1항(`D-086-real-path-reflection-ban.md:23`)에 적혀 있다. 운영 코드 위반 0건(위 빌드). 문서가 막는다고 적은 서명 모양(상위 타입 인자·반환 타입·타입 변수 경계·매개변수 제네릭 인자)이 변조 실험 1에서 모두 잡혔다 |
+| B3 | 통과 | 운영 계약 변경 없음. 규칙 계약 변경은 위 ADR과 D-086에 있다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 통과 | AR-10 고정 예제와 단언 3개, 허용 모양 무위반 단언(`RealPathReflectionTest.java:768`~`:771`). 변조 실험 2로 단언이 새 검사를 고정함을 확인. 기존 단언 삭제·약화, `@Disabled` 없음 |
+| B7 | risk-ops 검토 필요 | 보호 테스트(`autotrade-architecture-test`) 변경이고 2차 확인 위조(Guard) 경로를 다룬다. risk-ops 재검토와 독립 QA 재검토 뒤 사용자가 머지한다 |
+| B8 | 통과 | 새 예제·문서에 키·계좌번호·토큰 없음 |
+
+### 직전 지적의 처리
+- AR-10(상위 타입 인자·게터 반환 타입): **해소**. P4~P6과 변형 P7~P11이 모두 잡힌다. 판정이 "나올 수 있는 자리를 하나씩 막기"에서 "허용 모양 하나 밖은 모두 위반"으로 바뀌어, 우리 클래스의 서명에서 Jackson이 `Class` 타입을 알아낼 자리는 남지 않았다 `[추론]`(ArchUnit이 읽는 서명은 클래스 파일 `Signature` 속성이고 javac는 늘 이를 쓴다). 바인딩이 아닌 메서드의 `Class<T>` 매개변수는 Jackson이 부르지 않는다(생성자·`set*`·Jackson 주석 메서드는 `binding`으로 걸리고, 빌더 `with*`는 `@JsonDeserialize`/`@JsonPOJOBuilder`가 허용 목록 밖이다)
+- D-086 위험과 한계(`:47`)의 "위 1번이 `Class`가 나오는 서명 모양을 하나로 줄여 `Class` 값 바인딩을 막는다"는 우리 클래스 기준으로 이번 실행과 맞는다
+- AR-1~AR-9: 해소 상태 그대로(이번 빌드에서 해당 고정 예제 단언 통과)
+
+### 새 지적
+- 차단 지적 없음.
+
+#### R6 (권고, 판정 조건 아님) 허용 목록 Jackson 타입 자체가 `Class` 속성을 가진다
+- `[사실]` `ObjectMapper`·`JsonMapper`는 `setMixIns(Map<Class<?>,Class<?>>)`를 가진 공개 무인자 생성자 클래스다. 규칙은 우리 클래스의 서명만 보므로 `readValue(json, ObjectMapper.class)`는 정적으로 통과한다. 지금은 Jackson 2.21.4가 이 클래스의 바인딩 정의를 만들지 못해(설정자 충돌) 실행 시 실패하므로 열린 경로가 아니다.
+- 이 실패는 Jackson 내부 사정에 기댄 것이라 버전이 바뀌면 달라질 수 있다 `[추론]`. 고칠 방향(추천 ①): ① 허용 목록 Jackson 타입(`ObjectMapper`, `JsonMapper`, `SimpleModule` 등 34개)의 클래스 객체 리터럴을 실전 경로에서 금지한다(운영 코드가 이 리터럴을 쓰는지 grep으로 확인 뒤, 0건이면 비용이 작다). ② D-086 "Jackson 버전을 올리는 PR은 이 목록과 함께 검토한다" 문장에 이 확인을 명시한다. 이번 PR에서 하지 않아도 되며, 하지 않으면 D-086 위험과 한계에 한 줄 남기기를 권한다.
+
+## 판정
+승인
