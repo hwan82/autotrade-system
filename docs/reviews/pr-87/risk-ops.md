@@ -106,3 +106,43 @@
 
 ### 판정
 승인
+
+## 재검토 2026-10-14 (2차)
+- 대상: PR #87 / 브랜치 `claude/project-thread-go4oua` / 커밋 `1b01f5bfe33680868e9f0c42e9caaa7bd336b2d7` / `git diff origin/main...HEAD` 전체(merge-base `4e32d75` = 지금 `origin/main`). 앞 재검토(`b4c9227`) 뒤 커밋은 `25dc275`(architect 재검토 반영: 멈춤 판단 표시 분리, 시험 1개, 설정 키·API 표), `7270b52`(main 병합), `1b01f5b`(architect 2차 원문, QA 대기 목록)이다.
+- 점검표: A
+- 직접 실행한 것:
+  - 다른 세션의 빌드 출력과 겹치지 않게 `1b01f5b`를 검토용 폴더에 새로 복제하고, 앞 검토와 같은 저장소 밖 init 스크립트(Maven Central 429 회피용 Google 미러, 저장소 파일 변경 없음)로 `./gradlew --no-daemon build --rerun-tasks --continue`를 돌렸다 → **BUILD SUCCESSFUL, 130개 작업 모두 실행**. 테스트 결과 XML 집계(실패 0, 오류 0, 건너뜀 0): risk 55(RealTradingGuardTest 31, GuardedOrderGatewayTest 8), architecture-test 31(ArchitectureTest 18, ModuleOwnershipTest 13), app-engine 48, marketdata 129(FeedServerTest 9, AcceptBackoffTest 2 포함), app-gateway 40(GatewayFeedTest 2), sim 199(LiveSessionTest 9), app-lab 145(LiveLabServiceTest 5), app-experiment 17, 나머지 모듈 전부 통과.
+  - 코드·문서 확인: `b4c9227..1b01f5b` 전체 diff(9파일). 코드 변경은 `FeedServer.java`와 `FeedServerTest.java`뿐이다. 병합 커밋 `7270b52`는 충돌 해결 없음(`git show --cc` 결합 diff 0건)이고 main에서 온 파일은 `docs/qa/stage-1-completion-check.md`, `docs/reviews/pr-84/architect.md`(문서)뿐이다. 범위 전체 재확인으로 diff 이름 목록에서 `autotrade-risk`·`autotrade-architecture-test`·`autotrade-app-engine`·`autotrade-app-watchdog`·`broker-*` 변경 0건, 추가 줄에 `OrderGateway`·`RealOrder`·`RealTradingGuard` 0건, 비밀값 패턴 0건(검토 원문 인용 줄 1건 제외), 실전 엔진 `processIsolation`(`autotrade-app-engine/build.gradle.kts:12-15`)이 sim·lab·gateway를 막고 있음, 실험실 `bootRun` 힙 상한(`autotrade-app-lab/build.gradle.kts:44`), 디스크 하한 음수 거부(`LiveLabService.java:105-108`)와 판정(`LiveLabService.java:277`), 장애 문서 5.2 2번·#9·#10 diff를 다시 봤다.
+  - 이 파일 앞부분(첫 검토와 재검토 절)은 그대로 두었고 이 절만 덧붙였다.
+
+### 앞 재검토 점검표 밖 발견 처리
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| M1 멈춤 표시값과 `nanoTime` 부호 | 해결 | 쓰기 중 여부를 `volatile boolean writing`으로 분리했다(`FeedServer.java:230-233`). `writeLine`은 `writingSince`를 먼저 쓰고 `writing=true`를 뒤에 쓰며 `finally`에서 `writing=false`(`FeedServer.java:295-306`). 판정은 `s.subscribed && s.writing && now - s.writingSince > stallNanos`(`FeedServer.java:190`). 두 필드가 모두 volatile이고 읽는 쪽이 `writing`을 먼저 읽으므로, `writing=true`를 본 뒤 읽는 `writingSince`는 그 줄의 시작 시각이거나 더 새 값이다. 그래서 오래된 시각으로 정상 받는 쪽을 끊는 경우가 생기지 않는다 `[추론, 코드 확인]`. 새 시험 `FeedServerTest.quietConnectionIsNotDisconnectedOnItsFirstEvent`(멈춤 판단 300ms, 1초 조용한 뒤 3건 전달, 끊기지 않고 재접속 0) 통과. 다만 이 시험은 음수 `nanoTime`을 재현하지 못해 옛 코드에서도 통과했을 것이다. 수정의 근거는 코드 확인이고, 회귀 방지로는 "조용한 연결을 끊지 않는다"만 지킨다 |
+| M2 되살리기 하루 안 정지 확인 | 후속(변경 없음) | 코드 변경 없음. 앞 재검토대로 6단계 첫 재기동 측정 뒤 정한다. 차단 아님 |
+| M3 `acceptLoop` 실패 주입 시험 | 후속(변경 없음) | 코드 변경 없음. `acceptLoop`은 `AcceptBackoff`를 그대로 쓴다(`FeedServer.java:142-166`). 차단 아님 |
+
+### 점검표 A (1b01f5b 기준)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | diff에 `autotrade-risk`·RealTradingGuard·설정 로더 변경 없음(diff 이름 목록). `RealTradingGuardTest` 31건 통과 |
+| A2 | 통과 | 실전 주문 출구·ArchUnit 규칙 변경 없음(`autotrade-architecture-test` 변경 0). ArchitectureTest 18·ModuleOwnershipTest 13 통과. 추가 줄에 `OrderGateway`·`RealOrder` 없음 |
+| A3 | 통과 | 게이트웨이 변경은 전달 출구, 기동 실패 정리, accept 백오프, 이번 멈춤 표시 분리뿐이다. 주문·증권사 선택 코드 변경 없음 |
+| A4 | 해당 없음 | 실전 주문 송신 코드 변경 없음. 가상 제출은 `RunStepper.submit`으로 옮겨졌고 이번 범위에서 바뀌지 않음 |
+| A5 | 해당 없음 | 실전 멱등 키 경로 변경 없음. 가상 `SimOrderKeys` 그대로 |
+| A6 | 통과 | 실전 블랙리스트 코드 변경 없음. 실시간 세션도 같은 `RiskChain`(`LiveSetup.java:59-62`), `LiveSessionTest.blacklistedSymbolIsNeverBoughtInTheLiveSession` 통과 |
+| A7 | 해당 없음 | 실전 계좌 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 게이트웨이: `publish`는 기다리지 않고 예외를 삼킴(`FeedServer.java:114-126`), 받는 쪽마다 고정 큐·전용 쓰기 스레드, 한 줄 쓰기 30초 막히면 끊음(이번에 표시 분리로 오판 가능성 제거, `FeedServer.java:190`), accept 실패 백오프, 소켓 실패 시 녹화만(`GatewayFeedTest` 2, `FeedServerTest` 9). 실험실: 정지 요청 파일·디스크 하한(기본 20GB, 음수 거부)으로 시작 거부·운용 중 정지, 되살리기는 기록일 단위·`live-restore` 최저 우선순위 스레드(`LiveLabService.java:149`), 힙 상한 4g(`LiveLabServiceTest` 5). 실전 엔진은 sim·lab·gateway 의존 금지(`autotrade-app-engine/build.gradle.kts:12-15`, 빌드의 격리 검사 통과) |
+| A9 | 통과 | 실전 엔진·보호 시세 경로·서버 측 손절 코드 변경 없음. 게이트웨이 수신·녹화는 전달과 무관(녹화 먼저, 전달은 큐에 넣기만) |
+| A10 | 통과 | 추가 줄에 키·계좌번호·토큰 없음(grep, 검토 원문 인용 줄만 걸림). 소켓 폴더 700·파일 600. 이번 변경의 로그는 받는 쪽 이름과 초만 남긴다 |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음(보호 테스트 파일 변경 0). 이번 코드 변경에 시험 1개 추가(`quietConnectionIsNotDisconnectedOnItsFirstEvent`). 이 시험이 음수 `nanoTime`을 재현하지 못하는 한계는 위 M1에 적었다 |
+| A12 | 통과 | 장애 문서 5.2 2번·#9·#10이 코드와 맞다(디스크 기본 20GB, 30초 멈춤 끊기, 힙 4g, 공백 종류). 이번 변경은 #9의 "한 줄 쓰기가 30초 넘게 막히면 끊음" 문구를 그대로 만족한다. 장애 테스트 8종의 전제(실전 엔진 격리, 시세 전환, 엔진 재기동)를 깨는 변경 없음 |
+| A13 | 해당 없음 | 실시간 세션은 KRX만(`LivePlan.java:80-81`). 시간대는 캘린더, 금액은 기존 실행기 |
+| A14 | 통과 | 이번에 바뀐 문서(config-keys `autotrade.lab.live.min-free-gb` 기본 20·0 이상, ADR-005 `/api/live/*` 표의 `restoring`·409 조건)가 코드와 맞다(`LabWebConfiguration.java:106`, `LiveLabService.java:105-108`). D-076·ADR-010·기획서는 앞 재검토 뒤 바뀌지 않았다 |
+
+### 점검표 밖 발견(차단 아님)
+- P1: `autotrade.lab.live.min-free-gb=0`이면 디스크 하한이 사실상 꺼진다(0 이상 허용, `LiveLabService.java:105`). 사용자 설정이고 문서에 범위가 적혀 있어 차단하지 않지만, 6단계 절차서에 "0은 하한 없음이므로 쓰지 말 것"을 한 줄 넣기를 권한다. 아주 큰 값(약 85억 GB 초과)은 `minFreeGb * 2^30`이 넘쳐 음수가 될 수 있다 `[추론]`. 현실적 입력이 아니라 기록만 한다.
+- 머지 절차: 이 PR은 실전 관련 PR(프로세스 격리·장애 대응 문서)이다. 이 판정은 risk-ops 역할 검토에 한한다. 지침 10·11장에 따라 독립 QA 검토(`docs/qa/pending.md`에 "PR #87 검토해줘" 등록 확인)와 **사용자 직접 머지**가 남아 있다.
+
+### 판정
+승인
