@@ -32,10 +32,14 @@ public class ProfileController {
         this.store = store;
     }
 
+    /** 목록. {@code market}·{@code style}을 주면 그 시장·스타일만(실험 생성·선정 화면의 조합 고르기, STR-02). */
     @GetMapping
     public Page<StrategyProfileStore.ProfileSummary> list(
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-        return Page.of(store.list(), page, size);
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) Market market, @RequestParam(required = false) TradingStyle style) {
+        return Page.of(store.list().stream()
+                .filter(p -> (market == null || p.market() == market) && (style == null || p.style() == style))
+                .toList(), page, size);
     }
 
     @GetMapping("/{id}")
