@@ -5,12 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
+import com.autotrade.domain.market.Symbol;
+import com.autotrade.domain.market.TradeTick;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.testing.FixtureEvents;
 import com.autotrade.sim.testing.FixtureRecordings;
 import com.autotrade.sim.testing.TestKrxRules;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,7 +66,7 @@ class RecordingExperimentTest {
         assertThat(inputs)
                 .contains("data-set: \"" + first.data().version() + "\"")
                 .contains("adapter: REC-ADAPTER-V1")
-                .contains("execution-model: \"BOOK-V3;latency=PT0.5S\"")
+                .contains("execution-model: \"BOOK-V4;latency=PT0.5S\"")
                 .contains("  - date: 2026-03-03\n")
                 .contains("    recorded-events: 14\n")
                 .contains("    complete: true\n")
@@ -94,6 +97,21 @@ class RecordingExperimentTest {
         RecordingPlan empty = RecordingPlan.parse(PLAN.replace("2026-03-03", "2026-03-05").replace("2026-03-04", "2026-03-06"), "t");
         assertThatThrownBy(() -> RecordingExperiment.run(empty, Path.of(".."), recordings, new CodeVersion("t", false),
                 false, m -> { }, RunGate.NONE)).hasMessageContaining("기간 안에 녹화가 없습니다");
+    }
+
+    @Test
+    void 주식_호가_단위에_맞지_않는_가격이_있으면_시작하지_않는다(@TempDir Path tmp) throws IOException {
+        // architect PR #74 R2: ETF(5원 단위) 같은 가격이 녹화에 있으면 주식 호가 단위로 돌리지 않고 거절한다
+        List<MarketEvent> events = new ArrayList<>(EVENTS);
+        MarketEvent last = events.get(events.size() - 1);
+        events.add(new TradeTick(Symbol.krx("000660"), last.sequence() + 1, last.exchangeTime().plusSeconds(1),
+                last.receivedAt().plusSeconds(1), new BigDecimal("180050"), 1));
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), events);
+        RecordingPlan plan = RecordingPlan.parse(PLAN, "t");
+        assertThatThrownBy(() -> RecordingExperiment.run(plan, Path.of(".."), recordings, new CodeVersion("t", false),
+                false, m -> { }, RunGate.NONE))
+                .hasMessageContaining("주식 호가 단위에 맞지 않는 녹화 가격입니다: 000660 180050");
     }
 
     @Test
