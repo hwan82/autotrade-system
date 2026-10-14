@@ -79,6 +79,56 @@ class JournalWriterTest {
     }
 
     @Test
+    void resumingOnALaterDayReturnsRestartGapsFromTheLastDayBeforeTheEvent() {
+        // 1일차 장중에 멈췄다가 2일차에 이어 받으면 1일차 나머지가 빠진 것을 새 날 첫 줄 앞 공백으로 남긴다(QA PR #91 R1)
+        JournalWriter first = writer();
+        first.append("KIWOOM-WS", tick(SAMSUNG, 1, OPEN), OPEN);
+        Instant lastAlive = OPEN.plusSeconds(1);
+        first.append("KIWOOM-WS", tick(HYNIX, 2, lastAlive), lastAlive);
+        first.flush(); // 비정상 종료
+
+        Instant nextDay = OPEN.plusSeconds(24 * 3600);
+        JournalWriter second = writer();
+        second.resumeAfter(LocalDate.of(2026, 10, 14));
+        List<MarketEvent> out = second.append("KIWOOM-WS", tick(SAMSUNG, 3, nextDay), nextDay);
+        List<MarketEvent> later = second.append("KIWOOM-WS", tick(HYNIX, 4, nextDay.plusSeconds(1)), nextDay);
+        second.close(nextDay.plusSeconds(2));
+
+        assertThat(out).hasSize(3);
+        assertThat(out.subList(0, 2)).extracting(MarketEvent::symbol).containsExactly(HYNIX, SAMSUNG);
+        assertThat(out.subList(0, 2)).allSatisfy(e -> assertThat(e).isInstanceOfSatisfying(DataGap.class, g -> {
+            assertThat(g.reason()).isEqualTo(DataGap.GapReason.RECORDER_RESTART);
+            assertThat(g.gapStart()).isEqualTo(lastAlive);
+            assertThat(g.gapEnd()).isEqualTo(nextDay);
+        }));
+        assertThat(out).extracting(MarketEvent::sequence).containsExactly(1L, 2L, 3L);
+        assertThat(later).singleElement().satisfies(e -> assertThat(e.sequence()).isEqualTo(4));
+
+        RecordingLayout layout = new RecordingLayout(root);
+        assertThat(RecordedDay.open(layout.dayDir(Market.KRX, LocalDate.of(2026, 10, 15))).lines())
+                .extracting(RecordingCodec.Line::seq).containsExactly(1L, 2L, 3L, 4L);
+        // 앞 날 파일은 다시 열지 않는다
+        assertThat(RecordedDay.open(layout.dayDir(Market.KRX, LocalDate.of(2026, 10, 14))).lines()).hasSize(2);
+    }
+
+    @Test
+    void resumingOnTheSameDayKeepsTheSameDayRestartGapsOnly() {
+        JournalWriter first = writer();
+        first.append("KIWOOM-WS", tick(SAMSUNG, 1, OPEN), OPEN);
+        first.flush();
+
+        Instant resumed = OPEN.plusSeconds(60);
+        JournalWriter second = writer();
+        second.resumeAfter(LocalDate.of(2026, 10, 14));
+        List<MarketEvent> out = second.append("KIWOOM-WS", tick(SAMSUNG, 2, resumed), resumed);
+        second.close(resumed);
+
+        assertThat(out).hasSize(2);
+        assertThat(out.get(0)).isInstanceOf(DataGap.class);
+        assertThatThrownBy(() -> second.resumeAfter(LocalDate.of(2026, 10, 14))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void splitsDaysByExchangeLocalDateOfReceipt() {
         JournalWriter w = writer();
         w.append("KIWOOM-WS", tick(SAMSUNG, 1, OPEN), OPEN);

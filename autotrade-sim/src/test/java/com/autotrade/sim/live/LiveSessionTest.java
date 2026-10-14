@@ -218,10 +218,13 @@ class LiveSessionTest {
 
         LiveSession resumed = LiveSession.open(plan, REPO, copy, clock, m -> { });
         assertThat(resumed.status().restored()).isPositive().isLessThanOrEqualTo(crashAt);
+        int gapsBefore = resumed.status().dataGaps();
         for (MarketEvent e : events.subList(resumeFrom, events.size())) {
             clock.now = e.receivedAt();
             assertThat(resumed.accept("KIWOOM-WS", e)).isEqualTo(LiveSession.Accepted.ACCEPTED);
         }
+        // 멈춘 구간은 같은 날이든 다음 날이든 재기동 공백으로 남는다(QA PR #91 R1)
+        assertThat(resumed.status().dataGaps()).isGreaterThan(gapsBefore);
         writeLiveDetail(resumed.finish(new CodeVersion("c", false)));
 
         LiveReplayCheck.Outcome out = LiveReplayCheck.run(experimentDir, REPO, copy, new CodeVersion("c", false),
