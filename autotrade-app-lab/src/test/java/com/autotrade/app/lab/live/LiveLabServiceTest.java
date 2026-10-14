@@ -107,7 +107,9 @@ class LiveLabServiceTest {
             gateway.publish("KIWOOM-WS", new TradeTick(SAMSUNG, i + 1, at, at, new BigDecimal(60000 + i * 100), 5));
         }
         gateway.publish("KIWOOM-WS", new TradeTick(Symbol.krx("000660"), 99, t, t, new BigDecimal("180000"), 1));
-        await(() -> events(service) == 20);
+        // 받은 순서대로 처리하지만 21번째(boards 밖 종목)까지 처리된 뒤를 기다린다(risk-ops PR #94 F2: 20건만 기다리면 경합)
+        await(() -> events(service) == 20
+                && service.status().session().map(LiveSession.Status::skippedSymbol).orElse(0L) == 1);
         assertThat(service.status().session().orElseThrow().skippedSymbol()).isEqualTo(1);
 
         LiveLabService.Finished done = service.finish();
