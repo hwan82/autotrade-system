@@ -13,6 +13,7 @@
    - 같은 일을 하는 패키지 의존: `java.beans`, `javax.script`, `java.lang.instrument`, Attach API, `sun.misc`, `sun.reflect`, `jdk.internal`
    - Jackson이 JSON 내용으로 만들 클래스를 고르게 하는 설정: 기본 타입 지정(`*DefaultTyping*`), `@JsonTypeInfo(use = CLASS·MINIMAL_CLASS·CUSTOM)`. `NAME`·`SIMPLE_NAME`·`DEDUCTION`은 허용(미리 정한 하위 타입만 고른다)
    - 외부 명령 실행(`ProcessBuilder`, `Runtime#exec`): `jcmd <자기 pid> JVMTI.agent_load`로 실전 엔진 JVM에 에이전트를 붙일 수 있다(Java 21은 경고만 낸다, JEP 451, PR #108 architect 재검토 AR-4). 허용 목록 `ALLOWED_PROCESS_LAUNCHERS`는 비어 있고 테스트가 고정한다. 장애 대응표 #8·#9의 감시 자동 재기동(broker-and-fault-design 6장)을 감시 프로세스가 직접 구현하는 7단계 PR에서 감시의 실행기 클래스 하나와 그 클래스가 실행하는 명령을 함께 넣는다(보호 테스트 변경, risk-ops 2차 재검토 F4의 (a)안). 대응표는 바꾸지 않는다
+   - 시스템 속성 쓰기(`System#setProperty·setProperties·clearProperty`): JDK가 속성 값의 이름으로 클래스를 만든다(`java.util.logging.config.class` 등, architect 3차 재검토 AR-7)
    - JNI 네이티브 코드 적재(`System`·`Runtime`의 `load·loadLibrary`)와 `native` 메서드 선언, `Module#add*`(깊은 리플렉션 열기), 필드 이름 문자열로 접근하는 `Atomic*FieldUpdater`(PR #108 risk-ops F2·R1)
    - Jackson으로 이미 있는 객체를 덮어쓰거나(`readerForUpdating`, `updateValue`), 가시성·주석 해석기·믹스인·직렬화기 수정자를 바꾸거나, 문자열로 클래스를 찾는 API(PR #108 risk-ops F1, architect AR-2)
    - Jackson의 모듈 자동 발견(`findAndRegisterModules`, `findModules`, risk-ops 2차 재검토 R4)
@@ -38,10 +39,10 @@
 - 보장하는 것: 실전 경로 범위의 우리 바이트코드가 리플렉션·동적 코드 수단을 직접 쓰지 않고, 허용 목록의 JDK 패키지와 Jackson 타입만 쓰며, 그 안의 위험 메서드(위 1번)도 쓰지 않는다. 운영 코드 어디서도 `SecondConfirmation`을 데이터로 다루거나 Guard 타입을 바인딩 대상으로 넘기지 않는다.
 - 보장하지 않는 것(남은 한계)
   - 허용 목록 Jackson의 기본 동작 안의 리플렉션. 기본 `readValue`는 우리 DTO의 생성자·setter를 리플렉션으로 부른다. Guard 객체를 새로 만들려면 Guard 타입을 넘겨야 하고(4번이 막음), 살아 있는 객체를 덮어쓰는 API는 1번이 막는다. 허용 목록 타입 안에 아직 모르는 객체 접근 API가 있으면 그 경로는 열려 있다 `[추론]`. Jackson 버전을 올리는 PR은 이 목록과 함께 검토한다.
-  - 허용 클래스(`Class`, `System`, `Runtime`, `Thread` 등) 안의 위험 메서드는 금지 목록으로 막는다(`Class#forName`, 클래스 로더와 로더를 주고받는 API, `ResourceBundle`, `ProcessBuilder`·`Runtime#exec`, `System#loadLibrary`, `Module#add*`, `ServiceLoader`). 허용 클래스 안이나 패키지 단위로 허용한 `java.nio`·`java.util.concurrent` 등에 다른 간접 호출 수단이 있으면 열려 있다 `[추론]`. `Class#getMethods`처럼 `Method` 객체를 얻는 것 자체는 막지 않는다(호출 수단인 `Method#invoke`와 그것을 대신 부르는 API를 막는다).
+  - 허용 클래스(`Class`, `System`, `Runtime`, `Thread` 등) 안의 위험 메서드는 금지 목록으로 막는다(`Class#forName`, 클래스 로더와 로더를 주고받는 API, `ResourceBundle`, `ProcessBuilder`·`Runtime#exec`, `System#loadLibrary`·`setProperty`, `Module#add*`, `ServiceLoader`). 허용 클래스 안이나 패키지 단위로 허용한 `java.nio`·`java.util.concurrent` 등에 다른 간접 호출 수단이 있으면 열려 있다 `[추론]`. `Class#getMethods`처럼 `Method` 객체를 얻는 것 자체는 막지 않는다(호출 수단인 `Method#invoke`와 그것을 대신 부르는 API를 막는다).
   - Guard 패키지의 다른 타입(`OrderSessionPermit` 등)을 실전 경로 밖(실험실 등)에서 만드는 것은 그 프로세스가 엔진 메모리에 닿지 못한다는 프로세스 분리(D-013)에 기댄다.
   - `Object`로 받은 SecondConfirmation 레코드의 `getClass()`로 Jackson이 새 확인을 만드는 경로는 정적으로 잡지 못한다. 확인을 `Object`로 받아 Jackson에 넘기는 코드는 리뷰로 막는다 `[추론]`(지금은 없다).
-  - 배포 설치본의 런타임 클래스패스(빌드 밖에서 jar를 끼워 넣는 것)와 JVM 옵션(`-javaagent`)은 보지 않는다. 7단계 실행 절차서의 설치본 대조 항목으로 넘긴다. 같은 항목에 실전 엔진·감시 시작 옵션 `-XX:+DisableAttachMechanism`(다른 프로세스의 에이전트 부착 차단, architect 재검토 AR-4 후속)을 넣는다.
+  - 배포 설치본의 런타임 클래스패스(빌드 밖에서 jar를 끼워 넣는 것)와 JVM 옵션(`-javaagent`)은 보지 않는다. 7단계 실행 절차서의 설치본 대조 항목으로 넘긴다. 같은 항목에 `-D` 실행 옵션(시스템 속성은 코드에서 쓰지 못하게 막았지만 시작 옵션으로는 들어온다, risk-ops 3차 재검토 F5)과 실전 엔진·감시 시작 옵션 `-XX:+DisableAttachMechanism`(다른 프로세스의 에이전트 부착 차단, architect 재검토 AR-4 후속)을 넣는다.
   - 실험실(`autotrade-app-lab`)·게이트웨이는 리플렉션 규칙의 범위가 아니다. 실전 엔진과 다른 프로세스라 리플렉션으로 엔진 메모리의 Guard에 닿을 수 없다(D-013). 명령 채널은 2차 확인 규칙(ADR-006)이 막는다.
   - 범위 계산의 "들어오면 안 되는 프로젝트" 목록(`FORBIDDEN_PROJECTS`)은 프로세스 격리 검사(`processIsolation.forbiddenProjects`)와 따로 적는다. 둘이 어긋나도 각자 실패 방향이라 보호가 약해지지는 않는다(PR #108 architect 참고).
 

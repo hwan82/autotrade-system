@@ -68,4 +68,12 @@ public final class DynamicCode {
         java.security.Security.addProvider(p);
         return p.getService("MessageDigest", "Y").newInstance(null);
     }
+
+    /** 시스템 속성으로 JDK가 만들 클래스 이름을 정한다(architect 3차 재검토 AR-7). */
+    public static Object viaSystemProperty(String className) {
+        System.setProperty("java.util.logging.config.class", className);
+        System.setProperties(System.getProperties());
+        System.clearProperty("x");
+        return System.getLogger("x");
+    }
 }

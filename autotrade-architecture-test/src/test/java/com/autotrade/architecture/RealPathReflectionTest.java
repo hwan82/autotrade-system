@@ -194,7 +194,9 @@ class RealPathReflectionTest {
             case "java.lang.reflect.Field" -> FIELD_ACCESSORS.matcher(name).matches() || name.endsWith("Accessible");
             case "java.lang.Class" -> name.equals("forName") || name.equals("newInstance");
             // JNI 네이티브 코드 적재(risk-ops PR #108 F2)
-            case "java.lang.System" -> name.equals("load") || name.equals("loadLibrary");
+            // 시스템 속성 쓰기: JDK가 속성 값의 이름으로 클래스를 만든다(java.util.logging.config.class 등, architect 3차 재검토 AR-7)
+            case "java.lang.System" -> name.equals("load") || name.equals("loadLibrary")
+                    || name.equals("setProperty") || name.equals("setProperties") || name.equals("clearProperty");
             // 자기 JVM에 에이전트를 붙이는 외부 명령(jcmd <pid> JVMTI.agent_load)도 막는다(architect PR #108 재검토 AR-4)
             case "java.lang.Runtime" -> name.equals("load") || name.equals("loadLibrary")
                     || name.equals("exec") && !ALLOWED_PROCESS_LAUNCHERS.contains(access.getOriginOwner().getName());
@@ -624,7 +626,8 @@ class RealPathReflectionTest {
                 "InitialContext", "AtomicReferenceFieldUpdater.newUpdater", "Module.addOpens",
                 "URLClassLoader.newInstance", "ResourceBundle.getBundle", "Thread.getContextClassLoader",
                 "ProcessBuilder.<init>", "ProcessBuilder.start", "Runtime.exec",
-                "허용 목록 밖 타입 java.security.Provider", "Provider$Service.newInstance", "허용 목록 밖 타입 java.security.Security");
+                "허용 목록 밖 타입 java.security.Provider", "Provider$Service.newInstance", "허용 목록 밖 타입 java.security.Security",
+                "System.setProperty", "System.setProperties", "System.clearProperty");
     }
 
     @Test
