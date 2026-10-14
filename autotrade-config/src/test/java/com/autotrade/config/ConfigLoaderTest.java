@@ -338,6 +338,24 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void secrets의_값_바인딩이_실패해도_키_자리의_계좌번호는_경고에_남기지_않는다() throws IOException {
+        // PR #101 risk-ops F1: 비밀값 아닌 키 검사를 지나 바인딩에서 실패하는 갈래(값이 문자열이 아님, 빈 객체)
+        List<String> inputs = List.of(
+                "{\"real-trading\":{\"account-numbers\":{\"99990000-01\":[\"x\"]}}}", // S1
+                "{\"real-trading\":{\"account-numbers\":{\"99990000-01\":{}}}}", // S2
+                "{\"real-trading\":{\"account-numbers\":{\"99990000-01\":12345}}}", // S11
+                "{\"real-trading\":{\"99990000-01\":{}}}", // S4
+                "{\"99990000-01\":{}}", // S5
+                "{\"brokers\":{\"kis\":{\"99990000-01\":{}}}}"); // S15
+        for (String json : inputs) {
+            secrets(json);
+            LoadedConfig loaded = loader.load(paths);
+            assertThat(loaded.warning()).as(json).contains("secrets.json")
+                    .doesNotContain("99990000").doesNotContain("com.autotrade").doesNotContain("java.util");
+        }
+    }
+
+    @Test
     void runtime_config의_모르는_키가_키_이름_모양이면_고칠_곳을_보여_준다() throws IOException {
         runtime("""
                 { "real-trading": { "accounts": [ { "id": "KIS-1", "broker": "KIS", "market": "KRX", "nmae": "x" } ] } }
