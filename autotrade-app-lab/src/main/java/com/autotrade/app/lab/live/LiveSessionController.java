@@ -1,14 +1,18 @@
 package com.autotrade.app.lab.live;
 
 import com.autotrade.app.lab.web.ApiException;
+import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 실시간 모의 세션 API(ADR-010 2.4, D-076). 화면은 후속(ui-dev)이고 지금은 이 API로 시작·멈춤·끝냄·상태 조회를 한다.
+ * 실시간 모의 세션 API(ADR-010 2.4, D-076). 실시간 모의 화면({@code #/live})이 등록 파일 목록, 시작·멈춤·끝냄, 상태와
+ * 최근 공백 조회에 쓴다.
  * 상태를 바꾸는 요청은 다른 API와 같이 로컬 전용 필터(Origin·CSRF 토큰)를 거친다. 모의 계좌만 다루며 실전 주문 경로와 무관하다.
  */
 @RestController
@@ -24,6 +28,24 @@ public class LiveSessionController {
     @GetMapping("/status")
     public LiveLabService.View status() {
         return service.status();
+    }
+
+    @GetMapping("/registrations")
+    public List<LiveLabService.Registration> registrations() {
+        try {
+            return service.registrations();
+        } catch (IllegalStateException e) {
+            throw ApiException.conflict(e.getMessage());
+        }
+    }
+
+    @GetMapping("/gaps")
+    public LiveLabService.Gaps gaps(@RequestParam(defaultValue = "100") int limit) {
+        try {
+            return service.gaps(limit);
+        } catch (IllegalArgumentException e) {
+            throw ApiException.badRequest(e.getMessage());
+        }
     }
 
     @PostMapping("/sessions/{id}/start")
@@ -49,6 +71,10 @@ public class LiveSessionController {
             return service.finish();
         } catch (IllegalStateException e) {
             throw ApiException.conflict(e.getMessage());
+        } catch (LiveLabService.ReportNotWrittenException e) {
+            // 세션은 끝났고 보고서만 못 썼다. 메시지는 서비스가 만든 것(경로는 저장소 상대, 입력값 없음)이라 그대로 보인다.
+            // 그 밖의 실패(마감·기록 닫기)는 공통 처리기로 가서 메시지 없이 500이 된다(사유는 상태 stopReason)
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "REPORT_NOT_WRITTEN", e.getMessage());
         }
     }
 }

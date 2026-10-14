@@ -7,17 +7,20 @@ import com.autotrade.marketdata.ConnectionState;
 import com.autotrade.marketdata.feed.FeedClient;
 import com.autotrade.sim.live.LivePlan;
 import com.autotrade.sim.live.LiveSession;
+import com.autotrade.sim.recording.RecordingPlan;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.SimulationReport;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -27,6 +30,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +58,8 @@ public class LiveLabService implements AutoCloseable {
     /** 입력 기록 디스크 여유 기본 하한(수집기 {@code --min-free-gb} 기본값과 같음, ADR-008 2.7). */
     public static final long DEFAULT_MIN_FREE_GB = 20;
     private static final Pattern EXPERIMENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+    /** 등록 파일의 {@code input: live} 줄(따옴표 있든 없든). 형식 검사는 {@link LivePlan#parse}가 한다. */
+    private static final Pattern LIVE_INPUT = Pattern.compile("input:\\s*[\"']?" + LivePlan.INPUT + "[\"']?\\s*(#.*)?");
     private static final Logger log = LoggerFactory.getLogger(LiveLabService.class);
 
     /** 디스크 여유 바이트. 테스트는 고정값을 넣는다. */
@@ -143,7 +149,9 @@ public class LiveLabService implements AutoCloseable {
         try {
             plan = LivePlan.parse(Files.readString(file, StandardCharsets.UTF_8), "experiments/" + id + "/experiment.yaml");
         } catch (IOException e) {
-            throw new UncheckedIOException("등록 파일을 읽을 수 없습니다", e);
+            // 파일이 다른 프로그램에 잠겼거나 권한이 없을 때. 사용자가 고칠 수 있는 상태라 500이 아니라 거절로 알린다
+            throw new IllegalStateException("등록 파일을 읽을 수 없습니다(" + e.getClass().getSimpleName() + "): experiments/"
+                    + id + "/experiment.yaml. 다른 프로그램이 파일을 잡고 있지 않은지, 읽기 권한이 있는지 확인하세요");
         }
         if (!plan.id().value().equals(id)) {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다");
@@ -212,6 +220,7 @@ public class LiveLabService implements AutoCloseable {
      * 이어 쓰지 않는다(리플레이 확인 {@code runLiveReplayCheck}으로 넘어감).
      *
      * @throws IllegalStateException 돌고 있는 세션이 없거나 아직 되살리는 중일 때
+     * @throws ReportNotWrittenException 세션은 끝냈고(입력 기록은 정상 종료로 닫힘) 보고서만 못 썼을 때. 메시지는 화면에 보여도 된다
      */
     public synchronized Finished finish() {
         if (running == null) {
@@ -223,18 +232,39 @@ public class LiveLabService implements AutoCloseable {
         Running r = running;
         running = null;
         r.halt();
-        SimulationReport report = r.session.finish(code);
+        SimulationReport report;
+        try {
+            report = r.session.finish(code);
+        } catch (RuntimeException e) {
+            // 마감이나 입력 기록 닫기 실패(메시지에 절대 경로가 있을 수 있어 사유에는 종류만 남김). 기록이 정상 종료로 닫혔는지 모른다
+            lastStopReason = "끝내기 실패(" + e.getClass().getSimpleName() + "). 실험실 로그를 확인하세요";
+            log.warn("실시간 모의 세션을 끝내지 못했습니다: {} ({})", r.plan.id(), e.getClass().getSimpleName());
+            throw e;
+        }
         Path target = experimentsRoot.resolve(r.plan.id().value()).resolve(LiveSession.LIVE_DETAIL_FILE);
+        String shown = "experiments/" + r.plan.id() + "/" + LiveSession.LIVE_DETAIL_FILE;
         try {
             Files.writeString(target, ReportWriter.render(report), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new UncheckedIOException("실시간 보고서를 쓸 수 없습니다: " + target, e);
+            // 세션은 이미 끝났고(기록은 정상 종료로 닫힘) 보고서만 못 썼다. 다시 시작하면 기록으로 되살린 뒤 끝내기를 다시 할 수 있다
+            lastStopReason = "끝냈지만 보고서를 쓰지 못했습니다(" + e.getClass().getSimpleName() + "): " + shown;
+            log.warn("실시간 보고서를 쓸 수 없습니다: {} ({})", target, e.getClass().getSimpleName());
+            throw new ReportNotWrittenException(
+                    lastStopReason + ". 공간·권한을 확인한 뒤 세션을 다시 시작하고 끝내기를 다시 하세요", e);
         }
         lastStopReason = "끝냄";
         log.info("실시간 모의 세션 끝: {} → {}", r.plan.id(), target);
         long failed = report.runs().stream().filter(x -> !x.summary().failureReason().isEmpty()).count();
-        return new Finished(r.plan.id().value(), "experiments/" + r.plan.id() + "/" + LiveSession.LIVE_DETAIL_FILE,
-                report.runs().size(), (int) failed);
+        return new Finished(r.plan.id().value(), shown, report.runs().size(), (int) failed);
+    }
+
+    /** 세션은 끝냈고 입력 기록도 정상 종료로 닫았지만 상세 보고서를 쓰지 못했다. 메시지에는 저장소 상대 경로만 있다. */
+    public static final class ReportNotWrittenException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        ReportNotWrittenException(String message, IOException cause) {
+            super(message, cause);
+        }
     }
 
     /** 세션을 끝낸 결과. */
@@ -243,28 +273,129 @@ public class LiveLabService implements AutoCloseable {
     /** 화면용 상태. 돌고 있는 세션이 없으면 experimentId가 빈 문자열이고 session은 비어 있다. */
     public synchronized View status() {
         if (running == null) {
-            return new View("", false, Optional.empty(), ConnectionState.CLOSED, "", 0, 0, 0, lastStopReason);
+            return new View("", List.of(), false, Optional.empty(), ConnectionState.CLOSED, "", 0, 0, 0, lastStopReason);
         }
         Running r = running;
+        List<String> profiles = r.plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList();
         if (r.session == null) {
-            return new View(r.plan.id().value(), true, Optional.empty(), ConnectionState.NEW, "", 0, 0, 0, "");
+            return new View(r.plan.id().value(), profiles, true, Optional.empty(), ConnectionState.NEW, "", 0, 0, 0, "");
         }
-        return new View(r.plan.id().value(), false, Optional.of(r.session.status()), r.client.state(),
+        return new View(r.plan.id().value(), profiles, false, Optional.of(r.session.status()), r.client.state(),
                 r.client.lastError(), r.client.reconnectCount(), r.inbox.size(), r.inboxDropped.get(),
                 r.session.status().stopReason());
     }
 
     /**
      * @param experimentId 돌고 있는(되살리는 중 포함) 세션의 실험 ID, 없으면 빈 문자열
+     * @param profiles 계좌 순서대로 전략 프로필({@code id@버전}). {@code session.runs()}의 같은 자리 계좌가 이 프로필로 돈다
      * @param restoring 입력 기록으로 계좌를 되살리는 중(아직 게이트웨이에 연결하지 않음)
      * @param feedState 게이트웨이 시세 전달 연결 상태
      * @param inboxQueued 받는 큐에 남은 수
      * @param inboxDropped 받는 큐가 차서 버린 수(공백으로 남음)
      * @param stopReason 마지막 멈춘 이유(감시 정지 요청, 디스크 부족, 기록 실패, 시작 실패 등)
      */
-    public record View(String experimentId, boolean restoring, Optional<LiveSession.Status> session,
+    public record View(String experimentId, List<String> profiles, boolean restoring, Optional<LiveSession.Status> session,
             ConnectionState feedState, String feedError, long feedReconnects, int inboxQueued, long inboxDropped,
-            String stopReason) {}
+            String stopReason) {
+        public View {
+            profiles = List.copyOf(profiles);
+        }
+    }
+
+    /** 화면에 보여 줄 최근 공백 최대 개수. */
+    public static final int MAX_GAPS_SHOWN = 200;
+
+    /**
+     * 돌고 있는 세션이 계좌에 준 공백(되살린 기록 포함) 중 최근 {@code limit}개, 최근 것부터. 세션이 없거나 되살리는 중이면 빈 목록.
+     *
+     * @param limit 1~{@value #MAX_GAPS_SHOWN}
+     */
+    public synchronized Gaps gaps(int limit) {
+        if (limit < 1 || limit > MAX_GAPS_SHOWN) {
+            throw new IllegalArgumentException("limit은 1~" + MAX_GAPS_SHOWN + "이어야 합니다");
+        }
+        if (running == null || running.session == null) {
+            return new Gaps(0, List.of());
+        }
+        LiveSession session = running.session;
+        List<GapView> items = new ArrayList<>();
+        for (DataGap g : session.recentGaps(limit)) {
+            items.add(new GapView(g.symbol().code(), g.reason(), g.gapStart(), g.gapEnd(), g.receivedAt()));
+        }
+        java.util.Collections.reverse(items);
+        return new Gaps(session.status().dataGaps(), items);
+    }
+
+    /** @param total 세션 전체 공백 수(items는 그중 최근 것만) */
+    public record Gaps(int total, List<GapView> items) {
+        public Gaps {
+            items = List.copyOf(items);
+        }
+    }
+
+    /** 공백 하나: 종목, 사유, 빠진 구간, 받은 시각. */
+    public record GapView(String symbol, DataGap.GapReason reason, Instant gapStart, Instant gapEnd, Instant receivedAt) {}
+
+    /**
+     * 실시간 모의 등록 파일({@code input: live})이 있는 실험 폴더(실험 ID 내림차순). 다른 입력의 등록 파일은 뺀다. 읽을 수 없거나
+     * 형식이 틀린 실시간 등록 파일은 {@code error}에 사유를 담아 보인다(시작 버튼을 막는 데 쓴다).
+     */
+    public List<Registration> registrations() {
+        if (!Files.isDirectory(experimentsRoot)) {
+            return List.of();
+        }
+        List<Path> dirs;
+        try (Stream<Path> s = Files.list(experimentsRoot)) {
+            dirs = s.filter(Files::isDirectory).sorted(Comparator.reverseOrder()).toList();
+        } catch (IOException e) {
+            throw new IllegalStateException("실험 폴더를 읽을 수 없습니다(" + e.getClass().getSimpleName() + ")");
+        }
+        List<Registration> out = new ArrayList<>();
+        for (Path dir : dirs) {
+            String id = dir.getFileName().toString();
+            Path file = dir.resolve("experiment.yaml");
+            if (!EXPERIMENT_ID.matcher(id).matches() || !Files.isRegularFile(file)) {
+                continue;
+            }
+            String yaml;
+            try {
+                yaml = Files.readString(file, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                continue; // 실시간 등록인지 알 수 없다. 시작하면 같은 사유로 거절된다
+            }
+            if (yaml.lines().map(String::strip).noneMatch(l -> LIVE_INPUT.matcher(l).matches())) {
+                continue;
+            }
+            boolean journal = Files.isDirectory(sessionsRoot.resolve(id));
+            boolean finished = Files.isRegularFile(dir.resolve(LiveSession.LIVE_DETAIL_FILE));
+            try {
+                LivePlan plan = LivePlan.parse(yaml, "experiments/" + id + "/experiment.yaml");
+                String error = plan.id().value().equals(id) ? null : "폴더 이름과 실험 ID가 다릅니다";
+                out.add(new Registration(id, plan.question(), plan.from() + " ~ " + plan.to(),
+                        plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList(), plan.boards().size(),
+                        journal, finished, error));
+            } catch (RuntimeException e) {
+                out.add(new Registration(id, null, null, List.of(), 0, journal, finished,
+                        e.getMessage() == null ? "등록 파일을 읽을 수 없습니다(" + e.getClass().getSimpleName() + ")"
+                                : e.getMessage()));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 실시간 모의 등록 파일 하나.
+     *
+     * @param hasJournal 세션 입력 기록이 있음(시작하면 기록으로 계좌를 되살린 뒤 이어 받는다)
+     * @param finished 끝내기로 상세 보고서({@value LiveSession#LIVE_DETAIL_FILE})를 이미 썼음
+     * @param error 등록 파일 오류. 정상이면 null이고, 있으면 질문·기간이 null이다
+     */
+    public record Registration(String id, String question, String period, List<String> profiles, int symbols,
+            boolean hasJournal, boolean finished, String error) {
+        public Registration {
+            profiles = List.copyOf(profiles);
+        }
+    }
 
     /** 감시 정지 요청이나 디스크 부족이면 그 이유. */
     Optional<String> stopReason() {

@@ -46,7 +46,7 @@
 
 - 등록 파일 `experiments/<실험ID>/experiment.yaml`, `input: "live"`(`LivePlan`). 키는 녹화 실험과 같고(`id, question, market, from, to, seed, seed-capital, benchmark, profiles, boards, blacklist`), `boards`가 받을 종목 목록이다. 지금은 KRX만, 선정 프로필 없음(녹화 실험과 같은 범위).
 - 사전 등록: 운용 전에 커밋하고 운용 중 고치지 않는다. 바꾸려면 새 실험 ID.
-- 실험실 API(`/api/live`, ADR-005 웹 보안 그대로): `GET /status`, `POST /sessions/{id}/start`, `POST /stop`, `POST /finish`. 한 번에 한 세션. 화면은 후속(ui-dev).
+- 실험실 API(`/api/live`, ADR-005 웹 보안 그대로): `GET /status`, `GET /registrations`, `GET /gaps`, `POST /sessions/{id}/start`, `POST /stop`, `POST /finish`(응답·오류는 [ADR-005](ADR-005-ui-dashboard.md) 5장 표). 한 번에 한 세션. 화면은 실험실 `#/live`(PR #96): 등록 파일 고르기, 시작·멈춤·끝내기, 계좌별 상태와 최근 공백, 3초 폴링(SSE는 UI-01 이연, D-079).
 - 세션 하나 = 계좌(프로필) N개. 계좌는 리플레이 실행기와 **같은 코드**로 움직인다: 실행기의 Run 한 개 단계를 `RunStepper`(`autotrade-sim` `run` 패키지)로 떼어 리플레이 실행기(`SimulationExperimentRunner`)와 실시간 세션(`LiveSession`)이 같이 쓴다. 리스크 체인·주문 상태머신·블랙리스트·가상 거래소 그대로(지침 5장).
 - 계좌 하나가 예외로 멈춰도 그 계좌만 실패로 남고 나머지는 계속한다(계좌 격리).
 
@@ -102,7 +102,7 @@
 
 | 항목 | 지금 | 후속 |
 |---|---|---|
-| 실시간 모의 화면(세션 시작·멈춤·끝냄, 계좌별 진행) | API만 | ui-dev |
+| 실시간 모의 화면(세션 시작·멈춤·끝냄, 계좌별 진행) | 화면 `#/live`(PR #96, 3초 폴링, 계좌 요약과 최근 공백) | 잔고 상세·거래 내역·대사 상태(UI-08), SSE(UI-01)는 D-079 이연 그대로 |
 | 사용자 PC(Windows)에서 소켓 열기·권한·경로 길이 | 컨테이너(Linux)만 검증 | 6단계 첫 운용일 확인(절차서) |
 | 재기동 시간 단축(계좌 상태 스냅샷, 대안 G) | 기록 재실행(별도 스레드, 하루씩) | 몇 주 분량 재기동 측정 후 필요하면 |
 | 실전 엔진 클래스패스의 전달 패키지(`marketdata.feed`)를 ArchUnit으로 막을지 | 엔진은 쓰지 않음 | 7단계 전 risk-ops·architect (risk-ops PR #87 N5) |
