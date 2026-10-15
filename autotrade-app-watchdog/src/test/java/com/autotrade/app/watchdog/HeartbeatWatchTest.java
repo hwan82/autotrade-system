@@ -91,4 +91,29 @@ class HeartbeatWatchTest {
         assertThat(watch.check(clock.instant())).isEmpty(); // 상태는 계속 ALIVE
         assertThat(watch.states()).containsEntry("lab", State.ALIVE);
     }
+
+    @Test
+    void 첫_점검에서_모두_꺼짐이면_알리고_하나라도_있으면_알리지_않는다() {
+        // 설정 폴더를 잘못 적으면 빈 폴더를 지키며 모두 꺼짐으로만 보인다(architect PR #116 N2)
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch empty = new HeartbeatWatch(dir, List.of("engine", "gateway", "lab"), Duration.ofSeconds(15));
+        empty.check(clock.instant());
+        assertThat(empty.firstCheckAllAbsent()).isTrue();
+
+        new HeartbeatWriter(dir, "gateway", clock).beat();
+        HeartbeatWatch some = new HeartbeatWatch(dir, List.of("engine", "gateway", "lab"), Duration.ofSeconds(15));
+        some.check(clock.instant());
+        assertThat(some.firstCheckAllAbsent()).isFalse();
+    }
+
+    @Test
+    void 상한보다_큰_하트비트_파일은_읽지_않고_읽을_수_없음이다() throws Exception {
+        // PR #116 독립 QA R1: 비정상으로 커진 파일이 감시 힙을 채우지 않게 4KB 상한
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("engine"), Duration.ofSeconds(15));
+        Path file = Heartbeat.file(dir, "engine");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, new Heartbeat("engine", 1, clock.instant(), clock.instant(), 1).format() + "\n".repeat(5000)); // 다 읽으면 정상으로 해석되는 내용
+        assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.UNREADABLE);
+    }
 }

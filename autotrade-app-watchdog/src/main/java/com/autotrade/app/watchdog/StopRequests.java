@@ -1,6 +1,7 @@
 package com.autotrade.app.watchdog;
 
 import com.autotrade.monitor.AtomicFile;
+import com.autotrade.monitor.SmallFile;
 import java.io.IOException;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -66,6 +67,8 @@ final class StopRequests {
     /** 감시가 뜰 때 한 번: 남은 파일이 있으면 켜진 상태로 이어받는다. */
     void adoptLeftovers(Instant now) {
         for (Path f : files) {
+            // 감시가 쓰다 죽어 남긴 임시 파일을 거둔다(PR #116 QA·architect N3). 명령들은 stop-request만 본다
+            SmallFile.deleteLeftoverTemps(f);
             if (Files.exists(f)) {
                 active = true;
                 // 남은 파일의 처음 요청 시각을 이어 쓴다(architect PR #116 R2). 읽지 못하면 지금
@@ -108,7 +111,7 @@ final class StopRequests {
 
     private static java.util.Optional<Instant> requestedAt(Path f) {
         try {
-            for (String line : Files.readString(f, java.nio.charset.StandardCharsets.UTF_8).split("\n")) {
+            for (String line : SmallFile.read(f).split("\n")) {
                 if (line.startsWith("requested-at=")) {
                     return java.util.Optional.of(Instant.parse(line.substring("requested-at=".length()).strip()));
                 }

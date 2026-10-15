@@ -43,6 +43,8 @@ public final class HeartbeatWriter implements AutoCloseable {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.pid = ProcessHandle.current().pid();
         this.startedAt = clock.instant();
+        // 이전 실행이 쓰다 죽어 남긴 임시 파일(<이름>.hb.<pid>.tmp)을 거둔다(PR #116 QA·architect N3). 같은 이름 프로세스는 하나만 돈다
+        SmallFile.deleteLeftoverTemps(file);
     }
 
     /** 만들고 바로 주기 기록을 시작한다(첫 기록은 바로). */

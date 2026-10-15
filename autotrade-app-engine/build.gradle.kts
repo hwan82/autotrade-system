@@ -9,9 +9,10 @@ application {
     applicationName = "autotrade-engine"
 }
 
+// OSHI·JNA·java.lang.management를 쓰는 autotrade-monitor-sources는 간접 의존으로도 들어오지 않게 직접 금지한다(PR #114 QA R5, architect A1)
 processIsolation {
-    forbiddenProjects.set(listOf(":autotrade-sim", ":autotrade-app-lab", ":autotrade-ui", ":autotrade-app-gateway", ":autotrade-app-collector", ":autotrade-app-experiment"))
-    forbiddenGroups.set(listOf("org.springframework"))
+    forbiddenProjects.set(listOf(":autotrade-sim", ":autotrade-app-lab", ":autotrade-ui", ":autotrade-app-gateway", ":autotrade-app-collector", ":autotrade-app-experiment", ":autotrade-monitor-sources"))
+    forbiddenGroups.set(listOf("org.springframework", "com.github.oshi", "net.java.dev.jna"))
 }
 
 dependencies {

@@ -1,8 +1,8 @@
 package com.autotrade.app.watchdog;
 
+import com.autotrade.monitor.SmallFile;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -67,9 +67,9 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
             return parse("", configDir);
         }
         try {
-            return parse(Files.readString(file, StandardCharsets.UTF_8), configDir);
+            return parse(SmallFile.read(file), configDir);
         } catch (IOException e) {
-            throw new IllegalArgumentException("감시 설정 파일을 읽지 못했습니다: " + file + " (" + e.getClass().getSimpleName() + ")");
+            throw new IllegalArgumentException("감시 설정 파일을 읽지 못했습니다: " + file + " (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
         }
     }
 
