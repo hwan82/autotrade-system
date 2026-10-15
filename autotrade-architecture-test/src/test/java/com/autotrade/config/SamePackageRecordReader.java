@@ -15,6 +15,15 @@ public final class SamePackageRecordReader {
         return record.getRecordComponents()[0];
     }
 
+    /**
+     * risk-ops PR #110 F-2(P4): 서명은 깨끗하지만 private 메서드에서 클래스 객체를 다른 곳(JSON 노드, 목록 밖 컬렉션 타입)에
+     * 담아 넘긴다.
+     */
+    private static void stash(Class<?> record, java.util.concurrent.ConcurrentLinkedQueue<Object> out) {
+        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode().putPOJO("type", record);
+        out.add(record.getRecordComponents()[0].getType());
+    }
+
     /** PR #109 QA Q1: 허용 클래스가 {@code Object}로 넘긴 구성 요소에서 타입을 꺼낸다. */
     public static String typeName(Object component) {
         return ((RecordComponent) component).getType().getSimpleName();

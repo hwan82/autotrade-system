@@ -665,32 +665,78 @@ class RealPathReflectionTest {
      */
     @Test
     void 레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다() {
-        List<String> problems = new ArrayList<>();
         for (String name : ALLOWED_RECORD_READERS) {
-            JavaClass k = ArchitectureTest.PRODUCTION.get(name);
-            for (com.tngtech.archunit.core.domain.JavaMember m : k.getMembers()) {
-                if (m.getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE)) {
-                    continue;
-                }
-                List<com.tngtech.archunit.core.domain.JavaType> types = new ArrayList<>();
-                if (m instanceof JavaField f) {
-                    types.add(f.getType());
-                } else if (m instanceof com.tngtech.archunit.core.domain.JavaCodeUnit u) {
-                    types.add(u.getReturnType());
-                    u.getParameters().forEach(p -> types.add(p.getType()));
-                }
-                types.stream().flatMap(t -> t.getAllInvolvedRawTypes().stream()).map(JavaClass::getBaseComponentType)
-                        .filter(t -> t.getName().equals("java.lang.Class") || t.getName().equals("java.lang.Object")
-                                || t.getPackageName().equals("java.lang.reflect"))
-                        .forEach(t -> problems.add(m.getFullName() + "의 서명에 " + t.getName()));
-            }
-            // 메서드 참조(Class::getRecordComponents)도 잡도록 호출뿐 아니라 접근 전체를 본다(architect PR #110 AR-4)
-            k.getAccessesFromSelf().stream()
-                    .filter(c -> c.getTarget().getName().equals("getRecordComponents")
-                            && !c.getOrigin().getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE))
-                    .forEach(c -> problems.add(c.getOrigin().getFullName() + "가 private이 아닌데 구성 요소를 읽는다"));
+            assertThat(recordReaderShape(ArchitectureTest.PRODUCTION.get(name))).as(name).isEmpty();
         }
-        assertThat(problems).isEmpty();
+        // 위반 예제: 구성 요소를 public 메서드로 읽어 돌려주고, Object를 받는다(risk-ops PR #110 F-1)
+        assertThat(String.join("\n", recordReaderShape(new ClassFileImporter()
+                .importClasses(com.autotrade.config.SamePackageRecordReader.class)
+                .get(com.autotrade.config.SamePackageRecordReader.class)))).contains(
+                "SamePackageRecordReader.first(java.lang.Class)의 서명에 java.lang.Class",
+                "SamePackageRecordReader.first(java.lang.Class)가 private이 아닌데 구성 요소를 읽는다",
+                "SamePackageRecordReader.typeName(java.lang.Object)의 서명에 java.lang.Object",
+                "SamePackageRecordReader.stash(java.lang.Class, java.util.concurrent.ConcurrentLinkedQueue)가 임의 객체를 JSON 노드에 넣는다: putPOJO",
+                "SamePackageRecordReader가 고정 목록 밖 타입 java.util.concurrent.ConcurrentLinkedQueue를 쓴다")
+                .doesNotContain("stash(java.lang.Class, java.util.concurrent.ConcurrentLinkedQueue)의 서명에");
+    }
+
+    /**
+     * 레코드 구성 요소를 읽는 허용 클래스가 쓸 수 있는 타입(클래스 파일 상수 전부). 서명 모양만 보면 클래스 객체를 다른 클래스의
+     * {@code List<Object>}에 담거나 {@code ObjectNode.putPOJO}로 JSON 노드에 넣어 넘기는 길이 남는다(risk-ops PR #110 F-2,
+     * architect AR-2). 그래서 이 클래스가 쓰는 타입을 고정한다: 우리 타입은 자기 자신뿐이고, Jackson은 노드 읽기·만들기 타입만,
+     * JDK는 문자열·컬렉션·정규식과 구성 요소 읽기에 필요한 리플렉션 타입만. 이 목록을 늘리는 변경은 risk-ops 검토 대상이다.
+     */
+    static final Set<String> RECORD_READER_TYPES = Set.of(
+            // 읽는 대상 레코드와 비밀값 표지 주석
+            "com.autotrade.config.RuntimeConfig", "com.autotrade.config.Secret",
+            "com.fasterxml.jackson.databind.JsonNode", "com.fasterxml.jackson.databind.node.ObjectNode",
+            "com.fasterxml.jackson.databind.node.JsonNodeFactory",
+            "com.fasterxml.jackson.databind.PropertyNamingStrategies",
+            "com.fasterxml.jackson.databind.PropertyNamingStrategies$KebabCaseStrategy",
+            "java.lang.Object", "java.lang.String", "java.lang.CharSequence", "java.lang.Integer", "java.lang.Iterable",
+            "java.lang.Class", "java.lang.reflect.RecordComponent", "java.lang.reflect.ParameterizedType",
+            "java.lang.reflect.Type",
+            "java.util.ArrayList", "java.util.Collection", "java.util.Collections", "java.util.Iterator",
+            "java.util.LinkedHashMap", "java.util.List", "java.util.Map", "java.util.Map$Entry", "java.util.Set",
+            "java.util.TreeSet", "java.util.function.BiConsumer", "java.util.function.BiFunction",
+            "java.util.function.Predicate", "java.util.regex.Matcher", "java.util.regex.Pattern",
+            "java.util.stream.Stream");
+
+    /** 허용 클래스가 써서는 안 되는 Jackson 메서드: 임의 객체를 JSON 노드에 넣는다(risk-ops PR #110 F-2). */
+    static final Set<String> POJO_NODE_METHODS = Set.of("putPOJO", "pojoNode", "addPOJO", "insertPOJO");
+
+    /** 허용 클래스 모양 위반 목록(빈 목록이면 통과). */
+    static List<String> recordReaderShape(JavaClass k) {
+        List<String> problems = new ArrayList<>();
+        for (com.tngtech.archunit.core.domain.JavaMember m : k.getMembers()) {
+            if (m.getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE)) {
+                continue;
+            }
+            List<com.tngtech.archunit.core.domain.JavaType> types = new ArrayList<>();
+            if (m instanceof JavaField f) {
+                types.add(f.getType());
+            } else if (m instanceof com.tngtech.archunit.core.domain.JavaCodeUnit u) {
+                types.add(u.getReturnType());
+                u.getParameters().forEach(p -> types.add(p.getType()));
+            }
+            types.stream().flatMap(t -> t.getAllInvolvedRawTypes().stream()).map(JavaClass::getBaseComponentType)
+                    .filter(t -> t.getName().equals("java.lang.Class") || t.getName().equals("java.lang.Object")
+                            || t.getPackageName().equals("java.lang.reflect"))
+                    .forEach(t -> problems.add(m.getFullName() + "의 서명에 " + t.getName()));
+        }
+        // 메서드 참조(Class::getRecordComponents)도 잡도록 호출뿐 아니라 접근 전체를 본다(architect PR #110 AR-4)
+        k.getAccessesFromSelf().stream()
+                .filter(c -> c.getTarget().getName().equals("getRecordComponents")
+                        && !c.getOrigin().getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE))
+                .forEach(c -> problems.add(c.getOrigin().getFullName() + "가 private이 아닌데 구성 요소를 읽는다"));
+        k.getAccessesFromSelf().stream()
+                .filter(c -> POJO_NODE_METHODS.contains(c.getTarget().getName()))
+                .forEach(c -> problems.add(c.getOrigin().getFullName() + "가 임의 객체를 JSON 노드에 넣는다: " + c.getTarget().getName()));
+        k.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).stream()
+                .filter(n -> !n.equals(k.getName()) && !n.startsWith(k.getName() + "$")
+                        && !JAVAC_BOOTSTRAP_TYPES.contains(n) && !RECORD_READER_TYPES.contains(n))
+                .forEach(n -> problems.add(k.getSimpleName() + "가 고정 목록 밖 타입 " + n + "를 쓴다")));
+        return problems;
     }
 
     @Test
