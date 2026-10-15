@@ -42,3 +42,41 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-15
+- 대상: PR #119 / 커밋 c11f655e62c304ff777cf0e75779550cb4456d6c / `git diff origin/main...HEAD` (merge base 6fe3101, 파일 5개: `MonitorAgent.java`, `MonitorAgentTest.java`(보호 경로), `docs/qa/pending.md`, `docs/reviews/pr-119/architect.md`, `docs/reviews/pr-119/risk-ops.md`)
+- 점검표: A
+- 앞 검토 뒤 바뀐 것(c11f655): ① `MonitorService.java`·`MonitorServiceTest.java`를 main과 같게 되돌림(K1 반영, `git diff origin/main...HEAD -- autotrade-app-lab` 0줄로 확인) ② `MonitorAgent.trackFailure`가 같은 실패 반복 때 DEBUG가 꺼져 있으면 로그 문자열을 만들지 않고 null을 돌려줌(`MonitorAgent.java:208-212`). `before.count++`(`:208`)는 그 검사보다 앞이라 DEBUG가 꺼져도 연속 횟수는 센다 ③ `docs/qa/pending.md`에 PR #119 독립 QA 요청 줄 추가.
+- 영향 범위로 함께 본 실전 경로 코드: `MonitorAgent`를 쓰는 운영 코드는 실험실 `MonitorService`와 감시 `Watchdog.java:54`뿐(`grep MonitorAgent autotrade-app-*` 비시험 코드), 실전 엔진·게이트웨이는 쓰지 않음(앞 검토와 같음). origin/main이 merge base 뒤 PR #117로 움직였으나 monitor·watchdog 파일은 건드리지 않았고 `git merge-tree origin/main HEAD` 충돌 없음.
+- 직접 실행한 것:
+  - 작업 폴더가 아닌 스크래치 clone에서 c11f655로 `./gradlew build --no-build-cache` → **BUILD SUCCESSFUL, 136 tasks 모두 실행, 테스트 1255개 실패 0 / 오류 0 / 건너뜀 0**(앞 검토 1256개에서 되돌린 실험실 시험 1개가 빠진 수). 모듈별: autotrade-risk 55, autotrade-architecture-test 43, autotrade-app-engine 52, autotrade-app-watchdog 23, autotrade-app-gateway 50, autotrade-monitor-agent-jar 23, autotrade-monitor-sources 6, autotrade-app-lab 181 모두 통과.
+  - 변이 1: `MonitorAgent.java`를 merge base 버전으로 되돌리면 `MonitorAgentTest > 같은_수집원_실패는_상태가_바뀔_때만_WARN이고_반복은_DEBUG다() FAILED`(23개 중 1개 실패) → 새 시험이 바뀐 동작을 지킨다.
+  - 변이 2: `before.count++`를 DEBUG 검사 뒤로 옮겨(DEBUG가 꺼지면 횟수를 세지 않게) 돌리면 monitor-agent-jar 시험 23개 모두 **통과** → DEBUG 꺼짐 경로는 시험이 가르지 못한다(아래 K5). 확인 뒤 되돌렸고 clone `git status` 깨끗함.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | diff에 RealTradingGuard·Guard 설정·시험 변경 없음(파일 5개 모두 monitor·문서). 격리 빌드에서 autotrade-risk 55개, autotrade-app-engine 52개 통과 |
+| A2 | 해당 없음 | 주문 출구 코드 변경 없음. `autotrade-architecture-test` 변경 없음, 격리 빌드에서 43개(ArchitectureTest, ModuleOwnershipTest, RealPathReflectionTest 포함) 통과 |
+| A3 | 해당 없음 | 증권사·주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 경로 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 실전 엔진·게이트웨이는 `MonitorAgent`를 쓰지 않는다(`EngineMain.java:17`, `GatewayMain.java:19`는 `HeartbeatWriter`만). 감시(`Watchdog.java:54`)에 닿는 변경은 로그 등급과 수집원별 실패 맵(`MonitorAgent.java:44,188-213`)뿐이고, 이번 추가분 `LOG.isLoggable(DEBUG)`(`:209`)는 `lock` 안에서 불리지만 JDK 로거 조회일 뿐 에이전트로 되돌아오는 호출이 없어 교착 경로가 없다. 수집 주기·스레드 우선순위·임계 판정·정지 요청 판단(`Watchdog.java:61-83`)에 영향 없음. 실험실 `MonitorService`는 main과 같아져 앞 검토의 종료 순서 변경 논점이 사라졌다 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 로그 문구는 수집원 id, 예외 클래스 단순 이름, 횟수만(`MonitorAgent.java:195-212`). `getMessage()`를 남기지 않음. 시험 픽스처 문자열은 "OSHI 없음"·"다른 실패"뿐. `pending.md` 추가 줄에 비밀값 없음 |
+| A11 | 통과 | 보호 경로 변경은 `MonitorAgent` 동작과 그 시험 1개 추가뿐, 기존 보호 시험 삭제·비활성화·약화 없음(diff에 `-@Test`·`@Disabled` 없음). 고정 값(지문·허용 목록·소유 표) 변경 없음, `HashMap`·`System.Logger.isLoggable`이 실전 경로 JDK 허용 목록(D-086) 안임을 `RealPathReflectionTest` 통과로 확인. 새 동작에 실패하는 경우를 포함한 시험 `MonitorAgentTest#같은_수집원_실패는_상태가_바뀔_때만_WARN이고_반복은_DEBUG다`가 있고 변이 1로 변별력 확인. 되돌린 실험실 시험 `종료와_겹쳐_도착한_표본은_예외_없이_버린다`는 이 PR이 추가했던 것이며 main에 없던 것이라 보호 시험 삭제가 아니다. DEBUG 꺼짐 경로 시험 공백은 로그 횟수 문구에만 영향이 있어 K5 권고로 둔다 |
+| A12 | 통과 | 장애표 #10(PC 자원 고갈, `broker-and-fault-design.md:169`) 감지 수단인 임계 판정(`MonitorAgent.java:92-104`), 스냅샷 `failedSources`(`:94`), `lastSampleAt`은 바뀌지 않았다. 감시 기본 로그 수준(JUL INFO)에서 지속 실패는 처음 WARN 한 줄과 회복 INFO만 남고 반복은 문자열도 만들지 않으며, 이는 앞 검토에서 받아들인 정책과 같다. 장애 테스트 8종·해외 O1~O8의 전제와 무관 |
+| A13 | 해당 없음 | 시장·시간대·통화 계산 변경 없음 |
+| A14 | 통과 | 확정 결정과 충돌 없음(D-090의 "수집원 실패가 계속 남는 것"은 스냅샷 `failedSources`와 화면으로 성립). `pending.md`에 PR #119 독립 QA 요청이 기록되어 프로젝트 지침 11장 관문 절차와 맞다. 로그 정책을 D-090에 적는 일(앞 K2)은 아직 반영되지 않았고 권고로 남는다 |
+
+## 점검표 밖 발견 (재검토)
+- K1 해소: 실험실 쪽 변경을 뺐으므로 도달하지 않는 catch·사실과 다른 주석·변별력 없는 시험 문제가 없어졌다.
+- K2 유지(권고): D-090 또는 MON-05 설명에 수집원 실패 로그 정책(처음·종류 바뀜 WARN, 반복 DEBUG, 회복 INFO, 주기별 실패는 `failedSources`)을 한 줄 적기를 권한다. 7단계 감시 확장 PR에서 "연속 N회 실패를 #10 이상으로 판정"과 "지속 실패 중 주기적 WARN 재기록"을 risk-ops 검토 항목으로 넘기는 것도 그대로다. K3·K4도 앞 검토 그대로.
+- K5 (권고, 판정에 넣지 않음): 새 시험은 JUL 수준을 ALL로 올려서만 돌므로 운영 기본값(DEBUG 꺼짐) 경로를 시험하지 않는다. 변이 2처럼 `count++`가 DEBUG 검사 뒤로 밀려도 통과해, 그 경우 회복 INFO가 "1회 연속 실패 뒤"로 잘못 찍힌다. 영향은 로그 문구의 횟수뿐이고 스냅샷·임계·정지 요청에는 없다. 같은 시나리오를 JUL 수준 INFO로 한 번 더 돌려 DEBUG 기록 0건과 회복 문구 "IllegalStateException 101회 연속 실패 뒤"(또는 종류 바뀜 뒤 횟수)를 확인하는 시험을 추가하기를 권한다.
+- 참고: 새 시험은 전역 JUL 로거 수준을 바꿨다가 finally에서 되돌린다. 저장소에 JUnit 병렬 실행 설정이 없어(`junit-platform.properties`의 parallel 설정 없음) 다른 시험과 겹치지 않는다.
+
+- 머지 절차: 보호 경로(`autotrade-monitor-agent-jar/*`) 변경이므로 실전 관련 PR이다. 이 판정은 risk-ops 역할 검토 결과일 뿐이며 사용자 직접 확인 머지와 머지 전 독립 QA(`docs/qa/pending.md`의 "PR #119 검토해줘")가 필요하다.
+
+## 판정
+승인
