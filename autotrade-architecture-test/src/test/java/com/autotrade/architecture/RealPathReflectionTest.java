@@ -684,7 +684,8 @@ class RealPathReflectionTest {
                                 || t.getPackageName().equals("java.lang.reflect"))
                         .forEach(t -> problems.add(m.getFullName() + "의 서명에 " + t.getName()));
             }
-            k.getMethodCallsFromSelf().stream()
+            // 메서드 참조(Class::getRecordComponents)도 잡도록 호출뿐 아니라 접근 전체를 본다(architect PR #110 AR-4)
+            k.getAccessesFromSelf().stream()
                     .filter(c -> c.getTarget().getName().equals("getRecordComponents")
                             && !c.getOrigin().getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE))
                     .forEach(c -> problems.add(c.getOrigin().getFullName() + "가 private이 아닌데 구성 요소를 읽는다"));
@@ -831,14 +832,13 @@ class RealPathReflectionTest {
                 "NameToClassBinding$GetterProbe.getTypes() 반환 타입에 Class",
                 "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.app.engine.archfixture.NameToClassBinding.componentType",
                 "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.app.engine.archfixture.NameToClassBinding.declaringRecord")
-                .doesNotContain("SamePackageRecordReader");
+                .doesNotContain("NameToClassBinding$Holder의", "NameToClassBinding$Holder.value");
         // 허용 클래스와 같은 패키지의 다른 클래스(QA Q2), 허용 클래스가 Object로 넘긴 구성 요소에서 타입 꺼내기(QA Q1)
         EvaluationResult samePackage = rule.evaluate(new ClassFileImporter()
                 .importClasses(com.autotrade.config.SamePackageRecordReader.class));
         assertThat(String.join("\n", samePackage.getFailureReport().getDetails())).contains(
                 "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.config.SamePackageRecordReader.first",
-                "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName")
-                .doesNotContain("NameToClassBinding$Holder의", "NameToClassBinding$Holder.value");
+                "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
                 .get(ReflectionFreeEngineCode.class).getSource().orElseThrow().getUri())).isEmpty();
