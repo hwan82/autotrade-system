@@ -1,8 +1,10 @@
 package com.autotrade.app.watchdog;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.config.ConfigPaths;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -15,9 +17,34 @@ class WatchdogMainTest {
     @TempDir
     Path dir;
 
+    private final Clock fixed = Clock.fixed(Instant.parse("2026-10-08T00:00:00Z"), ZoneOffset.UTC);
+
     @Test
     void 설정_파일이_없어도_독립적으로_기동한다() {
-        Clock fixed = Clock.fixed(Instant.parse("2026-10-08T00:00:00Z"), ZoneOffset.UTC);
         assertThat(WatchdogMain.run(ConfigPaths.in(dir), fixed)).isZero();
+    }
+
+    @Test
+    void 감시_설정이_틀리면_기동을_거부한다() throws Exception {
+        Files.writeString(dir.resolve(WatchdogSettings.FILE), "disk.free-gb=20:50:1\n");
+
+        assertThat(WatchdogMain.run(ConfigPaths.in(dir), fixed)).isEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
+        assertThatThrownBy(() -> WatchdogMain.start(ConfigPaths.in(dir), fixed)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 기동하면_점검을_시작하고_닫으면_자기_하트비트를_지운다() throws Exception {
+        Watchdog w = WatchdogMain.start(ConfigPaths.in(dir), fixed);
+        Path own = dir.resolve("heartbeat").resolve("watchdog.hb");
+        try {
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (!Files.exists(own) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(own).exists();
+        } finally {
+            w.close();
+        }
+        assertThat(own).doesNotExist();
     }
 }

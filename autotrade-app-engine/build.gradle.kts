@@ -23,4 +23,6 @@ dependencies {
     implementation(project(":autotrade-config"))
     implementation(project(":autotrade-control"))
     implementation(project(":autotrade-notification-jar"))
+    // 하트비트 기록만(MON-02, D-092). JDK 허용 목록 안 코어라 실전 경로 검사(D-086)를 그대로 통과한다
+    implementation(project(":autotrade-monitor-agent-jar"))
 }
