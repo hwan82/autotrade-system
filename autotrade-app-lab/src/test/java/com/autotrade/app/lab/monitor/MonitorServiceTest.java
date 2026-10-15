@@ -41,7 +41,7 @@ class MonitorServiceTest {
     @Test
     void 화면_상태는_현재_값_대상_수준_기록_임계_이벤트를_담는다() {
         MonitorAgent agent = agent();
-        try (MonitorService service = new MonitorService(settings, agent)) {
+        try (MonitorService service = new MonitorService(settings, agent, CLOCK, null)) {
             assertThat(service.view().latest()).isNull(); // 첫 수집 전
             agent.sampleOnce();
             disk = 10;
@@ -64,7 +64,7 @@ class MonitorServiceTest {
     @Test
     void 실시간_연결은_정한_수까지만_열고_닫히면_자리를_돌려준다() {
         MonitorAgent agent = agent();
-        try (MonitorService service = new MonitorService(settings, agent)) {
+        try (MonitorService service = new MonitorService(settings, agent, CLOCK, null)) {
             for (int i = 0; i < MonitorService.MAX_STREAMS; i++) {
                 assertThat(service.openStream()).isPresent();
             }
@@ -76,11 +76,38 @@ class MonitorServiceTest {
     }
 
     @Test
+    void 마지막_표본이_주기의_3배보다_오래되면_수집_멈춤이다() {
+        MonitorAgent agent = agent();
+        try (MonitorService service = new MonitorService(settings, agent, CLOCK, null)) {
+            assertThat(service.view().stale()).isFalse(); // 첫 수집 전은 멈춤이 아니다
+            agent.sampleOnce();
+            assertThat(service.view().stale()).isFalse();
+            assertThat(service.stale(java.util.Optional.of(CLOCK.instant().minusSeconds(15)))).isFalse(); // 5초 x 3 = 경계
+            assertThat(service.stale(java.util.Optional.of(CLOCK.instant().minusSeconds(16)))).isTrue();
+        }
+    }
+
+    @Test
+    void 수집원을_만들지_못하면_실험실은_뜨고_모니터링만_사용_불가다() {
+        MonitorService service = MonitorConfiguration.create(settings, s -> {
+            throw new UnsatisfiedLinkError("jnidispatch 적재 실패 주입");
+        }, CLOCK);
+        try (service) {
+            service.start();
+            MonitorService.View view = service.view();
+            assertThat(view.enabled()).isFalse();
+            assertThat(view.problem()).contains("UnsatisfiedLinkError");
+            assertThat(service.openStream()).isEmpty();
+        }
+    }
+
+    @Test
     void 꺼져_있으면_수집하지_않고_실시간_연결도_열지_않는다() {
         MonitorSettings off = new MonitorSettings(false, 5, 10, Set.of(), List.of());
-        try (MonitorService service = new MonitorService(off, null)) {
+        try (MonitorService service = new MonitorService(off, null, CLOCK, null)) {
             service.start();
             assertThat(service.view().enabled()).isFalse();
+            assertThat(service.view().problem()).isNull();
             assertThat(service.view().latest()).isNull();
             assertThat(service.openStream()).isEmpty();
         }

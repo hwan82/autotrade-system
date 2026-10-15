@@ -16,8 +16,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * 감시 에이전트: 주기마다 수집원을 읽어 스냅샷을 만들고, 임계를 판정하고, 최근 기록을 들고, 듣는 쪽에 알린다(MON-05).
  *
- * <p>수집은 낮은 우선순위의 데몬 스레드 하나에서 한다. 수집원이나 듣는 쪽의 예외는 그 주기의 그 부분만 버리고 다음 주기를
- * 막지 않는다. 이 에이전트는 무엇도 멈추거나 죽이지 않는다: 임계 이벤트를 내기만 하고, 그에 따른 조치는 붙인 쪽이 정한다
+ * <p>수집은 낮은 우선순위의 데몬 스레드 하나에서 한다. 수집원이나 듣는 쪽이 던진 것은 {@code Error}까지 그 주기의 그
+ * 부분만 버리고 다음 주기를 막지 않는다. 그래도 수집이 멈췄는지는 {@link #lastSampleAt()}으로 본다(주기의 몇 배 넘게
+ * 그대로면 멈춤). 이 에이전트는 무엇도 멈추거나 죽이지 않는다: 임계 이벤트를 내기만 하고, 그에 따른 조치는 붙인 쪽이 정한다
  * (감시 프로세스는 정지 요청 파일만 만든다, D-058).
  */
 public final class MonitorAgent implements AutoCloseable {
@@ -58,7 +59,9 @@ public final class MonitorAgent implements AutoCloseable {
         for (MetricSource source : sources) {
             try {
                 readings.addAll(source.read());
-            } catch (RuntimeException e) {
+            } catch (Throwable e) {
+                // Error(LinkageError 등)도 그 수집원만 버린다. 코어는 JDK 허용 목록(D-086) 안 타입만 쓰므로 LinkageError·
+                // VirtualMachineError를 이름으로 가르지 못한다. 감시는 계속 도는 쪽이 낫다(risk-ops PR #114 R2)
                 failed.add(source.id());
                 LOG.log(System.Logger.Level.WARNING, "수집원 실패: " + source.id() + " (" + e.getClass().getSimpleName() + ")");
             }
@@ -83,7 +86,7 @@ public final class MonitorAgent implements AutoCloseable {
         for (MonitorListener l : listeners) {
             try {
                 l.onSample(snapshot, fired);
-            } catch (RuntimeException e) {
+            } catch (Throwable e) {
                 LOG.log(System.Logger.Level.WARNING, "감시 리스너 실패 (" + e.getClass().getSimpleName() + ")");
             }
         }
@@ -108,8 +111,8 @@ public final class MonitorAgent implements AutoCloseable {
     private void sampleQuietly() {
         try {
             sampleOnce();
-        } catch (RuntimeException e) {
-            // 예약 작업이 예외로 끝나면 다음 주기가 취소된다. 감시는 계속 돌아야 한다
+        } catch (Throwable e) {
+            // 예약 작업이 예외·Error로 끝나면 다음 주기가 조용히 취소된다. 어떤 Throwable도 밖으로 내보내지 않는다
             LOG.log(System.Logger.Level.WARNING, "감시 수집 실패 (" + e.getClass().getSimpleName() + ")");
         }
     }
@@ -125,6 +128,11 @@ public final class MonitorAgent implements AutoCloseable {
         synchronized (lock) {
             return history.isEmpty() ? Optional.empty() : Optional.of(history.get(history.size() - 1));
         }
+    }
+
+    /** 마지막으로 수집을 끝낸 시각(아직 없으면 빈 값). 붙인 쪽이 수집 멈춤을 알아보는 근거다. */
+    public Optional<Instant> lastSampleAt() {
+        return latest().map(MetricSnapshot::at);
     }
 
     /** 최근 스냅샷(오래된 것부터). */

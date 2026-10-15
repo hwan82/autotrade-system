@@ -58,10 +58,20 @@ export function thresholdText(t, unit) {
 
 let es = null;
 let timer = null;
+let staleTimer = null;
+/** 수집 멈춤으로 보는 기준(서버 MonitorService.STALE_INTERVALS와 같음). */
+const STALE_INTERVALS = 3;
 
 function stopUpdates() {
   if (es) { es.close(); es = null; }
   if (timer) { clearInterval(timer); timer = null; }
+  if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
+}
+
+/** 마지막 표본이 주기의 3배보다 오래됐는지. SSE가 조용히 끊기거나 수집이 멈추면 새 이벤트가 없으므로 화면이 스스로 잰다. */
+export function isStale(state, nowMs) {
+  if (!state.latest) return false;
+  return nowMs - Date.parse(state.latest.at) > STALE_INTERVALS * state.intervalSeconds * 1000;
 }
 
 export async function monitorPage() {
@@ -70,12 +80,18 @@ export async function monitorPage() {
   const host = h('div', { 'aria-live': 'off' });
   const link = h('span', { class: 'badge' });
   const at = h('span', { class: 'muted small' });
+  const staleBox = h('div', { role: 'alert' });
+  const checkStale = () => {
+    staleBox.replaceChildren(state.enabled && (state.stale || isStale(state, Date.now()))
+      ? h('p', { class: 'notice warn' }, `수집 멈춤: 마지막 표본이 ${new Date(state.latest.at).toLocaleTimeString('en-GB')}입니다(수집 주기 ${state.intervalSeconds}초의 ${STALE_INTERVALS}배 넘게 새 표본 없음). 아래 값은 지금 값이 아닙니다. 실험실 로그를 확인하세요.`)
+      : '');
+  };
 
   const setLink = (mode) => {
     const m = {
       sse: ['실시간 연결', 'badge ok'],
       poll: [`주기 조회(${state.intervalSeconds}초)`, 'badge warn-state'],
-      off: ['수집 꺼짐', 'badge'],
+      off: [state.problem ? '사용 불가' : '수집 꺼짐', state.problem ? 'badge warn-state' : 'badge'],
       wait: ['연결 중', 'badge'],
     }[mode];
     link.textContent = m[0];
@@ -84,11 +100,15 @@ export async function monitorPage() {
   const draw = () => {
     at.textContent = state.latest ? `마지막 수집 ${new Date(state.latest.at).toLocaleTimeString('en-GB')}` : '첫 수집 전';
     host.replaceChildren(body(state));
+    checkStale();
   };
   const alive = () => document.body.contains(host);
 
   // 화면에 들어올 때는 이미 그린 상태로 돌려준다. 이후 갱신은 SSE 또는 주기 조회
   draw();
+  if (state.enabled) {
+    staleTimer = setInterval(() => { if (!alive()) { stopUpdates(); return; } checkStale(); }, 1000);
+  }
   if (!state.enabled) {
     setLink('off');
   } else if (typeof EventSource === 'function') {
@@ -132,18 +152,24 @@ export async function monitorPage() {
         h('h1', {}, '모니터링'),
         h('p', { class: 'muted' }, 'PC 전체 자원과 실험실 프로세스(JVM) 지표입니다. 실전 엔진·게이트웨이·감시 프로세스의 JVM 지표는 여기 나오지 않습니다. 이 화면은 보기만 하고 아무것도 멈추지 않습니다.')),
       h('div', { class: 'monitor-link' }, link, at)),
-    host);
+    staleBox, host);
 }
 
 /** SSE 표본을 화면 상태에 더한다(기록은 서버 기록 크기와 같은 수까지). */
 export function apply(state, update) {
   const cap = Math.max(1, state.historySize || 1);
   state.latest = update.latest;
+  state.stale = false;
   state.history = state.history.concat([update.point]).slice(-cap);
   state.events = state.events.concat(update.events).slice(-200);
 }
 
 function body(state) {
+  if (!state.enabled && state.problem) {
+    return h('div', { class: 'empty' },
+      h('h2', {}, '모니터링을 쓸 수 없습니다'),
+      h('p', {}, state.problem));
+  }
   if (!state.enabled) {
     return h('div', { class: 'empty' },
       h('h2', {}, '모니터링 수집이 꺼져 있습니다'),

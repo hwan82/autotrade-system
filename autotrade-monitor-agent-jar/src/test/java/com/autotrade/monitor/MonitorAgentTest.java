@@ -69,6 +69,7 @@ class MonitorAgentTest {
     @Test
     void 수집원_예외는_그_주기의_실패_목록에만_남고_다음_주기를_막지_않는다() {
         MonitorAgent agent = agent(10);
+        assertThat(agent.lastSampleAt()).isEmpty();
         source.fail = true;
         MetricSnapshot failed = agent.sampleOnce();
         assertThat(failed.failedSources()).containsExactly("injected");
@@ -90,6 +91,53 @@ class MonitorAgentTest {
         agent.sampleOnce();
         assertThat(heard).hasSize(1);
         assertThat(agent.history()).hasSize(2);
+    }
+
+    /** 주기 수집 중 수집원이나 리스너가 Error를 던져도 다음 주기가 돈다(risk-ops PR #114 R2). */
+    @Test
+    void 수집원_Error는_그_주기_실패로만_남고_주기_수집이_이어진다() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
+        MetricSource broken = new MetricSource() {
+            @Override
+            public String id() {
+                return "broken";
+            }
+
+            @Override
+            public List<Reading> read() {
+                reads.incrementAndGet();
+                throw new NoClassDefFoundError("수집원 Error 주입");
+            }
+        };
+        try (MonitorAgent agent = new MonitorAgent(CLOCK, List.of(broken, source), List.of(), 10, 3)) {
+            CountDownLatch five = new CountDownLatch(5);
+            List<MetricSnapshot> heard = new java.util.concurrent.CopyOnWriteArrayList<>();
+            agent.addListener((s, e) -> {
+                heard.add(s);
+                five.countDown();
+            });
+            agent.start(Duration.ofMillis(10));
+            assertThat(five.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(reads.get()).isGreaterThanOrEqualTo(5);
+            assertThat(heard).allSatisfy(s -> {
+                assertThat(s.failedSources()).containsExactly("broken");
+                assertThat(s.readings()).hasSize(2);
+            });
+        }
+    }
+
+    @Test
+    void 리스너_Error도_다음_주기를_막지_않는다() throws Exception {
+        try (MonitorAgent agent = agent(10)) {
+            agent.addListener((s, e) -> {
+                throw new StackOverflowError("리스너 Error 주입");
+            });
+            CountDownLatch five = new CountDownLatch(5);
+            agent.addListener((s, e) -> five.countDown());
+            agent.start(Duration.ofMillis(10));
+            assertThat(five.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(agent.lastSampleAt()).contains(CLOCK.instant());
+        }
     }
 
     @Test
