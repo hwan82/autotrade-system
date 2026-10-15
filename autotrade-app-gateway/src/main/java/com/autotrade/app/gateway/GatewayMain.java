@@ -16,6 +16,7 @@ import com.autotrade.marketdata.live.JdkScheduler;
 import com.autotrade.marketdata.live.JdkWsTransport;
 import com.autotrade.marketdata.live.LiveRuntime;
 import com.autotrade.marketdata.live.SerialDispatcher;
+import com.autotrade.monitor.HeartbeatWriter;
 import java.io.IOException;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -65,8 +66,12 @@ public final class GatewayMain {
             System.exit(1);
             return;
         }
+        // 감시가 읽는 하트비트(MON-02, D-092). 쓰기 실패는 로그만 남긴다
+        HeartbeatWriter heartbeat = HeartbeatWriter.start(paths.runtimeFile().getParent(), PROCESS, clock,
+                HeartbeatWriter.DEFAULT_INTERVAL);
         CountDownLatch stopped = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            heartbeat.close();
             gateway.close();
             scheduler.close();
             stopped.countDown();

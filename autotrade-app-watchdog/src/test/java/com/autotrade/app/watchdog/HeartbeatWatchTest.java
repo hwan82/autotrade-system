@@ -1,0 +1,68 @@
+package com.autotrade.app.watchdog;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.autotrade.app.watchdog.HeartbeatWatch.Change;
+import com.autotrade.app.watchdog.HeartbeatWatch.State;
+import com.autotrade.monitor.Heartbeat;
+import com.autotrade.monitor.HeartbeatWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class HeartbeatWatchTest {
+
+    @TempDir
+    Path dir;
+
+    @Test
+    void 살아_있음_멈춤_꺼짐을_가르고_바뀔_때만_알린다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("engine", "gateway"), Duration.ofSeconds(15));
+        HeartbeatWriter engine = new HeartbeatWriter(dir, "engine", clock);
+        engine.beat();
+
+        List<Change> first = watch.check(clock.instant());
+        assertThat(first).extracting(Change::process, Change::from, Change::to)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("engine", null, State.ALIVE),
+                        org.assertj.core.groups.Tuple.tuple("gateway", null, State.ABSENT));
+
+        clock.advance(Duration.ofSeconds(15));
+        assertThat(watch.check(clock.instant())).isEmpty(); // 기준과 같으면 아직 살아 있음
+
+        clock.advance(Duration.ofSeconds(1));
+        List<Change> stale = watch.check(clock.instant());
+        assertThat(stale).singleElement().satisfies(c -> {
+            assertThat(c.process()).isEqualTo("engine");
+            assertThat(c.from()).isEqualTo(State.ALIVE);
+            assertThat(c.to()).isEqualTo(State.STALE);
+            assertThat(c.age()).isEqualTo(Duration.ofSeconds(16));
+        });
+        assertThat(watch.check(clock.instant())).isEmpty(); // 같은 상태는 다시 알리지 않음
+
+        engine.beat();
+        assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.ALIVE);
+
+        engine.close(); // 정상 종료는 파일을 지운다
+        assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.ABSENT);
+        assertThat(watch.states()).containsEntry("engine", State.ABSENT).containsEntry("gateway", State.ABSENT);
+    }
+
+    @Test
+    void 해석할_수_없거나_다른_프로세스_이름이면_읽을_수_없음이다() throws Exception {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("lab"), Duration.ofSeconds(15));
+        Path file = Heartbeat.file(dir, "lab");
+        Files.createDirectories(file.getParent());
+
+        Files.writeString(file, "반쯤 쓴");
+        assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.UNREADABLE);
+
+        Files.writeString(file, new Heartbeat("engine", 1, clock.instant(), clock.instant(), 1).format());
+        assertThat(watch.check(clock.instant())).isEmpty();
+        assertThat(watch.states()).containsEntry("lab", State.UNREADABLE);
+    }
+}

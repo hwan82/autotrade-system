@@ -3,6 +3,8 @@ package com.autotrade.architecture;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -12,7 +14,11 @@ import org.junit.jupiter.api.Test;
 class StopRequestPathTest {
 
     private static String constant(String className) throws ReflectiveOperationException {
-        Field f = Class.forName(className).getDeclaredField("STOP_REQUEST");
+        return constant(className, "STOP_REQUEST");
+    }
+
+    private static String constant(String className, String field) throws ReflectiveOperationException {
+        Field f = Class.forName(className).getDeclaredField(field);
         f.setAccessible(true);
         return (String) f.get(null);
     }
@@ -24,5 +30,24 @@ class StopRequestPathTest {
         assertThat(experiment).isEqualTo("experiment-state/stop-request");
         assertThat(constant("com.autotrade.app.lab.live.LiveLabService")).isEqualTo(experiment);
         assertThat(constant("com.autotrade.app.gateway.ReplayCheckGate")).isEqualTo(experiment);
+    }
+
+    /** 감시가 만드는 파일(D-092)과 명령이 보는 파일이 같아야 정지 순서 0번이 동작한다. */
+    @Test
+    void 감시가_만드는_정지_요청_파일은_명령들이_보는_파일과_같다() throws ReflectiveOperationException {
+        String watchdog = "com.autotrade.app.watchdog.StopRequests";
+
+        assertThat(constant(watchdog, "EXPERIMENT_STOP_REQUEST")).isEqualTo(constant("com.autotrade.app.experiment.ExperimentGate"));
+
+        Class<?> options = Class.forName("com.autotrade.app.collector.CollectorMain$Options");
+        Method parse = options.getDeclaredMethod("parse", String[].class);
+        parse.setAccessible(true);
+        Path configDir = Path.of("cfg").toAbsolutePath();
+        Object o = parse.invoke(null, (Object) new String[] {"krx-daily", "--config-dir", configDir.toString()});
+        Method stopRequest = options.getDeclaredMethod("stopRequest");
+        stopRequest.setAccessible(true);
+        Path collector = (Path) stopRequest.invoke(o);
+        assertThat(configDir.relativize(collector).toString().replace('\\', '/'))
+                .isEqualTo(constant(watchdog, "COLLECTOR_STOP_REQUEST"));
     }
 }
