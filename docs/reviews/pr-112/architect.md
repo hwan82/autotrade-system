@@ -95,3 +95,40 @@
 
 ## 판정
 승인 (1차 AR-1 해소, AR-2 해소, AR-3 반영. 권고 AR-R1(MM6)과 참고 1은 머지를 막지 않는다. B7 risk-ops 검토 필요, 보호 테스트 변경이라 머지는 사용자, 머지 전 독립 QA 관문)
+
+## 재검토 2026-10-15 (2차, 헤드 c14578d)
+- 대상: PR #112 / 헤드 c14578d / main 대비 diff 전체(`git diff origin/main...HEAD`, 17파일 +602 −18: `RealPathReflectionTest.java`, 테스트 소스 `SamePackageRecordReader`, `.github/CODEOWNERS`, `.github/workflows/ci.yml`, `scripts/ci/mark-protected-changes.sh`·`protected-paths.txt`·`test-mark-protected-changes.sh`, `project-instructions.md`, `qa/README.md`, `qa/checklists.md`, `qa/pending.md`, `qa-out-status.md`, `ADR-002`, `D-086`, 검토 원문 3개). 운영 코드 변경 0줄. 직전 architect 재검토(618e559, 헤드 b85bede) 뒤 코드 변경: 654b20e(QA F1·R1~R4), c14578d(main b4ed7fc 병합, risk-ops F-3·F-4·R-6)
+- 점검표: B
+- [확인 범위] 요청을 받을 때 헤드가 654b20e였고 그 기준으로 검토하던 중 c14578d로 바뀌었다. 654b20e 기준 원문은 커밋하지 않았다. 아래는 모두 c14578d 기준이다. 이 작업 트리는 다른 작업 트리가 같은 브랜치를 앞당겨 파일이 옛 커밋에 머물러 있었기 때문에, `origin/claude/project-thread-l44wj7`(c14578d)로 맞춘 뒤 모든 실행을 했다
+- 직접 실행한 것:
+  - `./gradlew clean` 뒤 `./gradlew build --no-daemon` (헤드 c14578d): `BUILD SUCCESSFUL in 3m 1s`. 결과 XML 합계 1,178건(main b4ed7fc의 PR #114 시험 포함), 실패·오류·건너뜀 0
+  - CI(헤드 c14578d, REST check-runs): `Gradle build`·`DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` 모두 success. guards 잡 단계(REST `actions/jobs/116320243284`): "Protected change marker self-test" success, "Protected change marker" success. 그 check-run 주석에 `warning 보호 대상 변경(실전 관련 PR) 보호 대상 파일 12개를 바꾼다 ...`가 실제로 남았다
+  - 표시 스크립트 로컬: `scripts/ci/test-mark-protected-changes.sh` → "표시 스크립트 자체 시험 통과". `scripts/ci/mark-protected-changes.sh main` → 보호 대상 12개(CI 주석과 같은 수). 변이: 표시 스크립트에서 `--no-renames`를 빼면 자체 시험이 `::error::보호 시험을 밖으로 옮긴 변경을 표시하지 않았다`로 exit 1(원문 복원 확인)
+  - `RealPathReflectionTest` 변이(각각 `--tests '*RealPathReflectionTest'`, 원문 복원): FM1(`SecretPaths` 기존 접근에 클래스 객체) 잡힘(지문), FM4(주석) 통과, N3(제네릭 배열 갈래 끔) 잡힘(모양), MM6(새 세 리플렉션 타입 제거) 잡힘(`규칙은_리플렉션_우회를_실제로_잡아낸다`), SK1P(지문 함수에 `SKIP_CODE` + 고정 값 비교 끔) 잡힘 "본문 상수만 다르면 지문이 달라야 한다", SK2P(`SKIP_DEBUG` 제거 + 고정 값 비교 끔) 잡힘 "줄 번호만 다르면 지문이 같아야 한다"
+  - **main 충돌**: 검토 끝 시점 origin/main은 88212d3(PR #115 머지)으로 다시 나아갔다. `git merge-tree --write-tree origin/main HEAD` → `CONFLICT (content): Merge conflict in docs/qa-out-status.md`. PR #115가 바꾼 나머지 파일(실험실 모니터 코드·시험, `monitor.js`, ADR-005, config-keys, D-090·D-091, 결정 README, PR #115 원문)은 이 PR과 겹치지 않는다
+  - 저장소 설정: `branches/main/protection` → 404 "Branch not protected"
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 헤드 c14578d clean build 직접 실행 성공(1,178건 실패 0). CI 3개 success |
+| B2 | 통과 | 모듈 의존·소유 변경 없음. `autotrade-architecture-test`의 이 PR 변경은 `RealPathReflectionTest`·`SamePackageRecordReader` 두 파일뿐이다(`git diff b4ed7fc HEAD -- autotrade-architecture-test`). 강화뿐이다: 리플렉션 타입 메서드 5종을 허용 클래스 안으로(:407-408), 서명 와일드카드·타입 변수 금지와 제네릭 배열(`hasWildcardOrTypeVariable`, :857), 중첩 클래스 금지, 디버그 정보만 뺀 바이트코드 지문(:743-780)과 그 함수의 자체 시험(:724-729). 규칙 변경은 D-086:51·:58·:61 이하, ADR-002:242에 반영했다 |
+| B3 | 통과 | 인터페이스·DB 스키마·설정 키·REST 계약 변경 없음. CI 단계와 표시 스크립트, CODEOWNERS는 개발 절차이고, 절차 문서(project-instructions.md 11장 보호 테스트, qa/README.md 1장, checklists.md A11)와 D-086:51을 함께 갱신했다. 표시가 보조라는 점("경고가 없다고 실전 관련이 아닌 것은 아니다")과 이름 바꾸기 처리, CODEOWNERS가 브랜치 보호 없이는 강제되지 않는다는 점이 qa/README.md:17과 스크립트 머리 주석에 있다 |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음. 지문은 같은 입력에 결정적이고 자체 시험의 합성 클래스는 고정 입력이다. 골든 테스트 포함 전체 빌드 통과 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 새 동작마다 실패하는 시험이 있다: 위 변이 6종 중 의도된 통과(FM4) 밖은 모두 잡힘. 표시 스크립트에는 임시 저장소 자체 시험(수정·밖으로 옮기기는 표시, 보호 밖 변경은 표시 안 함)이 CI 단계로 들어갔고, `--no-renames` 제거 변이를 잡는다. 지우거나 건너뛴 시험 없음 |
+| B7 | risk-ops 검토 필요 | 보호 테스트·CI 워크플로·규칙 문서 변경이라 실전 관련 PR이다. 헤드의 risk-ops 원문(`docs/reviews/pr-112/risk-ops.md`) 마지막 판정은 654b20e 기준 "수정 필요(F-3·F-4)"이고, c14578d의 F-3·F-4·R-6 반영에 대한 risk-ops 재검토가 필요하다. 머지는 사용자, 머지 전 독립 QA 재검토 |
+| B8 | 통과 | 추가 줄 전체를 읽음. 키·계좌번호·토큰 없음. 자체 시험의 `ci@example.invalid`는 임시 저장소 커밋용 자리표시자다. CI `Secret scan and collector boundary` success |
+
+## 직전 발견 처리
+- 1차 재검토(b85bede) **AR-R1 해소**: MM6 잡힘. 참고 1(ArchUnit·JDK 배포판 차이) 반영: D-086:51, 지문 실패 메시지.
+- 독립 QA **F1**: 보호 테스트 정의 확대(문서 세 곳)와 기계 표시(CI 경고, 실제 CI에서 경고가 남는 것 확인)가 들어갔다. 해소 판정은 QA 몫이다. **R1**(SK1P·SK2P 잡힘), **R2**(N3·MM6 잡힘), **R3**(문구) 반영 확인.
+- risk-ops **F-4** 반영 확인(`--no-renames`, 자체 시험이 변이를 잡음). **R-6** 반영: 보호 대상 경로에 `REQUIRED_PROJECTS`의 실전 경로 모듈 전체(`autotrade-config`·`control`·`domain`·`marketdata`·`strategy`·`notification-jar`·`monitor-agent-jar`)와 규칙 문서 5개를 넣었고, 표시가 보조라는 문장을 넣었다. 새 모듈 `autotrade-monitor-sources`(PR #114)는 실험실만 쓰므로(autotrade-app-lab/build.gradle.kts:20) 목록 밖이 맞다. **F-3**은 b4ed7fc 병합으로 풀렸으나 main이 다시 나아가 같은 종류가 다시 생겼다(아래 AR-R5).
+
+## 점검표 밖 발견(2차 재검토)
+- **AR-R5 (수정 필요) origin/main 88212d3과 `docs/qa-out-status.md`가 충돌한다.** PR #115가 같은 표 끝에 줄을 더했다. 표 줄이라 두 쪽을 다 남기면 풀린다. 겹치는 코드 파일은 없어 병합 결과의 동작 차이는 없다고 본다[추론, 병합 결과 빌드는 하지 않음]. 병합 뒤 새 헤드의 CI 3개 success를 확인한다. 이 PR 쪽 내용(시험·스크립트·문서)에는 더 고칠 것이 없다.
+- **AR-R4 (참고, 직전과 같음) CODEOWNERS는 지금 아무것도 강제하지 않는다.** main 브랜치 보호가 없고 PR 작성자와 소유자가 같은 `hwan82`다. 문서가 이 점을 이제 그대로 적는다(qa/README.md:17). 켤지는 사용자 결정이다.
+- **참고: 절차 범위 확대는 사용자 확인 사항이다.** project-instructions.md 11장이 바뀌어 사용자가 프로젝트 설정의 지침 사본도 갱신해야 한다. 또 보호 대상이 실전 경로 런타임 모듈 전체와 `autotrade-architecture-test` 전체로 넓어져, 새 모듈 추가(`ModuleOwnershipTest.OWNERS` 수정)나 `autotrade-domain`·`marketdata`·`strategy`를 고치는 PR도 CI 경고가 붙고 실전 관련 PR(사용자 머지, 독립 QA)로 가게 된다. 안전 쪽 변경이지만 사용자 머지 부담이 늘어나므로 메인이 사용자에게 알리기를 권한다.
+- [확인 범위] 커밋 메시지·`qa-out-status.md`의 "F-3·F-4·R-6 반영", "F1·R1~R4 반영"은 사실로 받지 않았다. 위 빌드·CI 단계 기록·변이·로컬 실행으로만 판정했다.
+
+## 판정
+수정 필요(AR-R5: origin/main 88212d3과 `docs/qa-out-status.md` 충돌 해소 후 새 헤드 CI 확인. 그 밖의 B 항목은 통과, QA F1·R1~R3과 risk-ops F-4·R-6 반영 확인. 참고 AR-R4·절차 범위 확대 사용자 알림. B7 risk-ops 재검토 필요, 보호 테스트 변경이라 머지는 사용자)
