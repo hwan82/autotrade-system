@@ -5,7 +5,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -20,6 +22,10 @@ import java.util.concurrent.TimeUnit;
  * 부분만 버리고 다음 주기를 막지 않는다. 그래도 수집이 멈췄는지는 {@link #lastSampleAt()}으로 본다(주기의 몇 배 넘게
  * 그대로면 멈춤). 이 에이전트는 무엇도 멈추거나 죽이지 않는다: 임계 이벤트를 내기만 하고, 그에 따른 조치는 붙인 쪽이 정한다
  * (감시 프로세스는 정지 요청 파일만 만든다, D-058).
+ *
+ * <p>수집원 실패 로그는 상태가 바뀔 때만 WARN이다: 처음 실패, 실패 종류가 바뀜. 같은 실패가 이어지는 동안은 DEBUG, 다시
+ * 읽히면 INFO 한 줄. OSHI가 안 되는 PC에서 매 주기 WARN이 쌓여 다른 경고를 묻지 않게 한다(risk-ops PR #114 K5). 주기마다의
+ * 실패는 스냅샷의 {@link MetricSnapshot#failedSources()}에 그대로 남는다.
  */
 public final class MonitorAgent implements AutoCloseable {
 
@@ -34,6 +40,8 @@ public final class MonitorAgent implements AutoCloseable {
     private final Object lock = new Object();
     private final List<MetricSnapshot> history = new ArrayList<>();
     private final List<ThresholdEvent> events = new ArrayList<>();
+    /** 지금 실패 중인 수집원 id → 실패 상태. 수집 스레드만 바꾸지만 시험이 직접 부를 수 있어 {@link #lock} 안에서만 다룬다. */
+    private final Map<String, Failure> failing = new HashMap<>();
     private ScheduledExecutorService scheduler;
 
     /**
@@ -56,15 +64,26 @@ public final class MonitorAgent implements AutoCloseable {
     public MetricSnapshot sampleOnce() {
         List<Reading> readings = new ArrayList<>();
         List<String> failed = new ArrayList<>();
+        List<LogLine> sourceLogs = new ArrayList<>();
         for (MetricSource source : sources) {
+            String error = null;
             try {
                 readings.addAll(source.read());
             } catch (Throwable e) {
                 // Error(LinkageError 등)도 그 수집원만 버린다. 코어는 JDK 허용 목록(D-086) 안 타입만 쓰므로 LinkageError·
                 // VirtualMachineError를 이름으로 가르지 못한다. 감시는 계속 도는 쪽이 낫다(risk-ops PR #114 R2)
                 failed.add(source.id());
-                LOG.log(System.Logger.Level.WARNING, "수집원 실패: " + source.id() + " (" + e.getClass().getSimpleName() + ")");
+                error = e.getClass().getSimpleName();
             }
+            synchronized (lock) {
+                LogLine line = trackFailure(source.id(), error);
+                if (line != null) {
+                    sourceLogs.add(line);
+                }
+            }
+        }
+        for (LogLine line : sourceLogs) {
+            LOG.log(line.level(), line.text());
         }
         readings.sort(Comparator.comparing(Reading::name));
         MetricSnapshot snapshot;
@@ -159,6 +178,46 @@ public final class MonitorAgent implements AutoCloseable {
             if (scheduler != null) {
                 scheduler.shutdownNow();
             }
+        }
+    }
+
+    /**
+     * 수집원 하나의 이번 주기 결과로 실패 상태를 갱신하고 남길 로그 한 줄을 돌려준다(없으면 null). {@code error}는 실패면 예외
+     * 클래스 이름, 성공이면 null. 처음 실패·종류 바뀜은 WARN, 같은 실패 반복은 DEBUG, 회복은 INFO다.
+     */
+    private LogLine trackFailure(String id, String error) {
+        Failure before = failing.get(id);
+        if (error == null) {
+            if (before == null) {
+                return null;
+            }
+            failing.remove(id);
+            return new LogLine(System.Logger.Level.INFO,
+                    "수집원 회복: " + id + " (" + before.error + " " + before.count + "회 연속 실패 뒤)");
+        }
+        if (before == null) {
+            failing.put(id, new Failure(error));
+            return new LogLine(System.Logger.Level.WARNING,
+                    "수집원 실패: " + id + " (" + error + "). 같은 실패가 이어지는 동안은 다시 경고하지 않는다");
+        }
+        if (!before.error.equals(error)) {
+            failing.put(id, new Failure(error));
+            return new LogLine(System.Logger.Level.WARNING,
+                    "수집원 실패 바뀜: " + id + " (" + before.error + " → " + error + ")");
+        }
+        before.count++;
+        return new LogLine(System.Logger.Level.DEBUG, "수집원 실패 계속: " + id + " (" + error + ", " + before.count + "회째)");
+    }
+
+    private record LogLine(System.Logger.Level level, String text) {}
+
+    /** 수집원 하나의 연속 실패 상태. */
+    private static final class Failure {
+        final String error;
+        long count = 1;
+
+        Failure(String error) {
+            this.error = error;
         }
     }
 

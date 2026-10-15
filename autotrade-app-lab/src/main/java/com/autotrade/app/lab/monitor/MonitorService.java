@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -55,7 +56,7 @@ public final class MonitorService implements AutoCloseable {
      * SSE 보내기 전용 스레드. 수집 스레드에서 바로 보내면 느린 브라우저 하나가 수집을 늦춘다(risk-ops PR #114 K1). 대기는 2개까지만
      * 두고 넘치면 가장 오래된 것을 버린다(화면은 다음 표본으로 따라잡는다).
      */
-    private final ThreadPoolExecutor sender = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+    final ThreadPoolExecutor sender = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(2), Thread.ofPlatform().name("monitor-sse").daemon(true).factory(),
             new ThreadPoolExecutor.DiscardOldestPolicy());
 
@@ -130,12 +131,16 @@ public final class MonitorService implements AutoCloseable {
         return streams.size();
     }
 
-    private void push(MetricSnapshot snapshot, List<ThresholdEvent> events) {
-        if (streams.isEmpty()) {
+    void push(MetricSnapshot snapshot, List<ThresholdEvent> events) {
+        if (closing || streams.isEmpty()) {
             return;
         }
         Update update = new Update(sample(snapshot), point(snapshot), events);
-        sender.execute(() -> send(update));
+        try {
+            sender.execute(() -> send(update));
+        } catch (RejectedExecutionException e) {
+            // 종료 중: 닫는 순간 돌던 수집이 보낸 마지막 표본이다. 버린다(architect PR #114 A7, 경고 로그를 남기지 않음)
+        }
     }
 
     private void send(Update update) {
@@ -161,11 +166,12 @@ public final class MonitorService implements AutoCloseable {
 
     @Override
     public void close() {
+        // 먼저 새 표본을 받지 않게 하고(closing), 수집과 송신 스레드를 멈춘다
+        closeStreams();
         if (agent != null) {
             agent.close();
         }
         sender.shutdownNow();
-        closeStreams();
     }
 
     static Sample sample(MetricSnapshot s) {
