@@ -13,6 +13,7 @@ import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentRunner;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.RunResult;
+import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.selection.SelectionSchedule;
@@ -80,7 +81,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     /**
      * @param risk 모의 주문이 통과할 검증 체인. 실전과 같은 {@link RiskChain}만 받는다(SIM-12). 승인만 하는 정책이나
      *     블랙리스트를 건너뛰는 정책은 넣을 수 없다. 리플레이는 실험 시작 때 찍은 블랙리스트 스냅샷 하나로 끝까지 돈다(RSK-12)
-     * @param parallelism 동시에 돌릴 Run 수(lab.max-parallel-runs). 결과에는 영향 없음
+     * @param parallelism 동시에 돌릴 Run 수. {@link RunGate#maxParallelRuns()}를 넘으면 그 값으로 줄인다.
+     *     결과에는 영향 없음
      * @param benchmark 매수 후 보유 비교 종목. 없으면 null
      */
     public SimulationExperimentRunner(
@@ -151,7 +153,12 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         if (parallelism < 1 || parallelism > 64) {
             throw new IllegalArgumentException("parallelism은 1~64여야 합니다: " + parallelism);
         }
-        this.parallelism = parallelism;
+        int cap = gate.maxParallelRuns();
+        if (cap < 1 || cap > 64) {
+            throw new IllegalArgumentException("병렬 Run 상한(maxParallelRuns)은 1~64여야 합니다: " + cap);
+        }
+        // 실험실 자원 상한(SIM-14, D-089): 등록 파일의 parallelism과 실행 명령이 준 상한 중 작은 쪽. 결과에는 영향 없음
+        this.parallelism = Math.min(parallelism, cap);
         this.benchmark = benchmark;
         this.selections = selections;
     }
@@ -174,6 +181,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         gate.check(); // 선정 일정 계산(모든 선정 × 거래일) 전에 본다. 계산 중에도 공급자 호출마다 본다(PR #52 QA F1)
         SelectionSchedule schedule = selectionSchedule(spec, events);
         List<Combination> combinations = spec.combinations();
+        Progress progress = new Progress(gate, spec.id().value(), combinations.size(), tradingDayCount(events));
+        progress.started();
         List<RunReport> reports = new ArrayList<>(combinations.size());
         // 한 Run이 멈춤을 보면 나머지는 문을 다시 묻지 않고 다음 확인 지점에서 같은 예외로 끝난다(D-063). 어느 Run의 결과를
         // 먼저 받든 처음 받은 정지 이유(장 시간, 정지 요청 파일 등)가 명령까지 올라가야 해서 예외 자체를 남긴다(PR #52 architect R1)
@@ -184,7 +193,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 int index = i;
                 futures.add(pool.submit(() -> {
                     checkGate(stopped);
-                    return runOne(spec, index, warmup, events, benchmarkReturn, schedule, stopped);
+                    progress.runStarted();
+                    RunReport report = runOne(spec, index, warmup, events, benchmarkReturn, schedule, stopped, progress);
+                    progress.runFinished(index, report.summary().status() == RunStatus.FAILED);
+                    return report;
                 }));
             }
             try {
@@ -213,7 +225,91 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 gaps.add(g);
             }
         }
+        progress.finished();
         return new SimulationReport(result, reports, gaps);
+    }
+
+    /** Run 하나가 마감하는 거래일 수. {@link RunStepper}가 거래일이 바뀔 때마다 마감하므로 같은 방식(바뀐 횟수 + 1)으로 센다. */
+    private int tradingDayCount(List<MarketEvent> events) {
+        int count = 0;
+        LocalDate day = null;
+        for (MarketEvent e : events) {
+            LocalDate d = rules.tradingDate(e.exchangeTime());
+            if (!d.equals(day)) {
+                count++;
+                day = d;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 실험 하나의 진행 보고(D-089). Run 스레드들이 함께 쓰므로 값 바꾸기와 넘기기를 한 잠금 안에서 해 받는 쪽이 보는 값이 뒤로
+     * 가지 않게 한다. Run 상태(계좌·거래소·전략)는 건드리지 않아 결과에 영향이 없다. 받는 쪽이 예외를 던지면 남은 보고를 끈다.
+     */
+    private static final class Progress {
+
+        private final RunGate gate;
+        private final String experimentId;
+        private final int runsTotal;
+        private final int daysPerRun;
+        private final int[] runDays;
+        private int started;
+        private int finished;
+        private int failed;
+        private long daysDone;
+        private boolean off;
+
+        Progress(RunGate gate, String experimentId, int runsTotal, int daysPerRun) {
+            this.gate = gate;
+            this.experimentId = experimentId;
+            this.runsTotal = runsTotal;
+            this.daysPerRun = daysPerRun;
+            this.runDays = new int[runsTotal];
+        }
+
+        synchronized void started() {
+            emit(ExperimentProgress.Phase.STARTED);
+        }
+
+        synchronized void runStarted() {
+            started++;
+            emit(ExperimentProgress.Phase.RUNNING);
+        }
+
+        synchronized void dayClosed(int index) {
+            if (runDays[index] < daysPerRun) {
+                runDays[index]++;
+                daysDone++;
+            }
+            emit(ExperimentProgress.Phase.RUNNING);
+        }
+
+        synchronized void runFinished(int index, boolean runFailed) {
+            daysDone += daysPerRun - runDays[index];
+            runDays[index] = daysPerRun;
+            finished++;
+            if (runFailed) {
+                failed++;
+            }
+            emit(ExperimentProgress.Phase.RUNNING);
+        }
+
+        synchronized void finished() {
+            emit(ExperimentProgress.Phase.FINISHED);
+        }
+
+        private void emit(ExperimentProgress.Phase phase) {
+            if (off) {
+                return;
+            }
+            try {
+                gate.onProgress(new ExperimentProgress(experimentId, phase, runsTotal, started, finished, failed,
+                        daysPerRun, daysDone));
+            } catch (RuntimeException e) {
+                off = true; // 진행 보고 실패는 실험을 멈추지 않는다
+            }
+        }
     }
 
     private Slice validateAndSlice(ExperimentSpec spec) {
@@ -398,7 +494,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
 
     private RunReport runOne(
             ExperimentSpec spec, int index, List<MarketEvent> warmup, List<MarketEvent> events, BigDecimal benchmarkReturn,
-            SelectionSchedule schedule, AtomicReference<ExperimentStoppedException> stopped) {
+            SelectionSchedule schedule, AtomicReference<ExperimentStoppedException> stopped, Progress progress) {
         RunStepper run = new RunStepper(spec, index, rules, cost, execution, strategies, risk, data.exchangeTimed(),
                 schedule);
         try {
@@ -406,7 +502,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     : events.get(0).receivedAt();
             run.begin(start, warmup);
             for (MarketEvent e : events) {
-                run.onEvent(e, () -> checkGate(stopped));
+                run.onEvent(e, () -> {
+                    progress.dayClosed(index);
+                    checkGate(stopped);
+                });
             }
             return run.finish(benchmarkReturn, settleAtWindowEnd);
         } catch (ExperimentStoppedException e) {

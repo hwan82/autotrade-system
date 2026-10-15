@@ -38,14 +38,14 @@ import java.util.TreeMap;
  * <p>실행: {@code ./gradlew :autotrade-app-experiment:runStrategyStudy} (커밋·dirty 여부는 Gradle이 git에서 넘긴다).
  * 인자: {@code <저장소 루트> <커밋> <dirty true|false>}. 프로세스 진입점은 {@code com.autotrade.app.experiment.ExperimentMain}이고
  * 장 시간 보호와 감시의 정지 요청 파일을 {@link RunGate}로 넣는다(D-063). 이 클래스에는 {@code main}이 없다.
- * 종료 코드: 0 완료, 4 정지 확인으로 멈춤(결과 파일을 쓰지 않음).
+ * 종료 코드: 0 완료, 3 취소 요청으로 멈춤(D-089), 4 정지 확인으로 멈춤(결과 파일을 쓰지 않음).
  *
  * <p>실험 설계는 아래 상수로 고정(사전 등록)하고 {@code experiment.yaml}로도 남긴다. 결과를 본 뒤 이 값을 바꿔 같은 데이터로
  * 다시 평가하지 않는다. 바꾸려면 새 실험 ID로 한다.
  */
 public final class StudyMain {
 
-    static final ExperimentId ID = new ExperimentId("EXP-20261008-STR01");
+    public static final ExperimentId ID = new ExperimentId("EXP-20261008-STR01");
     static final long SEED = 20261008L;
     static final LocalDate START = LocalDate.of(2026, 3, 2);
     static final int DAYS = 40;
@@ -78,7 +78,7 @@ public final class StudyMain {
             return 0;
         } catch (ExperimentStoppedException e) {
             System.err.println("[study] 멈췄습니다(결과 파일을 쓰지 않음): " + e.getMessage());
-            return 4;
+            return e.exitCode();
         }
     }
 
