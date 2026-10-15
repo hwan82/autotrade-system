@@ -56,3 +56,30 @@
 
 ## 판정
 수정 필요(A14/F1: 지문 값 갱신을 실전 관련 PR로 만드는 규칙이 보호 테스트 정의에 없음. 권고 R1~R4)
+
+## 재검토 2026-10-15
+- 대상: PR #112 / 헤드 4b2d8d1 / 1차 판정 헤드 380c612(보고서 커밋 520ef5c) 뒤 변경 전체. PR 자체 변경은 654b20e(F1 반영: 보호 테스트 정의 확대, CI 표시, CODEOWNERS)·c14578d(risk-ops F-3·F-4·R-6, main b4ed7fc 병합)·3fbc32c(main 병합)와 검토 원문. 헤드는 현재 origin/main 88212d3을 포함한다(`git merge-tree` 충돌 없음)
+- 점검표: A 전체 + B1, B6. 1차 F1과 권고 R1~R4 재확인
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks`(헤드 4b2d8d1): 429 재시도 뒤 3회째 **BUILD SUCCESSFUL**. 결과 XML 합계 **1,185건**, 실패·오류·건너뜀 0. `RealPathReflectionTest` 9건 통과
+  - CI(헤드 4b2d8d1): Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary 모두 success. "Secret scan" 작업 로그에서 `test-mark-protected-changes.sh` "표시 스크립트 자체 시험 통과"와 `mark-protected-changes.sh "main"`의 `##[warning]보호 대상 파일 12개를 바꾼다 …` 확인(이 PR 자신이 실전 관련 PR로 표시됨)
+  - 변이 N3 재실행(`hasWildcardOrTypeVariable`의 제네릭 배열 갈래 → `return false`): **잡힘**(`레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다` FAILED, 기대 문자열 `drainAll([Ljava.util.List;)`)
+  - 변이 R1(지문 함수에 `SKIP_CODE` 더하기): **잡힘**(`레코드_구성_요소를_읽는_클래스의_지문은_고정_값과_같다` FAILED)
+  - 1차 P4 경로의 표시 확인: 임시 브랜치에서 운영 `SecretPaths.java`만 바꾸고 `BASE_REF_PREFIX= scripts/ci/mark-protected-changes.sh <기준>` 실행 → `::warning title=보호 대상 변경(실전 관련 PR)`과 바뀐 경로 `autotrade-config/src/main/java/com/autotrade/config/SecretPaths.java` 출력. 지문 값을 고치는 시험 파일(`autotrade-architecture-test/*`)도 목록에 있다. 임시 브랜치는 지웠고 작업 트리 깨끗함 확인
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A2 | 통과 | `ArchitectureTest` 변경 없음. `RealPathReflectionTest` 변경은 추가만(위반 예제 `drainAll`·`wildcardBound`·`variableBound`·`arrayComponent`와 단언, 지문 함수 자체 시험 2단언). 삭제 0 |
+| A10 | 통과 | 추가 줄에 키·계좌번호·토큰 없음. 자체 시험의 메일 주소는 `ci@example.invalid`. CI 비밀값 스캔 success |
+| A11 | 통과 | 보호 테스트 삭제·약화 0건. 1차 N3·R1 변이가 이제 잡힌다. 고정 값 갱신 규칙이 점검표 A11에 들어감(`docs/qa/checklists.md:24`) |
+| A14 | 통과 | **F1 해소**: 보호 테스트 정의가 세 규칙 문서 모두에서 `autotrade-architecture-test` 모듈 전체(`RealPathReflectionTest`·`ModuleOwnershipTest`·고정 예제 포함)로 넓어지고 "고정 값(지문·허용 목록·소유 표·고정 구성 목록) 갱신을 포함한 모든 변경"과 "고정 값을 고쳐야 통과하는 대상 코드의 변경"을 실전 관련 PR로 적었다(`docs/team/project-instructions.md:115-117`, `docs/qa/README.md:15-17`). 기계 장치로 `scripts/ci/protected-paths.txt` + CI 표시(경고, 실패시키지 않음) + `.github/CODEOWNERS`가 생겼고 위 표시 확인으로 동작한다. D-086 문단도 같은 규칙으로 갱신. 나머지 A항목은 1차와 같음(해당 없음 또는 통과) |
+| B1 | 통과 | 헤드 직접 빌드 1,185건 통과, CI 3건 success |
+| B6 | 통과 | 새 위반 예제마다 기대 문자열 단언, 지문 함수 성질 시험 추가 |
+
+- 1차 권고 처리: R1 해소(지문 함수 자체 시험, 변이로 확인), R2 해소(N3 잡힘, 세 리플렉션 타입 위반 예제), R3 문서화(D-086에 JDK·ArchUnit·배포판 차이로 지문이 바뀔 수 있고 그 갱신도 실전 관련 PR이라고 적음. 사용자 PC 확인 줄은 7단계 절차서 몫으로 남음), R4 해소(main 병합)
+- 새 권고:
+  - **R5 (사용자 조치) 프로젝트 지침 원문 변경**: `docs/team/project-instructions.md`는 "개발 프로젝트 설정 > 지침에 그대로 붙여 넣어 사용"하는 원문이다. 머지 뒤 사용자가 프로젝트 설정의 지침도 11장 "보호 테스트" 세 줄로 갱신해야 설정 쪽 지침과 저장소가 같아진다
+  - **R6 (참고) 표시는 경고뿐이고 CODEOWNERS는 브랜치 보호가 꺼져 있으면 강제되지 않는다**(문서가 스스로 적음, `docs/qa/README.md:17`). 그래서 F1의 마지막 문은 여전히 사람의 분류다. 다만 이제 규칙 문서·점검표·CI 경고 세 곳이 같은 규칙을 말해 "겉보기에 설정 경고 개선"인 PR도 PR 화면 경고로 드러난다. 브랜치 보호(`Require review from Code Owners`)를 켤지는 사용자 결정이다
+
+## 판정 (재검토)
+승인 (F1 해소: 보호 테스트 정의 확대·고정 값 갱신 규칙·CI 표시와 CODEOWNERS, 표시 동작 직접 확인. R1·R2 변이 잡힘. 빌드 1,185건·CI 통과, main 충돌 없음. 권고 R5 사용자 지침 갱신, 참고 R6. 실전 관련이라 머지는 사용자)
