@@ -9,6 +9,7 @@ import com.autotrade.monitor.Threshold;
 import java.lang.System.Logger;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,9 +42,18 @@ final class Watchdog implements AutoCloseable {
     private final StopRequests stopRequests;
     /** 점검마다 있어야 하는 값(드라이브 경로마다 여유, PC CPU·메모리). 하나라도 빠지면 판단 못 함. */
     private final Set<String> requiredReadings = new TreeSet<>();
-    /** 지난 점검에서 빠진 필수 값. 바뀔 때만 알린다(PR #122 risk-ops R1: 값이 소리 없이 계속 빠지면 위험 판정도 꺼진다). */
-    private Set<String> missingReadings = Set.of();
+    /**
+     * 빠진 필수 값 경고를 되풀이하는 간격(D-096). 값이 소리 없이 계속 빠지면 위험 판정도 꺼지므로(PR #122 risk-ops R1) 빠진 동안
+     * 이 간격마다 다시 알린다(PR #122 QA R1). 같은 값이 빠졌다 돌아오기를 되풀이해도 이 간격 안에서는 다시 알리지 않는다(QA R4).
+     */
+    static final Duration MISSING_REPEAT = Duration.ofMinutes(10);
+
+    /** 마지막 경고 뒤 경고한 값들. 여기 없는 값이 새로 빠지면 간격과 상관없이 바로 알린다. */
+    private Set<String> warnedReadings = Set.of();
+    private Instant lastMissingWarning;
+    private boolean warnedSinceRecovery;
     private int missingWarnings;
+    private int missingRecoveries;
     private ScheduledExecutorService scheduler;
 
     Watchdog(Path configDir, WatchdogSettings settings, Clock clock, DiskFreeSource.FreeSpace freeSpace, OsReadings os) {
@@ -76,7 +86,7 @@ final class Watchdog implements AutoCloseable {
         String detail = "자원 값을 읽지 못함";
         try {
             MetricSnapshot snapshot = agent.sampleOnce();
-            reportMissing(snapshot);
+            reportMissing(snapshot, now);
             pressure = pressure(snapshot);
             detail = detail(snapshot);
         } catch (Throwable e) {
@@ -120,28 +130,48 @@ final class Watchdog implements AutoCloseable {
         return warn ? StopRequests.Pressure.ELEVATED : StopRequests.Pressure.CLEAR;
     }
 
-    /** 빠진 필수 값이 바뀌면 로그를 남긴다: 새로 빠지면 WARN, 모두 돌아오면 INFO. 같은 상태가 이어지면 남기지 않는다. */
-    private void reportMissing(MetricSnapshot snapshot) {
+    /**
+     * 빠진 필수 값을 알린다(D-096). 새 값이 빠지면 바로, 같은 값이 계속(또는 되풀이해) 빠지면 {@link #MISSING_REPEAT}마다 WARN.
+     * 경고한 뒤 모두 돌아오면 INFO 한 번.
+     */
+    private void reportMissing(MetricSnapshot snapshot, Instant now) {
         Set<String> missing = new TreeSet<>(requiredReadings);
         for (Reading r : snapshot.readings()) {
             missing.remove(r.name());
         }
-        if (missing.equals(missingReadings)) {
+        if (missing.isEmpty()) {
+            if (warnedSinceRecovery) {
+                warnedSinceRecovery = false;
+                missingRecoveries++;
+                LOG.log(Logger.Level.INFO, "자원 값을 다시 읽음: " + warnedReadings);
+            }
             return;
         }
-        if (missing.isEmpty()) {
-            LOG.log(Logger.Level.INFO, "자원 값을 다시 읽음: " + missingReadings);
-        } else {
-            missingWarnings++;
-            LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + ". 그 값의 위험 판정을 못 하므로 정지 요청을 새로 만들지 못하고, "
-                    + "켜진 정지 요청은 풀지 않는다(D-092 3번, D-095)");
+        boolean newName = !warnedReadings.containsAll(missing);
+        boolean due = lastMissingWarning == null || !now.isBefore(lastMissingWarning.plus(MISSING_REPEAT));
+        if (!newName && !due) {
+            return;
         }
-        missingReadings = Set.copyOf(missing);
+        Set<String> warned = new TreeSet<>(missing);
+        if (!due) {
+            warned.addAll(warnedReadings); // 간격 안에서는 경고한 값을 잊지 않아야 오가는 값이 매 점검 경고를 내지 않는다
+        }
+        warnedReadings = Set.copyOf(warned);
+        lastMissingWarning = now;
+        warnedSinceRecovery = true;
+        missingWarnings++;
+        LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + ". 그 값의 위험 판정을 못 하므로 정지 요청을 새로 만들지 못하고, "
+                + "켜진 정지 요청은 풀지 않는다(D-092 3번, D-095). 빠진 동안 " + MISSING_REPEAT.toMinutes() + "분마다 다시 알린다(D-096)");
     }
 
     /** 빠진 필수 값으로 WARN을 남긴 횟수(시험용). */
     int missingWarnings() {
         return missingWarnings;
+    }
+
+    /** 경고 뒤 모두 돌아와 INFO를 남긴 횟수(시험용). */
+    int missingRecoveries() {
+        return missingRecoveries;
     }
 
     private static String detail(MetricSnapshot snapshot) {
