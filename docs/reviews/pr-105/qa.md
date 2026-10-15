@@ -63,3 +63,26 @@
 
 ## 판정
 수정 필요 (A14: main 충돌 `docs/decisions/README.md`·`docs/spec/autotrade-spec.md`, 병합 뒤 `docs/runbooks/README.md:46`·`:61`이 D-085와 어긋남. 코드·시험은 위 확인 범위에서 결함을 찾지 못했다. 권고 R1, 참고 R2·R3. 실전 관련이라 머지는 사용자)
+
+## 재검토 2026-10-15
+- 대상: PR #105 / 커밋 7ae247c / 1차 판정 헤드 0a23620(보고서 커밋 505d2cb) 뒤 변경 = main 711b027 병합 커밋 하나(부모 505d2cb, 711b027)
+- 점검표: A14 재확인 + B1 + 과금. 1차에서 통과한 A1~A13·B6은 PR 자체 코드가 바뀌지 않아(아래) 1차 근거를 유지했다
+- 직접 실행한 것:
+  - `git diff 505d2cb 7ae247c -- autotrade-app-gateway docs/decisions/D-085-replay-check-gate.md docs/runbooks/collector.md docs/runbooks/stage-2-real-recording.md docs/team/broker-and-fault-design.md StopRequestPathTest.java` = 0줄. PR 코드·시험·D-085는 1차와 같다
+  - `git merge-tree --write-tree origin/main 7ae247c`: 충돌 없음(main 711b027 = 현재 origin/main)
+  - 충돌 해소 대조(`git diff 711b027 7ae247c`): `docs/decisions/README.md` D-085 행이 D-084와 D-086 사이, 미확정 표에서 Q-050 행 삭제, 닫힌 미확정에 Q-050(D-085) 추가. `docs/spec/autotrade-spec.md` 변경 이력에 v14.29(D-085) 행, RSK-07 문구에 리플레이 점검·D-085. `docs/qa/pending.md` 두 줄(1차·재검토) 추가. main 쪽 D-086·D-087·D-088 행과 v14.31·v14.32 행은 그대로 남았다
+  - `docs/runbooks/README.md`: `:46`은 이제 "빌드·`installDist`는 장 시간 보호를 스스로 확인하지 않는다 … `replayCheck`는 장 시간 보호와 정지 요청 파일을 확인해 구간 안이면 종료 코드 4로 시작하지 않지만(D-085), 관문 앞에서 Gradle 컴파일이 돌므로 보호 구간에는 시작하지 않는다", `:61` 종료 코드 표 `replayCheck` 4 칸은 "장 시간 보호·정지 요청으로 멈춤(보고서 없음, D-085)", 2 칸에 "입력 오류" 추가. `ReplayCheckMain`·D-085·`stage-2-real-recording.md` 7번과 일치한다
+  - `./gradlew build --rerun-tasks`(head 7ae247c): 1회째 **BUILD SUCCESSFUL**. 시험 결과 XML 합계 tests **1,140**, failures 0, errors 0, skipped 0(`ReplayCheckTest` 17건, `StopRequestPathTest` 1건 포함). head가 main을 포함해 이 빌드가 병합 빌드다(D-086 `RealPathReflectionTest`도 같이 통과)
+  - CI(head 7ae247c, check-runs 3건): Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary 모두 success
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A14 | 통과 | 위 충돌 해소 대조와 `runbooks/README.md:46`·`:61` 정정. 1차 A14(1)·(2) 모두 해소 |
+| B1 | 통과 | 병합 헤드 직접 빌드 1,140건 통과, CI 3건 통과 |
+| 과금 | 통과 | 병합으로 들어온 PR 쪽 변경 없음, 새 외부 호출·의존 없음 |
+
+- 참고 R4: 기획서 변경 이력에 v14.30 행이 없다(v14.32 행은 "v14.29·v14.30은 다른 PR이 쓴다"고 적음). 이 PR은 v14.29만 쓰므로 v14.30은 비어 남는다. 번호 공백일 뿐 내용 불일치는 아니며, 다음 기획서 PR에서 "번호 미사용"을 적어 두길 권한다
+- 1차 권고 R1(`gradle.properties` 해제 값), 참고 R2·R3은 그대로 열려 있다
+
+## 재검토 판정
+승인 (A14 해소: main 병합 충돌 없음, 실행 매뉴얼 46·61줄이 D-085와 일치, 병합 빌드 1,140건·CI 통과. 권고 R1, 참고 R2·R3·R4. 실전 관련이라 머지는 사용자)
