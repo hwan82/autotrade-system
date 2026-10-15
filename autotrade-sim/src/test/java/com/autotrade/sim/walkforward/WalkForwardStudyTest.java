@@ -185,6 +185,33 @@ class WalkForwardStudyTest {
     }
 
     @Test
+    void 실행_명령_병렬_상한이_1이면_결정론_확인을_같음으로_적지_않는다() throws IOException {
+        // 등록 파일 parallelism 3이라도 실행 명령 상한 1이면 두 실행이 모두 직렬이라 비교가 안 된다(D-089, PR #113 architect R6)
+        RunGate capOne = new RunGate() {
+            @Override
+            public java.util.Optional<String> stopReason() {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public int maxParallelRuns() {
+                return 1;
+            }
+        };
+        List<String> log = new ArrayList<>();
+
+        WalkForwardStudy.Outcome out = WalkForwardStudy.runAndWrite(experiment("3"), Path.of(".."), snapshots(),
+                new CodeVersion("test", false), true, log::add, capOne);
+
+        assertThat(out.deterministic()).isNull();
+        assertThat(out.files().get("inputs.yaml")).doesNotContain("같음(").contains("determinism: \"확인 안 함(실제 병렬 수가 1");
+        assertThat(out.files().get("results.md")).doesNotContain("같음(").contains("확인 안 함(실제 병렬 수가 1");
+        assertThat(log).contains("결정론 확인 생략: 실제 병렬 수가 1입니다")
+                .doesNotContain("결정론 확인: 병렬 1로 전체를 다시 실행")
+                .anySatisfy(l -> assertThat(l).startsWith("계산 시작: ").endsWith(", 병렬 1"));
+    }
+
+    @Test
     void 정지_확인이_걸리면_결과_파일을_쓰지_않는다() throws IOException {
         RunGate stop = () -> {
             throw new ExperimentStoppedException("테스트 정지");
