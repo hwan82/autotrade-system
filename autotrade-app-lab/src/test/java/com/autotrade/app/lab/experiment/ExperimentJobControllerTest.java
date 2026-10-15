@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.autotrade.app.lab.web.LocalOnlyRequestFilter;
@@ -126,5 +127,14 @@ class ExperimentJobControllerTest {
         mvc.perform(post("/api/experiment-jobs/{id}/cancel", "EXP-20261015-NONE").header("Host", "127.0.0.1")
                         .header(LocalOnlyRequestFilter.CSRF_HEADER, token.value()))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 진행_상태_실시간_연결은_비동기로_열리고_루프백이_아니면_거절한다() throws Exception {
+        mvc.perform(get("/api/experiment-jobs/stream").header("Host", "127.0.0.1").header("Accept", "text/event-stream"))
+                .andExpect(request().asyncStarted());
+        mvc.perform(get("/api/experiment-jobs/stream").header("Host", "evil.example")
+                        .header("Accept", "text/event-stream"))
+                .andExpect(status().isForbidden());
     }
 }

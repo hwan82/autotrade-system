@@ -1,6 +1,7 @@
-// 실험 비교 대시보드(UI-02): 목록, 실험 상세(리더보드 + 자산 곡선), 계좌 드릴다운(체결·왕복·거절 사유).
+// 실험 비교 대시보드(UI-02): 실행 중인 실험 진행 상태(jobs.js), 목록, 실험 상세(리더보드 + 자산 곡선), 계좌 드릴다운(체결·왕복·거절 사유).
 import { h, table } from '../dom.js';
 import { get, post } from '../api.js';
+import { jobsSection } from './jobs.js';
 import { equityChart, colorSwatches } from '../chart.js';
 import { money, number, pct, ratio, signClass, time, shortHash, delta, combinationLabel, STATUS, MARKET, STYLE, REFRESH, VALIDITY, SIDE, INTENT } from '../format.js';
 
@@ -28,7 +29,7 @@ export async function experimentsPage() {
       { label: '방식', render: e => e.clockMode === 'REPLAY' ? '녹화 리플레이' : '실시간 모의' },
       { label: '데이터', render: e => e.dataSnapshotVersion },
     ], '실험이 없습니다.');
-  return h('div', {}, head, list, h('h2', {}, '실험 폴더'), folderSection(folders));
+  return h('div', {}, head, jobsSection(), h('h2', {}, '실험 결과'), list, h('h2', {}, '실험 폴더'), folderSection(folders));
 }
 
 const FOLDER_PAGE = 200;
