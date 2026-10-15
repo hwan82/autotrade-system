@@ -253,6 +253,45 @@ class MonitorAgentTest {
     }
 
     @Test
+    void DEBUG가_꺼져_있어도_연속_실패_횟수는_세어_회복_로그에_남는다() {
+        // 운영 기본 수준(INFO)에서는 반복 줄을 만들지 않지만 횟수는 센다(architect PR #119 R1, risk-ops K5)
+        MonitorAgent agent = agent(10);
+        List<LogRecord> logs = new ArrayList<>();
+        Logger jul = Logger.getLogger(MonitorAgent.class.getName());
+        java.util.logging.Level oldLevel = jul.getLevel();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                logs.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        handler.setLevel(java.util.logging.Level.ALL);
+        jul.setLevel(java.util.logging.Level.INFO);
+        jul.addHandler(handler);
+        try {
+            source.fail = true;
+            for (int i = 0; i < 3; i++) {
+                agent.sampleOnce();
+            }
+            source.fail = false;
+            agent.sampleOnce();
+        } finally {
+            jul.removeHandler(handler);
+            jul.setLevel(oldLevel);
+        }
+
+        assertThat(logs).extracting(LogRecord::getMessage).containsExactly(
+                "수집원 실패: injected (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                "수집원 회복: injected (IllegalStateException 3회 연속 실패 뒤)");
+    }
+
+    @Test
     void 잘못된_주기와_기록_크기는_거절한다() {
         assertThatThrownBy(() -> agent(0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> agent(1).start(Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
