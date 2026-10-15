@@ -34,3 +34,4 @@
 | 2026-10-15 | PR #113 검토해줘 | docs/reviews/pr-113/qa.md | 실전 관련 PR(D-089 SIM-14: 실험 실행 명령의 정지 확인 배선을 진행 보고·취소 작업 제어로 감쌈, 정지 순서 0번·장애표 #10 경로, 종료 코드 3 취소 추가, 실험실 /api/experiment-jobs, 브랜치 claude/project-thread-4t6q46) |
 | 2026-10-15 | PR #113 재검토해줘 | docs/reviews/pr-113/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main d6fb6e7·b4ed7fc 병합으로 충돌 해소, 권고 Q1 상한 1 겹침 시험·R1 취소 뒤 정지 요청은 종료 코드 4·R2 작업 목록 메모리 상한 반영, 브랜치 claude/project-thread-4t6q46) |
 | 2026-10-15 | PR #116 검토해줘 | docs/reviews/pr-116/qa.md | 실전 관련 PR(D-092, MON-02 감시 프로세스 1차: 하트비트 파일(실전 엔진 포함), 감시의 드라이브 여유 감시와 정지 요청 파일 생성·갱신·해제(5.2 0번, 장애표 #8·#9·#10 감지), 감시 설정 오류 시 기동 거부, `StopRequestPathTest` 변경, 브랜치 claude/project-thread-0ganrn) |
+| 2026-10-15 | PR #119 검토해줘 | docs/reviews/pr-119/qa.md | 실전 관련 PR(보호 경로 `autotrade-monitor-agent-jar` 변경: MON-05 후속, `MonitorAgent` 수집원 실패 로그를 상태 변화 때만 WARN·반복 DEBUG·회복 INFO로(risk-ops PR #114 K5). 감시 프로세스도 이 코어를 씀. 브랜치 claude/project-thread-5u4jv5) |
