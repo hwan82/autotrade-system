@@ -61,3 +61,38 @@
 
 ## 판정
 수정 필요(A14: main 460cad2와 `docs/qa/pending.md` 충돌). 코드·시험 쪽은 R7을 닫았고(E1~E5·E7 잡힘, M1~M3 잡힘) 권고 Q1·Q2·R1은 머지를 막지 않는다. 충돌을 풀고 main을 병합한 헤드로 재검토 요청하면 된다. 실전 관련(보호 테스트 변경)이라 머지는 사용자.
+
+## 재검토 2026-10-15
+- 대상: PR #109 / 헤드 9451c98 (main 460cad2 병합 커밋) / main 460cad2 대비 diff 전체(`git diff origin/main...HEAD`, 파일 9개 +175 −3)
+- 점검표: A 전체 + B1, B6
+- 직접 실행한 것:
+  - 1차 이후 변경 확인: `git log 2cd1fc0..HEAD`는 main 병합 커밋 9451c98과 #105 커밋들뿐. `git diff 2cd1fc0 HEAD -- autotrade-architecture-test autotrade-config docs/reviews/pr-109`에서 이 PR 몫의 시험·운영 코드·보고서는 1차와 같다(바뀐 것은 main에서 온 `StopRequestPathTest` 등). main 대비 이 PR 몫은 1차 diff + QA 보고서 + `pending.md` 2줄(#109 검토·재검토 요청) + `qa-out-status.md` 2줄(#108 머지·#109 1차 처리 기록)
+  - 충돌: `git merge-base --is-ancestor origin/main HEAD` 참, `git merge-tree --write-tree origin/main HEAD` 충돌 없음(재검토 끝 시점 main도 460cad2). `pending.md`는 main의 #105 두 줄을 그대로 두고 #109 두 줄을 뒤에 붙였다
+  - `./gradlew build --no-daemon` (헤드 9451c98): 1회째 `BUILD SUCCESSFUL`, 결과 XML 합계 1,140건, 실패·오류·건너뜀 0. CI(헤드 9451c98) `Gradle build`·`DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` 모두 success
+  - 1차 탐침 E1~E7을 이 헤드에서 다시 실행(실험 뒤 삭제, `git status` 깨끗함): E1·E2·E3·E4·E5·E7 잡힘, E6(enum `getDeclaringClass`) 안 잡힘으로 1차와 같다. 시험 코드가 1차와 같아 변이 M1~M4와 L1·L2 결과도 그대로다 `[추론]`(diff 동일로 판단, 다시 돌리지 않음)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 이 PR 몫 운영 코드 변경 0줄(1차와 같음) |
+| A2 | 통과 | 1차 근거 그대로(RealPathReflectionTest.java:454-462 강화, `ArchitectureTest` 변경 없음). 이 헤드에서 탐침 E1~E5·E7 잡힘 재확인 |
+| A3 | 해당 없음 | 1차와 같음 |
+| A4 | 해당 없음 | 1차와 같음 |
+| A5 | 해당 없음 | 1차와 같음 |
+| A6 | 해당 없음 | 1차와 같음 |
+| A7 | 해당 없음 | 1차와 같음 |
+| A8 | 해당 없음 | 1차와 같음(#105의 리플레이 점검 변경은 main 몫이고 이 PR diff가 아님) |
+| A9 | 해당 없음 | 1차와 같음 |
+| A10 | 통과 | 추가된 4줄(pending 2·qa-out-status 2)에 키·계좌번호·토큰 없음. CI Secret scan success |
+| A11 | 통과 | 1차와 같음. 보호 테스트 삭제·약화 0건, 빌드 1,140건 통과 |
+| A12 | 통과 | 1차와 같음 |
+| A13 | 해당 없음 | 1차와 같음 |
+| A14 | 통과 | 1차 실패(main 460cad2와 `pending.md` 충돌) 해소: main 포함, 충돌 없음. D-086 1번·ADR-002 9.5 6항과 시험 상수 일치는 1차 근거 그대로. `qa-out-status.md` 새 줄은 1차 판정(FAIL A14, 권고 Q1·Q2·R1)을 맞게 옮겼다 |
+| B1 | 통과 | 헤드 9451c98 `./gradlew build` 직접 실행 성공(1,140건 실패 0), CI 3개 success |
+| B6 | 통과 | 1차와 같음(고정 예제 2건·기대 문자열·허용 목록 단언) |
+
+## 점검표 밖 발견 (재검토)
+- 1차 권고 Q1(L2: `SecretPaths`가 `RecordComponent`를 `Object`로 넘기면 밖에서 `getType` 통과), Q2(변이 M4 살아남음), R1(enum `getDeclaringClass`, `GUARD_TYPES_ARE_NOT_DATA` 설명)은 그대로 열려 있다. `qa-out-status.md`에 후속 PR로 적혔다. 머지를 막지 않는다.
+- 새 발견 없음.
+
+## 판정 (재검토)
+승인 (1차 A14 해소. 권고 Q1·Q2·R1은 후속 PR. 실전 관련(보호 테스트 변경)이라 머지는 사용자)
