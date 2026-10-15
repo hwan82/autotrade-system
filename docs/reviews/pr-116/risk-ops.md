@@ -45,3 +45,63 @@
 
 ## 판정
 수정 필요(K1: 실전 엔진 하트비트 엔진 단위 시험 추가, K2: D-092의 ADR-007 링크 수정, K3: runbook·장애표 #10 감시 생존 판단 문구에 UTC·실제 의미·기준 주기 명시)
+
+## 재검토 2026-10-15
+- 대상: PR #116 / 브랜치 `claude/project-thread-0ganrn` / 커밋 `9cd4330`, `ed34018`, `bf337f0`, `568e718`, `e75267a`(HEAD) / `origin/main...HEAD` diff 전체. 1차 검토 뒤 바뀐 부분(`ed34018..e75267a`, 22개 파일)은 한 줄씩 읽었고, 판정은 PR 전체를 기준으로 다시 냈다.
+- 기록 위치: 요청은 `risk-ops-2.md`에 쓰라는 것이었다. 그러나 검토 규칙상 원문은 docs/reviews/README.md 형식을 따르고, 그 형식은 재검토를 같은 파일 아래 `## 재검토 <날짜>`로 덧붙이며 앞 내용은 지우지 않는다고 정한다. 그래서 이 파일에 덧붙였다. 위의 1차 원문은 한 글자도 바꾸지 않았다. 커밋 `568e718`의 이 파일과 1차로 쓴 내용의 md5가 같다(`a7a5358…`).
+- 점검표: A
+- 직접 실행한 것:
+  - `e75267a`에서 `./gradlew build --offline --no-build-cache --rerun-tasks`를 돌렸고 **BUILD SUCCESSFUL**이다. 전체 시험 1217건, 실패 0, 오류 0, 건너뜀 0. 모듈별 결과(시험/실패/오류/건너뜀)는 아래와 같다.
+    - `:autotrade-risk:test` 55/0/0/0
+    - `:autotrade-architecture-test:test` 42/0/0/0
+    - `:autotrade-app-engine:test` 52/0/0/0
+    - `:autotrade-app-watchdog:test` 23/0/0/0
+    - `:autotrade-monitor-agent-jar:test` 22/0/0/0
+    - `:autotrade-app-gateway:test` 50/0/0/0
+    - `:autotrade-app-lab:test` 178/0/0/0
+  - K1 시험이 회귀를 실제로 잡는지 변이 시험으로 확인했다. `e75267a`를 별도 worktree에 두고 운영 코드를 바꾼 뒤 시험을 돌렸고, 끝나면 worktree째 지웠다. 저장소 작업 폴더는 깨끗하다(`git status` 빈 결과).
+    - (a) `Engine.close()`의 `heartbeat.close()`를 주석으로 막으면 `EngineMainTest#기동하면_하트비트를_쓰고_닫으면_지운다`가 **실패**한다.
+    - (b) `EngineMain.start`에 "첫 기록이 실패하면 `IOException`"을 넣어 기록 실패가 엔진 기동을 막게 만들면 `EngineMainTest#하트비트를_쓰지_못해도_엔진은_뜨고_Guard는_OFF이며_상태에_응답한다`가 **실패**한다.
+
+### 1차 지적 처리
+| 지적 | 처리 | 근거 |
+|---|---|---|
+| K1 엔진 하트비트 엔진 단위 시험 | 해소 | 시험 2건을 더했다. 1번은 생성과 닫을 때 삭제를 보고 `written-at`까지 확인한다. 2번은 하트비트 폴더를 막아도 엔진이 기동하고 `beat()`가 false이며, 상태 응답에서 계좌가 OFF이고 `guard().state`도 OFF인지 본다(EngineMainTest.java:110-142). 위 변이 (a)(b)를 모두 잡는다. 덧붙여 `Engine.close()`가 `try/finally`로 바뀌어 채널 닫기가 실패해도 하트비트 파일은 지운다(EngineMain.java:160-167) |
+| K2 D-092 ADR-007 링크 | 해소 | `../adr/ADR-007-selection-combination.md`로 고쳤다. D-092와 새 ADR-011의 상대 링크가 모두 실제 파일을 가리키는지 확인했고 빠진 링크는 없다 |
+| K3 감시 생존 판단 문구 | 해소 | runbook collector.md:60에 세 가지를 적었다: 시각은 UTC(끝 `Z`, 한국 시각은 +9시간)이고, "만든 시각"은 실제로 마지막으로 다시 쓴 시각이며, 기준은 `interval-seconds`의 3배(기본 15초)다. `watchdog.hb`의 `written-at`도 UTC라는 점과, 파일이 없으면 감시가 꺼진 것이라는 점도 적었다. 장애표 #10(broker-and-fault-design.md)과 D-092 6번도 같은 내용으로 고쳤다 |
+| R1 미래 `written-at` | 해소 | 나이를 절댓값으로 본다(HeartbeatWatch.java:69). `HeartbeatWatchTest#기록_시각이_기준보다_많이_미래면_멈춤으로_본다`(9시간 미래면 STALE) |
+| R3 `disks` 폴더가 없으면 감시 전체가 안 뜸 | 문서화 | runbook에 "감시는 설정이 틀리거나 `disks`에 적은 폴더가 없으면 뜨지 않는다"를 적었다 |
+| R2·R4·R5·R6 | R4 해소, 나머지 비차단 유지 | R4는 `GatewayMainTest#하트비트를_쓰고_닫으면_지운다`와 `LabHeartbeatTest#설정_폴더에_하트비트를_쓰고_컨텍스트가_닫히면_지운다`로 해소됐다. R2(엔진 멈춤 알림 채널)는 D-092 범위 밖 표의 MON-06 후속으로 남는다. 7단계 실전 활성화 전에 확인할 항목이다 |
+
+### 이번에 바뀐 코드의 실전 영향
+- `HeartbeatWatch`에 재기동 감지를 넣었다(같은 프로세스의 `started-at`이 바뀌면 WARNING, HeartbeatWatch.java:77-83). 로그만 남기고 아무 동작도 하지 않는다.
+- `StopRequests.adoptLeftovers`는 남은 파일의 `requested-at`을 이어 쓴다(StopRequests.java:72-76, 109-120). 읽지 못하면 지금 시각을 쓴다. 이 값은 해제 판단에 쓰이지 않는다. 해제는 `clearSince` 기준이라 정지 요청 해제 조건은 바뀌지 않았다.
+- `WatchdogSettings`는 빈 `processes`와 같은 폴더를 두 번 적은 `disks`도 기동 거부 대상에 넣었다. 틀린 설정을 더 잡는 쪽(fail-closed)이다.
+- `AtomicFile`의 임시 파일 이름에 PID를 붙였다(AtomicFile.java:20). `ProcessHandle.current().pid()`는 실전 경로 허용 목록 안이다. `RealPathReflectionTest` 통과, `WATCHDOG_KILLS_NO_PROCESS`는 `destroy*`만 막으므로 해당 없음.
+- CI는 감시가 엔진 하트비트의 `ABSENT → ALIVE`를 본 뒤에 엔진을 끄고, `ALIVE → ABSENT`를 기다리도록 바뀌었다. 고정 `sleep 6`을 조건 대기로 바꿨다.
+- 실전 주문 경로, Guard, 블랙리스트, 리스크 한도, 보호 시세 경로에는 변경이 없다. 엔진 쪽 운영 코드 변경은 `Engine.close()`의 `try/finally` 하나뿐이다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | RealTradingGuard·설정 로더 변경 없음. 엔진 기동 순서는 Guard(모두 OFF) → 명령 채널 → 하트비트다(EngineMain.java:83-93). 하트비트 기록이 실패해도 Guard가 OFF임을 엔진 시험으로 고정했다(`EngineMainTest#하트비트를_쓰지_못해도_엔진은_뜨고_Guard는_OFF이며_상태에_응답한다`). `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`·`#재기동하면_열려_있던_계좌도_OFF로_시작한다` 통과 |
+| A2 | 통과 | 주문 출구·Guard 팩토리·`ArchitectureTest`·`RealPathReflectionTest` 파일 변경 없음. 엔진에 새로 들어온 monitor 코어(PID를 붙인 `AtomicFile` 포함)도 허용 목록 검사를 통과했다. `:autotrade-architecture-test:test` 42건 통과 |
+| A3 | 해당 없음 | 증권사 연동·주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음. 하트비트는 프로세스 단위다 |
+| A8 | 통과 | 하트비트는 파일 전달이고 데몬 스레드에서 쓰며, 실패해도 엔진에 닿지 않는다. HeartbeatWriter.java:60-66과 85-96, 그리고 변이 (b)로 확인한 엔진 시험이 근거다. 감시는 5.2 0번 정지 요청 파일만 다루고 엔진에는 신호를 보내지 않는다(Watchdog.java `tick`). 정지 순서 1~6번과 보유 종목 보호 유지 원칙은 바뀌지 않았다 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드와 6.1 문서 변경 없음 |
+| A10 | 통과 | 추가된 diff에도 키·계좌번호·토큰 없음(grep). 로그는 프로세스 이름·시각·경로만 남긴다(재기동 감지 로그 HeartbeatWatch.java:81). 시험은 `@TempDir`만 쓴다. gitleaks는 로컬에 없어 CI에서 실행된다 |
+| A11 | 통과 | 보호 시험 삭제·약화 없음(`StopRequestPathTest`는 1차와 같고, 기존 단정을 유지한 채 시험 1건이 늘었다). 새 동작마다 실패 경우를 포함한 시험이 있다. 엔진은 K1 시험 2건으로 변이를 잡는다. 게이트웨이·실험실은 생성과 삭제를 시험한다. 감시 쪽은 미래 시각, 점검 사이 재기동, 빈 `processes`·같은 폴더 두 번 거부, 남은 파일의 `requested-at` 보존을 시험한다 |
+| A12 | 통과 | 장애표 6장 17종과 O1~O8의 행 수·대응은 그대로다. #10 감지 문구만 실제 동작(UTC, 마지막으로 다시 쓴 시각, 점검 주기 3배)에 맞췄다. 장애 시험 8종(7장)의 시나리오·합격 기준 변경 없음 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음. 하트비트·정지 요청 시각은 프로세스 생존 판단용 UTC `Instant`다 |
+| A14 | 통과 | D-092의 링크 오류를 고쳤다. D-092 3·6번, 검증 목록, broker-and-fault-design.md 5.1 표와 장애표 #8~#10, config-keys(`processes` 비우면 거부, `disks` 중복이면 거부), runbook 3.5가 코드와 맞는다. 하트비트 파일 계약과 감시 설정 원천은 ADR-011(제안, 사용자 머지로 확정)과 ADR-001 표에 기록됐다 |
+
+### 점검표 밖 발견(비차단)
+- N1(참고): 임시 파일 이름에 PID가 붙어서, 쓰는 도중에 프로세스가 죽으면 `<이름>.hb.<pid>.tmp`가 남는다. 다음 실행은 PID가 달라 이 파일을 덮어쓰지 않으므로 계속 남는다. 수백 바이트 파일이라 디스크 영향은 없다. 감시는 `<프로세스>.hb` 이름만 읽으므로(HeartbeatWatch `check`) 판정에도 영향이 없다. 나중에 정리 규칙을 넣을지는 선택이다.
+- N2(참고): 재기동 감지 로그(HeartbeatWatch.java:77-83)는 시험이 "상태 변화 없음"만 확인하고 로그가 나오는지는 확인하지 않는다. 로그만 남기는 기능이라 비차단이다.
+- R2(유지): 실전 엔진 멈춤(#8)은 감시 로그 ERROR로만 알린다. 7단계 실전 활성화 전 조건(알림 채널 연결, MON-06)으로 남긴다.
+
+### 판정
+승인
