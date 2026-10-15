@@ -112,4 +112,6 @@
 - 단계 완료 기록(결정 로그)은 QA 판정이 "승인"인 뒤에 한다. QA 판정 전에는 다음 단계 중 그 단계 결과에 의존하지 않는 작업만 진행한다.
 
 **보호 테스트**
-- `ArchitectureTest`, RealTradingGuard·GuardedOrderGateway 테스트, 장애 테스트를 지우거나 약화하는 변경은 실전 관련 PR로 취급한다.
+- 보호 테스트는 `autotrade-architecture-test` 모듈 전체(`ArchitectureTest`, `ModuleOwnershipTest`, `RealPathReflectionTest`와 위반·허용 고정 예제), RealTradingGuard·GuardedOrderGateway 테스트, 장애 테스트다.
+- 보호 테스트를 지우거나 약화하는 변경뿐 아니라, 고정 값(지문·허용 목록·소유 표·고정 구성 목록) 갱신을 포함한 모든 변경을 실전 관련 PR로 취급한다. 고정 값을 고쳐야 시험이 통과하는 변경(예: `SecretPaths` 지문)은 그 대상 코드의 변경도 실전 관련이다.
+- 보호 대상 경로는 `scripts/ci/protected-paths.txt`와 `.github/CODEOWNERS`에 있고, CI가 이 경로를 바꾸는 PR에 "실전 관련 PR" 경고를 남긴다.

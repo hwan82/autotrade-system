@@ -239,5 +239,5 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
   6. (독립 QA PR #108 F1·F2 반영) 의존은 ArchUnit 의존 목록과 함께 부른 메서드의 매개변수·반환 타입, 클래스 파일 상수 풀의 모든 타입 이름(형변환 포함)으로 대조한다. Jackson의 `Class` 역직렬화로 이름 문자열에서 클래스를 얻는 길(`Class`와 그 배열의 클래스 객체, 서명의 `Class`는 바인딩이 아닌 메서드의 `Class<T>` 매개변수만 허용, 이름 읽기 밖의 `getClass()`)과 다른 클래스 객체에 닿는 `Class` 메서드도 금지. 레코드 구성 요소 읽기는 `SecretPaths`만(독립 QA 재검토 R7).
 - 대안: 9장 대안과 같이 JPMS는 보류. QA 제안의 모듈 4개 패키지 목록은 엔진 런타임에 함께 실리는 domain·config·control의 리플렉션 유틸로 우회되어 버렸다(9.2 Q-1과 같은 종류). 리플렉션 대상을 Guard·출구로만 좁히는 안은 대상 이름이 문자열이라 정적 분석으로 알 수 없어 버렸다.
 - 남은 한계: 허용 목록 Jackson의 기본 동작 안의 리플렉션(새 객체는 Guard 타입을 넘겨야 하므로 3이, 살아 있는 객체 덮어쓰기는 5가 막는다. 허용 타입 안에 모르는 객체 접근 API가 있으면 열려 있다 `[추론]`), 허용 패키지 `java.lang`·`java.util` 안의 아직 모르는 간접 호출 수단 `[추론]`, `Object`로 받은 Guard 객체의 `getClass()`(이름 읽기 밖 사용은 6이 막고, Guard 타입 모양도 테스트로 고정), 빌드 밖에서 설치본에 끼워 넣은 jar와 `-javaagent` 같은 JVM 옵션(7단계 실행 절차서의 설치본 대조로 넘김, `-XX:+DisableAttachMechanism`과 `-D` 실행 옵션 대조 포함). 자세한 목록은 D-086 위험과 한계.
-- 검증: 테스트 7건과 변조 실험 7종(D-086 검증 절). 운영 코드는 지금 위반 0건이다(`autotrade-config`의 `SecretPaths`는 `RecordComponent`·`Type`으로 구조만 읽고 호출하지 않는다).
+- 검증: 테스트 9건과 변조 실험(D-086 검증 절). 운영 코드는 지금 위반 0건이다(`autotrade-config`의 `SecretPaths`는 `RecordComponent`·`Type`으로 구조만 읽고 호출하지 않는다).
 

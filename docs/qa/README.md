@@ -12,7 +12,9 @@
 - 모듈 경계와 안전 규칙: `autotrade-architecture-test`의 `ArchitectureTest` (순수 모듈 프레임워크 금지, 게이트웨이는 주문 포트를 모름, 실전 주문 출구는 Guard 팩토리만, 금액에 실수형 금지 등).
 - 실전 가드: `autotrade-risk`의 `RealTradingGuardTest`, `GuardedOrderGatewayTest` (기본 OFF, 재기동 시 OFF 포함).
 - 장애 테스트 8종(`docs/team/broker-and-fault-design.md` 7장): 7단계에서 risk-ops가 자동화해 CI에 넣는다. 자동화가 불가능한 항목은 수동 절차서와 결과 기록으로 대신한다.
-- 위 테스트 파일과 규칙(이하 **보호 테스트**)을 지우거나 약화하는 변경은 실전 관련 PR로 취급한다.
+- 리플렉션·모듈 소유 규칙: `autotrade-architecture-test`의 `RealPathReflectionTest`, `ModuleOwnershipTest`와 위반·허용 고정 예제(모듈 전체).
+- 위 테스트 파일과 규칙(이하 **보호 테스트**)을 지우거나 약화하는 변경, 그리고 고정 값(지문·허용 목록·소유 표·고정 구성 목록) 갱신을 포함한 모든 변경은 실전 관련 PR로 취급한다(독립 QA PR #112 F1).
+- 보호 대상 경로 목록: `scripts/ci/protected-paths.txt`(CI의 "Protected change marker"가 PR에 경고를 남긴다), `.github/CODEOWNERS`(저장소 소유자 지정). 표시는 경로로 잡히는 것만 보이므로, 경고가 없다고 실전 관련이 아닌 것은 아니다(판단 기준은 프로젝트 지침 10·11장). 이름 바꾸기는 옛 경로와 새 경로를 둘 다 보고, 표시 스크립트는 자체 시험(`scripts/ci/test-mark-protected-changes.sh`)이 CI에서 고정한다. `main` 브랜치 보호가 꺼져 있으면 CODEOWNERS는 강제되지 않는다.
 
 ## 2. 역할 검토
 - 점검표: [checklists.md](checklists.md)의 A(실전 경로), B(일반 코드).
