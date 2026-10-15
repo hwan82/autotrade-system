@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 class MonitorAgentTest {
@@ -180,6 +183,112 @@ class MonitorAgentTest {
         agent.close();
         thread.get().join(5000);
         assertThat(thread.get().isAlive()).isFalse();
+    }
+
+    @Test
+    void 같은_수집원_실패는_상태가_바뀔_때만_WARN이고_반복은_DEBUG다() {
+        // OSHI가 안 되는 PC에서 매 주기 WARN이 쌓이지 않게(risk-ops PR #114 K5)
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        MetricSource flaky = new MetricSource() {
+            @Override
+            public String id() {
+                return "system";
+            }
+
+            @Override
+            public List<Reading> read() {
+                RuntimeException e = failure.get();
+                if (e != null) {
+                    throw e;
+                }
+                return List.of(new Reading("cpu.system", 10, "%"));
+            }
+        };
+        MonitorAgent agent = new MonitorAgent(CLOCK, List.of(flaky), List.of(), 10, 3);
+        List<LogRecord> logs = new ArrayList<>();
+        Logger jul = Logger.getLogger(MonitorAgent.class.getName());
+        java.util.logging.Level oldLevel = jul.getLevel();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                logs.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        handler.setLevel(java.util.logging.Level.ALL);
+        jul.setLevel(java.util.logging.Level.ALL);
+        jul.addHandler(handler);
+        try {
+            agent.sampleOnce();
+            failure.set(new IllegalStateException("OSHI 없음"));
+            for (int i = 0; i < 100; i++) {
+                assertThat(agent.sampleOnce().failedSources()).containsExactly("system");
+            }
+            failure.set(new UnsupportedOperationException("다른 실패"));
+            agent.sampleOnce();
+            agent.sampleOnce();
+            failure.set(null);
+            agent.sampleOnce();
+            agent.sampleOnce();
+        } finally {
+            jul.removeHandler(handler);
+            jul.setLevel(oldLevel);
+        }
+
+        assertThat(logs).filteredOn(r -> r.getLevel().equals(java.util.logging.Level.WARNING))
+                .extracting(LogRecord::getMessage)
+                .containsExactly("수집원 실패: system (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                        "수집원 실패 바뀜: system (IllegalStateException → UnsupportedOperationException)");
+        assertThat(logs).filteredOn(r -> r.getLevel().equals(java.util.logging.Level.INFO))
+                .extracting(LogRecord::getMessage)
+                .containsExactly("수집원 회복: system (UnsupportedOperationException 2회 연속 실패 뒤)");
+        assertThat(logs).filteredOn(r -> r.getLevel().intValue() < java.util.logging.Level.INFO.intValue())
+                .hasSize(99 + 1)
+                .last().extracting(LogRecord::getMessage).isEqualTo("수집원 실패 계속: system (UnsupportedOperationException, 2회째)");
+    }
+
+    @Test
+    void DEBUG가_꺼져_있어도_연속_실패_횟수는_세어_회복_로그에_남는다() {
+        // 운영 기본 수준(INFO)에서는 반복 줄을 만들지 않지만 횟수는 센다(architect PR #119 R1, risk-ops K5)
+        MonitorAgent agent = agent(10);
+        List<LogRecord> logs = new ArrayList<>();
+        Logger jul = Logger.getLogger(MonitorAgent.class.getName());
+        java.util.logging.Level oldLevel = jul.getLevel();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                logs.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        handler.setLevel(java.util.logging.Level.ALL);
+        jul.setLevel(java.util.logging.Level.INFO);
+        jul.addHandler(handler);
+        try {
+            source.fail = true;
+            for (int i = 0; i < 3; i++) {
+                agent.sampleOnce();
+            }
+            source.fail = false;
+            agent.sampleOnce();
+        } finally {
+            jul.removeHandler(handler);
+            jul.setLevel(oldLevel);
+        }
+
+        assertThat(logs).extracting(LogRecord::getMessage).containsExactly(
+                "수집원 실패: injected (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                "수집원 회복: injected (IllegalStateException 3회 연속 실패 뒤)");
     }
 
     @Test

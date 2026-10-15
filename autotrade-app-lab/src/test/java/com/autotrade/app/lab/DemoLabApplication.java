@@ -6,10 +6,14 @@ import com.autotrade.app.lab.experiment.SampleReports;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.domain.market.Market;
+import com.autotrade.sim.run.ExperimentJobFiles;
+import com.autotrade.sim.run.ExperimentJobStatus;
+import com.autotrade.sim.run.ExperimentProgress;
 import com.autotrade.strategy.TradingStyle;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Map;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
@@ -19,7 +23,8 @@ import org.springframework.context.annotation.Bean;
 /**
  * 화면 미리 보기용 실행기: {@code ./gradlew :autotrade-app-lab:bootTestRun}.
  * 손으로 만든 샘플 실험({@link SampleReports}, ID가 DEMO-로 시작, 조합 실험 하나 포함)과 샘플 전략·선정 프로필을 임시 폴더에
- * 넣고 띄운다. 실험 폴더에는 불러오기 데모용 조합 실험 폴더(DEMO-20261012-CMB01)가 하나 있다.
+ * 넣고 띄운다. 실험 폴더에는 불러오기 데모용 조합 실험 폴더(DEMO-20261012-CMB01)가 하나 있다. 진행 상태(D-093) 데모로
+ * 5초마다 진행하는 실행 중 작업 하나와 끝난 작업 둘을 작업 폴더에 쓴다.
  * 샘플 값은 실험 결과가 아니며 테스트 소스에만 있어 배포본(bootJar)에는 들어가지 않는다.
  */
 public final class DemoLabApplication {
@@ -36,7 +41,55 @@ public final class DemoLabApplication {
         System.setProperty("autotrade.lab.experiments-dir", tmp + "/experiments");
         ExperimentFoldersTest.writeFolder(Files.createDirectories(Path.of(tmp, "experiments")), "DEMO-20261012-CMB01");
         demoLiveRegistration(Path.of(tmp));
+        demoJobs(Path.of(tmp, "config"));
         SpringApplication.from(AutotradeLabApplication::main).with(DemoData.class).run(args);
+    }
+
+    /**
+     * 진행 상태 화면 데모(D-093): 실행 명령 대신 상태 파일을 쓴다. 실행 중 작업은 5초마다 거래일을 진행하고, 끝나면 완료로
+     * 바꾼다. 화면의 취소 버튼이 만든 취소 요청 파일을 보면 실행 명령처럼 취소됨으로 끝낸다.
+     */
+    private static void demoJobs(Path configDir) throws IOException {
+        ExperimentJobFiles files = ExperimentJobFiles.in(configDir);
+        Files.createDirectories(files.dir());
+        Instant t = Instant.now();
+        files.write(new ExperimentJobStatus("DEMO-20261013-DONE1", "combination", ExperimentJobStatus.State.COMPLETED, 4321,
+                t.minusSeconds(7200), t.minusSeconds(3600), 4, 1,
+                new ExperimentProgress("DEMO-20261013-DONE1", ExperimentProgress.Phase.FINISHED, 6, 6, 6, 0, 250, 1500), ""));
+        files.write(new ExperimentJobStatus("DEMO-20261013-STOP1", "recording", ExperimentJobStatus.State.STOPPED, 4400,
+                t.minusSeconds(5400), t.minusSeconds(5000), 2, 1,
+                new ExperimentProgress("DEMO-20261013-STOP1", ExperimentProgress.Phase.RUNNING, 4, 2, 1, 0, 1, 1), "장 시간 보호 구간이라 멈췄습니다"));
+        String job = "DEMO-20261015-RUN01";
+        Instant started = t;
+        Thread.ofPlatform().daemon(true).name("demo-job").start(() -> {
+            int days = 0;
+            int perRun = 20;
+            int runs = 8;
+            try {
+                while (days <= runs * perRun) {
+                    if (Files.exists(files.cancelRequest(job))) {
+                        files.write(status(job, ExperimentJobStatus.State.CANCELLED, started, days, runs, perRun, "취소 요청으로 끝남"));
+                        return;
+                    }
+                    files.write(status(job, ExperimentJobStatus.State.RUNNING, started, days, runs, perRun, ""));
+                    Thread.sleep(5000);
+                    days += 3;
+                }
+                files.write(status(job, ExperimentJobStatus.State.COMPLETED, started, runs * perRun, runs, perRun, ""));
+            } catch (IOException | InterruptedException e) {
+                // 데모 끝
+            }
+        });
+    }
+
+    private static ExperimentJobStatus status(String job, ExperimentJobStatus.State state, Instant started, int days, int runs,
+            int perRun, String message) {
+        int finished = Math.min(runs, days / perRun);
+        int startedRuns = Math.min(runs, finished + 4);
+        long done = Math.min((long) runs * perRun, days);
+        return new ExperimentJobStatus(job, "combination", state, ProcessHandle.current().pid(), started, Instant.now(), 4, 1,
+                new ExperimentProgress(job, ExperimentProgress.Phase.RUNNING, runs, startedRuns, finished, finished > 2 ? 1 : 0,
+                        perRun, done), message);
     }
 
     /**

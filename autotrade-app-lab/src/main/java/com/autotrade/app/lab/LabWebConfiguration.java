@@ -2,6 +2,7 @@ package com.autotrade.app.lab;
 
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
 import com.autotrade.app.lab.experiment.ExperimentFolders;
+import com.autotrade.app.lab.experiment.ExperimentJobStream;
 import com.autotrade.app.lab.experiment.ExperimentJobs;
 import com.autotrade.app.lab.experiment.ExperimentRegistrations;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
@@ -9,6 +10,9 @@ import com.autotrade.app.lab.experiment.SnapshotList;
 import com.autotrade.app.lab.live.LiveLabService;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
+import com.autotrade.app.lab.settings.ExperimentLimitsPublisher;
+import com.autotrade.config.LoadedConfig;
+import com.autotrade.config.RuntimeConfigHolder;
 import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
@@ -22,6 +26,7 @@ import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -66,6 +71,54 @@ public class LabWebConfiguration {
         ExperimentJobs jobs = new ExperimentJobs(store.paths().runtimeFile().toAbsolutePath().getParent(), clock);
         log.info("실험 작업 상태 폴더: {}", jobs.root());
         return jobs;
+    }
+
+    /**
+     * 실험실 설정의 병렬 상한을 실험 실행 명령이 읽는 상한 파일로 내보낸다(D-094). 기동 때 한 번 쓰고, 설정 화면 저장 뒤에 다시 쓴다.
+     * 실험실이 꺼져 있을 때 {@code runtime-config.json}을 손으로 고쳤다면 다음 기동 때 반영된다. 그 파일이 깨져 기본값으로 떴으면
+     * 기동 때 쓰지 않는다(PR #121 architect F1).
+     */
+    @Bean
+    ExperimentLimitsPublisher experimentLimitsPublisher(RuntimeConfigStore store, RuntimeConfigHolder holder,
+            LoadedConfig loaded, Clock clock) {
+        ExperimentLimitsPublisher publisher =
+                new ExperimentLimitsPublisher(store.paths().runtimeFile().toAbsolutePath().getParent(), clock);
+        publisher.publishAtStartup(loaded, holder::current);
+        return publisher;
+    }
+
+    /** 실험 진행 상태 SSE(UI-01·UI-02, D-093). 연결이 있을 때만 작업 폴더를 다시 읽는다. */
+    @Bean(destroyMethod = "close")
+    ExperimentJobStream experimentJobStream(ExperimentJobs jobs, Clock clock) {
+        return new ExperimentJobStream(jobs, clock);
+    }
+
+    /**
+     * 진행 상태 SSE의 읽기 스레드를 띄우고, 종료 때 열린 연결을 웹 서버 graceful shutdown보다 먼저 닫는다(모니터링 SSE와 같은
+     * 이유, D-091: 닫지 않으면 graceful shutdown이 30초를 기다려 실전 운영 화면을 싣는 실험실 재기동이 늦어진다).
+     */
+    @Bean
+    SmartLifecycle experimentJobStreamLifecycle(ExperimentJobStream stream) {
+        return new SmartLifecycle() {
+            private volatile boolean running;
+
+            @Override
+            public void start() {
+                stream.start();
+                running = true;
+            }
+
+            @Override
+            public void stop() {
+                stream.closeStreams();
+                running = false;
+            }
+
+            @Override
+            public boolean isRunning() {
+                return running;
+            }
+        };
     }
 
     /** 수집 스냅샷 폴더(설정 폴더 아래 {@code snapshots}, 실행 명령의 기본값과 같음, ADR-008 2.4). */
