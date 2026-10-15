@@ -132,3 +132,33 @@
 
 ## 판정
 수정 필요(AR-R5: origin/main 88212d3과 `docs/qa-out-status.md` 충돌 해소 후 새 헤드 CI 확인. 그 밖의 B 항목은 통과, QA F1·R1~R3과 risk-ops F-4·R-6 반영 확인. 참고 AR-R4·절차 범위 확대 사용자 알림. B7 risk-ops 재검토 필요, 보호 테스트 변경이라 머지는 사용자)
+
+## 재검토 2026-10-15 (3차, 헤드 3fbc32c)
+- 대상: PR #112 / 헤드 3fbc32c (직전 architect 원문 a45632e 뒤: b09cd74 risk-ops 재검토 원문, 3fbc32c origin/main 88212d3 병합) / main 대비 diff 전체(`git diff origin/main...HEAD`, 17파일 +678 −18). origin/main은 검토 끝 시점에도 88212d3이고 헤드에 포함된다(`git merge-base --is-ancestor origin/main HEAD` 참)
+- 점검표: B
+- 직접 실행한 것:
+  - **병합 커밋 내용**: `git show --remerge-diff 3fbc32c` → 충돌 파일은 `docs/qa-out-status.md` 하나이고, 해소는 충돌 표지를 지우고 두 쪽 줄(PR #114 QA 처리 줄과 PR #112 처리 줄 2개)을 모두 남긴 것뿐이다(1줄 추가, 표지 4줄 삭제). 헤드의 `qa-out-status.md`에 충돌 표지 0개
+  - **병합이 다른 것을 바꾸지 않았는지**: `git diff c14578d 3fbc32c`(PR #112 원문과 `qa-out-status.md` 제외)와 `git diff b4ed7fc 88212d3`(같은 제외)를 파일로 떠서 `cmp` → 같음. 곧 c14578d 이후 이 브랜치에 들어온 것은 main의 PR #115 변경 그대로와 검토 원문뿐이고, 이 PR의 시험·스크립트·문서는 c14578d(2차 재검토 대상)와 같다
+  - `./gradlew clean` 뒤 `./gradlew build --no-daemon` (헤드 3fbc32c): `BUILD SUCCESSFUL in 3m`. 결과 XML 합계 1,185건(PR #115 시험 포함), 실패·오류·건너뜀 0
+  - CI(헤드 3fbc32c, REST check-runs): `Gradle build`·`DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` 모두 completed success. guards check-run 주석에 경고 "보호 대상 변경(실전 관련 PR)"이 남았다. 참고로 `pulls/112`의 `mergeable_state`는 `unstable`인데, check-suite 목록에서 `github-actions`는 success이고 `claude` 앱 suite가 실행 없이 `queued`로 남아 있어서다. CI 실패가 아니다
+  - `scripts/ci/test-mark-protected-changes.sh` → "표시 스크립트 자체 시험 통과"
+  - 변이 재확인(원문 복원, `git status` 깨끗함): FM1(`SecretPaths` 기존 접근에 클래스 객체) 잡힘(지문), FM4(주석) 통과, SK1P(지문 함수 `SKIP_CODE` + 고정 값 비교 끔) 잡힘(지문 자체 시험)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 헤드 3fbc32c clean build 직접 실행 성공(1,185건 실패 0). CI 3개 success |
+| B2 | 통과 | 2차 재검토(c14578d)와 같다. 병합이 이 PR의 규칙 코드를 바꾸지 않았다(위 `cmp`). PR #115는 실험실 모니터 코드라 모듈 규칙과 겹치지 않고 전체 빌드의 ArchUnit·소유 규칙이 통과한다 |
+| B3 | 통과 | 2차 재검토와 같다(계약 변경 없음, 절차 문서와 D-086 함께 갱신) |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음. 골든 테스트 포함 전체 빌드 통과 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 2차 재검토의 변이 결과가 그대로다(FM1·SK1P 잡힘, 표시 스크립트 자체 시험 통과). 지우거나 건너뛴 시험 없음 |
+| B7 | risk-ops 검토 필요 | 실전 관련 PR(보호 테스트·CI·규칙 문서). 헤드의 risk-ops 원문 마지막 판정(재검토 2, c14578d 기준)은 "수정 필요(F-5: main 88212d3 충돌)"이고 내용은 더 고칠 것 없다고 적었다. 3fbc32c에 대한 risk-ops 확인이 필요하다. 머지는 사용자, 머지 전 독립 QA 재검토 |
+| B8 | 통과 | 병합으로 들어온 이 PR 쪽 새 줄은 `qa-out-status.md` 표 줄뿐이고 비밀값이 없다. CI 비밀값 스캔 success |
+
+## 직전 발견 처리
+- **AR-R5 해소.** main 88212d3을 병합했고, 충돌 해소는 표 두 줄을 다 남긴 것뿐이며, 병합이 그 밖의 내용을 바꾸지 않았다(`cmp`). 새 헤드에서 내 빌드와 CI 3개가 통과했다.
+- AR-R4(CODEOWNERS 비강제)와 절차 범위 확대 사용자 알림은 2차 재검토의 참고 그대로다(사용자 결정 사항, 판정에 넣지 않음).
+- [확인 범위] 요청의 "docs/qa-out-status.md 양쪽 줄 유지"는 사실로 받지 않고 remerge-diff와 파일 대조로 확인했다.
+
+## 판정
+승인 (2차 AR-R5 해소: main 88212d3 병합, 충돌은 `qa-out-status.md` 표 줄 양쪽 유지뿐, 병합 결과 빌드 1,185건과 CI 3개 통과. 참고 AR-R4·절차 범위 확대 사용자 알림. B7 risk-ops 확인 필요, 보호 테스트 변경이라 머지는 사용자, 머지 전 독립 QA 재검토)
