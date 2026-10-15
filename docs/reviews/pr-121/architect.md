@@ -33,3 +33,33 @@
 
 ## 판정
 수정 필요(F1, F2)
+
+## 재검토 2026-10-15
+- 대상: PR #121 / 커밋 de7aa5c / `git diff origin/main...HEAD` 전체(19파일. 1차 이후 바뀐 것: `3e37d41..de7aa5c` 6파일, 운영 코드 3, 빌드 주석 1, 테스트 1, D-094)
+- 점검표: B
+- 직접 실행한 것:
+  - 바뀐 모듈의 테스트 결과를 `cleanTest`로 지운 뒤 `./gradlew --max-workers=2 build` → BUILD SUCCESSFUL, 종료 코드 0. `:autotrade-sim:test`·`:autotrade-app-lab:test`·`:autotrade-app-experiment:test`·`:autotrade-architecture-test:test`가 실제로 실행됨(UP-TO-DATE 아님). JUnit XML 집계: sim 250, app-lab 193(1차 191 + 새 시험 2), app-experiment 39, architecture-test 43. 모두 실패 0, 건너뜀 0
+  - 변이 확인: `ExperimentLimitsPublisher.publish`에서 `synchronized`를 빼고 `:autotrade-app-lab:test --tests '*ExperimentLimitsPublisherTest'` 실행 → `값은_쓰는_잠금_안에서_읽는다()` FAILED(4건 중 1건 실패). 그 뒤 `git checkout`으로 되돌렸고 작업 트리는 깨끗함. 새 시험이 F2 회귀를 실제로 잡는다
+  - 1차 이후 바뀐 파일과 `scripts/ci/protected-paths.txt` 대조 → 보호 경로 변경 없음
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 build 종료 코드 0, 테스트 캐시 없이 실행 |
+| B2 | 통과 | 새 의존 `ConfigSource`·`LoadedConfig`는 app-lab(`ExperimentLimitsPublisher`, `LabWebConfiguration.java:83`)에서만 씀. 실행 명령(`com.autotrade.app.experiment`)은 바뀌지 않음, `EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG` 통과. `LoadedConfig`는 기존 빈(CoreConfiguration.java:37) |
+| B3 | 통과 | 계약은 1차와 같다(파일 형식, 키 의미). 기동 때 쓰지 않는 조건과 잠금 안 읽기를 D-094 결정 2에, Windows 읽기 실패를 위험 줄에 반영. 빌드 주석도 고침(build.gradle.kts:42) |
+| B4 | 통과 | 시각은 주입 Clock만. sim 250건 재실행 통과 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | `ExperimentLimitsPublisherTest#설정_파일이_깨져_기본값으로_떴으면_기동_때_지난_상한을_덮지_않는다`(실제 `ConfigLoader`로 `DEFAULT_FILE_INVALID`를 만들고 지난 값 1 유지, 정상 파일이면 2로 씀), `#값은_쓰는_잠금_안에서_읽는다`(위 변이 확인으로 잠금을 빼면 실패함을 확인). 지우거나 약화한 시험 없음(기존 2건은 인자 모양만 Supplier로 바뀜) |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·리스크 한도·장애 대응·보호 테스트·보호 경로 변경 없음 |
+| B8 | 통과 | 새 경고 로그는 상한 파일 경로만 싣는다(ExperimentLimitsPublisher.java:41). 설정 값·비밀값 없음 |
+
+### 1차 지적 처리
+- **F1 해결.** 기동 경로가 `publishAtStartup(loaded, holder::current)`(LabWebConfiguration.java:86)이고, `loaded.source() == DEFAULT_FILE_INVALID`이면 쓰지 않고 경고와 false를 낸다(ExperimentLimitsPublisher.java:39~44). `DEFAULT_NO_FILE`·`RUNTIME_FILE`은 그대로 쓴다. 비밀값 파일만 깨진 경우는 `ConfigLoader`가 runtime 값을 쓰므로(출처 RUNTIME_FILE) 상한은 사용자 값이다. 시험이 있다.
+- **F2 해결.** `publish(Supplier<RuntimeConfig>)`가 `synchronized` 안에서 `current.get()`을 읽는다(ExperimentLimitsPublisher.java:51~52), 화면 저장은 `limits.publish(holder::current)`(SettingsController.java:132). 저장은 holder 갱신이 끝난 뒤 발행하므로, 잠금을 마지막으로 잡는 쪽이 최신 holder 값을 쓴다. 변이 확인으로 시험 효력을 확인했다.
+- 참고 2건(빌드 주석, Windows 위험 줄)도 반영됨.
+
+### 점검표 밖 발견
+- 없음. (참고) 실험실 기동 때 설정 파일이 깨져 상한 파일을 쓰지 않은 경우, 화면에서 값을 다시 저장하려면 디스크 대조(`requireDiskMatches`)를 먼저 통과해야 한다. 이는 기존 설정 화면 동작이며 이 PR 범위 밖이다.
+
+### 판정
+승인
