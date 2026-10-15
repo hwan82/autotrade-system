@@ -45,3 +45,53 @@
 
 ## 판정
 수정 필요(AR-1: 지문이 메서드 본문 데이터 흐름·상수 변경을 잡지 못하는데 D-086:51과 시험 Javadoc은 `SecretPaths` 코드 변경이면 지문이 바뀐다고 쓴다. 지문에 바이트코드를 넣거나(권장) 문서를 기계 검사 범위에 맞춘다. 권고 AR-2·AR-3. B7 risk-ops 검토 필요, 보호 테스트 변경이라 머지는 사용자)
+
+## 재검토 2026-10-15
+- 대상: PR #112 / 헤드 b85bede (1차 원문 커밋 e2b78f0 뒤 코드 커밋 1개) / main 대비 diff 전체(`git diff origin/main...HEAD`, 6파일: `RealPathReflectionTest.java`, 테스트 소스 `SamePackageRecordReader`, `ADR-002`, `D-086`, `docs/qa/pending.md`, 이 원문). 운영 코드 변경 0줄. merge-base fa1996b, origin/main은 그 뒤 d6fb6e7(PR #111, 문서·`KrxMarketRules` 주석)로 나아갔고 `git merge-tree --write-tree origin/main HEAD` 충돌 없음, 겹치는 파일 없음
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew clean build --no-daemon` (헤드 b85bede): `BUILD SUCCESSFUL in 3m 6s`. 결과 XML 합계 1,142건, 실패·오류·건너뜀 0. `RealPathReflectionTest` 9건
+  - CI(헤드 b85bede, REST check-runs): `Gradle build`·`DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` 모두 success
+  - 1차 변이·변조를 같은 방식으로 다시 돌리고 몇 가지를 더함(각각 `--tests '*RealPathReflectionTest'`, 실험 뒤 원문 복원, `git status` 깨끗함 확인)
+  - [확인 범위] 이 작업 트리는 같은 브랜치를 다른 작업 트리가 앞당겨 처음 빌드 한 번이 e2b78f0 내용으로 돌았다. 그 결과는 버리고, 작업 트리를 HEAD(b85bede)로 맞춘 뒤 clean build와 변이를 처음부터 다시 돌렸다. 아래는 모두 b85bede 기준이다
+
+| # | 바꾼 것 | 1차(c650772) | 재검토(b85bede) |
+|---|---|---|---|
+| FM1 | `SecretPaths.collect`의 `paths.add(path)` → `((Set) paths).add(t)` | 살아남음 | 잡힘 `레코드_구성_요소를_읽는_클래스의_지문은_고정_값과_같다` FAILED |
+| FM2 | `args[1] == Secret.class` → `args[0]` | 살아남음 | 잡힘(지문 시험) |
+| FM7 | 정규식 상수 `[a-z][a-z-]*` → `[a-z][a-z0-9-]*` | (안 돌림) | 잡힘(지문 시험) |
+| FM3 | private 메서드 추가 | 잡힘 | 잡힘(지문 시험) |
+| FM4 | 주석 한 줄 추가 | 통과 | 통과(의도대로) |
+| FM5 | 메서드 줄바꿈 서식 변경(`isKeyLike` 본문을 한 줄로) | (안 돌림) | 통과(줄 번호만 바뀜, 의도대로) |
+| FM6 | 지역 변수 이름 변경(`presentIn`의 `found` → `hits`) | (안 돌림) | 통과(지역 변수 이름은 디버그 정보, 동작 같음) |
+| MM1 | 리플렉션 타입 메서드 규칙 보고 끔 | 잡힘 | 잡힘 `규칙은_리플렉션_우회를_실제로_잡아낸다` |
+| MM2 | 와일드카드 검사 끔 | 잡힘 | 잡힘(모양 시험) |
+| MM3 | 와일드카드 검사를 반환 타입에만 | 살아남음 | 잡힘(모양 시험, `drain(List<? super Object>)`) |
+| MM4 | `REFLECT_TYPE_OWNERS`에서 `Type` 제거 | 살아남음 | 잡힘 `규칙은_리플렉션_우회를_실제로_잡아낸다`(`plainTypeName`) |
+| MM5 | 중첩 클래스 타입 검사 끔 | 잡힘 | 잡힘(모양 시험) |
+| MM6 | 새로 넣은 `WildcardType`·`TypeVariable`·`GenericArrayType` 세 개를 목록에서 뺌 | - | 살아남음(아래 AR-R1) |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 헤드 b85bede `./gradlew clean build --no-daemon` 직접 실행 성공, 1,142건 실패·오류·건너뜀 0. CI 3개 success |
+| B2 | 통과 | 모듈 의존·소유 변경 없음. 규칙 변경은 강화뿐이다: 지문을 디버그 정보만 뺀 바이트코드의 SHA-256으로 바꿈(RealPathReflectionTest.java:728-750, `ClassReader.SKIP_DEBUG` :744), 리플렉션 타입 목록 확대(:407-408). 1차 대비 삭제 줄은 이전 지문 계산 줄(같은 메서드를 바이트코드 방식으로 교체)과 지문 값·단언 줄 교체뿐이다. D-086:51의 지문 설명이 이제 기계 검사와 맞는다: 메서드 본문의 데이터 흐름과 상수가 지문에 들어감(FM1·FM2·FM7로 확인), 서식·주석만 바꾸면 지문이 같음(FM4·FM5로 확인), JDK 갱신 때 실패 방향으로 바뀔 수 있음 |
+| B3 | 해당 없음 | 인터페이스·DB 스키마·설정 키·REST API 변경 없음 |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음. 지문은 같은 입력에 대해 결정적이다(ASM `ClassWriter(0)`로 상수 풀을 방문 순서대로 다시 만든다). clean build에서 고정 값과 일치. 골든 테스트 포함 전체 빌드 통과 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 1차 AR-2의 생존 변이 MM3·MM4가 이제 잡힌다(위반 예제 `drain`·`plainTypeName`과 기대 문자열, RealPathReflectionTest.java:692, :988). 지우거나 건너뛴 테스트 없음(1,142건 유지). MM6 생존은 권고(AR-R1) |
+| B7 | risk-ops 검토 필요 | 보호 테스트 `RealPathReflectionTest` 변경이라 실전 관련 PR이다. 헤드 b85bede에 `docs/reviews/pr-112/risk-ops.md`가 없다. 머지는 사용자, 머지 전 독립 QA 관문(`docs/qa/pending.md`:31에 요청 줄 추가됨) |
+| B8 | 통과 | 추가 줄 전체를 읽음. 키·계좌번호·토큰 없음(지문 값은 바이트코드 해시). CI `Secret scan and collector boundary` success |
+
+## 1차 발견 처리
+- **AR-1 해소.** 지문을 디버그 정보만 뺀 클래스 파일 바이트코드로 바꿨다. 1차에서 살아남은 FM1(기존 접근에 넘기는 값만 바꾸기)·FM2(조건 상수)와 새 FM7(문자열 상수)이 모두 지문 시험에서 실패한다. 주석(FM4)·서식(FM5)만 바꾸면 통과해 Javadoc(:704-709, :728-733)과 D-086:51의 설명이 맞다. D-086:61의 변조 기록("문자열 상수 하나 바꾸기와 ... FM1은 실패")도 직접 재현했다.
+- **AR-2 해소.** MM3·MM4가 잡힌다.
+- **AR-3 반영.** 목록에 세 타입을 넣었고, 운영 코드 위반 0건은 clean build로 확인했다.
+
+## 점검표 밖 발견(재검토)
+- **AR-R1 (권고, 낮음) MM6이 살아남는다.** AR-3으로 넣은 `WildcardType`·`TypeVariable`·`GenericArrayType`은 위반 예제가 없어 목록에서 다시 빼도 시험이 모른다. 1차 AR-3에서 적은 대로 지금 새로 열린 길은 없고 목록 변경은 보호 테스트 diff로 드러난다[추론]. 다음에 이 예제를 고칠 때 `WildcardType#getUpperBounds` 같은 호출 하나를 위반 예제에 두고 단언하면 된다.
+- **참고 1.** 지문은 ArchUnit 안에 재배치된 ASM(`com.tngtech.archunit.thirdparty.org.objectweb.asm`, :741-744)을 쓴다. 공개 API가 아니라 ArchUnit을 올리면 컴파일이 깨지거나 ASM 출력이 달라져 지문이 바뀔 수 있다. 둘 다 실패 방향이라 보호가 약해지지는 않는다. ArchUnit을 올리는 PR도 지문 갱신 때문에 실전 관련 PR이 될 수 있다는 점만 D-086에 한 줄 더하면 좋다(JDK 갱신 문장 옆).
+- **참고 2.** 지역 변수 이름 변경(FM6)은 지문을 바꾸지 않는다. 동작이 같은 변경이라 문제는 아니고, Javadoc의 "디버그 정보(줄 번호·지역 변수 이름·소스 파일 이름)만 뺀다"는 설명과도 맞는다.
+- [확인 범위] 커밋 메시지의 "AR-1~AR-3 반영"은 사실로 받지 않았다. 해소 여부는 위 변이 표와 clean build로만 판정했다.
+
+## 판정
+승인 (1차 AR-1 해소, AR-2 해소, AR-3 반영. 권고 AR-R1(MM6)과 참고 1은 머지를 막지 않는다. B7 risk-ops 검토 필요, 보호 테스트 변경이라 머지는 사용자, 머지 전 독립 QA 관문)
