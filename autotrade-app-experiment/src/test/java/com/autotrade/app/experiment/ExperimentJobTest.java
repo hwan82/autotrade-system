@@ -136,6 +136,34 @@ class ExperimentJobTest {
     }
 
     @Test
+    void 취소로_멈추는_사이_정지_요청이_생기면_종료_코드_4와_정지_이유를_남긴다() throws Exception {
+        // 독립 QA PR #113 R1(탐침 P1): 실행기는 처음 받은 취소 예외만 올리므로 끝날 때 정지 확인을 한 번 더 본다
+        ExperimentJob job = start(new MovingClock(WEEKEND));
+        Files.writeString(files().cancelRequest(JOB), "");
+        assertThatThrownBy(job::check).isInstanceOf(ExperimentCancelledException.class);
+        Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+
+        int code = job.afterCancel(3);
+        job.finish(code);
+
+        assertThat(code).isEqualTo(4);
+        assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.STOPPED);
+        assertThat(status().message()).contains("정지를 요청").doesNotContain(config.toString());
+    }
+
+    @Test
+    void 정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다() throws Exception {
+        ExperimentJob job = start(new MovingClock(WEEKEND));
+        assertThat(job.afterCancel(0)).isZero();
+        assertThat(job.afterCancel(2)).isEqualTo(2);
+        assertThat(job.afterCancel(3)).isEqualTo(3);
+        Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+        // 완료·검토 필요는 결과를 이미 썼으므로 정지로 바꾸지 않는다
+        assertThat(job.afterCancel(0)).isZero();
+        job.finish(0);
+    }
+
+    @Test
     void 진행_중_보고는_1초에_한_번까지만_쓰고_단계가_바뀌면_바로_쓴다() throws Exception {
         MovingClock clock = new MovingClock(WEEKEND);
         ExperimentJob job = start(clock);

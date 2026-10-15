@@ -32,6 +32,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -58,7 +61,7 @@ class RunProgressTest {
     private static final List<StrategyProfile> GOLDEN_PROFILES = List.of(MKT_HOLD, LIMIT_MAKER, PROBE);
 
     /** 진행 상태를 모으고 병렬 상한을 주는 문. */
-    private static final class Recorder implements RunGate {
+    private static class Recorder implements RunGate {
 
         final List<ExperimentProgress> seen = Collections.synchronizedList(new ArrayList<>());
         final int cap;
@@ -127,6 +130,44 @@ class RunProgressTest {
         Recorder r = new Recorder(1);
         runner(8, r).runDetailed(spec(GOLDEN_PROFILES));
 
+        assertThat(r.seen).allSatisfy(p -> assertThat(p.runsStarted() - p.runsFinished()).isLessThanOrEqualTo(1));
+    }
+
+    @Test
+    void 병렬_상한_1이면_먼저_돈_Run이_오래_걸려도_다음_Run이_겹쳐_시작하지_않는다() throws InterruptedException {
+        // 첫 Run이 거래일 경계 정지 확인에서 잠시 멈춘 사이 둘째 Run이 시작되는지 본다(독립 QA PR #113 Q1, 변이 M4).
+        // 상한을 지키지 않으면 실행기 스레드 8개 중 다른 하나가 둘째 Run을 시작해 래치가 열린다
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        AtomicBoolean held = new AtomicBoolean();
+        Recorder r = new Recorder(1) {
+            @Override
+            public void onProgress(ExperimentProgress progress) {
+                super.onProgress(progress);
+                if (progress.runsStarted() - progress.runsFinished() >= 2) {
+                    secondStarted.countDown();
+                }
+            }
+
+            @Override
+            public Optional<String> stopReason() {
+                boolean running;
+                synchronized (seen) {
+                    running = seen.stream().anyMatch(p -> p.runsStarted() >= 1);
+                }
+                if (running && held.compareAndSet(false, true)) {
+                    try {
+                        secondStarted.await(1, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return Optional.empty();
+            }
+        };
+        runner(8, r).runDetailed(spec(GOLDEN_PROFILES));
+
+        assertThat(held).isTrue();
+        assertThat(secondStarted.getCount()).as("상한 1인데 Run 두 개가 함께 돌았다").isEqualTo(1);
         assertThat(r.seen).allSatisfy(p -> assertThat(p.runsStarted() - p.runsFinished()).isLessThanOrEqualTo(1));
     }
 

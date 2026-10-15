@@ -55,6 +55,8 @@ public final class ExperimentMain {
     }
 
     static int run(String[] args, Clock clock, Path configDir) {
+        // 상대 경로나 ..가 섞여도 상태 파일 메시지에서 설정 폴더 경로를 가릴 수 있게 한 번 정규화한다(PR #113 architect R5·risk-ops R3)
+        configDir = configDir.toAbsolutePath().normalize();
         if (args.length == 0 || !List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly")
                 .contains(args[0])) {
             System.err.println(
@@ -111,7 +113,7 @@ public final class ExperimentMain {
                 + maxParallelRuns + "(-PmaxParallelRuns, 등록 파일 parallelism과 작은 쪽)");
         int code = -1;
         try {
-            code = dispatch(args[0], forwarded, configDir, control);
+            code = control.afterCancel(dispatch(args[0], forwarded, configDir, control));
             return code;
         } finally {
             control.finish(code);

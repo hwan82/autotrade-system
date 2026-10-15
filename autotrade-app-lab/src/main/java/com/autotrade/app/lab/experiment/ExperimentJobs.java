@@ -18,6 +18,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.PriorityQueue;
 
 /**
  * 실험 실행 명령의 진행 상태 조회와 취소 요청(SIM-14·UI-02, D-089). 실험실은 실험을 돌리지 않는다(D-062): 실행 명령
@@ -81,19 +82,30 @@ public final class ExperimentJobs {
         if (!Files.isDirectory(files.dir())) {
             return new Listing(List.of(), 0, false);
         }
-        List<Path> paths = new ArrayList<>();
+        // 수정 시각은 파일마다 한 번만 읽는다(심장 박동으로 정렬 중에 바뀌면 비교 규칙이 깨진다). 최근 MAX_FILES개만
+        // 힙에 남겨 파일이 많아도 경로 목록 전체를 메모리에 모으지 않는다(독립 QA PR #113 R2)
+        Comparator<Stamped> newestFirst =
+                Comparator.comparing(Stamped::modified).reversed().thenComparing(st -> st.path().toString());
+        PriorityQueue<Stamped> kept = new PriorityQueue<>(newestFirst.reversed());
+        boolean truncated = false;
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(files.dir(), "*.status")) {
-            stream.forEach(paths::add);
+            for (Path p : stream) {
+                kept.add(new Stamped(p, modified(p)));
+                if (kept.size() > MAX_FILES) {
+                    kept.poll();
+                    truncated = true;
+                }
+            }
         } catch (IOException e) {
             throw new UncheckedIOException("작업 폴더를 읽지 못했습니다: " + files.dir(), e);
         }
-        paths.sort(Comparator.comparing(ExperimentJobs::modified).reversed().thenComparing(Path::toString));
-        boolean truncated = paths.size() > MAX_FILES;
+        List<Stamped> paths = new ArrayList<>(kept);
+        paths.sort(newestFirst);
         List<Job> out = new ArrayList<>();
         int unreadable = 0;
-        for (Path p : truncated ? paths.subList(0, MAX_FILES) : paths) {
+        for (Stamped st : paths) {
             try {
-                out.add(view(files.read(p)));
+                out.add(view(files.read(st.path())));
             } catch (IOException | RuntimeException e) {
                 unreadable++; // 쓰는 중 바꿔 넣기와 겹친 경우도 여기(다음 조회에서 다시 읽음)
             }
@@ -101,6 +113,8 @@ public final class ExperimentJobs {
         out.sort(Comparator.comparing(Job::updatedAt).reversed().thenComparing(Job::job));
         return new Listing(List.copyOf(out), unreadable, truncated);
     }
+
+    private record Stamped(Path path, Instant modified) {}
 
     private static Instant modified(Path p) {
         try {

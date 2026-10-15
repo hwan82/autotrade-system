@@ -211,6 +211,27 @@ final class ExperimentJob implements RunGate, AutoCloseable {
     }
 
     /**
+     * 취소(종료 코드 3)로 끝났는데 그사이 감시의 정지 요청이나 장 시간 보호가 생겼으면 정지(종료 코드 4)로 올린다. 실행기는 처음 받은
+     * 정지 예외 하나만 남기므로 이렇게 다시 보지 않으면 그 회차에는 장애표 #10의 감지 단서(종료 코드 4와 정지 이유)가 어디에도 남지
+     * 않는다(독립 QA PR #113 R1).
+     *
+     * @return 올렸으면 4, 아니면 받은 종료 코드
+     */
+    int afterCancel(int exitCode) {
+        if (exitCode != 3) {
+            return exitCode;
+        }
+        Optional<String> stop = gate.stopReason();
+        if (stop.isEmpty()) {
+            return exitCode;
+        }
+        lastStopReason = stop.get();
+        System.err.println("[experiment] 취소 요청으로 멈추는 사이 정지 사유가 생겼습니다(결과 파일을 쓰지 않음, 종료 코드 4): "
+                + stop.get());
+        return 4;
+    }
+
+    /**
      * 끝난 상태를 쓰고 취소 요청을 지우고 잠금을 푼다. 한 번만 동작한다.
      *
      * @param exitCode 실행 명령 종료 코드({@link ExperimentJobStatus.State#ofExitCode})
