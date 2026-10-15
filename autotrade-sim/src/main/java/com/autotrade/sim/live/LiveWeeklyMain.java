@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  *
  * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--to YYYY-MM-DD] [--sessions-dir 폴더]
  * [--recordings-dir 폴더]}. 폴더 기본값은 설정 폴더 아래 {@value LiveCheckMain#SESSIONS_DIR}와 {@value #RECORDINGS_DIR}.
- * 종료 코드: 0 설명되지 않는 차이 없음, 1 입력 오류, 2 설명되지 않는 차이 있음(전달·기록 경로 확인 필요), 4 정지 확인으로 멈춤.
+ * 종료 코드: 0 설명되지 않는 차이 없음, 1 입력 오류, 2 설명되지 않는 차이 있음(전달·기록 경로 확인 필요), 3 취소 요청으로 멈춤(D-089), 4 정지 확인으로 멈춤.
  */
 public final class LiveWeeklyMain {
 
@@ -81,7 +81,7 @@ public final class LiveWeeklyMain {
             return 0;
         } catch (ExperimentStoppedException e) {
             System.err.println("[live-weekly] 멈췄습니다(결과 파일을 쓰지 않음): " + e.getMessage());
-            return 4;
+            return e.exitCode();
         } catch (RuntimeException e) {
             System.err.println("[live-weekly] 실행하지 않았습니다: " + e.getMessage());
             return 1;

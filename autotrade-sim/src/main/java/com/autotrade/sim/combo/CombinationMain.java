@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  *
  * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--snapshots-dir 폴더] [--verify-determinism]}.
  * 스냅샷 폴더 기본값은 설정 폴더 아래 {@code snapshots}(수집기가 쓰는 곳, ADR-008 2.4). 설정 폴더는 {@code ConfigPaths}와
- * 같은 순서로 정한다: 시스템 속성 {@code autotrade.config-dir} → 환경 변수 {@code AUTOTRADE_CONFIG_DIR} → {@code ~/.autotrade}. 종료 코드: 0 완료, 1 입력 오류, 2 Run 실패나 결정론 불일치, 4 정지 확인으로 멈춤(결과 파일을 쓰지 않음, D-063).
+ * 같은 순서로 정한다: 시스템 속성 {@code autotrade.config-dir} → 환경 변수 {@code AUTOTRADE_CONFIG_DIR} → {@code ~/.autotrade}. 종료 코드: 0 완료, 1 입력 오류, 2 Run 실패나 결정론 불일치, 3 취소 요청으로 멈춤(D-089), 4 정지 확인으로 멈춤(결과 파일을 쓰지 않음, D-063).
  */
 public final class CombinationMain {
 
@@ -83,7 +83,7 @@ public final class CombinationMain {
             return 0;
         } catch (ExperimentStoppedException e) {
             System.err.println("[combo] 멈췄습니다(결과 파일을 쓰지 않음): " + e.getMessage());
-            return 4;
+            return e.exitCode();
         } catch (RuntimeException e) {
             System.err.println("[combo] 실행하지 않았습니다: " + e.getMessage());
             return 1;

@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
  * {@link RunGate}로 넣는다(D-063).
  *
  * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--sessions-dir 폴더]}. 세션 폴더 기본값은 설정 폴더 아래
- * {@value #SESSIONS_DIR}(실험실이 쓰는 곳). 종료 코드: 0 같음, 1 입력 오류, 2 다름(실시간 경로 결함)이나 실패한 Run, 4 정지 확인으로 멈춤.
+ * {@value #SESSIONS_DIR}(실험실이 쓰는 곳). 종료 코드: 0 같음, 1 입력 오류, 2 다름(실시간 경로 결함)이나 실패한 Run, 3 취소 요청으로 멈춤(D-089), 4 정지 확인으로 멈춤.
  */
 public final class LiveCheckMain {
 
@@ -66,7 +66,7 @@ public final class LiveCheckMain {
             return 0;
         } catch (ExperimentStoppedException e) {
             System.err.println("[live-check] 멈췄습니다(결과 파일을 쓰지 않음): " + e.getMessage());
-            return 4;
+            return e.exitCode();
         } catch (RuntimeException e) {
             System.err.println("[live-check] 실행하지 않았습니다: " + e.getMessage());
             return 1;

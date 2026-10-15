@@ -85,6 +85,32 @@ class RecordingExperimentTest {
     }
 
     @Test
+    void 실행_명령_병렬_상한이_1이면_결정론_확인을_같음으로_적지_않는다(@TempDir Path tmp) throws IOException {
+        // 등록 파일 parallelism 2라도 실행 명령 상한 1이면 두 실행이 모두 직렬이라 비교가 안 된다(D-089, PR #113 architect F1)
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        Path dir = experiment(tmp, PLAN);
+        RunGate capOne = new RunGate() {
+            @Override
+            public java.util.Optional<String> stopReason() {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public int maxParallelRuns() {
+                return 1;
+            }
+        };
+        List<String> log = new java.util.ArrayList<>();
+
+        RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, Path.of(".."), recordings,
+                new CodeVersion("test", false), true, log::add, capOne);
+
+        assertThat(out.files().get("inputs.yaml")).doesNotContain("같음(").contains("determinism: \"확인 안 함(실제 병렬 수가 1");
+        assertThat(log).contains("프로필 3개 실행(병렬 1)");
+    }
+
+    @Test
     void 녹화_종목의_소속부가_없거나_벤치마크가_녹화에_없으면_시작하지_않는다(@TempDir Path tmp) throws IOException {
         Path recordings = tmp.resolve("recordings");
         FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);

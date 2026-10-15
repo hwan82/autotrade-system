@@ -2,6 +2,7 @@ package com.autotrade.app.lab;
 
 import com.autotrade.app.lab.experiment.ExperimentCatalog;
 import com.autotrade.app.lab.experiment.ExperimentFolders;
+import com.autotrade.app.lab.experiment.ExperimentJobs;
 import com.autotrade.app.lab.experiment.ExperimentRegistrations;
 import com.autotrade.app.lab.experiment.InMemoryExperimentCatalog;
 import com.autotrade.app.lab.experiment.SnapshotList;
@@ -57,6 +58,14 @@ public class LabWebConfiguration {
             @Value("${autotrade.lab.experiments-dir:experiments}") String dir, StrategyProfileStore strategies,
             SelectionProfileStore selections) {
         return new ExperimentRegistrations(Path.of(dir), strategies, selections);
+    }
+
+    /** 실험 실행 명령의 진행 상태·취소 요청(D-089). 실행 명령과 같은 설정 폴더의 {@code experiment-state/jobs}를 본다. */
+    @Bean
+    ExperimentJobs experimentJobs(RuntimeConfigStore store, Clock clock) {
+        ExperimentJobs jobs = new ExperimentJobs(store.paths().runtimeFile().toAbsolutePath().getParent(), clock);
+        log.info("실험 작업 상태 폴더: {}", jobs.root());
+        return jobs;
     }
 
     /** 수집 스냅샷 폴더(설정 폴더 아래 {@code snapshots}, 실행 명령의 기본값과 같음, ADR-008 2.4). */

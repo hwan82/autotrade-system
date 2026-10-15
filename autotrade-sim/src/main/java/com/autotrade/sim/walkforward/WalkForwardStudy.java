@@ -140,11 +140,15 @@ public final class WalkForwardStudy {
 
         Context ctx = new Context(plan, in, windows, candidates, rules, cost, stressCost, factory, risk, index, blacklist,
                 code, log, gate, spanFrom);
+        // 실제 병렬 수: 등록 파일 parallelism과 실행 명령 상한 중 작은 쪽(D-089). 결정론 기록에도 이 값을 쓴다
+        int parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
         log.accept("계산 시작: 구간 " + windows.size() + ", 후보 m=" + plan.m() + ", 대조군 시드 " + plan.nullSeeds()
-                + ", 병렬 " + plan.parallelism());
-        Computed first = compute(ctx, plan.parallelism());
+                + ", 병렬 " + parallel);
+        Computed first = compute(ctx, parallel);
         Boolean deterministic = null;
-        if (verifyDeterminism) {
+        if (verifyDeterminism && parallel == 1) {
+            log.accept("결정론 확인 생략: 실제 병렬 수가 1입니다");
+        } else if (verifyDeterminism) {
             log.accept("결정론 확인: 병렬 1로 전체를 다시 실행");
             gate.check();
             Computed second = compute(ctx, 1);
@@ -153,8 +157,10 @@ public final class WalkForwardStudy {
                 log.accept("결정론 확인 실패: 두 실행의 결과 파일이 다릅니다");
             }
         }
-        String text = deterministic == null ? "확인 안 함(-PverifyDeterminism으로 확인)"
-                : deterministic ? "같음(병렬 " + plan.parallelism() + " vs 1, 판정표·상세 보고서·결과 파일 바이트 일치)" : "다름";
+        String text = deterministic == null
+                ? (verifyDeterminism ? "확인 안 함(실제 병렬 수가 1이라 병렬 대 직렬 비교가 안 됨. -PmaxParallelRuns와 등록 파일"
+                        + " parallelism을 2 이상으로)" : "확인 안 함(-PverifyDeterminism으로 확인)")
+                : deterministic ? "같음(병렬 " + parallel + " vs 1, 판정표·상세 보고서·결과 파일 바이트 일치)" : "다름";
         Map<String, String> files = new LinkedHashMap<>();
         first.files().forEach((k, v) -> files.put(k, v.replace(DETERMINISM_PLACEHOLDER, text)));
         return new Outcome(files, first.anyRunFailed(), deterministic);
