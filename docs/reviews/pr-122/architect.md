@@ -28,3 +28,41 @@
 
 ## 판정
 수정 필요(N1 D-095·결정 로그의 "D-092 6번"을 4번으로 정정, N2 `DiskFreeSource.java:12` 낡은 주석 정정, N3 3GB 시험을 SPARSE 옵션으로 만들거나 Windows 동작에 맞게 주석·방식 정정). N4는 권고. 코드·규칙 변경 자체는 빌드·변이 확인으로 문제를 찾지 못했다. 실전 관련 PR이므로 수정 뒤에도 risk-ops 검토·독립 QA·사용자 머지가 필요하다.
+
+## 재검토 2026-10-15
+- 대상: PR #122 / 브랜치 `claude/project-thread-0ganrn` 헤드 `9c828bd` / base main `7dfe46d`, `git diff origin/main...HEAD` 전체 26파일 +762 −39(지난 검토 헤드 `5e1871a` 대비 커밋 1건 `9c828bd`, 14파일 +206 −26)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (헤드 `9c828bd` 분리 체크아웃) → `BUILD SUCCESSFUL in 51s`, 종료 코드 0. 바뀐 모듈은 다시 시험함: `autotrade-app-watchdog` 39건(지난번 37 + 새 2), `autotrade-architecture-test` 44건, `autotrade-monitor-agent-jar` 27건, 실패·오류·건너뜀 0. 입력이 안 바뀐 모듈은 Gradle 최신 상태 재사용.
+  - 변이 3: `WatchdogMain.run`에서 `os(osReadings)` 삭제 → `WatchdogMainTest#PC_CPU_메모리를_줄_수_없는_JVM이면_기동을_거부한다` 실패. 되돌림.
+  - 변이 4: `Watchdog.tick`에서 `reportMissing(snapshot)` 삭제 → `WatchdogTest#값이_빠지기_시작하면_한_번만_알리고_돌아오면_다시_알릴_수_있다` 실패. 되돌림. 작업 트리 깨끗함 확인.
+  - 커밋된 1차 원문(이 파일 1~30줄)은 내가 넘긴 내용 그대로임을 확인(30줄, B6 "아래 N4" 정정 포함). 이 절만 덧붙임.
+  - Windows 실행(SPARSE 동작)은 하지 못함.
+
+### 지난 지적 처리
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| N1 D-092 항목 번호 | 해소 | `docs/decisions/D-095-watchdog-cpu-memory-jdk-read.md:5,7` "D-092 4번", `docs/decisions/README.md:101` "D-092 4번 보충". "6번" 인용 남은 곳 없음(grep) |
+| N2 낡은 주석 | 해소 | `DiskFreeSource.java:12-13` "OSHI를 쓰지 않고 `java.lang.management`는 `PlatformOsReadings`의 CPU·메모리 읽기만 허용". `WatchdogMain` 클래스 설명도 D-095·기동 거부 조건 반영 |
+| N3 3GB 시험 이식성 | 해소(Windows 미실행) | `HeartbeatTest#아주_큰_파일도_상한까지만_읽어_메모리를_쓰지_않는다`가 `Files.newByteChannel(CREATE_NEW, WRITE, SPARSE)` + 끝 1바이트 쓰기로 바뀜, 주석이 Linux·NTFS 차이를 정확히 적음. 시간 단언 2초→10초는 전체 읽기 변이가 `OutOfMemoryError`로 시간 전에 실패하므로 판별력 손실 없음 `[추론]`. NTFS에서 실제 희소로 잡히는지는 Windows에서 확인하지 못함 `[추론]` |
+| N4 JVM 거부 경로(권고) | 반영 | `WatchdogMain.run/start`에 `Supplier<Optional<OsReadings>>` 오버로드, 공통 `os(...)`. 시험이 `run` 2, `start` 던짐, 하트비트 미작성을 고정. 변이 3이 잡힘 |
+
+### B 점검표(헤드 9c828bd)
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 종료 코드 0, 시험 실패 0 |
+| B2 | 통과 | 새 커밋은 감시 패키지 안 변경뿐, 새 의존 없음. `RealPathReflectionTest`·고정 예제는 지난 헤드 대비 변경 없음(diff 0). 1차 B2 판단 유지 |
+| B3 | 통과 | 설정 키 범위 변경(`cpu.system`·`memory.used`의 경고 = 위험 거부, `WatchdogSettings.java` `usage`)이 `docs/config/config-keys.md` `cpu.system` 행, D-095 3번에 반영. `memory.used` 행은 "범위는 `cpu.system`과 같다"로 따라감. 결정 로그·장애 설계 5.2 0번·장애표 #10 문구 갱신 확인 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음. 새 코드도 시각을 쓰지 않음(`reportMissing`은 상태 비교만) |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 새 동작(결측 경고, JVM 거부, 경고 = 위험 거부)마다 시험 있음: `WatchdogTest#값이_빠지기_시작하면_...`, `WatchdogMainTest#PC_CPU_메모리를_줄_수_없는_JVM이면_기동을_거부한다`, `WatchdogSettingsTest#CPU_메모리_임계_형식과_범위를_검사한다`의 `90:90:3`. 기존 시험 삭제 없음(바뀐 단언은 메시지 문구 `≤`→`<` 1곳과 시간 한도 1곳). 변이 3·4가 잡힘 |
+| B7 | risk-ops 검토 필요 | 보호 경로(`autotrade-app-watchdog/*`, `autotrade-monitor-agent-jar/*`, `autotrade-architecture-test/*`)를 바꾸는 실전 관련 PR. 브랜치의 `docs/reviews/pr-122/risk-ops.md` 판정은 아직 1차 "수정 필요"뿐이라 risk-ops 재검토, 독립 QA, 사용자 머지가 남음 |
+| B8 | 통과 | 새 로그는 지표 이름 집합(`cpu.system`, `memory.used`, `disk.free-gb:<경로>`)과 결정 번호만 남김. 비밀값 없음. 커밋 메시지에 비밀값 없음 |
+
+### 점검표 밖 발견
+- **M1 (참고) 결측 집합이 줄어도 WARN**: `Watchdog.reportMissing`은 빠진 값 집합이 바뀌면 비어 있지 않은 한 늘든 줄든 WARN을 남긴다(예: {CPU, 드라이브} → {CPU}). 메시지가 "자원 값을 읽지 못함: <지금 빠진 값>"이라 내용은 맞고, 로그가 상태 변화 때만 나오므로 차단 사유 아님. 줄어든 경우를 INFO로 나누면 더 정확하다.
+- **M2 (참고)** `reportMissing`은 `sampleOnce()` 뒤·`pressure()` 앞의 같은 `try` 안에 있어, 만약 던지더라도 그 점검은 판단 못 함(UNKNOWN)으로 끝난다. 정지 요청을 푸는 쪽으로 새는 길은 없다.
+- 1차 N5·N6(범위 묶음, CPU 계속 음수 시 해제 불가·Linux 메모리 값·기본 임계 `[가정]`·"사용자 결정 ①" 저장소 밖 근거)은 그대로 참고 사항이다. N6의 무경보 결측은 R1 반영(WARN 로그)으로 운영자가 알 수 있게 됐다.
+
+### 판정
+승인(architect 범위). 지난 수정 필요 N1·N2·N3은 해소, N4 권고도 반영. 확인 못 한 것은 NTFS에서 SPARSE가 실제 희소 파일을 만드는지 하나이고, 이것은 시험의 판정 대상이 아니라 개발 PC의 디스크 사용량 문제이며 Linux CI·이 검토 빌드에서는 통과한다. 실전 관련 PR이므로 risk-ops 재검토 판정, 독립 QA, 사용자 머지가 끝나야 머지할 수 있다.

@@ -58,3 +58,58 @@
 
 ## 판정
 수정 필요(A11·A12·A14 / R1 CPU·메모리 값 결측의 무경보 해소와 시험, R2 5.2 0번·WatchdogMain·DiskFreeSource 낡은 문구 정정, R3 감시 기동 거부 경로 시험)
+
+## 재검토 2026-10-15
+- 대상: PR #122 / 브랜치 `claude/project-thread-0ganrn` / 새 헤드 `9c828bd`(지난 검토 헤드 `5e1871a` 뒤 커밋 1개 `9c828bd`) / base main `7dfe46d`. `git diff origin/main...HEAD` 전체(26개 파일, +762 −39)를 다시 봤고, 그중 `5e1871a..9c828bd`(14개 파일, +206 −26)는 줄마다 읽었다. 보호 테스트(`autotrade-architecture-test`)는 지난 헤드 뒤로 바뀌지 않았다(`git diff 5e1871a..9c828bd -- autotrade-architecture-test` 비어 있음). 그래서 지난 검토의 허용 목록 판단과 변이 시험 M1~M3 결과가 그대로 유효하다. 실전 엔진·`autotrade-risk`·증권사 플러그인 변경은 여전히 없다.
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` → **BUILD SUCCESSFUL(종료 코드 0)**. 바뀌지 않은 모듈의 태스크는 up-to-date였으므로, 필수 모듈은 `--rerun`으로 다시 돌렸다(`./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-watchdog:test :autotrade-monitor-agent-jar:test --rerun`, 종료 코드 0). 결과(시험/실패/오류/건너뜀):
+    - `:autotrade-risk:test` 55/0/0/0
+    - `:autotrade-architecture-test:test` 44/0/0/0
+    - `:autotrade-app-engine:test` 52/0/0/0
+    - `:autotrade-app-watchdog:test` 39/0/0/0(새 시험 2건 포함)
+    - `:autotrade-monitor-agent-jar:test` 27/0/0/0(희소 파일 3GB 시험 포함, Linux)
+  - 수정분 변이 시험. 하나씩 넣고 `:autotrade-app-watchdog:test`를 돌린 뒤 원복했다. 끝난 뒤 `git status --short`는 비어 있다.
+
+    | 변이 | 결과 |
+    |---|---|
+    | R1-M `Watchdog.tick`에서 `reportMissing(snapshot)` 호출을 지움(Watchdog.java:79) | 잡힘: `WatchdogTest#값이_빠지기_시작하면_한_번만_알리고_돌아오면_다시_알릴_수_있다` 실패(expected 1 but was 0) |
+    | R3-M 기동 점검 `run`에서 `os(osReadings)` 검사를 지움 | 잡힘: `WatchdogMainTest#PC_CPU_메모리를_줄_수_없는_JVM이면_기동을_거부한다` 실패(expected 2 but was 0) |
+    | N1-M 임계 검사를 `critical < warn`으로 되돌림(경고 = 위험 허용) | 잡힘: `WatchdogSettingsTest#CPU_메모리_임계_형식과_범위를_검사한다` 실패 |
+
+### 지난 지적 처리
+| 지적 | 처리 | 근거 |
+|---|---|---|
+| R1 값 결측 무경보 | 해소 | `Watchdog.reportMissing`(Watchdog.java:124-140)이 필수 값(드라이브 경로별·`cpu.system`·`memory.used`)의 결측 집합이 바뀔 때만 로그를 남긴다. 새로 빠지거나 빠진 값이 늘면 WARN, 모두 돌아오면 INFO다. 같은 결측이 이어지면 다시 남기지 않는다. WARN 문구는 "정지 요청을 새로 만들지 못하고, 켜진 정지 요청은 풀지 않는다"로 위험 판정이 꺼졌음을 직접 알린다. 판정 로직(`pressure`)과 `StopRequests`는 바뀌지 않았다. 시험과 R1-M으로 확인했다. D-095 위험과 한계 문구도 실제 동작(값이 빠지면 새 정지 요청을 못 만듦, 상태 변화 로그)에 맞게 고쳐졌다 |
+| R2 낡은 문구 | 해소 | broker-and-fault-design.md:144(5.2 0번)는 이제 CPU·메모리 위험 조건(기본 95% 3회)을 적고, 해제 조건을 "모든 드라이브가 경고 경계 위이고 CPU·메모리가 경고 경계(기본 85%) 아래로 5분, 값을 하나라도 못 읽으면 지우지 않음(빠지기 시작하면 경고 로그)"으로 적는다. "Q-053 결정 뒤" 문구는 사라졌다(grep 0건). `WatchdogMain` 클래스 설명(:14-18)과 `DiskFreeSource` 설명(:12-13)도 D-095에 맞게 고쳐졌다 |
+| R3 기동 거부 시험 없음 | 해소 | `WatchdogMain.run`·`start`가 `Supplier<Optional<OsReadings>>`를 받는 패키지 전용 오버로드를 갖는다(:53, :70). 운영 진입점은 `PlatformOsReadings::create`를 넘긴다(:49-50, :66-67). 검사는 `os()` 하나로 모았다(:88). `WatchdogMainTest#PC_CPU_메모리를_줄_수_없는_JVM이면_기동을_거부한다`가 확인하는 것: 기동 점검은 2를 돌려주고, 기동은 `IllegalArgumentException`을 던지고, 하트비트 파일을 쓰지 않는다. R3-M으로 시험이 동작을 잡는 것도 확인했다 |
+| N1 경고 = 위험 허용 | 반영 | `0 < 경고 < 위험 ≤ 100`으로 좁혔다(WatchdogSettings.java:165-166). config-keys·D-095에도 적었다. 기본 `85:95:3`은 그대로라 기존 설정에는 영향이 없다 |
+| N2 NTFS 3GB 할당·2초 단언 | 반영 | `StandardOpenOption.SPARSE`로 끝 1바이트만 쓰고, 시간 단언을 10초로 늘렸다(HeartbeatTest.java:163-172). Windows에서의 희소 동작은 이번에도 돌려 보지 못했다 `[추론]`. 안전 문제가 아니므로 판정에 넣지 않는다 |
+| N3 검사 모드 불일치 | 해소 | `run`도 같은 `os()` 검사를 한다(R3와 같은 시험) |
+| N4 감시 JDK 고정 | 문서화 | D-095 위험과 한계에 "HotSpot 계열(Temurin 21) 고정, 7단계 실행 절차서의 설치본 대조에 넣음"을 적었다. 실제 절차서 항목은 7단계 몫이라 남은 위험으로 둔다 |
+
+### 점검표 A 재판정
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk` 변경 없음. `:autotrade-risk:test` 55/0/0/0 재실행 통과(`RealTradingGuardTest` 포함) |
+| A2 | 통과 | 보호 테스트와 실전 주문 출구는 지난 헤드 뒤로 바뀌지 않았다. `RealPathReflectionTest` 44건 중 실패 0. 수정분에도 관리 API를 쓰는 새 코드는 없다(`PlatformOsReadings` 변경 없음) |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 실전 엔진 변경 없음, `:autotrade-app-engine:test` 52/0/0/0. 감시는 정지 요청 파일만 만들고 지운다. CPU·메모리 결측이 이제 WARN으로 드러나, 5.2 0·2번 감지 수단이 꺼졌는지 운영자가 알 수 있다 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 수정분에 키·계좌번호·토큰이 없다. 새 로그는 지표 이름(`cpu.system`, `memory.used`, `disk.free-gb:<경로>`)과 결정 번호만 낸다(Watchdog.java:133-137) |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음(지난 헤드 뒤 변경 0). 새 동작마다 실패하는 경우를 포함한 시험이 있다: 기동 거부 `WatchdogMainTest#PC_CPU_메모리를_줄_수_없는_JVM이면_기동을_거부한다`, 결측 알림 `WatchdogTest#값이_빠지기_시작하면_…`, CPU를 모를 때 해제하지 않음, CPU·메모리 위험이면 정지 요청, 임계 형식·범위 8가지 거부. 변이 M1~M5·R1-M·R3-M·N1-M가 모두 잡혔다 |
+| A12 | 통과 | 장애표 #10(broker-and-fault-design.md:169)과 5.2 0번(:144)이 코드의 발동·해제 조건, 결측 경고와 맞는다. 장애 테스트 8종의 전제는 바뀌지 않았다 |
+| A13 | 해당 없음 | 시장별 코드 변경 없음 |
+| A14 | 통과 | D-095(결정 3·4번, 위험과 한계, 검증), 결정 로그 D-095 행, config-keys, 5.2·장애표 #10, ADR-002 9.6·ADR-011, 기획서 v14.38이 코드 동작과 맞는다. D-095 근거의 D-092 인용 번호도 4번으로 바로잡았다(D-092 본문 4번이 "드라이브 여유만 봄") |
+
+### 남은 위험(판정에 넣지 않음)
+- Windows에서 첫 점검의 `getCpuLoad`가 음수를 주면, 감시 기동 직후 결측 WARN 한 번과 회복 INFO 한 번이 나온다 `[추론]`. 시끄럽지만 안전한 쪽이라 막지 않는다.
+- Windows에서 `getCpuLoad`·`getFreeMemorySize` 값이 작업 관리자와 맞는지, NTFS 희소 파일 시험이 실제로 할당 없이 도는지는 이번에도 확인하지 못했다. 사용자 PC 첫 기동 때 대조해야 한다(D-095).
+- 감시 JDK 고정은 7단계 실행 절차서에 실제 항목으로 들어가야 끝난다.
+
+### 판정
+승인
