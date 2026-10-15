@@ -53,3 +53,50 @@
 
 ## 판정
 승인 (b85bede 기준. 지문이 메서드 본문 데이터 흐름·상수 변경을 잡음을 K3·K4·K5로 확인. 권고 R-4·R-5는 머지를 막지 않는다. 보호 테스트 변경이라 머지는 사용자가 하고, 머지 전 독립 QA 관문)
+
+## 재검토 2026-10-15
+- 대상: PR #112 / 헤드 654b20e / main 대비 diff 전체(`git diff origin/main...HEAD`, origin/main = b4ed7fc, merge-base d6fb6e7, 파일 16개 +484 −18). 1차(b85bede) 이후 이 PR 자신의 변경은 69b78bc(main d6fb6e7 병합)와 654b20e(독립 QA F1·R1~R4 반영)다. 654b20e는 `RealPathReflectionTest.java`, `SamePackageRecordReader.java`, D-086, `docs/team/project-instructions.md` 11장 보호 테스트, `docs/qa/README.md`, `docs/qa/checklists.md` A11, `docs/qa/pending.md`, `docs/qa-out-status.md`를 고치고 `.github/CODEOWNERS`, `.github/workflows/ci.yml` 단계 "Protected change marker", `scripts/ci/mark-protected-changes.sh`, `scripts/ci/protected-paths.txt`를 더했다. 운영 코드 변경은 여전히 0줄이다
+- 점검표: A (헤드의 A11 새 문구 "고정 값 갱신이 있으면 그 이유와 대상 코드 변경을 검토했다" 포함)
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (654b20e): BUILD SUCCESSFUL
+  - `./gradlew --rerun-tasks :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test`: 성공. risk 55건, architecture-test 42건(`RealPathReflectionTest` 9건 포함), app-engine 50건, 실패·오류·건너뜀 0. 결과 XML 전체 합계 1,142건, 실패·오류·건너뜀 0
+  - CI: 654b20e에는 workflow run이 없다(REST `actions/runs?head_sha=654b20e…` 빈 목록, `check-runs`도 0건). 직전 헤드 520ef5c까지는 `pull_request` run이 있었다. 원인은 아래 F-3의 main 충돌로 본다[추론: `pull_request` 이벤트는 병합 커밋을 만들 수 없으면 실행되지 않는다]. 그래서 새 CI 단계가 GitHub Actions에서 실제로 도는지는 **확인 못 함**
+  - main 병합 확인: `git merge-tree --write-tree --name-only origin/main HEAD` → `CONFLICT (content): Merge conflict in docs/qa/pending.md`. main 6f241f3("PR #114 독립 QA 요청을 대기 목록에 추가")과 이 PR이 같은 표 끝에 줄을 더했다
+  - 표시 스크립트 로컬 실행: `bash scripts/ci/mark-protected-changes.sh main` → 경고 1줄과 보호 대상 6개 목록(`.github/CODEOWNERS`, `ci.yml`, `RealPathReflectionTest.java`, `SamePackageRecordReader.java`, 스크립트 2개). 정상 동작
+  - 표시 스크립트 이름 바꾸기 실험: 스크래치 저장소에서 `autotrade-architecture-test/src/A.java`를 `git mv`로 `other/A.java`로 옮긴 커밋에 스크립트를 실행 → `보호 대상 변경 없음`. `git diff --name-only`가 이름 바꾸기를 새 경로 하나로만 보이기 때문이다. `--no-renames`를 붙이면 두 경로가 모두 나온다. 아래 F-4
+  - 브랜치 보호 확인: `gh api repos/hwan82/autotrade-system/branches/main/protection` → 404 "Branch not protected"
+  - 변이·변조 실험(각각 `./gradlew --offline :autotrade-architecture-test:test --tests com.autotrade.architecture.RealPathReflectionTest`, 실험 뒤 원문 복원)
+    - MD2: 지문 함수에 `SKIP_CODE`를 더하고 운영 지문 비교를 `isNotNull()`로 바꿈(함수 약화와 값 갱신을 함께 한 것과 같음) → 잡힘 `레코드_구성_요소를_읽는_클래스의_지문은_고정_값과_같다`(새 자체 시험 "본문 상수만 다르면 지문이 달라야 한다"). 1차 R-4 해소
+    - N3: `hasWildcardOrTypeVariable`의 제네릭 배열 갈래를 끔 → 잡힘 모양 시험(`drainAll`)
+    - MRW: `REFLECT_TYPE_OWNERS`에서 `WildcardType`·`TypeVariable`·`GenericArrayType` 제거 → 잡힘 `규칙은_리플렉션_우회를_실제로_잡아낸다`(`wildcardBound`·`variableBound`·`arrayComponent`). 1차 R-5 해소
+    - MT(`Type` 제거), MP(와일드카드 검사를 반환 타입에만) → 잡힘
+    - K1(운영 `SecretPaths`에 주석) → 통과. K4(기존 `paths.add`에 클래스 객체) → 잡힘(지문)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 운영 코드 변경 0줄. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | `ArchitectureTest` 변경 없음. 1차 이후 시험 변경은 강화뿐이다: 위반 예제 `drainAll`·`wildcardBound`·`variableBound`·`arrayComponent`와 기대 문자열(RealPathReflectionTest.java:694, :1020-1023), 지문 함수 자체 시험(:726-729, `probeClass` :752). N3·MRW·MD2로 고정 확인 |
+| A3 | 해당 없음 | 주문·증권사 연동 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷 변경 없음 |
+| A8 | 해당 없음 | 프로세스 구성·정지 순서 변경 없음. 새 CI 단계는 `guards` 작업 안의 경고 표시라 빌드·런타임에 영향 없다 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 1차 이후 diff 전체를 읽음. 키·계좌번호·토큰 없음(CODEOWNERS의 `@hwan82`는 저장소 소유자 계정 이름이라 비밀값이 아니다). 비밀값 스캔 CI는 654b20e에서 돌지 않았다(위 CI 항목) |
+| A11 | 실패 | 보호 테스트 삭제·약화는 없고, 이 PR이 새로 고정한 값(`RECORD_READER_FINGERPRINTS`, :712)의 대상은 운영 `SecretPaths`이며 이 PR은 그 코드를 바꾸지 않았다(새 A11 문구 충족). 1차 R-4·R-5는 MD2·MRW로 해소 확인. 그러나 이 PR이 F1 대응으로 더한 기계 표시(`mark-protected-changes.sh:17`)는 보호 테스트를 보호 경로 밖으로 **옮기는** 변경을 보지 못한다(F-4, 직접 재현). 옮기면 그 시험은 `autotrade-architecture-test`에서 빠져 사실상 삭제인데 표시가 "보호 대상 변경 없음"을 낸다. 새 보호 장치에 우회가 있고 이를 잡는 시험도 없다 |
+| A12 | 통과 | 장애 대응표 17종·해외 O1~O8·장애 테스트 8종 문서와 시험 변경 없음 |
+| A13 | 해당 없음 | 시장별 코드 변경 없음 |
+| A14 | 실패 | (1) main(b4ed7fc)과 `docs/qa/pending.md` 충돌(F-3). 이 때문에 654b20e의 CI가 돌지 않아 새 CI 단계와 비밀값 스캔 결과를 확인하지 못했다. (2) 그 밖의 문서 대조는 맞다: 독립 QA F1의 (a)(보호 테스트 정의에 `autotrade-architecture-test` 전체와 고정 값 갱신을 넣음, project-instructions.md:114-117, qa/README.md:15-17, checklists.md A11)와 (b)(CI 표시, CODEOWNERS)가 들어갔고, D-086:51이 지문 함수 자체 시험과 CI 표시를 적는다. D-086 검증 절의 새 줄은 헤드 시험과 맞다 |
+
+## 점검표 밖 발견 (재검토)
+- **F-3 (수정 필요, A14) main과 충돌, CI 미실행.** origin/main b4ed7fc의 `docs/qa/pending.md`(6f241f3, PR #114 요청 줄)와 이 PR의 두 줄이 같은 표 끝에서 충돌한다. main을 병합해 두 줄을 모두 남기고, 새 헤드에서 CI 세 작업(특히 새 단계 "Protected change marker"가 이 PR 자체에 경고를 남기는지)을 확인한다.
+- **F-4 (수정 필요, A11) 보호 대상 표시가 이름 바꾸기를 놓친다.** `scripts/ci/mark-protected-changes.sh:17`의 `git diff --name-only "origin/${base}...HEAD"`는 git 기본 이름 바꾸기 감지 때문에 옮긴 파일의 새 경로만 낸다. 보호 시험(예: `RealPathReflectionTest.java`)을 `autotrade-architecture-test` 밖으로 옮기면 경고가 나오지 않는다(스크래치 저장소에서 재현). 고칠 것: `git diff --name-only --no-renames ...`로 바꾸고, 가능하면 표시 스크립트의 동작(보호 경로 수정·삭제·밖으로 옮기기가 걸리고 보호 경로 밖 변경은 안 걸림)을 확인하는 작은 CI 자체 시험(임시 저장소)을 둔다.
+- **R-6 (권고, 중간) 보호 대상 경로 목록이 실전 경로 모듈 일부만 덮는다.** `scripts/ci/protected-paths.txt`는 engine·watchdog·risk·broker-*·`SecretPaths.java`만 담고, 실전 경로 런타임에 실리는 `autotrade-domain`(`OrderGateway`·주문 상태), `autotrade-control`(명령 채널·2차 확인, ADR-006), `autotrade-config`(나머지, `RuntimeConfig`의 실전 설정), `autotrade-marketdata`·`autotrade-strategy`·`notification-jar`·`monitor-agent-jar`(RealPathReflectionTest.java:87-91 `REQUIRED_PROJECTS`)는 빠져 있다. 규칙 문서도 빠져 있다(`docs/team/project-instructions.md`, `docs/qa/README.md`·`checklists.md`, D-086, ADR-002). 표시는 경고일 뿐이고 실전 관련 PR 판정은 프로젝트 지침 10장 내용 기준이라 보호가 약해지지는 않지만, 경고 제목이 "실전 관련 PR"이라 경고가 없으면 실전 관련이 아니라고 읽힐 수 있다. `REQUIRED_PROJECTS` 전체와 규칙 문서를 넣거나, 스크립트·README에 "이 목록 밖도 10장 기준으로 실전 관련일 수 있다"를 적기를 권한다.
+- **R-7 (참고) CODEOWNERS는 지금 아무것도 강제하지 않는다.** main에 브랜치 보호가 없어(REST 404) 코드 소유자 리뷰 요구가 걸리지 않는다. 실전 관련 PR의 사용자 머지는 여전히 절차(지침 10·11장)에 기댄다. 저장소 설정에서 main 보호와 "Require review from Code Owners"를 켤지는 사용자 결정이다(혼자 쓰는 저장소라 본인 PR 승인 문제를 함께 따져야 한다).
+- **참고: 프로젝트 지침 원문 변경.** `docs/team/project-instructions.md` 11장 보호 테스트 정의가 넓어졌다(강화 방향, 4장 절대 규칙 약화 없음). CLAUDE.md는 이 파일을 직접 불러오므로 머지 즉시 적용되지만, 사용자가 프로젝트 설정 > 지침에 붙여 넣은 사본은 사용자가 따로 갱신해야 한다. 이 결과로 `autotrade-architecture-test`만 고치는 PR도 모두 사용자 머지 대상이 된다.
+- 참고: 1차 원문과 architect 원문(`docs/reviews/pr-112/risk-ops.md` 1차 절, `architect.md`)은 380c612 이후 바뀌지 않았다(`git diff --stat 380c612 HEAD -- docs/reviews/pr-112/risk-ops.md docs/reviews/pr-112/architect.md` 빈 출력). 독립 QA 원문은 무엇을 확인할지 정하는 데만 썼고, 판정은 654b20e 코드와 위 실행 결과로만 했다.
+- 참고: 실전 관련 PR(보호 테스트·CI·지침 변경)이라 머지는 사용자가 하고, 머지 전 독립 QA 재검토 관문이다(`docs/qa/pending.md`의 "PR #112 재검토해줘" 줄).
+
+## 판정 (재검토)
+수정 필요(A14·F-3: main b4ed7fc와 `docs/qa/pending.md` 충돌, 그 때문에 654b20e CI 미실행으로 새 CI 단계를 확인 못 함. A11·F-4: 보호 대상 표시가 보호 시험을 밖으로 옮기는 변경을 놓침, `--no-renames` 필요. 권고 R-6, 참고 R-7. 1차 권고 R-4·R-5는 해소. 머지는 사용자)
