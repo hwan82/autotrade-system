@@ -35,4 +35,5 @@ include(
     "autotrade-ui",
     "autotrade-notification-jar",
     "autotrade-monitor-agent-jar",
+    "autotrade-monitor-sources",
 )

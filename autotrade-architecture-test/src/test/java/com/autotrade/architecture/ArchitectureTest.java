@@ -112,7 +112,7 @@ class ArchitectureTest {
 
     /** 알림·감시 라이브러리는 다른 프로젝트에서 쓸 수 있게 자동매매 도메인을 모른다. */
     static final ArchRule REUSABLE_JARS_ARE_DOMAIN_FREE = noClasses()
-            .that().resideInAnyPackage("com.autotrade.notification..", "com.autotrade.monitor..")
+            .that().resideInAnyPackage("com.autotrade.notification..", "com.autotrade.monitor..", "com.autotrade.monitorsources..")
             .should().dependOnClassesThat().resideInAnyPackage(
                     "com.autotrade.domain..", "com.autotrade.marketdata..", "com.autotrade.strategy..",
                     "com.autotrade.selection..", "com.autotrade.risk..", "com.autotrade.sim..", "com.autotrade.broker..",
