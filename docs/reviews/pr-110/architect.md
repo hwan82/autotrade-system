@@ -30,3 +30,41 @@
 
 ## 판정
 수정 필요(AR-1: 옮겨진 `Holder` 오탐 방지 단언을 `byNameDetails`로 되돌리고 M1 변조로 확인, AR-2: D-086 한계 문장을 기계 검사 범위에 맞추거나 시험을 넓힘. B7 risk-ops 검토 필요)
+
+## 재검토 2026-10-15
+- 대상: PR #110 / 헤드 c3f65ac(요청 시점 헤드. 검토 중 같은 브랜치에 risk-ops 재검토 원문 커밋 933410e가 올라왔고, 이 커밋은 `docs/reviews/pr-110/risk-ops.md`만 바꿔 코드는 c3f65ac와 같다) / main 대비 diff(`git diff origin/main...HEAD`, 5파일: `RealPathReflectionTest.java`, `SamePackageRecordReader.java`(테스트 소스), `D-086-real-path-reflection-ban.md`, 검토 원문 2개). 1차 이후 코드 변경은 fd2f153(AR-1~AR-4 반영)과 c3f65ac(risk-ops F-1·F-2, AR-2 반영)이다. 운영 코드 변경은 0줄이다
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew clean build --no-daemon` (c3f65ac 코드): BUILD SUCCESSFUL in 2m 10s, 종료 0. `RealPathReflectionTest`는 tests=8, failures=0, errors=0, skipped=0이다
+  - 변조 실험 4건(모두 되돌렸고 `git status`가 깨끗함을 확인. 위 clean build는 되돌린 뒤 돌렸다)
+    - RM1: `NameToClassBinding.Holder`의 `public T value;`를 `public Class<T> value;`로 바꿈 → `규칙은_리플렉션_우회를_실제로_잡아낸다`가 실패한다(`doesNotContain "NameToClassBinding$Holder.value"`). 1차 M1과 같은 변조이고 이번에는 잡힌다. AR-1 해소
+    - RM2: 모양 검사에서 서명 금지 타입 `java.lang.Object`를 빼고 `putPOJO` 검사를 끔 → `레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다`가 실패한다(`typeName(java.lang.Object)의 서명에 java.lang.Object`, `stash(..)가 임의 객체를 JSON 노드에 넣는다: putPOJO`를 찾지 못함). 새 모양 검사에도 실패 경우 시험이 생겼다
+    - RM3: `SecretPaths`에 1차 M4의 `leakNode()`(private 도우미에서 `putPOJO("t", ..getType())`)를 넣음 → 모양 시험이 실패한다("SecretPaths.leakNode0()가 임의 객체를 JSON 노드에 넣는다: putPOJO"). 1차 AR-2에서 지적한 JSON 노드 길은 이제 기계 검사로 막힌다
+    - RM4: `SecretPaths`에 private `stash()`가 구성 요소 타입을 중첩 클래스 `SecretPaths.Leak.put(Object)`(내부 `ConcurrentLinkedQueue<Object>`)로 넘기게 함 → **시험 8건이 모두 통과해 검출되지 않는다**. 아래 AR-5
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 직접 실행한 `./gradlew clean build`가 성공했다(2m 10s, 종료 0). 위 실행 기록 참고 |
+| B2 | 통과 | 규칙은 강화 방향으로만 바뀌었다. `RecordComponent` 메서드를 허용 클래스 안에서만 부르게 했고(RealPathReflectionTest.java:459-465), 모양 검사 `recordReaderShape`(:709-741)를 추가했다. 그 안에 서명 원시 타입 검사, `getAccessesFromSelf` 기반 private 읽기 검사(AR-4 반영), `POJO_NODE_METHODS` 금지(:706), 클래스 파일 상수 고정 목록 `RECORD_READER_TYPES`(:689-703)가 있다. 근거 결정 D-086:51을 갱신했다. 운영 코드와 모듈 의존은 바뀌지 않았다. 변경 범위는 이 규칙이 실제로 판정하는 범위와 맞는다(RM1~RM3) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경이 없다 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경이 없다 |
+| B5 | 해당 없음 | 금액 계산 변경이 없다 |
+| B6 | 통과 | 1차 실패 사유(AR-1)를 해소했다. `byNameDetails`에 `Holder` 오탐 방지 단언이 돌아왔고(:881), 늘 참이던 `.doesNotContain("SamePackageRecordReader")`와 `samePackage` 쪽 `doesNotContain`은 없어졌다. RM1로 다시 잡히는 것을 확인했다. 새 모양 검사는 위반 예제 `SamePackageRecordReader`(`first`, `typeName`, private `stash`)로 실패 경우를 단언하고(:671-680), RM2로 확인했다. 지우거나 건너뛴 시험은 없다(main 7건 → 8건) |
+| B7 | risk-ops 검토 필요 | 보호 테스트(`RealPathReflectionTest`)를 바꾼 실전 관련 PR이다. 같은 브랜치에 `docs/reviews/pr-110/risk-ops.md`(1차와 재검토)가 있다. 그 판정 내용은 이 검토의 근거로 쓰지 않았다. 머지는 사용자가 하고, 머지 전에 독립 QA 관문을 거친다 |
+| B8 | 통과 | 1차 이후 바뀐 diff를 모두 읽었고 키·계좌번호·토큰은 없다. 위반 예제에는 리플렉션 호출과 Jackson 노드 호출만 있다 |
+
+## 점검표 밖 발견 (재검토)
+- **AR-1 해소**: 위 B6과 RM1.
+- **AR-2 해소**: D-086:51이 이제 검사 범위를 맞게 적는다(서명 원시 타입, 클래스 파일 상수 고정 목록, `putPOJO` 류 금지). 남는 길은 `[추론]`으로 적었고, `SecretPaths`와 `RECORD_READER_TYPES` 변경을 risk-ops가 검토할 신뢰 경계로 정했다. JSON 노드 길은 기계 검사로 막혔다(RM3). 목록 안 컬렉션을 `List<?>` 모양으로 내보내는 길은 남아 있고 문서에 적혀 있다.
+- **AR-3 해소**: D-086:58이 8건으로 고쳐졌다. **AR-4 해소**: private 읽기 검사가 `getAccessesFromSelf`를 쓴다(:731-734).
+- **AR-5 (권고, 낮음)** 고정 타입 목록 검사가 허용 클래스의 중첩 클래스를 뺀다(`!n.startsWith(k.getName() + "$")`, :736). 모양 검사도 `SecretPaths` 자신의 멤버에만 돈다.
+  - 그래서 RM4처럼 중첩 클래스가 `Object`를 받아 목록 밖 컬렉션에 담으면, 구성 요소 타입의 클래스 객체가 `SecretPaths` 밖으로 나가도 빌드가 통과한다.
+  - D-086:51의 "남는 길은 … 것이다" 목록에도 이 길이 없다.
+  - 승인을 막지 않는 이유: [사실] clean build 뒤 운영 `SecretPaths`에는 중첩 클래스가 없다(`autotrade-config/build/classes/java/main/com/autotrade/config/`에 `SecretPaths.class` 하나뿐). 이 길을 열려면 `SecretPaths.java`를 고쳐야 하고, D-086이 그 변경을 신뢰 경계로 보고 risk-ops 검토 대상으로 못박았다. [추론] `SecretPaths`가 package-private이라, 받는 쪽도 `com.autotrade.config` 패키지 안에 있어야 한다.
+  - 권고: (a) `recordReaderShape`를 `ALLOWED_RECORD_READERS` 클래스의 중첩 클래스에도 적용하거나 중첩 클래스 자체를 금지한다(한 줄 수준의 변경). 또는 (b) D-086 남는 길 목록에 "중첩 클래스 칸"을 더한다. 기계 검사인 (a)가 낫다. 다음 `SecretPaths`·D-086 변경 때 함께 처리해도 된다.
+- 참고(1차 R-2와 같은 성격, 권고 유지): `ParameterizedType#getActualTypeArguments`는 허용 클래스 밖에서도 막지 않는다. 실전 경로에서 `ParameterizedType`을 얻는 길이 `RecordComponent#getGenericType`(이제 `SecretPaths` 안에서만)과 소스에 적힌 `TypeReference`뿐이라, 새로 열린 길은 없다고 본다[추론].
+- [확인 범위] 커밋 메시지의 "AR-1~AR-4 반영", "F-1, F-2, AR-2 반영"은 사실로 받지 않았다. 해소 여부는 위 diff 읽기, RM1~RM3, clean build로만 판정했다.
+- [작업 기록] 검토 중 같은 브랜치 ref가 다른 세션의 커밋으로 네 번 앞으로 갔다(fd2f153, a5cab4d, c3f65ac, 933410e). 그때 이 작업 트리의 파일이 ref보다 뒤처졌다. 그래서 매번 ref 기준으로 파일을 맞춘 뒤 다시 실행했다. 판정에 쓴 clean build와 RM1~RM4는 모두 c3f65ac 코드에서 돌렸다.
+
+## 판정 (재검토)
+승인 (1차 AR-1·AR-2 해소, AR-3·AR-4 반영. 권고 AR-5(허용 클래스의 중첩 클래스를 모양 검사에 포함)와 R-2 성격 권고는 머지를 막지 않는다. 보호 테스트 변경이라 risk-ops 검토, 사용자 머지, 머지 전 독립 QA 관문 필요)
