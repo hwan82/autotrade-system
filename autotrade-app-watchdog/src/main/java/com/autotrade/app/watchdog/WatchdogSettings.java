@@ -174,7 +174,14 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
     private static List<Path> disks(String raw, Path configDir, List<String> problems) {
         List<Path> out = new ArrayList<>();
         if (raw == null || raw.isBlank()) {
-            out.add(configDir.toAbsolutePath());
+            // 기본은 설정 폴더 드라이브. 처음 쓰는 PC면 폴더가 없을 수 있다. 감시는 어차피 이 폴더에 하트비트를 쓰므로 만든다
+            Path dir = configDir.toAbsolutePath();
+            try {
+                Files.createDirectories(dir);
+            } catch (IOException | RuntimeException e) {
+                problems.add("설정 폴더를 만들지 못했습니다: " + dir);
+            }
+            out.add(dir);
         } else {
             for (String p : raw.split(",")) {
                 String s = p.strip();

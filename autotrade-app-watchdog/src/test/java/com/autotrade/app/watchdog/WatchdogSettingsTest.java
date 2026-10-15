@@ -94,4 +94,14 @@ class WatchdogSettingsTest {
                 .hasMessageContaining("interval-seconds(20) 이상");
         assertThatThrownBy(() -> WatchdogSettings.parse("disks= , ", dir)).hasMessageContaining("disks가 비었습니다");
     }
+
+    @Test
+    void 처음_쓰는_PC라_설정_폴더가_없으면_만들고_기본값으로_뜬다() {
+        Path fresh = dir.resolve("fresh-config");
+
+        WatchdogSettings s = WatchdogSettings.load(fresh);
+
+        assertThat(fresh).isDirectory();
+        assertThat(s.disks()).containsExactly(fresh.toAbsolutePath());
+    }
 }
