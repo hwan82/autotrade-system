@@ -47,6 +47,10 @@ public final class MonitorService implements AutoCloseable {
     private final Clock clock;
     private final String problem;
     private final List<SseEmitter> streams = new CopyOnWriteArrayList<>();
+    /** 수집을 시작한 시각. 첫 표본이 오지 않는 멈춤을 재는 기준(QA PR #114 R3). 시작 전은 null. */
+    private volatile Instant startedAt;
+    /** 종료 중이면 새 SSE를 받지 않는다. */
+    private volatile boolean closing;
     /**
      * SSE 보내기 전용 스레드. 수집 스레드에서 바로 보내면 느린 브라우저 하나가 수집을 늦춘다(risk-ops PR #114 K1). 대기는 2개까지만
      * 두고 넘치면 가장 오래된 것을 버린다(화면은 다음 표본으로 따라잡는다).
@@ -72,6 +76,7 @@ public final class MonitorService implements AutoCloseable {
     /** 수집 시작(켜져 있을 때만). */
     public void start() {
         if (agent != null) {
+            startedAt = clock.instant();
             agent.start(Duration.ofSeconds(settings.intervalSeconds()));
             log.info("모니터링 수집 시작: {}초 주기, 임계 {}개", settings.intervalSeconds(), agent.thresholds().size());
         } else {
@@ -82,21 +87,26 @@ public final class MonitorService implements AutoCloseable {
     /** 화면 첫 그리기용 전체 상태. */
     public View view() {
         if (agent == null) {
-            return new View(false, problem, settings.intervalSeconds(), settings.historySize(), false, null, List.of(),
+            return new View(false, problem, settings.intervalSeconds(), settings.historySize(), null, false, null, List.of(),
                     List.of(), List.of());
         }
         List<MetricSnapshot> history = agent.history();
         Optional<MetricSnapshot> latest = history.isEmpty() ? Optional.empty() : Optional.of(history.get(history.size() - 1));
-        return new View(true, null, settings.intervalSeconds(), settings.historySize(), stale(latest.map(MetricSnapshot::at)),
+        return new View(true, null, settings.intervalSeconds(), settings.historySize(), startedAt,
+                stale(latest.map(MetricSnapshot::at)),
                 latest.map(MonitorService::sample).orElse(null),
                 agent.thresholds().stream().map(ThresholdView::of).toList(),
                 history.stream().map(MonitorService::point).toList(), agent.recentEvents());
     }
 
-    /** 마지막 표본이 주기의 {@link #STALE_INTERVALS}배보다 오래됐는지. 첫 수집 전은 멈춤이 아니다. */
+    /**
+     * 마지막 표본이 주기의 {@link #STALE_INTERVALS}배보다 오래됐는지. 첫 표본 전이면 수집을 시작한 시각부터 잰다(첫 수집부터
+     * 막히는 경우, QA PR #114 R3). 시작 전은 멈춤이 아니다.
+     */
     boolean stale(Optional<Instant> last) {
-        return last.map(at -> Duration.between(at, clock.instant())
-                .compareTo(Duration.ofSeconds((long) settings.intervalSeconds() * STALE_INTERVALS)) > 0).orElse(false);
+        Instant since = last.orElse(startedAt);
+        return since != null && Duration.between(since, clock.instant())
+                .compareTo(Duration.ofSeconds((long) settings.intervalSeconds() * STALE_INTERVALS)) > 0;
     }
 
     /** 새 표본을 받을 SSE 연결. 꺼져 있거나 연결이 너무 많으면 빈 값. */
@@ -104,7 +114,7 @@ public final class MonitorService implements AutoCloseable {
         SseEmitter emitter;
         // 상한 검사와 추가를 한 번에(동시 요청이 함께 상한을 넘지 않게, architect PR #114 A2)
         synchronized (streams) {
-            if (agent == null || streams.size() >= MAX_STREAMS) {
+            if (agent == null || closing || streams.size() >= MAX_STREAMS) {
                 return Optional.empty();
             }
             emitter = new SseEmitter(SSE_TIMEOUT_MILLIS);
@@ -140,14 +150,22 @@ public final class MonitorService implements AutoCloseable {
         }
     }
 
+    /** 열린 SSE를 모두 끝내고 새 연결을 받지 않는다(종료 첫 단계). */
+    public void closeStreams() {
+        synchronized (streams) {
+            closing = true;
+        }
+        streams.forEach(SseEmitter::complete);
+        streams.clear();
+    }
+
     @Override
     public void close() {
         if (agent != null) {
             agent.close();
         }
         sender.shutdownNow();
-        streams.forEach(SseEmitter::complete);
-        streams.clear();
+        closeStreams();
     }
 
     static Sample sample(MetricSnapshot s) {
@@ -170,10 +188,12 @@ public final class MonitorService implements AutoCloseable {
     }
 
     /**
-     * 화면 첫 상태. {@code latest}는 아직 첫 수집 전이면 null. {@code problem}은 켜져 있는데 수집원을 만들지 못한 이유(그때
-     * {@code enabled=false}). {@code stale}은 마지막 표본이 수집 주기의 3배보다 오래됨(수집 멈춤).
+     * 화면 첫 상태. {@code latest}는 아직 첫 수집 전이면 null. {@code problem}은 켜져 있는데 설정이 잘못됐거나 수집원을 만들지
+     * 못한 이유(그때 {@code enabled=false}). {@code startedAt}은 수집 시작 시각(꺼졌으면 null). {@code stale}은 마지막 표본(첫
+     * 표본 전이면 수집 시작)이 수집 주기의 3배보다 오래됨(수집 멈춤).
      */
-    public record View(boolean enabled, String problem, int intervalSeconds, int historySize, boolean stale, Sample latest, List<ThresholdView> thresholds,
+    public record View(boolean enabled, String problem, int intervalSeconds, int historySize, Instant startedAt, boolean stale,
+            Sample latest, List<ThresholdView> thresholds,
             List<Point> history, List<ThresholdEvent> events) {}
 
     /** SSE {@code sample} 이벤트 본문. */

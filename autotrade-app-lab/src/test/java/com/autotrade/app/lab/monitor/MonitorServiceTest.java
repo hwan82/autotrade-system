@@ -88,6 +88,72 @@ class MonitorServiceTest {
     }
 
     @Test
+    void 첫_표본이_수집_시작부터_주기의_3배_넘게_없으면_수집_멈춤이다() {
+        Instant start = CLOCK.instant();
+        Instant[] now = {start};
+        Clock clock = new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now[0];
+            }
+        };
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        MetricSource stuck = new MetricSource() {
+            @Override
+            public String id() {
+                return "stuck";
+            }
+
+            @Override
+            public List<Reading> read() {
+                // 첫 read가 막힌다(QA PR #114 P2: Windows WMI 첫 초기화 정지 등)
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return List.of();
+            }
+        };
+        MonitorAgent agent = new MonitorAgent(clock, List.of(stuck), List.of(), 10, 10);
+        MonitorSettings hourly = new MonitorSettings(true, 3600, 10, Set.of(), List.of());
+        try (MonitorService service = new MonitorService(hourly, agent, clock, null)) {
+            assertThat(service.view().stale()).isFalse(); // 시작 전
+            assertThat(service.view().startedAt()).isNull();
+            service.start();
+            assertThat(service.view().startedAt()).isEqualTo(start);
+            now[0] = start.plusSeconds(3 * 3600);
+            assertThat(service.view().latest()).isNull();
+            assertThat(service.view().stale()).isFalse(); // 경계
+            now[0] = start.plusSeconds(3 * 3600 + 1);
+            assertThat(service.view().stale()).isTrue();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void 종료_첫_단계에서_열린_실시간_연결을_닫고_새_연결을_받지_않는다() {
+        MonitorAgent agent = agent();
+        try (MonitorService service = new MonitorService(settings, agent, CLOCK, null)) {
+            assertThat(service.openStream()).isPresent();
+            service.closeStreams();
+            assertThat(service.openStreams()).isZero();
+            assertThat(service.openStream()).isEmpty();
+        }
+    }
+
+    @Test
     void 수집원을_만들지_못하면_실험실은_뜨고_모니터링만_사용_불가다() {
         MonitorService service = MonitorConfiguration.create(settings, s -> {
             throw new UnsatisfiedLinkError("jnidispatch 적재 실패 주입");
