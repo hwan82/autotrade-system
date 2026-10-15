@@ -46,3 +46,46 @@
 
 ## 판정
 수정 필요(R1: OSHI·JNA 초기화 실패가 실험실과 실전 운영 화면 기동을 막음, R2: Error 한 번으로 감시 에이전트 수집이 조용히 영구 정지, 그리고 이에 딸린 A11 실패 경우 테스트와 A14 D-090 문구)
+
+## 재검토 2026-10-15
+- 대상: PR #114 / 커밋 1d553ae425e96c86bb39b86f7c4f4e41f608978a / main 대비 diff 전체(48개 파일, +2392 −17). 직전 검토(ba028df) 뒤 바뀐 커밋 a71bf4c(architect 지적 R1~R3·A2·A3), 95d1d2a(병합), 1d553ae(risk-ops 지적 R1·R2·K1)를 모두 다시 봤다.
+- 점검표: A (사유는 처음 검토와 같음)
+- 직접 실행한 것
+  - `./gradlew build --no-daemon` (별도 작업 트리 `/tmp/claude-0/riskops-wt`, 1d553ae): BUILD SUCCESSFUL, 테스트 1177건 실패 0·오류 0·건너뜀 0. 모듈별: `autotrade-risk` 55, `autotrade-architecture-test` 41, `autotrade-app-engine` 50, `autotrade-app-watchdog` 1, `autotrade-monitor-agent-jar` 16, `autotrade-monitor-sources` 6, `autotrade-app-lab` 170. gitleaks는 이 환경에 없어 돌리지 못했다(CI 몫).
+  - 실험 1 재실행 (실제 JNA 네이티브 적재 실패): `JAVA_TOOL_OPTIONS`에 `-Djna.nosys=true -Djna.noclasspath=true -Djna.boot.library.path=/nonexistent -Djna.nounpack=true`를 더해 `:autotrade-app-lab:test --rerun-tasks --tests 'com.autotrade.app.lab.real.RealOpsControllerTest' --tests 'com.autotrade.app.lab.monitor.*'` 실행. **전부 통과**(RealOpsControllerTest 12, MonitorApiTest 3, MonitorServiceTest 5, MonitorSettingsTest 5, MonitorUnavailableBootTest 1). 시험 출력에 `수집원 실패: system (IllegalStateException)`이 주기마다 남고 실험실은 떴다. 처음 검토 때 같은 조건에서 RealOpsControllerTest 10건 전부 실패하던 것이 해소됐다.
+  - 실험 2 대신 변이 시험: `MonitorAgent`의 `catch (Throwable e)` 3곳을 `catch (RuntimeException e)`로 임시로 바꾸고 `:autotrade-monitor-agent-jar:test` 실행 → 16건 중 2건 실패(새 Error 주입 시험 2건). 원복 후 다시 통과, 작업 트리 변경 없음 확인. 새 시험이 R2 퇴행을 실제로 잡는다.
+  - 화면 수집 멈춤 판정: `monitor.js`의 `isStale`을 node 22로 따로 돌려 5초 주기에서 15초 경과 false, 15.001초 true, 첫 수집 전 false 확인(서버 `MonitorService.stale`과 같은 경계). 화면 JS 시험 체계는 저장소에 없다.
+  - diff에서 키·토큰·계좌번호 형태 문자열 검색 0건.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `git diff origin/main...HEAD -- autotrade-app-engine autotrade-risk autotrade-broker-* autotrade-control autotrade-config autotrade-app-watchdog autotrade-app-gateway` 0줄. `guard.RealTradingGuardTest`, `guard.GuardedOrderGatewayTest` 통과(autotrade-risk 55건). 새 설정 키 `autotrade.lab.monitor.*`는 실험실 기동 속성으로 Guard와 무관 |
+| A2 | 통과 | 주문 출구 코드 변경 없음. 보호 테스트 diff는 처음 검토 때와 같다(`git diff 96a9a01 HEAD -- autotrade-architecture-test` 0줄): `REUSABLE_JARS_ARE_DOMAIN_FREE` 범위 확대(ArchitectureTest.java:115)와 소유 표 갱신뿐. `RealPathReflectionTest` 변경 없음, 통과. 코어가 이제 `Throwable`을 잡지만 `java.lang.Throwable`은 기존 허용 목록 안이다(RealPathReflectionTest.java:273). 허용 목록을 넓히지 않고 고쳤다 |
+| A3 | 통과 | 증권사 플러그인·주문 라우팅 변경 없음(A1 diff 0줄). `order.RealOrderGatewaysTest` 통과 |
+| A4 | 통과 | 주문 상태머신·타임아웃 처리 변경 없음. autotrade-risk·autotrade-app-engine 시험 통과 |
+| A5 | 통과 | 멱등 키 코드 변경 없음. 이 PR은 주문을 만들지 않는다 |
+| A6 | 통과 | 블랙리스트 코드 변경 없음, `BlacklistSnapshotTest`·`RiskChainTest` 통과. 새 코드에 주문·청산·상태 변경 API 없음(MonitorController는 GET 두 개뿐) |
+| A7 | 통과 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음. `EngineCommandHandlerTest` 통과 |
+| A8 | 통과 | 실전 엔진 런타임에 새 모듈·외부 jar 없음(RealPathReflectionTest 통과, 처음 검토 실험 3). 수집은 `MIN_PRIORITY` 데몬 스레드 하나(MonitorAgent.java:105-107). SSE 전송이 수집 스레드에서 전용 데몬 스레드 하나(대기 2, 넘치면 오래된 것 버림)로 옮겨져 느린 브라우저가 수집을 막지 않는다(MonitorService.java:54-56, :123-129). 처음 검토의 점검표 밖 R1(실험실 기동 실패가 실전 운영 화면을 막음)은 해소: 에이전트 생성의 `RuntimeException | LinkageError`를 잡아 모니터링만 사용 불가로 띄우고(MonitorConfiguration.java:43-54), OSHI 자체도 첫 `read()`로 미뤘다(SystemSource.java:47-77). 실제 JNA 적재 실패에서도 실전 운영 API가 응답(실험 1 재실행, `MonitorUnavailableBootTest#실험실이_뜨고_실전_운영_상태와_모니터링_사용_불가가_응답한다`) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. 5.2 정지 순서 6번(보유 종목 보호)에 닿는 코드 없음 |
+| A10 | 통과 | diff에서 비밀값 형태 문자열 0건. 새 로그는 수집원 id·예외 클래스 이름·지표 값만(MonitorAgent.java:66, :90, :116, MonitorConfiguration.java:50). 화면 `problem` 문구도 예외 클래스 이름만(MonitorConfiguration.java:51). gitleaks는 로컬 미실행(CI 결과로 확인) |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음(A2). 처음 검토에서 빠졌던 실패 경우 시험이 들어왔다: `MonitorAgentTest#수집원_Error는_그_주기_실패로만_남고_주기_수집이_이어진다`, `#리스너_Error도_다음_주기를_막지_않는다`(변이 시험으로 퇴행을 잡는 것 확인), `SystemSourceFailureTest`(SystemSourceFailureTest.java:28, :40, :56), `MonitorServiceTest#수집원을_만들지_못하면_실험실은_뜨고_모니터링만_사용_불가다`, `#마지막_표본이_주기의_3배보다_오래되면_수집_멈춤이다`, `MonitorUnavailableBootTest`. 화면 `isStale`은 자동 시험이 없다(저장소에 JS 시험 체계 없음, 직접 계산으로 경계 확인) |
+| A12 | 통과 | 장애표 #1~#17, O1~O8과 장애 테스트 8종의 전제를 바꾸지 않는다. #10 감지 문구는 여전히 사실 그대로다(감시 프로세스는 아직 에이전트를 쓰지 않음). 처음 검토에서 지적한 "감시가 붙으면 Error 한 번으로 #10 감지가 무력화될 수 있음"은 해소: 예약 작업 밖으로 어떤 `Throwable`도 나가지 않고(MonitorAgent.java:111-118), 멈춤을 알아볼 `lastSampleAt()`(:134-136)이 생겼다. 장애 테스트 2번(실험실 CPU 100% 부하)의 전제(JVM 분리)도 그대로 |
+| A13 | 해당 없음 | 시장 경로·금액 계산 변경 없음. 시각은 주입된 `Clock`(MonitorAgent.java:72, MonitorService.java:98). 화면의 수집 멈춤 판정은 브라우저 시계를 쓰지만 같은 PC의 표시용이다 |
+| A14 | 통과 | D-090 결정 1번이 실제 동작(`Throwable` 격리, `lastSampleAt`, `VirtualMachineError`도 그 주기만 버림)과 맞게 고쳐졌다(D-090:12). 결정 2번·위험과 한계의 "OSHI 실패하면 그 주기의 system 수집원만 빠지고 실험실은 계속 돈다"는 실험 1 재실행과 맞다. 결정 3번에 사용 불가·수집 멈춤·SSE 전용 스레드가 적혔고(D-090:15), ADR-005 REST 표의 `problem`·`stale` 필드가 `MonitorService.View`(MonitorService.java:176)와 맞다. `MetricSource` 계약 주석(MetricSource.java:9-10)도 맞다. 검증 절 시험 건수(MonitorAgentTest 8, MonitorServiceTest 5, SystemSourceFailureTest 3)가 실제 실행 결과와 맞다 |
+
+## 점검표 밖 발견 (재검토)
+
+### 처음 검토 지적의 처리
+- R1 (수정 필요) → **해소**. 위 A8·실험 1 재실행 참고. 에이전트 생성을 막는 실패는 `RuntimeException | LinkageError`만 잡는다(MonitorConfiguration.java:49). 생성 단계에서 OSHI를 건드리지 않으므로(SystemSource.java:47-51) 생성 실패는 `JvmSource` 등 순수 JDK 부분뿐이고, 메모리 부족 같은 `VirtualMachineError`로 기동이 깨지는 것은 이 PR이 만든 실패 모드가 아니다.
+- R2 (수정 필요) → **해소**. 요구 (a) 수집원·리스너·예약 작업 모두 `Throwable` 격리(MonitorAgent.java:62, :89, :114), (b) `lastSampleAt()`와 서버 `stale`(MonitorService.java:97-100), 화면 1초마다 재판정(monitor.js:72, :85, :110), (c) Error 주입 시험 2건, (d) D-090 문구 정정 모두 충족.
+- K1 (권고) → 반영됨(SSE 전용 스레드).
+- K2·K3 → 그대로 7단계 감시 구현 PR 몫(D-090 한계 절에도 남아 있음).
+
+### 새 권고 (판정에 넣지 않음)
+- K4: 코어가 `VirtualMachineError`까지 삼킨다. 처음 검토의 권장안(`VirtualMachineError` 제외)과 다르지만, 이를 가르려면 실전 경로 JDK 허용 목록(보호 테스트)을 넓혀야 하고, 감시는 "조용히 멈춤"보다 "계속 돌며 실패를 남김"이 낫다는 D-090 판단에 동의한다. 다만 7단계에 감시가 이 코어를 쓸 때는 (1) 같은 수집원이 연속 N회 실패하거나 `lastSampleAt`이 주기의 3배 넘게 멈추면 감시 자신이 그것을 #10 이상으로 다루고, (2) 그 판단을 장애표 #10 감지 열에 적는다. 그 PR의 risk-ops 검토 항목으로 넘긴다.
+- K5: OSHI가 영구히 안 되는 PC에서는 `수집원 실패: system (IllegalStateException)` WARN이 매 주기(기본 5초, 하루 약 17,280줄) 남는다(MonitorAgent.java:66). 실험실 로그만의 문제라 실전 영향은 없지만, 정작 중요한 실험실 경고를 묻을 수 있다. 같은 수집원의 같은 실패는 처음과 상태가 바뀔 때만 WARN, 그 사이는 DEBUG나 N회마다 한 줄로 줄이기를 권한다.
+- K6: 수집 멈춤은 화면에서만 드러나고 서버 로그·이벤트로는 남지 않는다. 실험실 화면을 안 보고 있으면 모른다. 실험실 표시용이므로 판정에 넣지 않지만, 감시 쪽 구현 때는 K4 (1)처럼 감시 자신이 판정해야 한다.
+
+## 판정 (재검토)
+승인
