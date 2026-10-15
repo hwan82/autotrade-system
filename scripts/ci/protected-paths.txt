@@ -1,0 +1,16 @@
+# 보호 대상 경로(독립 QA PR #112 F1, 프로젝트 지침 11장 "보호 테스트"). 한 줄에 하나, bash 패턴(*는 /도 맞춘다).
+# 여기에 걸리는 파일을 바꾸는 PR은 실전 관련 PR이다: risk-ops 검토, 사용자 머지, 머지 전 독립 QA.
+# 이 목록과 표시 스크립트, .github/CODEOWNERS도 보호 대상이다.
+autotrade-architecture-test/*
+autotrade-risk/*
+autotrade-app-engine/*
+autotrade-app-watchdog/*
+autotrade-broker-*
+autotrade-config/src/main/java/com/autotrade/config/SecretPaths.java
+gradle/libs.versions.toml
+build-logic/*
+settings.gradle.kts
+.github/workflows/*
+.github/CODEOWNERS
+scripts/ci/protected-paths.txt
+scripts/ci/mark-protected-changes.sh

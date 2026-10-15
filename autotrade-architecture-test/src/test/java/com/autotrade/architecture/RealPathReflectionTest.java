@@ -690,6 +690,8 @@ class RealPathReflectionTest {
                 "SamePackageRecordReader.leak()의 서명에 와일드카드·타입 변수",
                 // architect PR #112 AR-2(MM3): 매개변수의 와일드카드
                 "SamePackageRecordReader.drain(java.util.List)의 서명에 와일드카드·타입 변수",
+                // 독립 QA PR #112 R2(N3): 제네릭 배열 안의 와일드카드
+                "SamePackageRecordReader.drainAll([Ljava.util.List;)의 서명에 와일드카드·타입 변수",
                 // PR #110 독립 QA R2: 중첩 클래스
                 "SamePackageRecordReader가 중첩 클래스 com.autotrade.config.SamePackageRecordReader$Sink를 둔다",
                 "SamePackageRecordReader가 고정 목록 밖 타입 com.autotrade.config.SamePackageRecordReader$Sink를 쓴다",
@@ -715,9 +717,16 @@ class RealPathReflectionTest {
         assertThat(RECORD_READER_FINGERPRINTS.keySet()).isEqualTo(ALLOWED_RECORD_READERS);
         for (String name : ALLOWED_RECORD_READERS) {
             assertThat(fingerprint(ArchitectureTest.PRODUCTION.get(name)))
-                    .as(name + "가 바뀌었다. 이 클래스는 리플렉션 규칙의 신뢰 경계라, risk-ops 검토를 받고 지문을 고친다(D-086)")
+                    .as(name + "의 지문이 다르다. 이 클래스는 리플렉션 규칙의 신뢰 경계라, 코드를 바꿨으면 risk-ops 검토를 받고 지문을 고친다."
+                            + " JDK·ArchUnit 버전이나 JDK 배포판 차이로만 달라졌어도 값 갱신은 실전 관련 PR이다(D-086, 프로젝트 지침 11장)")
                     .isEqualTo(RECORD_READER_FINGERPRINTS.get(name));
         }
+        // 지문 함수 자체의 약화(SKIP_CODE 추가, 상수 무시 등)를 잡는다(독립 QA PR #112 R1, risk-ops R-4): 이름이 같고 본문 상수만
+        // 다른 두 클래스는 지문이 다르고, 줄 번호만 다른 두 클래스는 지문이 같다
+        assertThat(fingerprint(probeClass("a", 10))).as("본문 상수만 다르면 지문이 달라야 한다")
+                .isNotEqualTo(fingerprint(probeClass("b", 10)));
+        assertThat(fingerprint(probeClass("a", 10))).as("줄 번호만 다르면 지문이 같아야 한다")
+                .isEqualTo(fingerprint(probeClass("a", 99)));
         // 지문이 접근 하나의 차이도 잡는지: 위반 예제와 허용 예제의 지문은 다르다
         JavaClasses two = new ClassFileImporter().importClasses(com.autotrade.config.SamePackageRecordReader.class,
                 ReflectionFreeEngineCode.class);
@@ -732,12 +741,34 @@ class RealPathReflectionTest {
      * 있고, 그때는 실패하는 방향이다.
      */
     static String fingerprint(JavaClass k) {
-        byte[] original;
         try (java.io.InputStream in = k.getSource().orElseThrow().getUri().toURL().openStream()) {
-            original = in.readAllBytes();
+            return fingerprint(in.readAllBytes());
         } catch (java.io.IOException e) {
             throw new java.io.UncheckedIOException(e);
         }
+    }
+
+    /** 지문 함수 시험용 클래스 {@code Probe}: {@code static String v()}가 상수 {@code value}를 돌려주고, 그 줄 번호가 {@code line}이다. */
+    private static byte[] probeClass(String value, int line) {
+        var w = new com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassWriter(0);
+        int pub = com.tngtech.archunit.thirdparty.org.objectweb.asm.Opcodes.ACC_PUBLIC;
+        int stat = com.tngtech.archunit.thirdparty.org.objectweb.asm.Opcodes.ACC_STATIC;
+        w.visit(com.tngtech.archunit.thirdparty.org.objectweb.asm.Opcodes.V21, pub, "Probe", null, "java/lang/Object", null);
+        w.visitSource("Probe.java", null);
+        var m = w.visitMethod(pub | stat, "v", "()Ljava/lang/String;", null, null);
+        m.visitCode();
+        var start = new com.tngtech.archunit.thirdparty.org.objectweb.asm.Label();
+        m.visitLabel(start);
+        m.visitLineNumber(line, start);
+        m.visitLdcInsn(value);
+        m.visitInsn(com.tngtech.archunit.thirdparty.org.objectweb.asm.Opcodes.ARETURN);
+        m.visitMaxs(1, 0);
+        m.visitEnd();
+        w.visitEnd();
+        return w.toByteArray();
+    }
+
+    static String fingerprint(byte[] original) {
         com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassWriter writer =
                 new com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassWriter(0);
         new com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassReader(original)
@@ -985,7 +1016,11 @@ class RealPathReflectionTest {
                 "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName",
                 "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeArgument",
                 // architect PR #112 AR-2(MM4): Type 자체의 메서드
-                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.plainTypeName");
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.plainTypeName",
+                // 독립 QA PR #112 R2, architect AR-R1, risk-ops R-5: 나머지 세 리플렉션 타입
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.wildcardBound",
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.variableBound",
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.arrayComponent");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
                 .get(ReflectionFreeEngineCode.class).getSource().orElseThrow().getUri())).isEmpty();

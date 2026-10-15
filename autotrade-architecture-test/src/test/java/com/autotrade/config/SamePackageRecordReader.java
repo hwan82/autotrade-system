@@ -44,6 +44,24 @@ public final class SamePackageRecordReader {
         return out.size();
     }
 
+    /** 독립 QA PR #112 R2(N3): 제네릭 배열 안의 와일드카드. */
+    static int drainAll(java.util.List<?>[] all) {
+        return all.length;
+    }
+
+    /** 독립 QA PR #112 R2: 나머지 리플렉션 타입의 메서드. */
+    public static Object wildcardBound(Object type) {
+        return ((java.lang.reflect.WildcardType) type).getUpperBounds()[0];
+    }
+
+    public static Object variableBound(Object type) {
+        return ((java.lang.reflect.TypeVariable<?>) type).getBounds()[0];
+    }
+
+    public static Object arrayComponent(Object type) {
+        return ((java.lang.reflect.GenericArrayType) type).getGenericComponentType();
+    }
+
     /** architect PR #112 AR-2(MM4): {@code Type} 자체의 메서드. */
     public static String plainTypeName(Object type) {
         return ((java.lang.reflect.Type) type).getTypeName();
