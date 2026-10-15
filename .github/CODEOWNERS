@@ -1,0 +1,27 @@
+# 보호 대상(scripts/ci/protected-paths.txt와 같은 목록, 독립 QA PR #112 F1). 이 경로를 바꾸는 PR은 실전 관련 PR이라
+# 저장소 소유자(사용자)가 직접 머지한다(프로젝트 지침 10·11장). 목록을 바꾸면 두 파일을 함께 고친다.
+/autotrade-architecture-test/ @hwan82
+/autotrade-risk/ @hwan82
+/autotrade-app-engine/ @hwan82
+/autotrade-app-watchdog/ @hwan82
+/autotrade-broker-*/ @hwan82
+/autotrade-config/ @hwan82
+/autotrade-control/ @hwan82
+/autotrade-domain/ @hwan82
+/autotrade-marketdata/ @hwan82
+/autotrade-strategy/ @hwan82
+/autotrade-notification-jar/ @hwan82
+/autotrade-monitor-agent-jar/ @hwan82
+/docs/team/project-instructions.md @hwan82
+/docs/qa/README.md @hwan82
+/docs/qa/checklists.md @hwan82
+/docs/decisions/D-086-real-path-reflection-ban.md @hwan82
+/docs/adr/ADR-002-real-trading-guard.md @hwan82
+/gradle/libs.versions.toml @hwan82
+/build-logic/ @hwan82
+/settings.gradle.kts @hwan82
+/.github/workflows/ @hwan82
+/.github/CODEOWNERS @hwan82
+/scripts/ci/protected-paths.txt @hwan82
+/scripts/ci/mark-protected-changes.sh @hwan82
+/scripts/ci/test-mark-protected-changes.sh @hwan82

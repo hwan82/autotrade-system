@@ -28,4 +28,6 @@
 | 2026-10-15 | PR #109 검토해줘 | docs/reviews/pr-109/qa.md | 실전 관련 PR(보호 테스트 강화: PR #108 QA 권고 R7, 레코드 구성 요소 읽기를 `SecretPaths`만 허용, 브랜치 claude/project-thread-l44wj7) |
 | 2026-10-15 | PR #109 재검토해줘 | docs/reviews/pr-109/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main 460cad2와 pending.md 충돌, main 병합으로 해소) |
 | 2026-10-15 | PR #110 검토해줘 | docs/reviews/pr-110/qa.md | 실전 관련 PR(보호 테스트 강화: PR #109 QA 권고 Q1·Q2·R1, `SecretPaths` 모양 고정·고정 타입 목록·같은 패키지 위반 예제, D-086 한계 갱신, 브랜치 claude/project-thread-l44wj7) |
+| 2026-10-15 | PR #112 검토해줘 | docs/reviews/pr-112/qa.md | 실전 관련 PR(보호 테스트 강화: PR #110 QA 권고 Q1·R1~R3, `SecretPaths` 바이트코드 지문 고정·와일드카드·중첩 클래스 금지, 브랜치 claude/project-thread-l44wj7) |
+| 2026-10-15 | PR #112 재검토해줘 | docs/reviews/pr-112/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14/F1: 보호 테스트 정의·기계 표시 추가, 권고 R1~R4 반영) |
 | 2026-10-15 | PR #114 검토해줘 | docs/reviews/pr-114/qa.md | 보호 테스트 변경·감시 런타임에 처음 코드가 들어가는 PR(D-090, MON-05 모니터 에이전트·모니터링 화면: 코어 `autotrade-monitor-agent-jar`, 새 모듈 `autotrade-monitor-sources`(OSHI), 실험실 `/api/monitor`·`#/monitor`, `ModuleOwnershipTest`·`ArchitectureTest` 변경, 브랜치 claude/project-thread-y0syxq) |
