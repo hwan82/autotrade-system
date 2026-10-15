@@ -43,3 +43,44 @@
 
 ## 판정
 수정 필요(A11·F-1: 옮겨진 `Holder` 오탐 방지 단언 복원과 새 모양 시험의 위반 고정 예제, A14·F-2: 모양 시험이 서명만 본다는 한계를 시험 확대나 D-086·시험 설명으로 맞추고 D-086 시험 건수 정정. 권고 R-2. 보호 테스트 변경이라 머지는 사용자)
+
+## 재검토 2026-10-15
+- 대상: PR #110 / 헤드 c3f65ac / main(d0e9f3f) 대비 diff (`git diff origin/main...c3f65ac`). 1차(c9dacca) 이후 코드 변경은 fd2f153(architect 반영)과 c3f65ac(risk-ops 반영) 두 커밋으로, `RealPathReflectionTest.java`, `SamePackageRecordReader.java`, `D-086-real-path-reflection-ban.md`를 고쳤다. 운영 코드 변경은 여전히 0줄이다
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (c3f65ac): BUILD SUCCESSFUL
+  - `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test --rerun-tasks`: 성공. 모듈별로 risk 55건, architecture-test 41건(`RealPathReflectionTest` 8건 포함), app-engine 50건이고 실패는 0이다. 전체 결과 파일 합계는 1,141건이며 실패·오류·건너뜀은 0이다
+  - 변조 실험(실험 뒤 모두 되돌렸고 `git status`가 깨끗함을 확인)
+    - M3 재실행: `classAsData`가 타입 변수 필드도 `Class`로 보고하는 과잉 차단을 넣음 → `규칙은_리플렉션_우회를_실제로_잡아낸다`가 실패해 잡힌다("NameToClassBinding$Holder.value 필드 타입에 Class"). F-1의 단언 복원이 확인됐다
+    - MS: 모양 검사에서 서명 금지 타입 `java.lang.Object`를 빼고 `putPOJO` 검사를 끔 → `레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다`가 실패해 잡힌다(위반 예제의 `typeName(Object)`, `stash .. putPOJO` 기대 문자열). 새 모양 검사에 실패 경우 시험이 생겼다
+    - P4 재실행: 1차와 같은 탐침이다. `SecretPaths`가 private `publish()`로 구성 요소 타입을 같은 패키지 다른 클래스(`QaSink110`)의 `List<Object>`에 넣고, 탐침이 그것을 `(Class<?>)`로 바꿔 `convertValue`에 넘김 → 모양 시험이 실패해 잡힌다("SecretPaths가 고정 목록 밖 타입 com.autotrade.config.QaSink110를 쓴다")
+    - P5(새 변형): P4와 같지만 칸을 `SecretPaths`의 중첩 클래스 `SecretPaths.Sink`(`static final List<Object> ITEMS`)에 둠 → **시험 8건이 모두 통과해 검출되지 않는다**. 아래 R-3
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 운영 코드 변경 0줄(diff 파일 목록). `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | `ArchitectureTest` 변경 없음. `RecordComponent` 메서드를 허용 클래스 안으로 좁힌 검사(RealPathReflectionTest.java:459-465)와 모양 시험(:666-741)은 강화뿐이다. 1차 M1·M2와 이번 M3·MS로 시험에 고정됐음을 확인 |
+| A3 | 해당 없음 | 주문·증권사 연동 코드 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷 코드 변경 없음 |
+| A8 | 해당 없음 | 프로세스 구성·자원 정지 순서 변경 없음. 위반 예제 `SamePackageRecordReader`는 테스트 소스라 `실전_경로_런타임_구성은_고정_목록과_같다`가 통과한다 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 코드 변경 없음 |
+| A10 | 통과 | 1차 이후 바뀐 diff 전체를 읽었고 키·계좌번호·토큰은 없다. gitleaks는 CI 몫이다 |
+| A11 | 통과 | 1차 F-1 해소. (1) `Holder` 오탐 방지 단언이 `byNameDetails`로 돌아왔다(RealPathReflectionTest.java:881). 늘 참이던 `.doesNotContain("SamePackageRecordReader")`는 없어졌고, M3로 다시 잡힘을 확인했다. (2) 모양 검사를 `recordReaderShape`(:709)로 분리했고, 위반 예제(`SamePackageRecordReader.first`·`typeName`·`stash`)로 서명·private 읽기·`putPOJO`·고정 목록 밖 타입이 보고되는지 단언한다(:671-680). MS로 약화가 잡힘을 확인했다. 지워지거나 비활성화된 보호 테스트는 없다 |
+| A12 | 통과 | 장애 대응표 17종·해외 O1~O8·장애 테스트 8종 문서와 시험 변경 없음 |
+| A13 | 해당 없음 | 시장별 코드 변경 없음 |
+| A14 | 통과 | 1차 F-2 해소. D-086(D-086-real-path-reflection-ban.md:51)은 이제 검사 범위를 "private이 아닌 서명의 원시 타입 + 클래스 파일 상수 고정 목록 `RECORD_READER_TYPES` + `putPOJO` 류 금지"로 맞게 적는다. 남는 길을 `[추론]`으로 적고, `SecretPaths`와 `RECORD_READER_TYPES` 변경을 "신뢰 경계로 risk-ops 검토 대상"으로 못박았다. 시험 상수(RealPathReflectionTest.java:689-703)와 문서가 일치한다. 검증 절의 건수는 8건으로 고쳐졌다(:58). 다만 남는 길 목록에 P5(중첩 클래스 칸)가 빠졌다. 문서가 정한 신뢰 경계 안의 길이라 실패로 보지 않고 R-3 권고로 둔다 |
+
+## 점검표 밖 발견 (재검토)
+- **R-3 (권고, 낮음) 고정 타입 목록 검사가 `SecretPaths`의 중첩 클래스를 통째로 뺀다.** `recordReaderShape`는 `k.getName() + "$"`로 시작하는 타입을 목록 검사에서 빼고(RealPathReflectionTest.java:736), 모양 검사는 `SecretPaths` 자신의 멤버에만 돈다. 그래서 P5처럼 중첩 클래스에 `List<Object>` 칸을 두면, 그 칸을 거쳐 구성 요소 타입의 클래스 객체가 다른 클래스로 나가고 빌드가 통과한다. 지금 운영 `SecretPaths`에는 중첩 클래스가 없어 열린 길은 없다. 이 길을 열려면 `SecretPaths`를 고쳐야 하는데, D-086은 그 변경을 risk-ops 검토 대상으로 정했다. 다음 중 하나를 권한다.
+  - (a) `ALLOWED_RECORD_READERS` 클래스의 중첩 클래스(람다는 자기 클래스 안이라 해당 없음)에도 `recordReaderShape`를 적용하거나, 중첩 클래스 자체를 금지한다.
+  - (b) D-086 남는 길 목록에 "중첩 클래스 칸"을 더한다.
+  - 기계 검사인 (a)가 낫다.
+- **R-2 (권고, 1차에서 이어짐, 낮음)** `ParameterizedType#getActualTypeArguments`·`Type` 메서드 호출은 여전히 허용 클래스 밖에서도 막지 않는다. 지금 새로 열린 길은 없다는 1차 추론이 그대로다.
+- 참고: 다른 리뷰어인 architect의 원문(`docs/reviews/pr-110/architect.md`)은 판정에 쓰지 않았다. 이 판정은 c3f65ac 코드와 위 실행 결과에만 근거한다.
+- 참고: 실전 관련 PR(보호 테스트 변경)이라 머지는 사용자가 하고, 머지 전 독립 QA 관문이다. 이 브랜치의 `docs/qa/pending.md`에 요청 줄은 아직 없다(diff 파일 목록).
+
+## 판정 (재검토)
+승인 (1차 F-1·F-2 해소. 권고 R-2·R-3은 머지를 막지 않는다. 보호 테스트 변경이라 머지는 사용자가 하고, 머지 전 독립 QA 관문)
