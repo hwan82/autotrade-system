@@ -139,3 +139,38 @@
 
 ## 판정 (재검토 2)
 수정 필요(A14·F-5: c14578d 뒤에 들어온 main 88212d3과 `docs/qa-out-status.md` 충돌로 지금은 병합 불가. 2차 F-3·F-4와 권고 R-6은 해소 확인, 그 밖의 내용은 더 고칠 것 없음. 머지는 사용자)
+
+## 재검토 2026-10-15 (3)
+- 대상: PR #112 / 헤드 3fbc32c / main 대비 diff 전체(`git diff origin/main...HEAD`, origin/main = 88212d3, 파일 17개 +678 −18). origin/main은 헤드의 조상이다(`git merge-base --is-ancestor origin/main HEAD` 참). 2차 재검토(c14578d) 이후 커밋은 a45632e(architect 원문), b09cd74(이 원문 재검토 2), 3fbc32c(main 88212d3 병합)다
+- 점검표: A
+- 직접 실행한 것:
+  - 병합 커밋 내용: `git show --remerge-diff 3fbc32c` → 손으로 고친 것은 `docs/qa-out-status.md` 충돌 해소 하나뿐이다. 충돌 표지를 지우고 main 쪽 PR #114 QA 처리 줄과 이 PR 쪽 PR #112 처리 줄 두 개를 모두 남겼다. 그 밖의 변경은 main(b4ed7fc → 88212d3, PR #115)에서 그대로 들어왔다. main 쪽 변경 파일은 `autotrade-app-lab` 모니터링, `autotrade-ui` 화면, 문서(D-090·D-091·ADR-005·config-keys·결정 목록)와 검토 원문이다. 실전 경로 모듈과 보호 경로에 겹치는 파일은 없다. PR diff의 파일 목록과 내용은 c14578d와 같고 검토 원문 2개만 늘었다
+  - `./gradlew build --no-daemon` (3fbc32c): BUILD SUCCESSFUL
+  - `./gradlew --rerun-tasks :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test`: 성공. risk 55건, architecture-test 42건(`RealPathReflectionTest` 9건 포함), app-engine 50건, 실패·오류·건너뜀 0. 결과 XML 전체 합계 1,185건, 실패·오류·건너뜀 0
+  - CI(3fbc32c, REST): workflow run 38705541668 `pull_request`. `Gradle build`·`DB schema (PostgreSQL 16)`·`Secret scan and collector boundary`는 모두 success다. `guards`의 "Protected change marker self-test"·"Protected change marker" 단계는 success이고, `보호 대상 변경(실전 관련 PR)` 경고 주석을 남겼다
+  - 검토를 마칠 때 origin/main은 여전히 88212d3이다(fetch 후 확인)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 운영 코드 변경 0줄. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | `ArchitectureTest`는 PR diff에 없다. `RealPathReflectionTest` 변경은 2차 재검토와 같다(강화뿐, 1~2차 변이 실험으로 고정 확인) |
+| A3 | 해당 없음 | 주문·증권사 연동 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷 변경 없음 |
+| A8 | 해당 없음 | 프로세스 구성·정지 순서 변경 없음. main에서 들어온 PR #115는 실험실·UI 변경이고, 실전 경로 런타임 구성 시험이 통과한다 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 병합 해소 줄을 읽었고 비밀값이 없다. CI 비밀값 스캔(전체 이력) success |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음. 표시 스크립트 자체 시험 CI 단계 success. 2차 재검토의 `--no-renames` 변조 실험 결과가 그대로 유효하다(스크립트 변경 없음) |
+| A12 | 통과 | 장애 대응표 17종·해외 O1~O8·장애 테스트 8종 문서와 시험 변경 없음 |
+| A13 | 해당 없음 | 시장별 코드 변경 없음 |
+| A14 | 통과 | 재검토 2의 F-5 해소. main 88212d3이 조상이고 충돌이 없다. `docs/qa-out-status.md`는 세 줄을 모두 보존한다. 결정 로그·규칙 문서 대조는 재검토 2와 같다(변경 없음) |
+
+## 점검표 밖 발견 (재검토 3)
+- 없음. 참고 R-7(main 브랜치 보호가 없어 CODEOWNERS가 강제되지 않음)은 사용자 결정으로 남는다.
+- 참고: 실전 관련 PR(보호 테스트·CI·지침 변경)이라 머지는 사용자가 하고, 머지 전 독립 QA 재검토 관문이다(`docs/qa/pending.md`의 "PR #112 재검토해줘" 줄). 지침 원문(`docs/team/project-instructions.md` 11장)이 바뀌므로, 사용자는 프로젝트 설정 > 지침의 사본도 갱신해야 한다.
+- 참고: 머지 직전에 main이 다시 앞서 있으면, 병합한 뒤 CI를 다시 확인한다.
+
+## 판정 (재검토 3)
+승인 (3fbc32c 기준. F-5 해소, 병합 커밋은 `docs/qa-out-status.md` 충돌 해소만 담음, CI 세 작업 success. 참고 R-7은 사용자 결정. 보호 테스트·CI·지침 변경이라 머지는 사용자가 하고, 머지 전 독립 QA 재검토 관문)
