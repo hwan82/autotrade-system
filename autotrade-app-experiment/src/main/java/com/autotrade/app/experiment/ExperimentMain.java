@@ -56,6 +56,16 @@ public final class ExperimentMain {
     }
 
     static int run(String[] args, Clock clock, Path givenConfigDir) {
+        return run(args, clock, givenConfigDir, ExperimentMain::dispatch);
+    }
+
+    /** 실험 본체. 시험이 가짜 본체를 넣어 {@link #run}이 {@link #runControlled}를 거치는지 본다(PR #113 risk-ops 3차 R9). */
+    @FunctionalInterface
+    interface Body {
+        int run(String command, String[] forwarded, Path configDir, RunGate gate);
+    }
+
+    static int run(String[] args, Clock clock, Path givenConfigDir, Body body) {
         // 상대 경로나 ..가 섞여도 상태 파일 메시지에서 설정 폴더 경로를 가릴 수 있게 한 번 정규화한다(PR #113 architect R5·risk-ops R3)
         Path configDir = givenConfigDir.toAbsolutePath().normalize();
         if (args.length == 0 || !List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly")
@@ -112,7 +122,7 @@ public final class ExperimentMain {
         }
         System.out.println("[experiment] 진행 상태 파일: " + control.statusFile() + ", 병렬 Run 상한 "
                 + maxParallelRuns + "(-PmaxParallelRuns, 등록 파일 parallelism과 작은 쪽)");
-        return runControlled(control, runGate -> dispatch(args[0], forwarded, configDir, runGate));
+        return runControlled(control, runGate -> body.run(args[0], forwarded, configDir, runGate));
     }
 
     /**
