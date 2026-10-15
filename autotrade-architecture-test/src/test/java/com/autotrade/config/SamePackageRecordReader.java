@@ -39,6 +39,16 @@ public final class SamePackageRecordReader {
         private Sink() {}
     }
 
+    /** architect PR #112 AR-2(MM3): 매개변수의 와일드카드. */
+    static int drain(java.util.List<? super Object> out) {
+        return out.size();
+    }
+
+    /** architect PR #112 AR-2(MM4): {@code Type} 자체의 메서드. */
+    public static String plainTypeName(Object type) {
+        return ((java.lang.reflect.Type) type).getTypeName();
+    }
+
     /** PR #110 risk-ops R-2: 허용 클래스 밖에서 제네릭 타입 인자 읽기. */
     public static String typeArgument(Object type) {
         return ((java.lang.reflect.ParameterizedType) type).getActualTypeArguments()[0].getTypeName();

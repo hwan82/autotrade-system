@@ -404,7 +404,8 @@ class RealPathReflectionTest {
     static final Set<String> ALLOWED_RECORD_COMPONENT_METHODS = Set.of("getName", "getType", "getGenericType");
 
     /** 메서드를 허용 클래스({@link #ALLOWED_RECORD_READERS}) 안에서만 부를 수 있는 리플렉션 타입(risk-ops PR #110 R-2). */
-    static final Set<String> REFLECT_TYPE_OWNERS = Set.of("java.lang.reflect.Type", "java.lang.reflect.ParameterizedType");
+    static final Set<String> REFLECT_TYPE_OWNERS = Set.of("java.lang.reflect.Type", "java.lang.reflect.ParameterizedType",
+            "java.lang.reflect.WildcardType", "java.lang.reflect.TypeVariable", "java.lang.reflect.GenericArrayType");
 
     /**
      * 이름 문자열로 클래스를 얻는 데이터 바인딩(독립 QA PR #108 F1): Jackson은 {@code Class} 타입 값을 이름 문자열에서
@@ -687,6 +688,8 @@ class RealPathReflectionTest {
                 "SamePackageRecordReader.lastType의 서명에 java.lang.reflect.Type",
                 // PR #110 독립 QA R1: 와일드카드
                 "SamePackageRecordReader.leak()의 서명에 와일드카드·타입 변수",
+                // architect PR #112 AR-2(MM3): 매개변수의 와일드카드
+                "SamePackageRecordReader.drain(java.util.List)의 서명에 와일드카드·타입 변수",
                 // PR #110 독립 QA R2: 중첩 클래스
                 "SamePackageRecordReader가 중첩 클래스 com.autotrade.config.SamePackageRecordReader$Sink를 둔다",
                 "SamePackageRecordReader가 고정 목록 밖 타입 com.autotrade.config.SamePackageRecordReader$Sink를 쓴다",
@@ -699,13 +702,13 @@ class RealPathReflectionTest {
     }
 
     /**
-     * 허용 클래스의 지문: 멤버(private 포함)와 바이트코드 접근·클래스 파일 상수 타입을 정렬해 SHA-256으로 묶은 값. 허용 클래스는
+     * 허용 클래스의 지문: 디버그 정보를 뺀 바이트코드의 SHA-256({@link #fingerprint}). 허용 클래스는
      * 이 규칙의 신뢰 경계라(모양 검사가 못 보는 길이 남는다, PR #110 독립 QA R1), 그 클래스를 바꾸면 이 값을 고쳐야 하고 그
      * 변경은 보호 테스트 변경이 되어 실전 관련 PR(risk-ops 검토, 사용자 머지, 독립 QA)로 간다. 서식·주석만 바꾼 변경은 지문을 바꾸지
      * 않는다.
      */
     static final java.util.Map<String, String> RECORD_READER_FINGERPRINTS = java.util.Map.of(
-            "com.autotrade.config.SecretPaths", "0e66030cf4ee0150d26d1a8d6abff11d4d2ed8ac47e93dd52431b629b9f66f6d");
+            "com.autotrade.config.SecretPaths", "e798b8a7ec061ca7bf21ee8a895a8315c776b8cb765b6cd74d90485d2c79b7aa");
 
     @Test
     void 레코드_구성_요소를_읽는_클래스의_지문은_고정_값과_같다() {
@@ -722,21 +725,25 @@ class RealPathReflectionTest {
                 .isNotEqualTo(fingerprint(two.get(ReflectionFreeEngineCode.class)));
     }
 
+    /**
+     * 클래스 파일에서 디버그 정보(줄 번호·지역 변수 이름·소스 파일 이름)만 뺀 바이트코드의 SHA-256. 메서드 본문의 데이터 흐름과
+     * 상수까지 지문에 들어가고(architect PR #112 AR-1), 주석·서식만 바꾸면 줄 번호만 달라지므로 지문이 같다. 상수 풀은 원본을
+     * 복사하지 않고 다시 만든다(디버그 정보의 문자열이 남지 않게). 같은 JDK의 javac 출력에 기댄다: JDK를 올리면 지문이 바뀔 수
+     * 있고, 그때는 실패하는 방향이다.
+     */
     static String fingerprint(JavaClass k) {
-        java.util.TreeSet<String> lines = new java.util.TreeSet<>();
-        k.getModifiers().forEach(m -> lines.add("class " + m));
-        for (com.tngtech.archunit.core.domain.JavaMember m : k.getMembers()) {
-            String type = m instanceof JavaField f ? f.getType().getName()
-                    : ((com.tngtech.archunit.core.domain.JavaCodeUnit) m).getReturnType().getName();
-            lines.add("member " + m.getFullName() + " " + new java.util.TreeSet<>(m.getModifiers()) + " " + type);
+        byte[] original;
+        try (java.io.InputStream in = k.getSource().orElseThrow().getUri().toURL().openStream()) {
+            original = in.readAllBytes();
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
         }
-        k.getAccessesFromSelf().forEach(a -> lines.add("access " + a.getOrigin().getFullName() + " -> "
-                + a.getTarget().getFullName() + " " + a.getClass().getSimpleName()));
-        k.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).forEach(n -> lines.add("type " + n)));
+        com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassWriter writer =
+                new com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassWriter(0);
+        new com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassReader(original)
+                .accept(writer, com.tngtech.archunit.thirdparty.org.objectweb.asm.ClassReader.SKIP_DEBUG);
         try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(String.join("\n", lines).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return java.util.HexFormat.of().formatHex(digest);
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(writer.toByteArray()));
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
@@ -976,7 +983,9 @@ class RealPathReflectionTest {
         assertThat(String.join("\n", samePackage.getFailureReport().getDetails())).contains(
                 "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.config.SamePackageRecordReader.first",
                 "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName",
-                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeArgument");
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeArgument",
+                // architect PR #112 AR-2(MM4): Type 자체의 메서드
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.plainTypeName");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
                 .get(ReflectionFreeEngineCode.class).getSource().orElseThrow().getUri())).isEmpty();
