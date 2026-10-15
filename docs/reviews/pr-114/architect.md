@@ -46,3 +46,45 @@
 
 ## 판정
 수정 필요(R1 ADR-005 REST 계약 추가, R2 임계 덮어쓰기의 모르는 지표 이름 거절, R3 수집원 `LinkageError` 격리와 OSHI 초기화 실패 시 실험실 기동 유지 및 테스트). B7: risk-ops 검토 필요(감시 런타임 모듈 첫 클래스, `NO_CLASSES_YET`·`ArchitectureTest` 변경).
+
+## 재검토 2026-10-15
+- 대상: PR #114 / 브랜치 `claude/project-thread-y0syxq` / 커밋 `1d553ae` / `git diff origin/main...HEAD` 전체(48개 파일, +2392 −17, merge-base `d6fb6e7` = 현재 origin/main). 앞 검토 이후 바뀐 것은 `git diff c548817 1d553ae`(22개 파일)로 따로 읽었다.
+- 점검표: B
+- 직접 실행한 것(별도 작업 트리, 캐시 없는 새 폴더):
+  - `./gradlew build --no-daemon` → 종료 코드 0. 테스트 결과 XML 합계 1177건, 실패 0, 오류 0, 건너뜀 0. 새·바뀐 테스트: `MonitorAgentTest` 8, `ThresholdEvaluatorTest` 8, `SystemSourceFailureTest` 3, `SampleAppAttachTest` 3, `MonitorSettingsTest` 5, `MonitorServiceTest` 5, `MonitorApiTest` 3, `MonitorUnavailableBootTest` 1. 보호 테스트 `ArchitectureTest` 19, `ModuleOwnershipTest` 13, `RealPathReflectionTest` 8 통과
+  - JNA 네이티브 적재 실패 재현(risk-ops 실험 1과 같은 조건): `JAVA_TOOL_OPTIONS`에 `-Djna.nosys=true -Djna.noclasspath=true -Djna.boot.library.path=/nonexistent -Djna.nounpack=true`를 더해 `:autotrade-app-lab:test --tests RealOpsControllerTest --tests MonitorApiTest --rerun-tasks` → 15건 모두 통과(`RealOpsControllerTest` 12, `MonitorApiTest` 3). 테스트 로그에 "모니터링 수집 시작"과 주기마다 "수집원 실패: system (IllegalStateException)". 주입 대역이 아닌 실제 OSHI 경로에서도 실험실이 뜨고 system 수집원만 주기 실패로 남는 것을 확인
+  - gitleaks는 이 환경에 없어 돌리지 못했다(CI 몫). diff의 `+` 줄에서 키·토큰·계좌번호 형태 검색 0건
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 종료 코드 0, 1177건 통과·건너뜀 0 |
+| B2 | 통과 | 앞 검토 이후 모듈 의존·ArchUnit 규칙 변경 없음(`git diff c548817 1d553ae -- '*.kts' autotrade-architecture-test` 0줄). 새 `MonitorAgentFactory`는 실험실 패키지 안(`com.autotrade.app.lab.monitor`). 코어의 `catch (Throwable e)`(`MonitorAgent.java:62,89,114`)는 `RealPathReflectionTest` JDK 허용 목록 안 타입(`java.lang.Throwable`)만 쓰고 통과 |
+| B3 | 통과 | R1 반영: ADR-005 5장 REST 표에 `GET /api/monitor`·`GET /api/monitor/stream`(`docs/adr/ADR-005-ui-dashboard.md:119-120`), 응답 필드(`problem`·`stale` 포함)와 본문 없는 409가 공통 오류 형식의 예외인 이유를 적었다. 설정 키 문구에 모르는 지표 이름 거절 추가(`docs/config/config-keys.md:48`). `View` 필드 추가(`MonitorService.java:176`)도 ADR 표와 일치 |
+| B4 | 해당 없음 | 시뮬레이션·전략·체결 변경 없음. 새 시각 계산(`MonitorService.stale`, `MonitorService.java:97-99`)은 주입 `Clock` 사용 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 앞 지적의 실패 경우마다 테스트가 생겼다: 수집원 `Error`·리스너 `Error` 뒤 주기 수집 지속(`MonitorAgentTest#수집원_Error는_그_주기_실패로만_남고_주기_수집이_이어진다`, `#리스너_Error도_다음_주기를_막지_않는다`), OSHI 지연 생성·`LinkageError` 감쌈·재시도(`SystemSourceFailureTest` 3건), 수집원 생성 실패 시 실험실 기동(`MonitorServiceTest#수집원을_만들지_못하면_실험실은_뜨고_모니터링만_사용_불가다`, `MonitorUnavailableBootTest`), 모르는 지표 거절(`MonitorSettingsTest#모르는_지표_이름은_기동을_막는다`), 수집 멈춤 경계(`MonitorServiceTest#마지막_표본이_주기의_3배보다_오래되면_수집_멈춤이다`), 경계 의미(`ThresholdEvaluatorTest#경계는_나빠질_때_새_수준의_경계_좋아질_때_떠난_수준의_경계다`). 삭제·비활성화한 테스트 없음. 화면 JS(`isStale`)는 저장소에 JS 테스트 기반이 없어 테스트가 없다(권고 A6) |
+| B7 | risk-ops 검토 필요 | 앞 검토와 같은 이유(감시 런타임 모듈 `autotrade-monitor-agent-jar` 첫 운영 클래스, `NO_CLASSES_YET`·`ArchitectureTest` 변경). 이번 수정은 risk-ops 지적 R1·R2·K1 반영이며 `docs/reviews/pr-114/risk-ops.md`에 아직 재검토 절이 없다. 실전 주문 경로·Guard·블랙리스트·리스크 한도 코드 변경은 여전히 0줄 |
+| B8 | 통과 | 새 로그·메시지는 예외 클래스 이름과 지표 이름만(`MonitorConfiguration.java:50-52`, `SystemSource.java:75`, `MonitorSettings.java:82-83`). 비밀값 형태 문자열 없음 |
+
+### 앞 지적 처리 확인
+- **R1(ADR-005 REST 계약)**: 해결. 위 B3.
+- **R2(모르는 지표 이름)**: 해결. `MetricNames.ALL`(`MetricNames.java:29`)을 두고 `parseThresholds(text, known)`가 이름이 없으면 쓸 수 있는 이름 목록과 함께 거절(`MonitorSettings.java:81-84`). `MonitorConfiguration`이 `MetricNames.ALL`을 넘긴다. 목록이 실제 수집원 지표를 모두 담는지는 `SystemSourceFailureTest#지표_이름_목록은_수집원이_내는_이름을_모두_담는다`가 두 번 수집(변화율 지표 포함)해 확인한다. 라이브러리 `StandardSources.merge`의 "새 지표 더함"은 그대로(권고대로).
+- **R3(`Error` 격리, OSHI 초기화 실패 시 기동)**: 해결. ① 코어는 수집원·리스너·예약 작업 모두 `Throwable`을 잡는다. 요구는 "`VirtualMachineError`는 잡지 않는다"였으나, 코어가 감시 런타임 모듈이라 D-086 JDK 허용 목록에 `LinkageError`·`VirtualMachineError`가 없고(`RealPathReflectionTest.java:257-280`의 `ALLOWED_JDK_CLASSES`에 없음 확인), 이를 넣는 것은 보호 테스트 변경이다. 대신 `Throwable`을 잡고 D-090 "위험과 한계"에 OOM도 그 주기만 버린다는 것과 `lastSampleAt` 정체로 드러난다는 것을 적었다. 감시 루프는 멈추는 것보다 도는 쪽이 낫다는 판단에 동의하며 이 차이를 받아들인다. ② `SystemSource`는 OSHI를 첫 `read()`에서 만들고 `LinkageError`를 `IllegalStateException`으로 감싼다(`SystemSource.java:64-77`). 부분 초기화가 남지 않도록 `hal`을 마지막에 대입해 다음 주기에 다시 시도한다. ③ 실험실은 팩토리 실패(`RuntimeException | LinkageError`)도 잡아 "사용 불가"로 뜬다(`MonitorConfiguration.java:43-54`). 위 JNA 실패 재현으로 실제 경로 확인.
+- **A2(SSE 상한 경쟁)**: 해결. 상한 검사와 추가를 `synchronized (streams)`로 묶음(`MonitorService.java:106-112`).
+- **A3(이벤트 `limit` 의미)**: 해결. "나빠질 때 새 수준, 좋아질 때 떠난 수준"으로 정하고(`ThresholdEvaluator.java:59`, `Level` 선언 순서가 심각도 순임을 확인), `Threshold.limitOf`·`ThresholdEvent` 주석과 D-090 문구를 맞췄다. 테스트 1건 추가.
+- **A1(수집원 모듈 금지 목록 직접 등록)**: 별도 PR로 넘긴다고 D-090 "위험과 한계"에 적었다. 권고였으므로 받아들인다.
+- **A4**: 변경 없음(의견 그대로).
+
+### 이번에 새로 본 것
+**권고(머지를 막지 않음)**
+- A5: SSE 전용 송신 스레드가 대기 2개를 넘으면 가장 오래된 갱신을 버린다(`MonitorService.java:54-56`, `DiscardOldestPolicy`). 버려진 갱신의 `point`는 화면 그래프 기록에서 빠진다(`monitor.js` `apply`는 받은 점만 잇는다). 브라우저가 3주기 넘게 막힐 때만 생기는 일이고 다음 표본으로 현재 값은 따라잡으므로 영향은 작다. 문서(ADR-005 표)에 "느린 연결은 중간 표본을 건너뛸 수 있다"를 한 줄 적기를 권한다.
+- A6: 화면의 수집 멈춤 판정(`monitor.js` `isStale`, 1초 타이머)은 서버 `stale`과 같은 기준이지만 JS 테스트가 없다. 저장소에 JS 테스트 기반이 생길 때 함께 넣는다(UI 후속 과제).
+- A7: `MonitorService.close`는 에이전트를 닫은 뒤 송신 스레드를 `shutdownNow`한다. 닫는 순간 수집 스레드가 `push`하면 `RejectedExecutionException`이 나지만 코어가 리스너 실패로 잡아 경고 한 줄만 남긴다. 종료 중 로그 한 줄이라 그대로 둬도 된다.
+
+**확인한 것(문제 없음)**
+- 수집 멈춤 판정은 서버(`MonitorService.stale`, 경계 15초는 멈춤 아님·16초는 멈춤)와 화면이 같은 배수(3)를 쓰고, 화면은 SSE가 조용히 끊겨 새 이벤트가 없어도 1초마다 스스로 다시 잰다. 화면을 떠나면 타이머를 멈춘다(`stopUpdates`).
+- `MonitorUnavailableBootTest`는 `@Primary` 팩토리로 실패를 주입하고 실제 Spring 컨텍스트에서 `/api/real/status` 200, `/api/monitor` `enabled=false`·`problem`, SSE 409를 확인한다. 실전 운영 화면이 모니터링 실패와 무관하게 뜨는 것을 직접 지킨다.
+- 머지 커밋 `95d1d2a`·`cb32a4f`는 같은 브랜치 병합이며 PR 범위 밖 파일을 들여오지 않았다(`git diff --name-only origin/main...HEAD` 48개 모두 MON-05·검토 원문).
+
+## 판정
+승인. 앞 수정 요구 R1·R2·R3 모두 해결, 권고 A2·A3 반영. 새 권고 A5~A7은 머지를 막지 않는다. B7: risk-ops 검토 필요(risk-ops R1·R2 반영분의 재검토가 아직 원문에 없음. 감시 런타임 모듈 첫 클래스와 보호 테스트 변경이 있어 프로젝트 지침 10장에 따라 사용자 확인 머지 대상인지 risk-ops 판정에 따른다).
