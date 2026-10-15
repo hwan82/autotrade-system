@@ -72,3 +72,79 @@
 
 ## 판정
 수정 필요(A11 K1: 4KB 상한 연결 시험이 상한 없이도 통과함, A14 K2: D-092 범위 밖 표·7번·검증 목록 갱신)
+
+## 재검토 2026-10-15
+- 대상: PR #118 / 브랜치 `claude/project-thread-0ganrn` / 커밋 `6c7fdba`(HEAD), `97f2b22`, `c19d28c`, `de41b05` / `git diff origin/main...HEAD` 전체.
+  - 1차 뒤 바뀐 부분(`c19d28c..6c7fdba`)은 한 줄씩 읽었다. 운영 코드는 `SmallFile`, 빌드 파일은 엔진·감시 `build.gradle.kts`, 시험은 2건, 문서는 ADR-011과 D-092가 바뀌었다.
+  - 판정은 PR 전체를 기준으로 다시 냈다.
+  - 1차 원문은 `97f2b22`에 커밋된 그대로이고, `97f2b22..6c7fdba`에서 이 파일은 바뀌지 않았다. 이 절은 그 아래에 덧붙였다.
+- 점검표: A
+- 직접 실행한 것:
+  - `6c7fdba`를 별도 worktree에 두고 `./gradlew build --no-daemon`을 돌렸다. **BUILD SUCCESSFUL(종료 코드 0)**. 전체 시험 1261건, 실패·오류·건너뜀 0건이다. 모듈별 결과(시험/실패/오류/건너뜀)는 다음과 같다.
+    - `:autotrade-risk:test` 55/0/0/0
+    - `:autotrade-architecture-test:test` 43/0/0/0
+    - `:autotrade-app-engine:test` 52/0/0/0
+    - `:autotrade-app-watchdog:test` 28/0/0/0
+    - `:autotrade-monitor-agent-jar:test` 24/0/0/0
+    - `:autotrade-app-gateway:test` 50/0/0/0
+    - `:autotrade-app-lab:test` 181/0/0/0
+  - 변이 시험은 두 번째 worktree에서 했다. 하나씩 바꾸고 시험을 돌린 뒤 원복했다. 끝난 뒤 `git status`는 비어 있었고, 두 worktree는 지웠다.
+
+    | 변이 | 결과 |
+    |---|---|
+    | V10 `HeartbeatWatch`와 `StopRequests`를 상한 없는 `Files.readString`으로 되돌림(1차에서 못 잡던 변이) | **잡힘**: `HeartbeatWatchTest#상한보다_큰_하트비트_파일은_읽지_않고_읽을_수_없음이다`, `StopRequestsTest#기동_때_남은_임시_파일을_거두고_너무_큰_남은_파일은_지금_시각으로_이어받는다` 실패 |
+    | V10a 하트비트 경로만 되돌림 | 잡힘: `HeartbeatWatchTest` 해당 시험 실패 |
+    | V10b 정지 요청 경로만 되돌림 | 잡힘: `StopRequestsTest` 해당 시험 실패 |
+    | V1 `bytes.length > MAX_BYTES` 판정을 없앰 | 잡힘: 감시 3건(하트비트, 정지 요청, 설정)과 `HeartbeatTest#작은_파일_읽기는_상한을_넘으면_읽지_않는다`, 모두 4건 실패 |
+    | V11 `readNBytes(MAX_BYTES)`로 바꿔 넘는 파일을 잘라 읽고 통과시킴 | 잡힘: 위와 같은 4건 실패 |
+    | V12 경계를 `>=`로 바꿈(정확히 4096바이트도 거부) | 잡힘: `HeartbeatTest#작은_파일_읽기는_상한을_넘으면_읽지_않는다` 실패 |
+    | V13 엔진에 `libs.oshi.core`를 직접 의존(프로젝트 금지 목록과 무관) | 잡힘: `:autotrade-app-engine:verifyProcessIsolation` 실패. 메시지에 `com.github.oshi:oshi-core`, `com.github.oshi:oshi-common`, `net.java.dev.jna:jna`, `net.java.dev.jna:jna-platform`이 나온다 |
+    | V14 감시에 같은 의존 | 잡힘: `:autotrade-app-watchdog:verifyProcessIsolation` 실패. 같은 네 구성 요소가 나온다 |
+    | V15 엔진에 `:autotrade-monitor-sources` 의존(1차 V7 재확인) | 잡힘: 프로젝트와 그룹 두 금지에 모두 걸린다 |
+    | V16 `deleteLeftoverTemps` 안에서 `IllegalStateException`을 던짐(삼키는지 확인) | 예외를 삼킨다. `HeartbeatTest#기록기를_만들면_…`만 실패하고(정리를 안 했으므로), `:autotrade-app-engine:test` 52건은 모두 통과한다. 정리가 실패해도 엔진 기동은 막히지 않는다 |
+
+### 1차 지적 처리
+| 지적 | 처리 | 근거 |
+|---|---|---|
+| K1 (A11) 상한 연결 시험이 상한 없이도 통과 | 해소 | 두 시험 모두 "다 읽으면 결과가 달라지는" 입력으로 바뀌었다. 하트비트 시험은 정상 다섯 줄 뒤에 빈 줄 5000개를 붙인다(HeartbeatWatchTest.java:116). 정지 요청 시험은 `requested-at=2026-10-14…` 뒤에 빈 줄 5000개를 붙이고, `doesNotContain("2026-10-14")`를 단정한다(StopRequestsTest.java:148, 162). V10, V10a, V10b, V1, V11이 모두 잡힌다 |
+| K2 (A14) D-092 갱신 | 해소 | 범위 밖 표에서 `forbiddenProjects` 줄을 지웠다. 7번 거부 사유에 "4KB를 넘는 파일 크기(PR #118)"를 넣었다(D-092…md:25). 검증 목록에는 PR #118 후속 시험 7건과 그룹 금지를 한 줄로 더했다(:71). 처음 1차 줄(:68)의 건수는 PR #116 시점 기록으로 남고 새 줄이 보완한다. 코드와 어긋나는 서술은 남아 있지 않다 |
+| R1 (권고) 크기 확인과 읽기 사이 TOCTOU | 해소 | 한 스트림에서 `readNBytes(MAX_BYTES + 1)`로 읽고 길이로 판정한다(SmallFile.java:24-31). V11과 V12로 경계를 고정했다 |
+| R2 (참고) 감시 두 개 | 유지(비차단) | 바뀐 것이 없다. 실전 영향 없음 |
+
+### 1차 뒤 바뀐 코드의 실전 영향
+- **`SmallFile.deleteLeftoverTemps`가 바뀌었다**(SmallFile.java:38-51). 엔진 기동 경로에서 호출되는 함수다.
+  - 이제 `toAbsolutePath()` 대신 `target.getParent()`를 쓴다. `toAbsolutePath()`가 낼 수 있는 `IOError`를 피하기 위해서다.
+  - 함수 전체를 `catch (RuntimeException)`으로 감쌌다.
+  - 엔진에서 대상은 `Heartbeat.file(<설정 폴더>, "engine")`이라 부모 폴더가 늘 있다.
+  - 정리가 실패해도 엔진은 뜬다. V16에서 엔진 시험 52건이 통과한 것으로 확인했다.
+  - 이 단계가 Guard(모두 OFF) 생성 뒤에 도는 순서는 그대로다(EngineMain.java:83-93).
+- **엔진·감시 `forbiddenGroups`에 `com.github.oshi`, `net.java.dev.jna`를 더했다**(두 `build.gradle.kts`의 15줄).
+  - 격리 검사는 그룹이 같거나 그 그룹으로 시작하는 하위 그룹이면 걸러 낸다(autotrade.process-conventions.gradle.kts:22-24).
+  - OSHI 좌표는 `com.github.oshi:oshi-core`다(libs.versions.toml:19). V13·V14에서 JNA까지 간접 의존을 모두 잡는 것을 봤다.
+  - 보호가 강해지는 변경이고, 약해지는 곳은 없다.
+- 실전 주문 경로, RealTradingGuard, 블랙리스트, 리스크 한도, 보호 시세 경로, 서버 측 손절은 바뀌지 않았다. `autotrade-risk`와 `autotrade-architecture-test`의 diff는 비어 있다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `RealTradingGuard`, 설정 로더, `EngineMain.startGuard`는 바뀌지 않았다. 엔진 쪽 새 동작(임시 파일 정리)은 Guard 생성 뒤에 돌고 예외를 밖으로 내지 않는다(EngineMain.java:83-93, SmallFile.java:38-51, V16). `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`, `#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `EngineMainTest#하트비트를_쓰지_못해도_엔진은_뜨고_Guard는_OFF이며_상태에_응답한다`가 통과했다 |
+| A2 | 통과 | 주문 출구, Guard 팩토리, `ArchitectureTest`, `RealPathReflectionTest`는 바뀌지 않았다. 엔진 런타임에 들어온 `SmallFile`(`InputStream.readNBytes`, `DirectoryStream`)도 실전 경로 허용 목록 검사를 통과했다. `:autotrade-architecture-test:test` 43건 통과 |
+| A3 | 해당 없음 | 증권사 연동과 주문 라우팅은 바뀌지 않았다 |
+| A4 | 해당 없음 | 주문 타임아웃 처리는 바뀌지 않았다 |
+| A5 | 해당 없음 | 멱등 키는 바뀌지 않았다 |
+| A6 | 해당 없음 | 블랙리스트와 수동 보유 필터는 바뀌지 않았다 |
+| A7 | 해당 없음 | 계좌별 큐, 토큰 버킷, 킬스위치는 바뀌지 않았다. 하트비트와 정지 요청 파일은 프로세스 단위다 |
+| A8 | 통과 | 엔진에 새로 생긴 일은 기동 때 한 번 하는 로컬 폴더 정리뿐이다. 실패해도 삼킨다(V16). 감시 파일 읽기는 4KB+1바이트를 넘지 않는다(V1, V11, V12). 그래서 커진 파일 하나가 감시 힙을 채워 5.2 0번 정지 요청을 막는 일이 없다. 정지 요청 두 파일은 늘 함께 켜지고 함께 꺼진다(1차 V5, `StopRequestsTest#한_파일만_못_지우면_…`). OSHI·JNA·`monitor-sources`가 엔진·감시에 들어오지 않는 것은 프로젝트와 그룹 두 겹으로 잡는다(V13~V15). 정지 순서 1~6번과 보유 종목 보호 유지 원칙은 바뀌지 않았다 |
+| A9 | 통과 | 보호 시세 경로, 서버 측 손절 코드, 6.1 문서는 바뀌지 않았다 |
+| A10 | 통과 | 1차 뒤 diff에도 키, 계좌번호, 토큰이 없다. 상한 초과 예외 메시지에는 이제 크기 없이 상한과 경로만 들어간다(SmallFile.java:29). 시험은 `@TempDir`만 쓴다. gitleaks는 CI 결과로 확인한다 |
+| A11 | 통과 | 보호 시험은 삭제·약화되지 않았다. 바뀐 두 시험은 단정을 강화했다(`doesNotContain` 추가). 금지 목록 강화는 V13~V15로 실제 동작을 확인했다. 1차에서 못 잡던 연결 변이 V10을 이제 잡는다. 새 동작(상한, 정리, 부분 삭제, 첫 점검 경고, 격리)은 모두 실패하는 경우까지 시험한다 |
+| A12 | 통과 | 장애표 6장 17종과 O1~O8의 행 수, 대응 내용은 그대로다. #8 감지 문구는 설정 키 기준으로 코드(HeartbeatWatch.java:71)와 맞는다. 장애 시험 8종(7장)의 시나리오와 합격 기준은 바뀌지 않았다 |
+| A13 | 해당 없음 | 시장별 경로는 바뀌지 않았다. 시각은 프로세스 생존 판단용 UTC `Instant`다 |
+| A14 | 통과 | D-092(7번, 범위 밖 표, 검증 목록), ADR-011 3장(`forbiddenGroups` 포함), config-keys.md(4KB 거부), broker-and-fault-design.md #8이 코드와 맞는다(K2 해소) |
+
+### 점검표 밖 발견(비차단)
+- R2(유지): 감시가 두 개 떠 있으면 두 번째 감시가 첫 감시의 `stop-request.<pid>.tmp`를 지울 수 있다. 그 주기 쓰기만 실패하고 다음 점검에 다시 쓰므로 실전 영향은 없다. 감시 단일 실행 잠금은 7단계 자동 재기동과 함께 정한다.
+- 참고: `SmallFile.read`가 일반 파일이 아닌 FIFO를 열면 블록될 수 있다. 이는 이 PR 전의 `Files.readString`도 같았으므로 회귀가 아니다. 설정 폴더는 사용자만 쓰는 곳이다.
+- 남은 7단계 조건(PR #116에서 이어짐): 엔진 멈춤(#8)은 아직 감시 로그 ERROR로만 알린다(MON-06). 자동 재기동도 아직 없다.
+
+### 판정
+승인
