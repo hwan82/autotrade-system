@@ -118,3 +118,40 @@
 
 ### 판정
 수정 필요(F1 현재 main b4ed7fc와 docs/decisions/README.md·docs/qa/pending.md·docs/spec/autotrade-spec.md 충돌, PR CI 미실행. 코드 쪽 실패 항목은 없음. 병합 뒤 risk-ops 재검토(B7)와 독립 QA 재검토, 사용자 직접 머지 필요)
+
+## 재검토 2026-10-15 (3차)
+- 대상: PR #113 / 커밋 `998da51` / main 대비 diff 전체(`git diff origin/main...HEAD`, merge-base `b4ed7fc`, 파일 41개 +2,495 −48) 다시 읽음. 2차 재검토(`497c034`) 뒤 더해진 것은 main `b4ed7fc` 병합(`e000c7a`), risk-ops 2차 원문(`9c2998c`)과 그 병합(`8c9fb3f`, `docs/reviews/pr-113/risk-ops.md` +43만), 권고 반영(`998da51`, 4개 파일 +68 −4)이고 이것들은 줄 단위로 대조했다. 이 파일의 앞 내용은 바뀌지 않았다(`git diff 497c034 HEAD -- docs/reviews/pr-113/architect.md` 빈 출력).
+- 점검표: B
+- 직접 실행한 것:
+  - 작업 트리와 다른 새 clone(헤드 `998da51`)에서 `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**(3분 9초, 136 작업). 테스트 XML 집계 1,213건, 실패·오류 0, 건너뜀 0. `ExperimentJobTest` 17, `RunProgressTest` 8, `ExperimentJobStatusTest` 7, `ExperimentJobsTest` 1, `ExperimentJobControllerTest` 2, `RecordingExperimentTest` 5, `ExperimentGateTest` 19, `ArchitectureTest` 19, `ModuleOwnershipTest` 13, `RealPathReflectionTest` 8 모두 통과.
+  - GitHub REST(헤드 `998da51`): PR `mergeable: true`, `mergeable_state: unstable`. check run 3건 모두 `completed`/`success`: `Gradle build`(08:22:15Z), `DB schema (PostgreSQL 16)`(08:19:09Z), `Secret scan and collector boundary`(08:18:51Z). commit status API는 0건(`state: pending`)이라 `unstable`은 그 빈 status 때문으로 보인다 `[추론]`. 실패한 검사는 없다.
+  - 검토 중 main이 `88212d3`(PR #115, D-091)으로 움직였다. `git merge-tree`로 시험 병합 → 충돌 없음(`docs/config/config-keys.md`, `docs/decisions/README.md` 자동 병합). 병합 결과에서 결정 로그 D-089·D-090·D-091이 번호 순, 기획서 버전 칸 v14.34(main), 변경 이력 v14.34 행 아래 v14.33 행. 별도 worktree에서 그 병합을 `./gradlew build --no-daemon` → BUILD SUCCESSFUL, 1,220건 실패 0·건너뜀 0. 시험 병합은 버렸다.
+  - 변이(운영 코드 한 곳씩 고치고 `:autotrade-app-experiment:test --tests '*ExperimentJobTest'` 뒤 `git checkout`으로 복원, `git status` 깨끗함 확인):
+    - M7 `ExperimentMain.java:125` `control.afterCancel(body.applyAsInt(control))` → `body.applyAsInt(control)`: **잡힘**(`실행_명령은_취소로_끝난_본체도_정지_요청이_있으면_종료_코드_4로_끝낸다`, 4 기대·3 실제).
+    - M8 `ExperimentMain.java:60` 정규화 제거(`givenConfigDir` 그대로): **잡힘**(`설정_폴더는_상대_경로와_점점이_섞여도_정규화한_절대_경로로_쓴다`).
+    - M9 `ExperimentMain.java:115` `runControlled(...)` 우회(`dispatch(..., control)` 직접): **잡힘**(`실행_명령은_입력_오류도_상태_파일에_남기고_잠금을_푼다` RUNNING으로 남음, `병렬_상한은_옵션으로_받고_설정_파일은_읽지_않는다` 2 기대·4 실제).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 헤드 `998da51` 빌드 성공 1,213건 실패 0. PR CI 3건 모두 success. 최신 main `88212d3`과의 시험 병합 빌드도 성공(1,220건) |
+| B2 | 통과 | `998da51`의 운영 변경은 `ExperimentMain`(app-experiment) 안에서 `runControlled` 추출과 지역 변수화뿐, 새 import는 `java.util.function.ToIntFunction`(JDK). 새 모듈·패키지 없음. `ArchitectureTest`·`ModuleOwnershipTest`·`RealPathReflectionTest`는 이 PR diff에 없음(main 쪽 변경만)·통과 |
+| B3 | 통과 | 계약 변경 없음: `runControlled`는 패키지 전용 static이고 REST·상태 파일 형식·설정 키·실행 옵션 그대로. D-089 검증 절 시험 수 `ExperimentJobTest`(17)이 결과 XML 17건과 일치(`D-089-…md:52`). 병합 해소: 결정 로그 D-089 행과 D-090 행 모두 유지(`docs/decisions/README.md`), 기획서 버전 칸 v14.34·v14.33 행 유지(`docs/spec/autotrade-spec.md:12`, 변경 이력), `docs/qa/pending.md` #114 줄과 #113 줄·#113 재검토 줄 모두 유지. 내용 손실 없음(`git show --cc e000c7a`) |
+| B4 | 통과 | 실행기·골든 운영 코드 변경 없음. `RunProgressTest` 상한 1·2·64 골든 바이트 일치 통과. 새 시험은 고정 `Clock`(`Clock.fixed(WEEKEND, …)`, `MovingClock`)만 씀 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 지난 R7·R8의 시험 공백이 메워짐: `ExperimentJobTest#실행_명령은_취소로_끝난_본체도_정지_요청이_있으면_종료_코드_4로_끝낸다`(`runControlled` 경로로 4·`STOPPED`·정지 이유·취소 요청 파일 삭제), `#설정_폴더는_상대_경로와_점점이_섞여도_정규화한_절대_경로로_쓴다`(`run`에 비정규 상대 경로를 넣고 콘솔 출력의 상태 파일·정지 요청 파일 경로가 정규화 절대 경로임). 위 M7·M8·M9를 모두 잡음. 시험 diff는 추가만, `@Disabled`·삭제 없음. `System.setOut` 교체는 `finally`에서 복원하고 JUnit 병렬 실행 설정이 없어(grep `junit-platform.properties` 없음) 다른 시험과 겹치지 않음 |
+| B7 | 통과(risk-ops 검토 필요) | `runControlled`는 장애표 #10 감지 단서(종료 코드 4)와 정지 순서 0번 경로의 배선이다. 이 절을 쓰는 동안 원격 브랜치에 risk-ops 3차 원문(`d69303f`, `docs/reviews/pr-113/risk-ops.md` `## 판정 (3차 재검토)` "승인")이 올라왔다. 그 커밋은 그 파일 +41줄만 바꿔 이 검토 대상 코드에 영향이 없다(`git diff --stat 998da51 d69303f`). 실전 관련 PR로 독립 QA 재검토(`docs/qa/pending.md` "PR #113 재검토해줘" 줄 있음)와 사용자 직접 머지 대상 그대로 |
+| B8 | 통과 | `998da51`에 비밀값 없음. 새 시험은 임시 폴더 경로만 씀. CI `Secret scan and collector boundary` success |
+
+### 지난 지적 처리
+- **F1**(main `b4ed7fc` 충돌, CI 미실행): 해소. `e000c7a`가 권고한 방식(두 행 유지, 버전 칸 v14.34)으로 풀었고 헤드 CI 3건 success. 최신 main `88212d3`과도 충돌 없음(위 시험 병합).
+- **R7**(afterCancel 배선 시험): 해소. M7·M9가 잡힘.
+- **R8**(설정 폴더 정규화 시험): 해소. M8이 잡힘. 상태 파일 메시지 대신 콘솔 출력 경로로 고정했지만, 메시지 가림(`withoutConfigDir`)은 같은 `configDir` 값을 쓰므로 정규화 여부를 고정하기에 충분하다 `[추론]`.
+- **R6**(조합·워크포워드의 "확인 안 함" 시험): 이번에도 반영 안 됨. 권고로 남김.
+
+### 새 권고(판정을 막지 않음)
+- **R9** R8 시험의 `Path.of("").toAbsolutePath().relativize(config…)`는 Windows에서 작업 폴더와 임시 폴더의 드라이브가 다르면 `IllegalArgumentException`으로 시험이 깨진다(사용자 PC가 Windows, `CLAUDE.md` QA 폴더 `C:\…`). 저장소와 `%TEMP%`가 같은 드라이브면 문제없다 `[추론]`(Windows에서 돌려 보지 못함). 드라이브가 다를 때를 피하려면 `@TempDir` 아래에서 `config.resolve("sub").resolve("..")`처럼 절대 비정규 경로를 하나 더 쓰거나 `Assumptions`로 같은 루트일 때만 상대 경로 경우를 보게 할 수 있다.
+- **R6**(지난 권고) 그대로 열림.
+- 참고(risk-ops 3차 R9와의 차이): risk-ops 원문은 `run`이 `runControlled`를 거치지 않게 바꾸는 변이(M7b)를 시험이 못 잡는다고 적었다. 이 검토의 M9(`ExperimentMain.java:115`를 `return dispatch(args[0], forwarded, configDir, control);`로 바꿈)는 위와 같이 두 시험이 잡았다. 변이 모양이 다를 수 있어(예: 우회하면서 `afterCancel`·`finish`를 따로 부르는 경우) 두 결과는 모순이 아닐 수 있다 `[추론]`. 판정에는 영향 없음.
+
+### 판정
+승인(코드·문서 실패 항목 없음, F1·R7·R8 해소, CI 3건 success. 실전 관련 PR이라 독립 QA 재검토와 사용자 직접 머지 필요, risk-ops 3차 원문은 승인)
