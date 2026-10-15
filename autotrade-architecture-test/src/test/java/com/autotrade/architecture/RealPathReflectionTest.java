@@ -457,8 +457,11 @@ class RealPathReflectionTest {
                         && !ALLOWED_RECORD_READERS.contains(a.getOriginOwner().getName()))
                 .forEach(a -> out.add("허용 목록 밖 레코드 구성 요소 읽기: " + a.getDescription()));
         c.getAccessesFromSelf().stream()
+                // 구성 요소의 메서드도 읽는 클래스 안에서만 부른다: 허용 클래스가 구성 요소를 Object로 넘기면 받는 쪽이
+                // getType()으로 클래스 객체를 꺼낼 수 있다(PR #109 독립 QA Q1, risk-ops R-1)
                 .filter(a -> a.getTarget().getOwner().getName().equals("java.lang.reflect.RecordComponent")
-                        && !ALLOWED_RECORD_COMPONENT_METHODS.contains(a.getTarget().getName()))
+                        && (!ALLOWED_RECORD_COMPONENT_METHODS.contains(a.getTarget().getName())
+                                || !ALLOWED_RECORD_READERS.contains(a.getOriginOwner().getName())))
                 .forEach(a -> out.add("허용 목록 밖 RecordComponent 메서드: " + a.getDescription()));
         c.getSource().ifPresent(src -> out.addAll(GetClassUses.of(src.getUri())));
         return out;
@@ -559,8 +562,10 @@ class RealPathReflectionTest {
 
     /**
      * Guard 패키지 타입을 데이터 바인딩 대상으로 넘기는 표지: 클래스 객체({@code RealTradingGuard.class}), 제네릭 상위 타입 인자
-     * ({@code new TypeReference<GuardState>() {}}), 주석 값의 클래스({@code @JsonDeserialize(as = ...)}). 이것이 없으면 Jackson
-     * 같은 라이브러리가 Guard 타입 객체를 새로 만들 수 없다(문자열로 클래스를 찾는 API와 Jackson의 {@code Class} 역직렬화는 실전 경로에서 금지, risk-ops PR #108 F1, 독립 QA F1).
+     * ({@code new TypeReference<GuardState>() {}}), 주석 값의 클래스({@code @JsonDeserialize(as = ...)}). 이 규칙은 코드에
+     * 드러난 표지만 막는다. 문자열로 클래스를 찾는 API와 Jackson의 {@code Class} 역직렬화는 다른 규칙이 막지만(risk-ops PR #108 F1,
+     * 독립 QA F1), 허용 타입의 공개 메서드가 돌려주는 클래스 객체({@code Enum#getDeclaringClass}, {@code Annotation#annotationType}
+     * 등)를 거치는 길은 정적 검사로 다 막지 못한다. 남은 길은 D-086 한계에 적는다(PR #109 독립 QA R1, architect AR-R2).
      */
     static List<String> guardTypeAsData(JavaClass c) {
         List<String> out = new ArrayList<>();
@@ -650,6 +655,41 @@ class RealPathReflectionTest {
         }
         assertThat(problems).isEmpty();
         assertThat(records).containsExactlyInAnyOrderElementsOf(GUARD_RECORDS);
+    }
+
+    /**
+     * 레코드 구성 요소를 읽는 허용 클래스는 구성 요소·클래스 객체·리플렉션 타입을 밖으로 내보내지 않는다(architect PR #109
+     * AR-R1, risk-ops R-1, 독립 QA Q1). 허용은 클래스 단위라, 이 모양을 고정하지 않으면 {@code SecretPaths}만 고쳐도 길이 다시 열리고
+     * 그 변경은 보호 테스트 diff에 나타나지 않는다. private이 아닌 메서드·필드의 서명에 {@code Class}, {@code java.lang.reflect},
+     * {@code Object}가 없고, 구성 요소를 읽는 메서드는 private이다.
+     */
+    @Test
+    void 레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다() {
+        List<String> problems = new ArrayList<>();
+        for (String name : ALLOWED_RECORD_READERS) {
+            JavaClass k = ArchitectureTest.PRODUCTION.get(name);
+            for (com.tngtech.archunit.core.domain.JavaMember m : k.getMembers()) {
+                if (m.getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE)) {
+                    continue;
+                }
+                List<com.tngtech.archunit.core.domain.JavaType> types = new ArrayList<>();
+                if (m instanceof JavaField f) {
+                    types.add(f.getType());
+                } else if (m instanceof com.tngtech.archunit.core.domain.JavaCodeUnit u) {
+                    types.add(u.getReturnType());
+                    u.getParameters().forEach(p -> types.add(p.getType()));
+                }
+                types.stream().flatMap(t -> t.getAllInvolvedRawTypes().stream()).map(JavaClass::getBaseComponentType)
+                        .filter(t -> t.getName().equals("java.lang.Class") || t.getName().equals("java.lang.Object")
+                                || t.getPackageName().equals("java.lang.reflect"))
+                        .forEach(t -> problems.add(m.getFullName() + "의 서명에 " + t.getName()));
+            }
+            k.getMethodCallsFromSelf().stream()
+                    .filter(c -> c.getTarget().getName().equals("getRecordComponents")
+                            && !c.getOrigin().getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE))
+                    .forEach(c -> problems.add(c.getOrigin().getFullName() + "가 private이 아닌데 구성 요소를 읽는다"));
+        }
+        assertThat(problems).isEmpty();
     }
 
     @Test
@@ -791,6 +831,13 @@ class RealPathReflectionTest {
                 "NameToClassBinding$GetterProbe.getTypes() 반환 타입에 Class",
                 "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.app.engine.archfixture.NameToClassBinding.componentType",
                 "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.app.engine.archfixture.NameToClassBinding.declaringRecord")
+                .doesNotContain("SamePackageRecordReader");
+        // 허용 클래스와 같은 패키지의 다른 클래스(QA Q2), 허용 클래스가 Object로 넘긴 구성 요소에서 타입 꺼내기(QA Q1)
+        EvaluationResult samePackage = rule.evaluate(new ClassFileImporter()
+                .importClasses(com.autotrade.config.SamePackageRecordReader.class));
+        assertThat(String.join("\n", samePackage.getFailureReport().getDetails())).contains(
+                "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.config.SamePackageRecordReader.first",
+                "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName")
                 .doesNotContain("NameToClassBinding$Holder의", "NameToClassBinding$Holder.value");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
