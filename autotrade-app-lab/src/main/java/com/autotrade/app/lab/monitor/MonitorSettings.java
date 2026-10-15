@@ -10,7 +10,8 @@ import java.util.function.Predicate;
 
 /**
  * 실험실 모니터링 설정(MON-05, D-090). 실험실 프로세스 기동 속성 {@code autotrade.lab.monitor.*}에서 읽는다. 값이 범위 밖이거나
- * 형식이 틀리면 실험실이 뜨지 않는다(잘못 쓴 임계를 모르고 지나치지 않게).
+ * 형식이 틀리면 생성·읽기가 {@link IllegalArgumentException}을 던지고, {@link MonitorConfiguration#load}가 그 오류로
+ * 모니터링만 "사용 불가"로 둔다(실험실은 뜬다, D-091).
  *
  * @param enabled 꺼 두면 수집하지 않고 화면은 꺼짐을 보여 준다
  * @param intervalSeconds 수집 주기(초, 1~3600)
