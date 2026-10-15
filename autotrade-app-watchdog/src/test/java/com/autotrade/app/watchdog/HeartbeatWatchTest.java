@@ -65,4 +65,16 @@ class HeartbeatWatchTest {
         assertThat(watch.check(clock.instant())).isEmpty();
         assertThat(watch.states()).containsEntry("lab", State.UNREADABLE);
     }
+
+    @Test
+    void 기록_시각이_기준보다_많이_미래면_멈춤으로_본다() throws Exception {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("gateway"), Duration.ofSeconds(15));
+        Path file = Heartbeat.file(dir, "gateway");
+        Files.createDirectories(file.getParent());
+        java.time.Instant future = clock.instant().plus(Duration.ofHours(9)); // 시간대를 잘못 맞춘 시계 등
+        Files.writeString(file, new Heartbeat("gateway", 1, future, future, 1).format());
+
+        assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.STALE);
+    }
 }

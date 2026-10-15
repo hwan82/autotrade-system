@@ -64,7 +64,8 @@ final class HeartbeatWatch {
                 if (last.isEmpty()) {
                     state = State.UNREADABLE;
                 } else {
-                    age = Duration.between(last.get().writtenAt(), now);
+                    // 미래 시각(시계 조정 등)도 차이가 크면 멈춤으로 본다. 그대로 두면 나이가 음수라 늘 살아 있음이 된다
+                    age = Duration.between(last.get().writtenAt(), now).abs();
                     state = age.compareTo(stale) > 0 ? State.STALE : State.ALIVE;
                 }
             } catch (NoSuchFileException e) {
