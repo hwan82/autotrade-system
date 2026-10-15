@@ -169,6 +169,37 @@ class WatchdogTest {
     }
 
     @Test
+    void 값이_빠지기_시작하면_한_번만_알리고_돌아오면_다시_알릴_수_있다() {
+        // PR #122 risk-ops R1: 값이 소리 없이 계속 빠지면 위험 판정이 꺼진 것을 아무도 모른다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        assertThat(w.missingWarnings()).isZero();
+
+        cpu = -1;
+        for (int i = 0; i < 5; i++) {
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+        }
+        assertThat(w.missingWarnings()).isEqualTo(1);
+
+        diskFails = true; // 빠진 값이 늘면 다시 알린다
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(2);
+
+        diskFails = false;
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(3);
+        w.close();
+    }
+
+    @Test
     void 점검마다_자기_하트비트를_쓰고_다른_프로세스_하트비트를_판정한다() throws Exception {
         TestClock clock = new TestClock("2026-10-15T00:00:00Z");
         Watchdog w = watchdog(clock);

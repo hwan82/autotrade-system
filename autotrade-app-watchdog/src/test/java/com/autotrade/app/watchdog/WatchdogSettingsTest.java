@@ -108,8 +108,9 @@ class WatchdogSettingsTest {
     void CPU_메모리_임계_형식과_범위를_검사한다() {
         assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=85:95", dir)).hasMessageContaining("cpu.system는 경고%:위험%:연속");
         assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=85:x:3", dir)).hasMessageContaining("cpu.system: 숫자가 아닙니다");
-        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=0:95:3", dir)).hasMessageContaining("0 < 경고 ≤ 위험 ≤ 100");
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=0:95:3", dir)).hasMessageContaining("0 < 경고 < 위험 ≤ 100");
         assertThatThrownBy(() -> WatchdogSettings.parse("memory.used=95:85:3", dir)).hasMessageContaining("memory.used: 0 < 경고");
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=90:90:3", dir)).hasMessageContaining("cpu.system: 0 < 경고 < 위험");
         assertThatThrownBy(() -> WatchdogSettings.parse("memory.used=85:101:3", dir)).hasMessageContaining("≤ 100");
         assertThatThrownBy(() -> WatchdogSettings.parse("memory.used=85:95:11", dir)).hasMessageContaining("memory.used: 연속은 1~10");
         assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=85:95:0", dir)).hasMessageContaining("연속은 1~10");

@@ -148,7 +148,7 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
                 sustain, Duration.ofSeconds(hold), cpu, memory);
     }
 
-    /** 사용률 임계 {@code 경고%:위험%:연속}. 0 < 경고 ≤ 위험 ≤ 100, 연속 1~10. */
+    /** 사용률 임계 {@code 경고%:위험%:연속}. 0 < 경고 < 위험 ≤ 100, 연속 1~10. */
     private static Limits usage(Map<String, String> values, String key, List<String> problems) {
         String raw = values.getOrDefault(key, DEFAULT_USAGE_PERCENT);
         String[] parts = raw.split(":", -1);
@@ -161,8 +161,9 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
             double critical = new BigDecimal(parts[1].strip()).doubleValue();
             int sustain = Integer.parseInt(parts[2].strip());
             boolean ok = true;
-            if (warn <= 0 || critical < warn || critical > 100) {
-                problems.add(key + ": 0 < 경고 ≤ 위험 ≤ 100이어야 합니다: " + raw);
+            // 경고 = 위험이면 위험 바로 아래에서 해제되어 ADR-007 2.7의 여유 구간이 없다(PR #122 risk-ops N1)
+            if (warn <= 0 || critical <= warn || critical > 100) {
+                problems.add(key + ": 0 < 경고 < 위험 ≤ 100이어야 합니다: " + raw);
                 ok = false;
             }
             if (sustain < 1 || sustain > 10) {

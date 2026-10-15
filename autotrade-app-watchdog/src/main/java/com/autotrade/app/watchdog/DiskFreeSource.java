@@ -9,8 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 드라이브 여유 공간(GB, 2^30바이트) 수집원(D-092). 감시 런타임은 OSHI·{@code java.lang.management}를 쓰지 않으므로(D-086, D-090)
- * JDK {@code FileStore}로 읽는다. 이름은 실험실 표준 수집원과 같은 {@code disk.free-gb:<경로>}다.
+ * 드라이브 여유 공간(GB, 2^30바이트) 수집원(D-092). 감시 런타임은 OSHI를 쓰지 않고 {@code java.lang.management}는
+ * {@link PlatformOsReadings}의 CPU·메모리 읽기만 허용되므로(D-086, D-090, D-095) JDK {@code FileStore}로 읽는다. 이름은 실험실 표준 수집원과 같은 {@code disk.free-gb:<경로>}다.
  *
  * <p>한 경로를 읽지 못하면 그 경로 값만 빠진다. 감시는 값이 빠진 주기를 "판단 못 함"으로 보고 정지 요청을 풀지 않는다.
  */

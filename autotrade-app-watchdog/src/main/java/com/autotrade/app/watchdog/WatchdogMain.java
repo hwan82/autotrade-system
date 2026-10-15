@@ -6,14 +6,16 @@ import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.concurrent.CountDownLatch;
 
 /**
- * 감시·킬스위치(D-013 ④, MON-02 1차 D-092). 상주 프로세스 하트비트와 드라이브 여유를 보고, 자원이 위험하면 단발 일괄 명령 정지 요청
- * 파일을 만든다. 어떤 프로세스도 죽이거나 띄우지 않는다(D-058). 실전 계좌 긴급 정지·청산 경로, CPU·메모리 감시, 자동 재기동,
+ * 감시·킬스위치(D-013 ④, MON-02 1차 D-092·D-095). 상주 프로세스 하트비트와 드라이브 여유·PC CPU·메모리를 보고, 자원이 위험하면
+ * 단발 일괄 명령 정지 요청 파일을 만든다. 어떤 프로세스도 죽이거나 띄우지 않는다(D-058). 실전 계좌 긴급 정지·청산 경로, 자동 재기동,
  * 알림 발송은 후속 작업이다(D-092 범위 밖).
  *
- * <p>감시 설정({@code <설정 폴더>/watchdog.properties})이 틀리면 기동을 거부한다(종료 코드 2).
+ * <p>감시 설정({@code <설정 폴더>/watchdog.properties})이 틀리거나 이 JVM이 PC CPU·메모리를 줄 수 없으면 기동을 거부한다(종료 코드 2).
  *
  * <p>시스템 시계를 만드는 곳은 이 진입점뿐이다. 나머지 코드는 주입받은 {@link Clock}만 쓴다(ArchitectureTest).
  */
@@ -45,9 +47,14 @@ public final class WatchdogMain {
 
     /** 기동 점검: 설정을 읽고 감시 설정을 검사만 한다. 종료 코드를 돌려준다(0: 정상, 2: 감시 설정 오류). */
     static int run(ConfigPaths paths, Clock clock) {
+        return run(paths, clock, PlatformOsReadings::create);
+    }
+
+    static int run(ConfigPaths paths, Clock clock, Supplier<Optional<OsReadings>> osReadings) {
         ProcessStartup.start(PROCESS, paths, clock);
         try {
             WatchdogSettings.load(configDir(paths));
+            os(osReadings);
             return 0;
         } catch (IllegalArgumentException e) {
             refuse(e);
@@ -57,13 +64,15 @@ public final class WatchdogMain {
 
     /** 설정 로딩 → 감시 설정 검사(틀리면 던짐) → 점검 시작. */
     static Watchdog start(ConfigPaths paths, Clock clock) {
+        return start(paths, clock, PlatformOsReadings::create);
+    }
+
+    static Watchdog start(ConfigPaths paths, Clock clock, Supplier<Optional<OsReadings>> osReadings) {
         ProcessStartup.start(PROCESS, paths, clock);
         Path dir = configDir(paths);
         WatchdogSettings settings = WatchdogSettings.load(dir);
         // 지키는 설정 폴더를 남긴다. 잘못 적은 폴더면 모든 프로세스가 꺼짐으로만 보인다(architect PR #116 N2)
-        // PC CPU·메모리는 JDK OperatingSystemMXBean으로만 읽는다(D-095). 못 읽는 JVM이면 감시를 띄우지 않는다
-        OsReadings os = PlatformOsReadings.create().orElseThrow(() -> new IllegalArgumentException(
-                "이 JVM은 PC CPU·메모리 사용률을 줄 수 없습니다(com.sun.management.OperatingSystemMXBean 없음, D-095)"));
+        OsReadings os = os(osReadings);
         LOG.log(Level.INFO, "감시 시작: 설정 폴더 {6}, 주기 {0}초, 하트비트 {1}({2}초 넘으면 멈춤), 드라이브 {3}, 여유 경고 {4}GB·위험 {5}GB",
                 settings.interval().toSeconds(), settings.processes(), settings.heartbeatStale().toSeconds(), settings.disks(),
                 Math.round(settings.diskWarnGb()), Math.round(settings.diskCriticalGb()), dir.toAbsolutePath());
@@ -73,6 +82,12 @@ public final class WatchdogMain {
         Watchdog watchdog = new Watchdog(dir, settings, clock, DiskFreeSource.FILE_STORE, os);
         watchdog.start();
         return watchdog;
+    }
+
+    /** PC CPU·메모리는 JDK OperatingSystemMXBean으로만 읽는다(D-095). 못 읽는 JVM이면 감시를 띄우지 않는다(던짐). */
+    private static OsReadings os(Supplier<Optional<OsReadings>> osReadings) {
+        return osReadings.get().orElseThrow(() -> new IllegalArgumentException(
+                "이 JVM은 PC CPU·메모리 사용률을 줄 수 없습니다(com.sun.management.OperatingSystemMXBean 없음, D-095)"));
     }
 
     private static Path configDir(ConfigPaths paths) {

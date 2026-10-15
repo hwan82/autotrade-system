@@ -41,6 +41,9 @@ final class Watchdog implements AutoCloseable {
     private final StopRequests stopRequests;
     /** 점검마다 있어야 하는 값(드라이브 경로마다 여유, PC CPU·메모리). 하나라도 빠지면 판단 못 함. */
     private final Set<String> requiredReadings = new TreeSet<>();
+    /** 지난 점검에서 빠진 필수 값. 바뀔 때만 알린다(PR #122 risk-ops R1: 값이 소리 없이 계속 빠지면 위험 판정도 꺼진다). */
+    private Set<String> missingReadings = Set.of();
+    private int missingWarnings;
     private ScheduledExecutorService scheduler;
 
     Watchdog(Path configDir, WatchdogSettings settings, Clock clock, DiskFreeSource.FreeSpace freeSpace, OsReadings os) {
@@ -73,6 +76,7 @@ final class Watchdog implements AutoCloseable {
         String detail = "자원 값을 읽지 못함";
         try {
             MetricSnapshot snapshot = agent.sampleOnce();
+            reportMissing(snapshot);
             pressure = pressure(snapshot);
             detail = detail(snapshot);
         } catch (Throwable e) {
@@ -114,6 +118,30 @@ final class Watchdog implements AutoCloseable {
             return StopRequests.Pressure.UNKNOWN;
         }
         return warn ? StopRequests.Pressure.ELEVATED : StopRequests.Pressure.CLEAR;
+    }
+
+    /** 빠진 필수 값이 바뀌면 로그를 남긴다: 새로 빠지면 WARN, 모두 돌아오면 INFO. 같은 상태가 이어지면 남기지 않는다. */
+    private void reportMissing(MetricSnapshot snapshot) {
+        Set<String> missing = new TreeSet<>(requiredReadings);
+        for (Reading r : snapshot.readings()) {
+            missing.remove(r.name());
+        }
+        if (missing.equals(missingReadings)) {
+            return;
+        }
+        if (missing.isEmpty()) {
+            LOG.log(Logger.Level.INFO, "자원 값을 다시 읽음: " + missingReadings);
+        } else {
+            missingWarnings++;
+            LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + ". 그 값의 위험 판정을 못 하므로 정지 요청을 새로 만들지 못하고, "
+                    + "켜진 정지 요청은 풀지 않는다(D-092 3번, D-095)");
+        }
+        missingReadings = Set.copyOf(missing);
+    }
+
+    /** 빠진 필수 값으로 WARN을 남긴 횟수(시험용). */
+    int missingWarnings() {
+        return missingWarnings;
     }
 
     private static String detail(MetricSnapshot snapshot) {
