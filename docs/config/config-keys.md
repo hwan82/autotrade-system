@@ -41,11 +41,11 @@
 | `autotrade.lab.selections-dir` | `selections` (실행 폴더 기준, bootRun은 저장소 루트) | 선정 프로필 YAML 폴더. 실험 실행기가 읽는 `selections/`와 같은 폴더를 가리켜야 화면에서 만든 선정이 실험에 쓰인다 | ADR-005 4·5장, ADR-007 2.1, D-060 |
 | `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다. 실험 생성 화면도 이 폴더에 새 실험 폴더와 등록 파일(`experiment.yaml`)을 쓴다. 실시간 모의 세션(D-076)도 이 폴더의 `input: "live"` 등록 파일을 읽고 끝낼 때 `live-detail.txt`를 쓴다 | D-062, D-074, D-076 |
 | `autotrade.lab.live.min-free-gb` | `20` | 실시간 모의 입력 기록 폴더(설정 폴더 `live-sessions/`) 디스크 여유 하한(GB). 미만이면 세션을 시작하지 않고, 운용 중이면 1초 안에 멈춘다(실전 엔진 기록과 같은 디스크일 수 있음). 1~1,000,000, 범위 밖이면 실험실이 뜨지 않는다(0이면 하한이 꺼지므로 거부) | D-076, risk-ops PR #87 R1, QA PR #87 R2 |
-| `autotrade.lab.monitor.enabled` | `true` | 모니터링 수집(MON-05). 끄면 수집하지 않고 화면은 꺼짐을 보여 준다 | [D-090](../decisions/D-090-monitor-agent-and-screen.md) |
-| `autotrade.lab.monitor.interval-seconds` | `5` | 수집 주기(초). 1~3600, 범위 밖이면 실험실이 뜨지 않는다 | D-090 |
-| `autotrade.lab.monitor.history-size` | `720` | 화면 그래프용으로 들고 있을 표본 수(5초 주기면 1시간). 1~10000 | D-090 |
+| `autotrade.lab.monitor.enabled` | `true` | 모니터링 수집(MON-05). 끄면 수집하지 않고 화면은 꺼짐을 보여 준다. `autotrade.lab.monitor.*` 값이 하나라도 틀리면(true·false가 아님, 정수가 아님, 범위 밖, 아래 임계 오류) 실험실은 뜨고 모니터링만 "사용 불가"로 오류 문구를 보여 준다(QA PR #114 R1) | [D-090](../decisions/D-090-monitor-agent-and-screen.md) |
+| `autotrade.lab.monitor.interval-seconds` | `5` | 수집 주기(초). 1~3600, 범위 밖이면 모니터링 사용 불가 | D-090 |
+| `autotrade.lab.monitor.history-size` | `720` | 화면 그래프용으로 들고 있을 표본 수(5초 주기면 1시간). 1~10000, 범위 밖이면 모니터링 사용 불가 | D-090 |
 | `autotrade.lab.monitor.disks` | 빈 값 | 지표를 낼 드라이브(마운트) 쉼표 목록(예: `C:\,D:\`, 대소문자 무시). 비면 모든 로컬 드라이브 | D-090 |
-| `autotrade.lab.monitor.thresholds` | 빈 값 | 기본 임계 덮어쓰기. `지표=방향:경고:위험:연속`을 `;`로 잇는다(예: `cpu.system=ABOVE:70:90:3;disk.free-gb=BELOW:100:30:1`). 방향은 ABOVE·BELOW. 기본 임계와 지표 이름은 D-090 5번과 `MetricNames`. 형식이 틀리거나, 같은 지표가 두 번이거나, 지표 이름이 `MetricNames.ALL`에 없으면(오타, 대상까지 쓴 이름) 실험실이 뜨지 않는다 | D-090 |
+| `autotrade.lab.monitor.thresholds` | 빈 값 | 기본 임계 덮어쓰기. `지표=방향:경고:위험:연속`을 `;`로 잇는다(예: `cpu.system=ABOVE:70:90:3;disk.free-gb=BELOW:100:30:1`). 방향은 ABOVE·BELOW. 기본 임계와 지표 이름은 D-090 5번과 `MetricNames`. 형식이 틀리거나, 같은 지표가 두 번이거나, 지표 이름이 `MetricNames.ALL`에 없으면(오타, 대상까지 쓴 이름) 모니터링 사용 불가 | D-090 |
 | `autotrade.code-commit` | `unknown` (bootRun은 `git rev-parse HEAD`를 JVM 속성으로 넘김) | 실시간 모의 세션 상세 보고서의 `code` 줄(커밋). 리플레이 확인은 이 줄을 비교에서 뺀다 | D-076 |
 | `autotrade.code-dirty` | `true` (bootRun은 `git status --porcelain`이 비었는지로 넘김) | 같은 보고서의 작업 트리 변경 여부 | D-076 |
 

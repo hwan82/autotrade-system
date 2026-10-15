@@ -68,10 +68,22 @@ function stopUpdates() {
   if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
 }
 
-/** 마지막 표본이 주기의 3배보다 오래됐는지. SSE가 조용히 끊기거나 수집이 멈추면 새 이벤트가 없으므로 화면이 스스로 잰다. */
+/**
+ * 마지막 표본(첫 표본 전이면 수집 시작)이 주기의 3배보다 오래됐는지. SSE가 조용히 끊기거나 수집이 멈추면 새 이벤트가 없으므로
+ * 화면이 스스로 잰다.
+ */
 export function isStale(state, nowMs) {
-  if (!state.latest) return false;
-  return nowMs - Date.parse(state.latest.at) > STALE_INTERVALS * state.intervalSeconds * 1000;
+  const since = state.latest ? state.latest.at : state.startedAt;
+  if (!since) return false;
+  return nowMs - Date.parse(since) > STALE_INTERVALS * state.intervalSeconds * 1000;
+}
+
+function staleText(state) {
+  const limit = `수집 주기 ${state.intervalSeconds}초의 ${STALE_INTERVALS}배 넘게 새 표본 없음`;
+  if (!state.latest) {
+    return `수집 멈춤: ${new Date(state.startedAt).toLocaleTimeString('en-GB')}에 수집을 시작했지만 첫 표본이 없습니다(${limit}). 실험실 로그를 확인하세요.`;
+  }
+  return `수집 멈춤: 마지막 표본이 ${new Date(state.latest.at).toLocaleTimeString('en-GB')}입니다(${limit}). 아래 값은 지금 값이 아닙니다. 실험실 로그를 확인하세요.`;
 }
 
 export async function monitorPage() {
@@ -83,7 +95,7 @@ export async function monitorPage() {
   const staleBox = h('div', { role: 'alert' });
   const checkStale = () => {
     staleBox.replaceChildren(state.enabled && (state.stale || isStale(state, Date.now()))
-      ? h('p', { class: 'notice warn' }, `수집 멈춤: 마지막 표본이 ${new Date(state.latest.at).toLocaleTimeString('en-GB')}입니다(수집 주기 ${state.intervalSeconds}초의 ${STALE_INTERVALS}배 넘게 새 표본 없음). 아래 값은 지금 값이 아닙니다. 실험실 로그를 확인하세요.`)
+      ? h('p', { class: 'notice warn' }, staleText(state))
       : '');
   };
 
