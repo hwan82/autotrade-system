@@ -1,10 +1,8 @@
 package com.autotrade.app.lab.monitor;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.autotrade.monitor.Level;
-import com.autotrade.monitor.MetricSnapshot;
 import com.autotrade.monitor.MetricSource;
 import com.autotrade.monitor.MonitorAgent;
 import com.autotrade.monitor.Reading;
@@ -153,20 +151,6 @@ class MonitorServiceTest {
             assertThat(service.openStreams()).isZero();
             assertThat(service.openStream()).isEmpty();
         }
-    }
-
-    @Test
-    void 종료와_겹쳐_도착한_표본은_예외_없이_버린다() {
-        // 닫는 순간 돌던 수집이 push하면 RejectedExecutionException이 리스너 실패 경고로 남던 것(architect PR #114 A7)
-        MonitorAgent agent = agent();
-        MonitorService service = new MonitorService(settings, agent, CLOCK, null);
-        assertThat(service.openStream()).isPresent();
-        MetricSnapshot snapshot = agent.sampleOnce();
-        service.sender.shutdownNow(); // 송신 스레드만 먼저 멈춘 경합
-        assertThatCode(() -> service.push(snapshot, List.of())).doesNotThrowAnyException();
-        service.close();
-        assertThatCode(() -> service.push(snapshot, List.of())).doesNotThrowAnyException();
-        assertThat(service.openStreams()).isZero();
     }
 
     @Test

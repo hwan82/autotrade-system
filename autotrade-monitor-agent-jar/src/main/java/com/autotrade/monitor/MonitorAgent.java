@@ -183,7 +183,7 @@ public final class MonitorAgent implements AutoCloseable {
 
     /**
      * 수집원 하나의 이번 주기 결과로 실패 상태를 갱신하고 남길 로그 한 줄을 돌려준다(없으면 null). {@code error}는 실패면 예외
-     * 클래스 이름, 성공이면 null. 처음 실패·종류 바뀜은 WARN, 같은 실패 반복은 DEBUG, 회복은 INFO다.
+     * 클래스 이름, 성공이면 null. 처음 실패·종류 바뀜은 WARN, 같은 실패 반복은 DEBUG(꺼져 있으면 null), 회복은 INFO다.
      */
     private LogLine trackFailure(String id, String error) {
         Failure before = failing.get(id);
@@ -206,6 +206,9 @@ public final class MonitorAgent implements AutoCloseable {
                     "수집원 실패 바뀜: " + id + " (" + before.error + " → " + error + ")");
         }
         before.count++;
+        if (!LOG.isLoggable(System.Logger.Level.DEBUG)) {
+            return null; // DEBUG가 꺼져 있으면 주기마다 문자열을 만들지 않는다(architect PR #119 A2)
+        }
         return new LogLine(System.Logger.Level.DEBUG, "수집원 실패 계속: " + id + " (" + error + ", " + before.count + "회째)");
     }
 
