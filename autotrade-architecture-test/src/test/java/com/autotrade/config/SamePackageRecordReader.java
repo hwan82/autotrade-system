@@ -24,6 +24,26 @@ public final class SamePackageRecordReader {
         out.add(record.getRecordComponents()[0].getType());
     }
 
+    /** PR #110 독립 QA Q1(M8): 공개 필드 서명에 리플렉션 타입. */
+    public static java.lang.reflect.Type lastType;
+
+    /** PR #110 독립 QA R1: 와일드카드로 감싸 {@code Object}가 서명에 드러나지 않는 반환. */
+    static java.util.List<?> leak() {
+        return Sink.TYPES;
+    }
+
+    /** PR #110 독립 QA R2(architect AR-5, risk-ops R-3): 중첩 클래스에 칸을 두고 클래스 객체를 담는다. */
+    static final class Sink {
+        static final java.util.concurrent.CopyOnWriteArrayList<Object> TYPES = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        private Sink() {}
+    }
+
+    /** PR #110 risk-ops R-2: 허용 클래스 밖에서 제네릭 타입 인자 읽기. */
+    public static String typeArgument(Object type) {
+        return ((java.lang.reflect.ParameterizedType) type).getActualTypeArguments()[0].getTypeName();
+    }
+
     /** PR #109 QA Q1: 허용 클래스가 {@code Object}로 넘긴 구성 요소에서 타입을 꺼낸다. */
     public static String typeName(Object component) {
         return ((RecordComponent) component).getType().getSimpleName();

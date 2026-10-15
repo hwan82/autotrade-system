@@ -403,6 +403,9 @@ class RealPathReflectionTest {
     /** 레코드 구성 요소에서 부를 수 있는 메서드({@code getAccessor}는 {@code Method}라 허용 목록 밖 타입으로도 걸린다). */
     static final Set<String> ALLOWED_RECORD_COMPONENT_METHODS = Set.of("getName", "getType", "getGenericType");
 
+    /** 메서드를 허용 클래스({@link #ALLOWED_RECORD_READERS}) 안에서만 부를 수 있는 리플렉션 타입(risk-ops PR #110 R-2). */
+    static final Set<String> REFLECT_TYPE_OWNERS = Set.of("java.lang.reflect.Type", "java.lang.reflect.ParameterizedType");
+
     /**
      * 이름 문자열로 클래스를 얻는 데이터 바인딩(독립 QA PR #108 F1): Jackson은 {@code Class} 타입 값을 이름 문자열에서
      * {@code Class.forName}처럼 만든다. 그래서 {@code Class.class} 클래스 객체({@code readValue(.., Class.class)}), {@code Class}가
@@ -463,6 +466,11 @@ class RealPathReflectionTest {
                         && (!ALLOWED_RECORD_COMPONENT_METHODS.contains(a.getTarget().getName())
                                 || !ALLOWED_RECORD_READERS.contains(a.getOriginOwner().getName())))
                 .forEach(a -> out.add("허용 목록 밖 RecordComponent 메서드: " + a.getDescription()));
+        c.getAccessesFromSelf().stream()
+                // 제네릭 타입 인자 읽기도 같다: 구성 요소의 getGenericType()에서 클래스 객체에 닿는다(risk-ops PR #110 R-2)
+                .filter(a -> REFLECT_TYPE_OWNERS.contains(a.getTarget().getOwner().getName())
+                        && !ALLOWED_RECORD_READERS.contains(a.getOriginOwner().getName()))
+                .forEach(a -> out.add("허용 목록 밖 리플렉션 타입 메서드: " + a.getDescription()));
         c.getSource().ifPresent(src -> out.addAll(GetClassUses.of(src.getUri())));
         return out;
     }
@@ -664,20 +672,74 @@ class RealPathReflectionTest {
      * {@code Object}가 없고, 구성 요소를 읽는 메서드는 private이다.
      */
     @Test
-    void 레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다() {
+    void 레코드_구성_요소를_읽는_클래스는_구성_요소를_밖으로_내보내지_않는다() throws ClassNotFoundException {
         for (String name : ALLOWED_RECORD_READERS) {
-            assertThat(recordReaderShape(ArchitectureTest.PRODUCTION.get(name))).as(name).isEmpty();
+            assertThat(recordReaderShape(ArchitectureTest.PRODUCTION.get(name), ArchitectureTest.PRODUCTION)).as(name).isEmpty();
         }
         // 위반 예제: 구성 요소를 public 메서드로 읽어 돌려주고, Object를 받는다(risk-ops PR #110 F-1)
-        assertThat(String.join("\n", recordReaderShape(new ClassFileImporter()
-                .importClasses(com.autotrade.config.SamePackageRecordReader.class)
-                .get(com.autotrade.config.SamePackageRecordReader.class)))).contains(
+        JavaClasses fixture = new ClassFileImporter().importClasses(com.autotrade.config.SamePackageRecordReader.class,
+                Class.forName("com.autotrade.config.SamePackageRecordReader$Sink"));
+        assertThat(String.join("\n", recordReaderShape(fixture.get(com.autotrade.config.SamePackageRecordReader.class), fixture)))
+                .contains(
                 "SamePackageRecordReader.first(java.lang.Class)의 서명에 java.lang.Class",
+                // PR #110 독립 QA Q1: 서명의 java.lang.reflect 검사(M6)와 필드 서명 검사(M8)를 지우면 실패한다
+                "SamePackageRecordReader.first(java.lang.Class)의 서명에 java.lang.reflect.RecordComponent",
+                "SamePackageRecordReader.lastType의 서명에 java.lang.reflect.Type",
+                // PR #110 독립 QA R1: 와일드카드
+                "SamePackageRecordReader.leak()의 서명에 와일드카드·타입 변수",
+                // PR #110 독립 QA R2: 중첩 클래스
+                "SamePackageRecordReader가 중첩 클래스 com.autotrade.config.SamePackageRecordReader$Sink를 둔다",
+                "SamePackageRecordReader가 고정 목록 밖 타입 com.autotrade.config.SamePackageRecordReader$Sink를 쓴다",
+                "SamePackageRecordReader$Sink가 고정 목록 밖 타입 java.util.concurrent.CopyOnWriteArrayList를 쓴다",
                 "SamePackageRecordReader.first(java.lang.Class)가 private이 아닌데 구성 요소를 읽는다",
                 "SamePackageRecordReader.typeName(java.lang.Object)의 서명에 java.lang.Object",
                 "SamePackageRecordReader.stash(java.lang.Class, java.util.concurrent.ConcurrentLinkedQueue)가 임의 객체를 JSON 노드에 넣는다: putPOJO",
                 "SamePackageRecordReader가 고정 목록 밖 타입 java.util.concurrent.ConcurrentLinkedQueue를 쓴다")
                 .doesNotContain("stash(java.lang.Class, java.util.concurrent.ConcurrentLinkedQueue)의 서명에");
+    }
+
+    /**
+     * 허용 클래스의 지문: 멤버(private 포함)와 바이트코드 접근·클래스 파일 상수 타입을 정렬해 SHA-256으로 묶은 값. 허용 클래스는
+     * 이 규칙의 신뢰 경계라(모양 검사가 못 보는 길이 남는다, PR #110 독립 QA R1), 그 클래스를 바꾸면 이 값을 고쳐야 하고 그
+     * 변경은 보호 테스트 변경이 되어 실전 관련 PR(risk-ops 검토, 사용자 머지, 독립 QA)로 간다. 서식·주석만 바꾼 변경은 지문을 바꾸지
+     * 않는다.
+     */
+    static final java.util.Map<String, String> RECORD_READER_FINGERPRINTS = java.util.Map.of(
+            "com.autotrade.config.SecretPaths", "0e66030cf4ee0150d26d1a8d6abff11d4d2ed8ac47e93dd52431b629b9f66f6d");
+
+    @Test
+    void 레코드_구성_요소를_읽는_클래스의_지문은_고정_값과_같다() {
+        assertThat(RECORD_READER_FINGERPRINTS.keySet()).isEqualTo(ALLOWED_RECORD_READERS);
+        for (String name : ALLOWED_RECORD_READERS) {
+            assertThat(fingerprint(ArchitectureTest.PRODUCTION.get(name)))
+                    .as(name + "가 바뀌었다. 이 클래스는 리플렉션 규칙의 신뢰 경계라, risk-ops 검토를 받고 지문을 고친다(D-086)")
+                    .isEqualTo(RECORD_READER_FINGERPRINTS.get(name));
+        }
+        // 지문이 접근 하나의 차이도 잡는지: 위반 예제와 허용 예제의 지문은 다르다
+        JavaClasses two = new ClassFileImporter().importClasses(com.autotrade.config.SamePackageRecordReader.class,
+                ReflectionFreeEngineCode.class);
+        assertThat(fingerprint(two.get(com.autotrade.config.SamePackageRecordReader.class)))
+                .isNotEqualTo(fingerprint(two.get(ReflectionFreeEngineCode.class)));
+    }
+
+    static String fingerprint(JavaClass k) {
+        java.util.TreeSet<String> lines = new java.util.TreeSet<>();
+        k.getModifiers().forEach(m -> lines.add("class " + m));
+        for (com.tngtech.archunit.core.domain.JavaMember m : k.getMembers()) {
+            String type = m instanceof JavaField f ? f.getType().getName()
+                    : ((com.tngtech.archunit.core.domain.JavaCodeUnit) m).getReturnType().getName();
+            lines.add("member " + m.getFullName() + " " + new java.util.TreeSet<>(m.getModifiers()) + " " + type);
+        }
+        k.getAccessesFromSelf().forEach(a -> lines.add("access " + a.getOrigin().getFullName() + " -> "
+                + a.getTarget().getFullName() + " " + a.getClass().getSimpleName()));
+        k.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).forEach(n -> lines.add("type " + n)));
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(String.join("\n", lines).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /**
@@ -705,9 +767,24 @@ class RealPathReflectionTest {
     /** 허용 클래스가 써서는 안 되는 Jackson 메서드: 임의 객체를 JSON 노드에 넣는다(risk-ops PR #110 F-2). */
     static final Set<String> POJO_NODE_METHODS = Set.of("putPOJO", "pojoNode", "addPOJO", "insertPOJO");
 
-    /** 허용 클래스 모양 위반 목록(빈 목록이면 통과). */
-    static List<String> recordReaderShape(JavaClass k) {
+    /**
+     * 허용 클래스 모양 위반 목록(빈 목록이면 통과). 중첩 클래스는 두지 않는다: 중첩 클래스에 칸을 두면 고정 타입 목록을 피해
+     * 클래스 객체를 담을 수 있다(PR #110 독립 QA R2, architect AR-5, risk-ops R-3). 그래도 중첩 클래스가 있으면 그 클래스에도
+     * 같은 타입 목록을 적용해 위반을 함께 보인다.
+     */
+    static List<String> recordReaderShape(JavaClass k, JavaClasses scope) {
         List<String> problems = new ArrayList<>();
+        List<JavaClass> nested = scope.stream().filter(n -> n.getName().startsWith(k.getName() + "$"))
+                .sorted(java.util.Comparator.comparing(JavaClass::getName)).toList();
+        nested.forEach(n -> problems.add(k.getSimpleName() + "가 중첩 클래스 " + n.getName() + "를 둔다"));
+        for (JavaClass c : java.util.stream.Stream.concat(java.util.stream.Stream.of(k), nested.stream()).toList()) {
+            c.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).stream()
+                    .filter(n -> !n.equals(c.getName()) && !JAVAC_BOOTSTRAP_TYPES.contains(n) && !RECORD_READER_TYPES.contains(n)
+                            // 바깥 클래스와 중첩 클래스 사이의 상호 참조는 위의 "중첩 클래스를 둔다"로 이미 보였다
+                            && !(c != k && n.equals(k.getName())))
+                    .forEach(n -> problems.add(c.getName().substring(c.getPackageName().length() + 1)
+                            + "가 고정 목록 밖 타입 " + n + "를 쓴다")));
+        }
         for (com.tngtech.archunit.core.domain.JavaMember m : k.getMembers()) {
             if (m.getModifiers().contains(com.tngtech.archunit.core.domain.JavaModifier.PRIVATE)) {
                 continue;
@@ -723,6 +800,10 @@ class RealPathReflectionTest {
                     .filter(t -> t.getName().equals("java.lang.Class") || t.getName().equals("java.lang.Object")
                             || t.getPackageName().equals("java.lang.reflect"))
                     .forEach(t -> problems.add(m.getFullName() + "의 서명에 " + t.getName()));
+            // List<?>·Stream<?>·<T> T처럼 원시 타입에 Object가 드러나지 않는 모양(PR #110 독립 QA R1)
+            if (types.stream().anyMatch(RealPathReflectionTest::hasWildcardOrTypeVariable)) {
+                problems.add(m.getFullName() + "의 서명에 와일드카드·타입 변수");
+            }
         }
         // 메서드 참조(Class::getRecordComponents)도 잡도록 호출뿐 아니라 접근 전체를 본다(architect PR #110 AR-4)
         k.getAccessesFromSelf().stream()
@@ -732,11 +813,21 @@ class RealPathReflectionTest {
         k.getAccessesFromSelf().stream()
                 .filter(c -> POJO_NODE_METHODS.contains(c.getTarget().getName()))
                 .forEach(c -> problems.add(c.getOrigin().getFullName() + "가 임의 객체를 JSON 노드에 넣는다: " + c.getTarget().getName()));
-        k.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).stream()
-                .filter(n -> !n.equals(k.getName()) && !n.startsWith(k.getName() + "$")
-                        && !JAVAC_BOOTSTRAP_TYPES.contains(n) && !RECORD_READER_TYPES.contains(n))
-                .forEach(n -> problems.add(k.getSimpleName() + "가 고정 목록 밖 타입 " + n + "를 쓴다")));
         return problems;
+    }
+
+    private static boolean hasWildcardOrTypeVariable(com.tngtech.archunit.core.domain.JavaType t) {
+        if (t instanceof com.tngtech.archunit.core.domain.JavaWildcardType
+                || t instanceof com.tngtech.archunit.core.domain.JavaTypeVariable) {
+            return true;
+        }
+        if (t instanceof com.tngtech.archunit.core.domain.JavaParameterizedType p) {
+            return p.getActualTypeArguments().stream().anyMatch(RealPathReflectionTest::hasWildcardOrTypeVariable);
+        }
+        if (t instanceof com.tngtech.archunit.core.domain.JavaGenericArrayType a) {
+            return hasWildcardOrTypeVariable(a.getComponentType());
+        }
+        return false;
     }
 
     @Test
@@ -884,7 +975,8 @@ class RealPathReflectionTest {
                 .importClasses(com.autotrade.config.SamePackageRecordReader.class));
         assertThat(String.join("\n", samePackage.getFailureReport().getDetails())).contains(
                 "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.config.SamePackageRecordReader.first",
-                "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName");
+                "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeName",
+                "허용 목록 밖 리플렉션 타입 메서드: Method <com.autotrade.config.SamePackageRecordReader.typeArgument");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
                 .get(ReflectionFreeEngineCode.class).getSource().orElseThrow().getUri())).isEmpty();
