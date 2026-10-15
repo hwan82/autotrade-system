@@ -14,6 +14,7 @@ import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ResultBundle;
+import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationReport;
 import java.io.IOException;
@@ -182,6 +183,32 @@ class CombinationExperimentTest {
         assertThat(second.files()).isEqualTo(first.files());
         assertThat(secondBundle).isEqualTo(firstBundle);
         assertThat(Files.exists(tmp.resolve("experiments").resolve(ID).resolve(ResultBundle.FILE_NAME + ".tmp"))).isFalse();
+    }
+
+    @Test
+    void 실행_명령_병렬_상한이_1이면_결정론_확인을_같음으로_적지_않는다() throws IOException {
+        // 등록 파일 parallelism 2라도 실행 명령 상한 1이면 두 실행이 모두 직렬이라 비교가 안 된다(D-089, PR #113 architect R6)
+        Path snapshots = snapshots();
+        Path dir = experiment(COMBOS);
+        RunGate capOne = new RunGate() {
+            @Override
+            public java.util.Optional<String> stopReason() {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public int maxParallelRuns() {
+                return 1;
+            }
+        };
+        List<String> log = new ArrayList<>();
+
+        CombinationExperiment.Outcome out = CombinationExperiment.runAndWrite(dir, Path.of(".."), snapshots,
+                new CodeVersion("test", false), true, log::add, capOne);
+
+        assertThat(out.files().get("inputs.yaml")).doesNotContain("같음(").contains("determinism: \"확인 안 함(실제 병렬 수가 1");
+        assertThat(log).contains("조합 2개 실행(병렬 1)", "결정론 확인 생략: 실제 병렬 수가 1입니다")
+                .doesNotContain("결정론 확인: 병렬 1로 다시 실행");
     }
 
     @Test

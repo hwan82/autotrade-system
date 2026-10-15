@@ -185,6 +185,40 @@ class ExperimentJobTest {
     }
 
     @Test
+    void 실행_명령_진입점은_본체를_작업_제어_아래에서_돌린다(@TempDir Path repo) throws Exception {
+        // risk-ops 3차 R9: run이 runControlled를 거치지 않으면(afterCancel을 건너뛰면) 취소 뒤 정지 요청이 4로 바뀌지 않는다
+        List<String> seen = new java.util.ArrayList<>();
+        int code = ExperimentMain.run(new String[] {"combination", "--max-parallel-runs=2", repo.toString(), "abc", "false",
+                JOB}, Clock.fixed(WEEKEND, ZoneOffset.UTC), config, (command, forwarded, configDir, gate) -> {
+                    seen.add(command + " " + String.join(" ", forwarded) + " 상한 " + gate.maxParallelRuns());
+                    try {
+                        assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.RUNNING);
+                        Files.writeString(files().cancelRequest(JOB), "");
+                        gate.check();
+                        return 0;
+                    } catch (ExperimentCancelledException e) {
+                        try {
+                            Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+                        } catch (IOException io) {
+                            throw new UncheckedIOException(io);
+                        }
+                        return e.exitCode();
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
+
+        assertThat(seen).containsExactly("combination " + repo + " abc false " + JOB + " 상한 2");
+        assertThat(code).isEqualTo(4);
+        assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.STOPPED);
+        assertThat(status().message()).contains("정지를 요청");
+        assertThat(files().cancelRequest(JOB)).doesNotExist();
+        // 잠금이 풀려 같은 실험을 다시 시작할 수 있다
+        Files.delete(config.resolve(ExperimentGate.STOP_REQUEST));
+        start(Clock.fixed(WEEKEND, ZoneOffset.UTC)).finish(0);
+    }
+
+    @Test
     void 정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다() throws Exception {
         ExperimentJob job = start(new MovingClock(WEEKEND));
         assertThat(job.afterCancel(0)).isZero();
@@ -350,23 +384,34 @@ class ExperimentJobTest {
     @Test
     void 설정_폴더는_상대_경로와_점점이_섞여도_정규화한_절대_경로로_쓴다(@TempDir Path repo) throws Exception {
         // architect 2차 R8·risk-ops 2차 R4: 상태 파일 메시지에서 설정 폴더를 가리려면 경로 표기가 하나여야 한다
-        Path messy = Path.of("").toAbsolutePath().relativize(config.resolve("sub").resolve(".."));
-        assertThat(messy.isAbsolute()).isFalse();
-        PrintStream original = System.out;
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
-        try {
-            ExperimentMain.run(new String[] {"combination", repo.toString(), "abc", "false", JOB},
-                    Clock.fixed(WEEKEND, ZoneOffset.UTC), messy);
-        } finally {
-            System.setOut(original);
+        Path absoluteMessy = config.resolve("sub").resolve("..");
+        List<Path> cases = new java.util.ArrayList<>(List.of(absoluteMessy));
+        // 상대 경로는 작업 폴더와 임시 폴더가 같은 루트일 때만 만들 수 있다. Windows에서 드라이브가 다르면
+        // relativize가 IllegalArgumentException을 던진다(PR #113 architect 3차 R9)
+        Path cwd = Path.of("").toAbsolutePath();
+        if (cwd.getRoot().equals(absoluteMessy.getRoot())) {
+            Path relativeMessy = cwd.relativize(absoluteMessy);
+            assertThat(relativeMessy.isAbsolute()).isFalse();
+            cases.add(relativeMessy);
         }
-
-        String printed = out.toString(StandardCharsets.UTF_8);
         Path normalized = config.toAbsolutePath().normalize();
-        assertThat(printed).contains("진행 상태 파일: " + ExperimentJobFiles.in(normalized).status(JOB))
-                .contains("정지 요청 파일 확인 위치: " + normalized.resolve(ExperimentGate.STOP_REQUEST))
-                .doesNotContain("sub" + File.separator + "..");
+        for (Path messy : cases) {
+            PrintStream original = System.out;
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+            try {
+                ExperimentMain.run(new String[] {"combination", repo.toString(), "abc", "false", JOB},
+                        Clock.fixed(WEEKEND, ZoneOffset.UTC), messy);
+            } finally {
+                System.setOut(original);
+            }
+
+            String printed = out.toString(StandardCharsets.UTF_8);
+            assertThat(printed).as(messy.toString())
+                    .contains("진행 상태 파일: " + ExperimentJobFiles.in(normalized).status(JOB))
+                    .contains("정지 요청 파일 확인 위치: " + normalized.resolve(ExperimentGate.STOP_REQUEST))
+                    .doesNotContain("sub" + File.separator + "..");
+        }
     }
 
     @Test
