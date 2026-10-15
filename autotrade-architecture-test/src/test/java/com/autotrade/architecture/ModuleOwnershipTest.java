@@ -116,6 +116,7 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.control", "autotrade-control"),
             Map.entry("com.autotrade.notification", "autotrade-notification-jar"),
             Map.entry("com.autotrade.monitor", "autotrade-monitor-agent-jar"),
+            Map.entry("com.autotrade.monitorsources", "autotrade-monitor-sources"),
             Map.entry("com.autotrade.app.engine", "autotrade-app-engine"),
             Map.entry("com.autotrade.app.gateway", "autotrade-app-gateway"),
             Map.entry("com.autotrade.app.lab", "autotrade-app-lab"),
@@ -127,7 +128,7 @@ class ModuleOwnershipTest {
      * 표에는 있지만 아직 클래스 파일이 없는 자리 모듈({@code package-info.java}만 있어 컴파일 결과가 없다). 클래스가 생기면
      * 여기서 빼야 위 검사가 통과한다.
      */
-    static final Set<String> NO_CLASSES_YET = Set.of("autotrade-notification-jar", "autotrade-monitor-agent-jar");
+    static final Set<String> NO_CLASSES_YET = Set.of("autotrade-notification-jar");
 
     /**
      * 설계상 Java 클래스를 만들지 않는 Java 플러그인 모듈(정적 자원만 담는다). 패키지를 소유하지 않으므로 {@link #OWNERS}에 없다.
@@ -403,7 +404,7 @@ class ModuleOwnershipTest {
         assertThat(OurModules.classFileCount(jar)).isEqualTo(1);
         // 지금 실제 표의 선언도 사실이다(자원 전용·자리 모듈)
         assertThat(classlessModules()).containsExactlyInAnyOrder(
-                "autotrade-ui", "autotrade-notification-jar", "autotrade-monitor-agent-jar");
+                "autotrade-ui", "autotrade-notification-jar");
     }
 
     private static void writeEmptyJar(Path jar) throws IOException {
