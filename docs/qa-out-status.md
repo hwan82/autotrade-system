@@ -53,3 +53,4 @@
 | 2026-10-14 | docs/reviews/pr-108/architect.md·risk-ops.md 재검토 (헤드 743545c) | 수정 필요(AR-8·AR-9 / F6, 권고 R5) | `Class[].class` 배열 클래스 객체 금지(AR-8·F6), `getClass()`는 바로 다음 명령이 이름 읽기일 때만(바이트코드 순서 검사 GetClassUses, AR-9·R5), 고정 예제 3건 추가. 같은 검토자 재검토 요청 |
 | 2026-10-14 | docs/reviews/pr-108/architect.md·risk-ops.md 재검토 (헤드 4f44ccc) | 수정 필요(AR-10 / F7) | 서명의 `Class`를 바인딩이 아닌 메서드의 `Class<T>` 매개변수 하나로 제한(상위 타입 인자·반환 타입·타입 변수 경계 금지), 고정 예제 P4~P6. 같은 검토자 재검토 요청 |
 | 2026-10-14 | docs/reviews/pr-108/architect.md·risk-ops.md 재검토 (헤드 af0a8e3) | 승인(권고 R6 두 검토 공통) | R6(Jackson 실행 동작에 기댄 근거, 매퍼 클래스 객체)은 D-086 위험과 한계에 한 줄, Jackson 버전 올림 PR 후속. 독립 QA 재검토 요청 |
+| 2026-10-15 | docs/reviews/pr-108/qa.md 재검토 2026-10-15 | PASS(권고 R7) | 사용자 지시 "머지하십시오"(스레드 2026-10-15T04:08:22Z)로 PR #108 머지 `711b027`. R7(`RecordComponent#getType`으로 리터럴 없이 클래스 객체)은 후속 PR에서 레코드 구성 요소 읽기를 `SecretPaths`만 허용, `RecordComponent` 메서드 허용 목록 |
