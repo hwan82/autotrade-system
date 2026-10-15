@@ -70,11 +70,14 @@ public class SettingsController {
     private final RuntimeConfigHolder holder;
     private final RuntimeConfigStore store;
     private final LoadedConfig startup;
+    private final ExperimentLimitsPublisher limits;
     private final RuntimeConfig defaults;
 
-    public SettingsController(RuntimeConfigHolder holder, RuntimeConfigStore store, LoadedConfig startup) {
+    public SettingsController(RuntimeConfigHolder holder, RuntimeConfigStore store, LoadedConfig startup,
+            ExperimentLimitsPublisher limits) {
         this.holder = holder;
         this.store = store;
+        this.limits = limits;
         this.startup = startup;
         this.defaults = new ConfigLoader().defaults();
     }
@@ -123,6 +126,11 @@ public class SettingsController {
                 return after;
             });
             log.info("설정 변경(UI): {}", touched.stream().sorted().collect(Collectors.joining(", ")));
+            if (touched.contains(LAB_PARALLEL)) {
+                // 실험 실행 명령은 이 파일로 상한을 받는다(D-094). 두 저장이 겹쳐도 마지막 쓰기가 최신 값을 읽도록 current()를 쓴다.
+                // 실패해도 저장은 그대로이고 경고 로그만 남긴다
+                limits.publish(holder.current());
+            }
             return view(saved);
         } catch (IllegalArgumentException e) {
             // RuntimeConfig 검증 메시지는 키 이름과 범위만 담는다. 비밀값 형식 오류는 apply가 값 없이 만든다
@@ -251,8 +259,9 @@ public class SettingsController {
         List<Group> groups = new ArrayList<>();
 
         groups.add(new Group("lab", "실험실", List.of(
-                plain(LAB_PARALLEL, "int", c.lab().maxParallelRuns(), d.lab().maxParallelRuns(), true, "즉시(새 Run부터)",
-                        List.of(), "동시에 도는 계좌(Run) 수 상한, 1~64. 실전 엔진 자원 보호용"),
+                plain(LAB_PARALLEL, "int", c.lab().maxParallelRuns(), d.lab().maxParallelRuns(), true, "다음 실험 실행부터",
+                        List.of(), "동시에 도는 계좌(Run) 수 상한, 1~64. 실전 엔진 자원 보호용. 실험 실행 명령이 -PmaxParallelRuns 없이"
+                                + " 돌 때 쓴다(실행 중인 실험은 그대로)"),
                 plain(LAB_SEED_KRW, "long", c.lab().defaultSeedCapitalKrw(), d.lab().defaultSeedCapitalKrw(), true, "즉시",
                         List.of(), "국내 실험 기본 시드머니(원)"),
                 plain(LAB_SEED_USD, "long", c.lab().defaultSeedCapitalUsd(), d.lab().defaultSeedCapitalUsd(), true, "즉시",

@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.autotrade.app.lab.web.LocalOnlyRequestFilter;
 import com.autotrade.config.KakaoMode;
 import com.autotrade.config.RuntimeConfigHolder;
+import com.autotrade.sim.run.ExperimentLimits;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -116,6 +117,8 @@ class SettingsControllerTest {
         assertThat(holder.current().lab().maxParallelRuns()).isEqualTo(2);
         assertThat(holder.current().lab().defaultSeedCapitalKrw()).isEqualTo(5_000_000L);
         assertThat(Files.readString(dir.resolve("config/runtime-config.json"))).contains("\"max-parallel-runs\" : 2");
+        // 실험 실행 명령이 읽는 상한 파일도 같은 값으로 바뀐다(D-094)
+        assertThat(ExperimentLimits.read(dir.resolve("config")).orElseThrow().maxParallelRuns()).isEqualTo(2);
     }
 
     @Test

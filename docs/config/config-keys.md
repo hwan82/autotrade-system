@@ -16,7 +16,7 @@
 | `market-data.priority` | 증권사 배열 | `["KIWOOM","TOSS","KIS"]` | KIS·KIWOOM·TOSS, 비어 있지 않고 중복 없음. 게이트웨이는 이 순서대로 시세 소스를 고르고, 목록에 없는 증권사는 시세 소스로 쓰지 않는다(아직 구현하지 않은 소스는 건너뜀). 기본값은 D-024 순서다: 토스 시세 조회는 무료로 사용자가 확인했다(Q-020, D-039). 무료여도 증권사별 호출 한도는 지킨다(`docs/research/market-data-limits.md` 1장). 토스 보유 종목 보호 폴링은 이 키가 아니라 `market-data.toss-polling-scope`가 정한다. **D-059(2026-10-11)**: 토스 Client ID가 하나인 동안 게이트웨이는 토스를 호출하지 않으므로 `TOSS` 항목을 건너뛴다(토스 연결 PR에서 기동 경고와 함께 강제, 기본값을 `["KIWOOM","KIS"]`로 바꿀지도 그 PR에서 정함) | 재기동 | 시세 게이트웨이 | D-024, D-039(D-033 되돌림), D-059 |
 | `market-data.mode` | enum | `AUTO` | AUTO·FAILOVER·SHARDED. AUTO는 실시간 소스 두 곳이 설정되어 있으면 SHARDED, 아니면 FAILOVER(D-009). 운용 중 한쪽이 DEGRADED가 되면 남은 쪽으로 넘기는 동작은 2단계 ADR에서 정한다 | 재기동 | 시세 게이트웨이 | D-009 |
 | `market-data.toss-polling-scope` | enum | `HELD_ONLY` | HELD_ONLY·OFF. ⚠️ OFF는 전 시세 끊김 시 보유 종목 폴링 손절 감시(장애표 2번)를 끈다. 실전 보유 종목이 있을 때의 검증은 risk-ops 검토 후 추가 | 재기동 | 실전 엔진(보호 폴링) | D-008, D-024(HELD_ONLY 유지) |
-| `lab.max-parallel-runs` | int | `4` | 1~64 | 즉시(새 Run부터) | 실험실(**지금 이 키를 읽는 운영 코드는 없다**. 실험실은 실험을 돌리지 않고(D-062), 실험 실행 명령의 병렬 상한은 `-PmaxParallelRuns`로 받는다(D-089 결정 4, 설정 로더 금지 D-063). 잇는 방법은 D-089 변경 제안) | ADR-001 3장 예산 `[가정]` |
+| `lab.max-parallel-runs` | int | `4` | 1~64 | 다음 실험 실행부터 | 실험실이 기동 때와 설정 화면 저장 때 `<설정 폴더>/experiment-state/limits`(experiment-limits-v1)로 내보내고, 실험 실행 명령은 `-PmaxParallelRuns`가 없을 때 그 파일 값을 병렬 Run 상한으로 쓴다(D-094, 실행 명령은 설정 로더를 읽지 않음 D-063). 실행 중인 실험은 그대로 | ADR-001 3장 예산 `[가정]` |
 | `lab.default-seed-capital-krw` | long(원) | `10000000` | 1 이상 | 즉시 | 실험 생성 화면(국내) | D-021 |
 | `lab.default-seed-capital-usd` | long(달러) | `10000` | 1 이상 | 즉시 | 실험 생성 화면(미국) | D-021 |
 | `notification.slack.enabled` | bool | `false` | true면 webhook-url 필수 | 즉시 | 알림 | 원본 기획 v2.0 |
