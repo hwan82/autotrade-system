@@ -54,3 +54,35 @@
 
 ## 판정
 **수정 필요(A14)**: main d6fb6e7과 `docs/spec/autotrade-spec.md`·`docs/qa/pending.md` 충돌(PR CI 미실행 포함). main을 병합해 충돌을 풀고 CI·빌드 통과를 확인한 뒤 재검토. 코드 쪽 실패 항목은 없음(A8·A12 통과). 권고 Q1·R1·R2는 막지 않음.
+
+## 재검토 2026-10-15
+- 대상: PR #113 / 헤드 330b2f3 / 1차 판정 헤드 c7f5661(보고서 커밋 5cffde4) 뒤 변경 전체: 9e2221f(main d6fb6e7 병합, A14), 9ffc8cc(QA Q1·R1·R2·R5 반영), e000c7a(main b4ed7fc 병합), 998da51(architect 2차 R7·R8 시험), 검토 원문. 현재 origin/main 88212d3(PR #115)은 아직 병합되지 않았지만 `git merge-tree --write-tree origin/main HEAD` 충돌 없음
+- 점검표: A 전체 + B1, B6. 1차 A14와 권고 Q1·R1·R2 재확인
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks`(헤드 330b2f3): 1회째 **BUILD SUCCESSFUL**. 결과 XML 합계 **1,213건**, 실패·오류·건너뜀 0
+  - CI(헤드 330b2f3): Gradle build, DB schema (PostgreSQL 16), Secret scan and collector boundary 모두 success(1차 때는 충돌로 PR CI가 돌지 않았다)
+  - 변이(운영 코드 한 곳씩 고치고 해당 모듈 시험, 매번 원복, 작업 트리 깨끗함 확인):
+
+| # | 변이 | 결과 |
+|---|---|---|
+| M4 | `SimulationExperimentRunner` 생성자 `Math.min(parallelism, cap)` → `parallelism`(1차에서 살아남음) | **잡힘**(`RunProgressTest` FAILED). Q1 해소 |
+| M7 | `ExperimentMain.runControlled`에서 `control.afterCancel(..)` 연결 제거 | 잡힘(`실행_명령은_취소로_끝난_본체도_정지_요청이_있으면_종료_코드_4로_끝낸다` FAILED) |
+| M8 | 설정 폴더 정규화(`toAbsolutePath().normalize()`) 제거 | 잡힘(app-experiment 36건 중 1 FAILED) |
+| M9 | `ExperimentJobs.list()`의 힙 자르기(`kept.poll()`) 제거 | 잡힘(`상한을_넘으면_가장_최근_파일을_남기고_자른다` FAILED) |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A2 | 통과 | 보호 테스트 변경 없음. 새 시험은 추가만 |
+| A8 | 통과 | 1차 근거 유지. 추가로 R1 반영: 취소(3)로 끝난 뒤 정지 사유가 있으면 종료 코드 4와 `STOPPED`·정지 이유로 올린다(`ExperimentJob.afterCancel`, `ExperimentMain.runControlled`). 완료(0)·검토 필요(2)는 바꾸지 않음(시험 `정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다`). 장애표 #10 감지 단서가 취소와 겹친 회차에도 남는다(1차 P1 해소) |
+| A10 | 통과 | 추가 줄에 키·계좌번호·토큰 없음. 설정 폴더 경로를 정규화해 상태 파일 메시지에서 가림(M8로 물림) |
+| A11 | 통과 | 시험 삭제 0, 보호 테스트 무변경. M4가 이제 잡힘 |
+| A12 | 통과 | 장애표 #10·5.2 0번 문구와 동작 일치(D-089 2번 갱신) |
+| A14 | 통과 | **1차 A14 해소**: main 병합으로 기획서·pending.md 충돌이 풀렸고 CI가 돈다. D-089 2번(취소 뒤 정지 사유는 4로)과 검증 절 건수(`RunProgressTest` 8, `ExperimentJobTest` 17)가 헤드 코드·시험과 맞음 |
+| B1 | 통과 | 헤드 직접 빌드 1,213건, CI 3건 success |
+| B6 | 통과 | R1·R2·Q1·R5 각각 실패하는 경우를 포함한 시험이 있고 변이로 확인 |
+
+- 1차 권고 처리: Q1 해소(M4 잡힘), R1 해소, R2 해소(최근 500개만 힙에 남기고 수정 시각은 파일마다 한 번 읽음), 개발 쪽 R5 해소(설정 폴더 정규화)
+- 새 권고 R3 (참고): 헤드에 main 88212d3(PR #115, 실험실 모니터링 기동·종료 변경)이 아직 없다. 충돌은 없지만 같은 `autotrade-app-lab`을 고치므로 머지 전 main 병합 뒤 CI 재확인을 권한다
+
+## 판정 (재검토)
+승인 (1차 A14 해소: main 병합·CI 통과. 권고 Q1·R1·R2 반영과 변이 M4·M7·M8·M9 잡힘 확인. 빌드 1,213건 통과. 참고 R3. 실전 관련이라 머지는 사용자)
