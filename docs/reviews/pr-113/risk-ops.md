@@ -78,3 +78,46 @@
 
 ## 판정 (재검토)
 승인 (점검표 A 전 항목 통과 또는 해당 없음, 확인 못 함 없음. 직전 F1·R1·R2 해소, R3은 막지 않는 권고. 실전 관련 PR이므로 지침 10장·11장에 따라 사용자 직접 머지·독립 QA 관문 대상)
+
+## 재검토 2026-10-15 (2차)
+- 대상: PR #113 / 헤드 9ffc8cc / main 대비 diff `git diff origin/main...HEAD` 전체(merge-base d6fb6e7, 파일 42개). 직전 재검토(9e51c66, 승인) 뒤 더해진 것: 독립 QA 원문·대기 목록(5cffde4·c7f5661), main d6fb6e7 병합(9e2221f), QA 권고 반영 코드(9ffc8cc: `ExperimentJob.afterCancel`, `ExperimentMain` 설정 폴더 정규화·`afterCancel` 배선, `ExperimentJobs.list` 힙 상한, `RunProgressTest`·`ExperimentJobTest` 각 추가, D-089·runbooks 문구).
+- 점검표: A
+- 직접 실행한 것 (별도 clone, 헤드 9ffc8cc, 작업 트리 깨끗함 확인):
+  - `./gradlew build --no-daemon`: **BUILD SUCCESSFUL**(3분 40초). 결과 XML 합계 1,175건 실패·오류·건너뜀 0. `:autotrade-risk:test` 55/0/0, `:autotrade-architecture-test:test` 41/0/0, `:autotrade-app-engine:test` 50/0/0, `:autotrade-sim:test` 241/0/0, `:autotrade-app-experiment:test` 34/0/0, `:autotrade-app-lab:test` 159/0/0, `:autotrade-app-gateway:test` 49/0/0, `:autotrade-app-watchdog:test` 1/0/0. 새 시험 `RunProgressTest#병렬_상한_1이면_먼저_돈_Run이_오래_걸려도_다음_Run이_겹쳐_시작하지_않는다`(1.008초), `ExperimentJobTest#취소로_멈추는_사이_정지_요청이_생기면_종료_코드_4와_정지_이유를_남긴다`, `#정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다` 통과.
+  - 병합 커밋 9e2221f `git show --cc`: 충돌 해결은 `docs/qa/pending.md`(#110 줄 + #113 줄)와 `docs/spec/autotrade-spec.md`(v14.33 줄 + v14.30 "번호 미사용" 줄)를 둘 다 남긴 것뿐이고 코드 변경을 끼워 넣지 않음.
+  - **현재 main과의 병합 확인**: `origin/main`이 b4ed7fc(PR #114 머지, D-090·v14.34)로 앞서 있음. `git merge-tree --write-tree origin/main HEAD` → **충돌 3파일** `docs/decisions/README.md`(D-090 줄과 D-089 줄), `docs/qa/pending.md`(PR #114 줄과 #113 줄), `docs/spec/autotrade-spec.md`(버전 칸 v14.34/v14.33, 변경 이력 v14.34 줄과 v14.33 줄). GitHub REST `pulls/113`: `mergeable: false`, `mergeable_state: dirty`. 헤드 9ffc8cc check run **0건**(PR CI 미실행).
+  - 시험 병합(별도 clone, 충돌 줄을 양쪽 다 남기고 버전 칸은 v14.34로 둠, 커밋·푸시 안 함): `./gradlew build` **BUILD SUCCESSFUL**, 1,211건 실패·오류·건너뜀 0. 코드 의미 충돌은 없음(PR #114의 실험실 `monitor` 패키지·`autotrade-monitor-sources`와 이 PR의 `experiment` 패키지는 겹치지 않음).
+  - 변이 시험(운영 코드 한 곳씩 고치고 해당 모듈 시험, 매번 `git checkout`으로 복원, 끝에 `git status` 깨끗함 확인):
+
+| # | 시도 | 결과 |
+|---|---|---|
+| M4 | `SimulationExperimentRunner.java:161` `Math.min(parallelism, cap)` → `parallelism` | **잡힘** 3회 중 3회(`RunProgressTest` 8건 중 1~2 FAILED). QA Q1 해소 |
+| M7 | `ExperimentMain.java:116` `control.afterCancel(dispatch(...))` → `dispatch(...)` (R1 배선 제거) | **살아남음**(`:autotrade-app-experiment:test` 전부 통과). 아래 R4 |
+| M8 | `ExperimentJobs.java:89` 힙 비교기 `newestFirst.reversed()` → `newestFirst`(오래된 것을 남김) | 잡힘(`ExperimentJobsTest` FAILED) |
+| M9 | `ExperimentMain.java:59` 설정 폴더 정규화 줄 제거 | 살아남음(정규화를 고정하는 시험 없음). 비밀값·실전 경로와 무관한 표시 문제라 권고만 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `git diff --name-status origin/main...HEAD`에 Guard·엔진·설정 로더·`autotrade-risk` 변경 없음. `:autotrade-risk:test` 55/0, `:autotrade-app-engine:test` 50/0 |
+| A2 | 통과 | `ArchitectureTest`·`RealPathReflectionTest`·`ModuleOwnershipTest` 변경 없음(병합으로 들어온 `RealPathReflectionTest` 변경은 main 쪽 d6fb6e7 것이고 merge-base에 포함). `:autotrade-architecture-test:test` 41/0. 이번 수정은 sim·app-experiment·app-lab 안이고 주문 출구를 만들지 않음. 시험 병합(b4ed7fc)에서도 ArchUnit 통과 |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음. `RunProgressTest#진행_보고와_병렬_상한은_골든_결과를_바꾸지_않는다` 통과(골든 바이트 일치) |
+| A6 | 해당 없음 | 블랙리스트·`RiskChain` 경로 변경 없음(이번 커밋은 sim 운영 코드를 바꾸지 않음, 시험만 추가) |
+| A7 | 해당 없음 | 실전 계좌 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 5.2 0번(broker-and-fault-design.md:144) 정지 확인 순서 유지: `ExperimentJob.check()`/`stopReason()`(ExperimentJob.java:134-159)이 정지 요청·장 시간 보호를 취소보다 먼저 봄. 새 `afterCancel`(ExperimentJob.java:220-232)은 종료 코드 3일 때만 `gate.stopReason()`을 다시 보고 있으면 4로 올리는 한 방향 변경이라 정지를 약하게 만들 수 없음(0·2 등 결과를 이미 쓴 코드는 바꾸지 않음, `#정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다`). 설정 폴더 정규화(ExperimentMain.java:59)는 `gate(...)`보다 앞이라 정지 요청 파일 경로가 `<정규화 경로>/experiment-state/stop-request`로 같은 파일을 가리킴. 병렬 기본 4와 실행기 쪽 상한이 이제 시험으로 고정됨(M4 잡힘). 실험실 목록 읽기는 최근 500개만 메모리에 둠(ExperimentJobs.java:89-96, M8 잡힘) |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음 |
+| A10 | 통과 | 이번 diff 전체에 키·계좌번호·토큰 없음. `afterCancel` 콘솔 출력은 기존 정지 메시지와 같은 내용(정지 요청 파일 경로·시각). 상태 파일에는 `withoutConfigDir`로 `<설정 폴더>`로 바뀌고(ExperimentJob.java:273-276), 이제 설정 폴더가 정규화돼 상대 경로·`..`도 가려짐(직전 R3 해소, 단 M9: 시험으로 고정 안 됨) |
+| A11 | 통과 | 시험 diff 삭제 줄 0(`git diff origin/main...HEAD -- '*/src/test/*'`). 보호 테스트 변경 없음. 새 동작(R1·R2·Q1)에 시험이 붙었고 M4·M8은 변이로 물림. R1 배선(M7)과 정규화(M9)는 시험으로 고정되지 않음(R4, 권고) |
+| A12 | 통과 | 장애표 #10(broker-and-fault-design.md:169) "실험 실행 명령 4" 감지 단서가 취소와 정지 요청이 겹친 회차에도 남게 됨(`afterCancel`, 상태 `STOPPED`와 정지 이유, `ExperimentJobStatus.State.ofExitCode` 4→STOPPED). 작업 폴더 실패·중복 실행 갈래의 4(직전 F1)는 그대로(ExperimentMain.java:104·111, 기존 시험 통과). 장애 테스트 8종의 전제(엔진·게이트웨이·감시 코드) 변경 없음 |
+| A13 | 해당 없음 | 시장별 규칙 변경 없음 |
+| A14 | **실패** | 코드와 문서는 맞음: D-089 결정 2(afterCancel)·검증 절 시험 수(`RunProgressTest` 8, `ExperimentJobTest` 15)가 실제 결과 XML과 일치, runbooks README 종료 코드 표의 "취소와 겹치면 4가 이김"이 `afterCancel`과 일치. 그러나 **현재 main b4ed7fc와 다시 충돌**: `docs/decisions/README.md`(D-090/D-089 줄), `docs/qa/pending.md`, `docs/spec/autotrade-spec.md`(버전 칸 v14.34/v14.33과 변경 이력). GitHub `mergeable_state: dirty`, 헤드 check run 0건이라 PR CI가 돌지 않았음. 독립 QA 1차 판정의 A14 실패 사유(main 충돌·CI 미실행)가 그대로 남아 있음. 병합 시 기획서 버전 칸은 main의 v14.34를 유지해야 함(main의 v14.34 줄이 "v14.33과 D-089는 열린 브랜치가 쓴다"고 예약함) |
+
+## 점검표 밖 발견 (2차 재검토)
+- 독립 QA 권고 처리: Q1 해소(M4가 3회 모두 잡힘. 새 시험은 첫 Run의 거래일 경계 정지 확인에서 최대 1초 기다리며, 상한이 맞으면 래치가 열리지 않아 1초 뒤 통과하는 구조라 정상 코드에서 흔들릴 여지는 없음 `[추론]`(코드 읽기, 전체 빌드에서 1.008초로 통과)). R1 해소(코드). R2 해소(M8로 물림). 직전 risk-ops R3(설정 폴더 정규화) 해소.
+- R4 (권고, 막지 않음): R1의 단위 동작(`afterCancel`)은 시험이 있지만 `ExperimentMain.run`에서 부르는 배선은 시험이 없다(M7 살아남음). 누가 배선을 빼면 취소·정지 겹침 회차에 장애표 #10 단서가 다시 사라진다. `ExperimentMain.run`을 등록 파일 하나로 돌리며 첫 확인에서 취소 요청을 보고, 그 뒤 정지 요청 파일이 생기게 하는 시험(또는 `dispatch`를 주입할 수 있게 해 3을 돌려주는 가짜로 확인)이면 고정된다. 같은 시험에 상대 경로 설정 폴더(M9)를 넣으면 정규화도 함께 고정된다.
+- 관찰(문제 아님): `afterCancel`은 취소로 멈춘 직후 장 시간 보호 구간에 들어간 경우(예: 07:59:59 취소, 08:00 종료)에도 4로 올린다. 결과 파일이 없는 것은 같고 자원 보호 쪽으로 기우는 방향이라 안전상 문제 없음. 정지 요청 파일 존재를 판단하지 못할 때 4가 되는 것도 기존 "판단 못 하면 멈춤" 규칙(ExperimentGate.java:52)과 같다.
+- 관찰: `docs/qa/pending.md`에 이번 수정에 대한 "PR #113 재검토해줘" 줄이 아직 없다. 독립 QA 재검토를 요청할 때 지침 11장대로 추가해야 한다.
+
+## 판정 (2차 재검토)
+수정 필요(A14: 현재 main b4ed7fc와 `docs/decisions/README.md`·`docs/qa/pending.md`·`docs/spec/autotrade-spec.md` 충돌로 PR이 병합 불가(dirty)이고 헤드 CI가 돌지 않음. main을 병합해 충돌을 풀고(기획서 버전 칸 v14.34 유지) CI 통과를 확인한 뒤 재검토. 코드 쪽 실패 항목 없음, R4는 막지 않는 권고)
