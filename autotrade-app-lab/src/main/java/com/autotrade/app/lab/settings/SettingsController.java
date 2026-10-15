@@ -127,9 +127,9 @@ public class SettingsController {
             });
             log.info("설정 변경(UI): {}", touched.stream().sorted().collect(Collectors.joining(", ")));
             if (touched.contains(LAB_PARALLEL)) {
-                // 실험 실행 명령은 이 파일로 상한을 받는다(D-094). 두 저장이 겹쳐도 마지막 쓰기가 최신 값을 읽도록 current()를 쓴다.
+                // 실험 실행 명령은 이 파일로 상한을 받는다(D-094). 값은 publisher 잠금 안에서 읽는다(두 저장이 겹쳐도 최신 값).
                 // 실패해도 저장은 그대로이고 경고 로그만 남긴다
-                limits.publish(holder.current());
+                limits.publish(holder::current);
             }
             return view(saved);
         } catch (IllegalArgumentException e) {

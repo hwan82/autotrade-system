@@ -8,7 +8,7 @@
 ## 결정
 
 1. **상한 파일** `<설정 폴더>/experiment-state/limits`(`ExperimentLimits`, `autotrade-sim` `com.autotrade.sim.run`). 형식 `format: experiment-limits-v1` 다음 `max-parallel-runs: N`(1~64), `updated-at: <ISO 시각>` 두 줄. 상태 파일(experiment-job-v1)과 같은 `키: 값` 줄이고, 모르는 키·중복 키·빠진 키·범위 밖·1 KiB 초과·일반 파일이 아님(링크·폴더)은 거부한다. 거부 메시지에 파일 내용을 싣지 않는다. 임시 파일에 쓰고 바꿔 넣는다.
-2. **쓰는 쪽은 실험실**(`ExperimentLimitsPublisher`). 기동 때 지금 설정값으로 한 번 쓰고, 설정 화면에서 `lab.max-parallel-runs`를 저장하면 다시 쓴다. 두 저장이 겹쳐도 마지막 쓰기가 최신 값을 읽도록 쓰는 순간의 `RuntimeConfigHolder.current()`를 쓴다(잠금 하나). 쓰기에 실패해도 설정 저장은 되돌리지 않고 경고 로그만 남긴다(설정 파일이 단일 원본이고 상한 파일은 사본). 실험실이 꺼진 동안 `runtime-config.json`을 손으로 고치면 다음 실험실 기동 때 반영된다.
+2. **쓰는 쪽은 실험실**(`ExperimentLimitsPublisher`). 기동 때 지금 설정값으로 한 번 쓰고, 설정 화면에서 `lab.max-parallel-runs`를 저장하면 다시 쓴다. 값은 쓰기 잠금 안에서 `RuntimeConfigHolder.current()`로 읽어, 두 저장이 겹쳐도 마지막 쓰기가 최신 값을 쓴다(PR #121 architect F2). 기동 때 `runtime-config.json`이 깨져 내장 기본값으로 떴으면(`ConfigSource.DEFAULT_FILE_INVALID`) 상한 파일을 고치지 않고 경고 로그만 남긴다. 사용자가 낮춰 둔 값이 기본 4로 덮이지 않게 지난 파일을 그대로 둔다(PR #121 architect F1). 쓰기에 실패해도 설정 저장은 되돌리지 않고 경고 로그만 남긴다(설정 파일이 단일 원본이고 상한 파일은 사본). 실험실이 꺼진 동안 `runtime-config.json`을 손으로 고치면 다음 실험실 기동 때 반영된다.
 3. **읽는 쪽은 실험 실행 명령**. 병렬 상한은 ① `--max-parallel-runs`(Gradle `-PmaxParallelRuns`)가 있으면 그 값 ② 없으면 상한 파일 값 ③ 파일이 없으면 기본 4. 시작 출력에 쓴 값과 출처(옵션, 실험실 설정과 저장 시각, 기본값)를 적는다. 상한 파일이 있는데 읽지 못하거나 형식이 틀리면 **기본값으로 넘어가지 않고 입력 오류(종료 코드 1)** 로 시작하지 않는다(실험실에서 1로 낮춘 상한이 파일 손상으로 4가 되지 않게). 이때도 정지 요청·장 시간 보호가 걸려 있으면 종료 코드 4와 그 이유가 먼저다(PR #113 risk-ops F1과 같은 원칙). 실행 명령은 여전히 `runtime-config.json`·`secrets.json`과 설정 로더를 읽지 않는다.
 4. 실행 중인 실험은 시작 때 정한 상한을 끝까지 쓴다(설정 화면 표시 "다음 실험 실행부터"). 상태 파일 형식(experiment-job-v1)은 그대로이고 `max-parallel-runs`에 실제 쓴 값이 남는다.
 
@@ -29,11 +29,12 @@
 - 실험실을 한 번도 띄우지 않았거나, 꺼진 동안 `runtime-config.json`을 손으로 고치면 실행 명령은 파일 값(없으면 기본 4)을 쓴다. 시작 출력의 출처와 저장 시각으로 알 수 있다 `[추론]`.
 - 상한 파일 쓰기 실패는 화면 응답에 나오지 않고 실험실 로그 경고로만 남는다. 실행 명령은 지난 값을 쓴다.
 - 같은 설정 폴더를 쓰는 다른 프로세스가 이 파일을 고치면 그 값을 따른다. 설정 폴더는 사용자 PC의 사용자 폴더이고 같은 폴더의 정지 요청 파일도 같은 전제다.
+- Windows에서 실험실이 상한 파일을 바꿔 넣는 순간 실행 명령이 읽으면 읽기 실패로 종료 코드 1이 될 수 있다(안전한 쪽 실패, 다시 실행하면 됨). Windows에서 확인하지 못함 `[추론]`.
 - 병렬 상한은 Run 스레드 수만 묶는다. 힙 상한(`-Pheap`, `labHeap`)과 OS 우선순위는 그대로다(D-089 위험 줄).
 
 ## 검증
 
 - `ExperimentLimitsTest`(7): 쓰고 읽기 왕복·임시 파일 없음, 바꿔 넣기, 없으면 빈 값, 범위 밖 거부, 형식 오류 11가지 거부(메시지에 내용 없음), 크기 상한·폴더 거부, 위치가 작업 폴더 옆.
-- `ExperimentLimitsPublisherTest`(2): 설정값·시각을 세 줄로 씀, 쓰지 못하면 false이고 예외 없음.
+- `ExperimentLimitsPublisherTest`(4): 설정값·시각을 세 줄로 씀, 쓰지 못하면 false이고 예외 없음, 설정 파일이 깨져 기본값으로 떴으면 기동 때 지난 상한(1)을 덮지 않음, 두 저장이 겹치면 늦게 시작한 저장의 최신 값이 남음(잠금을 빼면 실패).
 - `SettingsControllerTest`: 화면에서 `lab.max-parallel-runs`를 2로 저장하면 상한 파일도 2.
 - `ExperimentJobTest` 2건: 옵션이 없으면 상한 파일 값, 옵션이 이김, 파일 지우면 기본 4. 상한 파일이 깨졌으면 종료 코드 1·작업 시작 안 함·오류 출력에 고칠 방법, 옵션을 주면 파일을 보지 않음, 정지 요청이 있으면 4. 기존 "runtime-config.json은 읽지 않는다" 시험은 그대로 통과.
