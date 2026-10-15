@@ -93,6 +93,16 @@ public final class NameToClassBinding {
         }
     }
 
+    /** QA 재검토 R7(V17): 레코드 구성 요소 타입의 클래스 객체를 리터럴 없이 얻어 Jackson에 넘긴다. */
+    public static Object componentType(Class<?> record, Map<String, Object> fields) {
+        return M.convertValue(fields, record.getRecordComponents()[0].getType());
+    }
+
+    /** QA 재검토 R7: {@code getDeclaringRecord}는 허용 메서드 밖. */
+    public static String declaringRecord(java.lang.reflect.RecordComponent c) {
+        return c.getDeclaringRecord().getSimpleName();
+    }
+
     /** F1: 정적 의존 없이 다른 클래스 객체에 닿는 {@code Class} 메서드. */
     public static Class<?>[] nested(Class<?> holder) {
         return holder.getDeclaredClasses();

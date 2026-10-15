@@ -394,6 +394,16 @@ class RealPathReflectionTest {
             "getResourceAsStream");
 
     /**
+     * 레코드 구성 요소를 읽는 클래스(독립 QA PR #108 재검토 R7). {@code getRecordComponents()} + {@code RecordComponent#getType()}은
+     * 클래스 리터럴 없이 구성 요소 타입의 클래스 객체를 준다(예: 엔진 레코드의 {@code RealTradingGuard} 구성 요소). 그래서 이 길은
+     * 설정 레코드의 비밀값 경로만 읽는 {@code SecretPaths} 하나에만 연다. 늘리는 PR은 보호 테스트 변경이다.
+     */
+    static final Set<String> ALLOWED_RECORD_READERS = Set.of("com.autotrade.config.SecretPaths");
+
+    /** 레코드 구성 요소에서 부를 수 있는 메서드({@code getAccessor}는 {@code Method}라 허용 목록 밖 타입으로도 걸린다). */
+    static final Set<String> ALLOWED_RECORD_COMPONENT_METHODS = Set.of("getName", "getType", "getGenericType");
+
+    /**
      * 이름 문자열로 클래스를 얻는 데이터 바인딩(독립 QA PR #108 F1): Jackson은 {@code Class} 타입 값을 이름 문자열에서
      * {@code Class.forName}처럼 만든다. 그래서 {@code Class.class} 클래스 객체({@code readValue(.., Class.class)}), {@code Class}가
      * 들어간 필드·생성자 매개변수·제네릭 인자(바인딩 대상의 속성), Jackson 주석이 붙은 메서드나 설정자({@code set*})의 {@code Class}
@@ -441,6 +451,15 @@ class RealPathReflectionTest {
                 .filter(a -> a.getTarget().getOwner().getName().equals("java.lang.Class")
                         && !ALLOWED_CLASS_METHODS.contains(a.getTarget().getName()))
                 .forEach(a -> out.add("허용 목록 밖 Class 메서드: " + a.getDescription()));
+        c.getAccessesFromSelf().stream()
+                .filter(a -> a.getTarget().getOwner().getName().equals("java.lang.Class")
+                        && a.getTarget().getName().equals("getRecordComponents")
+                        && !ALLOWED_RECORD_READERS.contains(a.getOriginOwner().getName()))
+                .forEach(a -> out.add("허용 목록 밖 레코드 구성 요소 읽기: " + a.getDescription()));
+        c.getAccessesFromSelf().stream()
+                .filter(a -> a.getTarget().getOwner().getName().equals("java.lang.reflect.RecordComponent")
+                        && !ALLOWED_RECORD_COMPONENT_METHODS.contains(a.getTarget().getName()))
+                .forEach(a -> out.add("허용 목록 밖 RecordComponent 메서드: " + a.getDescription()));
         c.getSource().ifPresent(src -> out.addAll(GetClassUses.of(src.getUri())));
         return out;
     }
@@ -641,6 +660,8 @@ class RealPathReflectionTest {
         assertThat(c.modules()).as("실전 경로 런타임의 외부 라이브러리(허용 목록, risk-ops R-8)")
                 .containsExactlyInAnyOrderElementsOf(EXTERNAL_ALLOWLIST);
         assertThat(c.others()).as("프로젝트도 외부 모듈도 아닌 구성 요소(파일 의존 등)").isEmpty();
+        assertThat(ALLOWED_RECORD_READERS).as("레코드 구성 요소 읽기는 설정 비밀값 경로 계산 하나뿐이다(QA PR #108 R7)")
+                .containsExactly("com.autotrade.config.SecretPaths");
         assertThat(ALLOWED_SERVICE_LOADERS).as("ServiceLoader 허용 목록은 7단계 플러그인 로딩 PR 전까지 비어 있다").isEmpty();
         assertThat(ALLOWED_PROCESS_LAUNCHERS).as("외부 명령 실행 허용 목록은 7단계 감시 재기동 PR 전까지 비어 있다").isEmpty();
     }
@@ -767,7 +788,9 @@ class RealPathReflectionTest {
                 "NameToClassBinding.classOf가 getClass 메서드 참조를 만든다",
                 "NameToClassBinding$SuperProbe의 상위 타입 java.util.ArrayList<java.lang.Class<?>>에 Class",
                 "NameToClassBinding$TypeVarProbe의 상위 타입",
-                "NameToClassBinding$GetterProbe.getTypes() 반환 타입에 Class")
+                "NameToClassBinding$GetterProbe.getTypes() 반환 타입에 Class",
+                "허용 목록 밖 레코드 구성 요소 읽기: Method <com.autotrade.app.engine.archfixture.NameToClassBinding.componentType",
+                "허용 목록 밖 RecordComponent 메서드: Method <com.autotrade.app.engine.archfixture.NameToClassBinding.declaringRecord")
                 .doesNotContain("NameToClassBinding$Holder의", "NameToClassBinding$Holder.value");
         // 이름 읽기(e.getClass().getSimpleName())는 허용(ReflectionFreeEngineCode.ordinary)
         assertThat(GetClassUses.of(new ClassFileImporter().importClasses(ReflectionFreeEngineCode.class)
