@@ -107,6 +107,7 @@ class MonitorServiceTest {
                 return now[0];
             }
         };
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
         MetricSource stuck = new MetricSource() {
             @Override
             public String id() {
@@ -115,10 +116,15 @@ class MonitorServiceTest {
 
             @Override
             public List<Reading> read() {
+                // 첫 read가 막힌다(QA PR #114 P2: Windows WMI 첫 초기화 정지 등)
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
                 return List.of();
             }
         };
-        // 수집 스레드가 아니라 화면 상태만 본다: 에이전트를 시작하되 표본은 넣지 않는다(첫 read가 막힌 경우와 같은 상태)
         MonitorAgent agent = new MonitorAgent(clock, List.of(stuck), List.of(), 10, 10);
         MonitorSettings hourly = new MonitorSettings(true, 3600, 10, Set.of(), List.of());
         try (MonitorService service = new MonitorService(hourly, agent, clock, null)) {
@@ -131,6 +137,8 @@ class MonitorServiceTest {
             assertThat(service.view().stale()).isFalse(); // 경계
             now[0] = start.plusSeconds(3 * 3600 + 1);
             assertThat(service.view().stale()).isTrue();
+        } finally {
+            release.countDown();
         }
     }
 
