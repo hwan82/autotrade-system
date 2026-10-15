@@ -107,6 +107,30 @@ class HeartbeatWatchTest {
     }
 
     @Test
+    void 하트비트를_하나도_못_본_동안은_설정_폴더_경고를_주기로_되풀이하고_한_번이라도_보면_그친다() {
+        // PR #118 독립 QA R1: 첫 점검 한 번만 알리면 나중에 프로세스를 띄운 사람이 못 본다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("engine", "gateway"), Duration.ofSeconds(15));
+        watch.check(clock.instant());
+        assertThat(watch.allAbsentWarnings()).isEqualTo(1);
+
+        clock.advance(HeartbeatWatch.ALL_ABSENT_REPEAT.minusSeconds(5));
+        watch.check(clock.instant());
+        assertThat(watch.allAbsentWarnings()).isEqualTo(1);
+        clock.advance(Duration.ofSeconds(5));
+        watch.check(clock.instant());
+        assertThat(watch.allAbsentWarnings()).isEqualTo(2);
+
+        new HeartbeatWriter(dir, "gateway", clock).beat();
+        watch.check(clock.instant());
+        Heartbeat.file(dir, "gateway").toFile().delete(); // 정상 종료로 다시 모두 꺼짐: 폴더는 맞으니 알리지 않는다
+        clock.advance(HeartbeatWatch.ALL_ABSENT_REPEAT.multipliedBy(3));
+        watch.check(clock.instant());
+        assertThat(watch.states()).containsEntry("gateway", State.ABSENT);
+        assertThat(watch.allAbsentWarnings()).isEqualTo(2);
+    }
+
+    @Test
     void 상한보다_큰_하트비트_파일은_읽지_않고_읽을_수_없음이다() throws Exception {
         // PR #116 독립 QA R1: 비정상으로 커진 파일이 감시 힙을 채우지 않게 4KB 상한
         TestClock clock = new TestClock("2026-10-15T00:00:00Z");

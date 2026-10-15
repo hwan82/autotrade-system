@@ -61,10 +61,16 @@ public final class WatchdogMain {
         Path dir = configDir(paths);
         WatchdogSettings settings = WatchdogSettings.load(dir);
         // 지키는 설정 폴더를 남긴다. 잘못 적은 폴더면 모든 프로세스가 꺼짐으로만 보인다(architect PR #116 N2)
+        // PC CPU·메모리는 JDK OperatingSystemMXBean으로만 읽는다(D-095). 못 읽는 JVM이면 감시를 띄우지 않는다
+        OsReadings os = PlatformOsReadings.create().orElseThrow(() -> new IllegalArgumentException(
+                "이 JVM은 PC CPU·메모리 사용률을 줄 수 없습니다(com.sun.management.OperatingSystemMXBean 없음, D-095)"));
         LOG.log(Level.INFO, "감시 시작: 설정 폴더 {6}, 주기 {0}초, 하트비트 {1}({2}초 넘으면 멈춤), 드라이브 {3}, 여유 경고 {4}GB·위험 {5}GB",
                 settings.interval().toSeconds(), settings.processes(), settings.heartbeatStale().toSeconds(), settings.disks(),
                 Math.round(settings.diskWarnGb()), Math.round(settings.diskCriticalGb()), dir.toAbsolutePath());
-        Watchdog watchdog = new Watchdog(dir, settings, clock, DiskFreeSource.FILE_STORE);
+        LOG.log(Level.INFO, "감시 자원 임계: CPU 경고 {0}%·위험 {1}%·연속 {2}회, 메모리 경고 {3}%·위험 {4}%·연속 {5}회",
+                Math.round(settings.cpu().warn()), Math.round(settings.cpu().critical()), settings.cpu().sustain(),
+                Math.round(settings.memory().warn()), Math.round(settings.memory().critical()), settings.memory().sustain());
+        Watchdog watchdog = new Watchdog(dir, settings, clock, DiskFreeSource.FILE_STORE, os);
         watchdog.start();
         return watchdog;
     }

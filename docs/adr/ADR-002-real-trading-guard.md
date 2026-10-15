@@ -241,3 +241,7 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 - 남은 한계: 허용 목록 Jackson의 기본 동작 안의 리플렉션(새 객체는 Guard 타입을 넘겨야 하므로 3이, 살아 있는 객체 덮어쓰기는 5가 막는다. 허용 타입 안에 모르는 객체 접근 API가 있으면 열려 있다 `[추론]`), 허용 패키지 `java.lang`·`java.util` 안의 아직 모르는 간접 호출 수단 `[추론]`, `Object`로 받은 Guard 객체의 `getClass()`(이름 읽기 밖 사용은 6이 막고, Guard 타입 모양도 테스트로 고정), 빌드 밖에서 설치본에 끼워 넣은 jar와 `-javaagent` 같은 JVM 옵션(7단계 실행 절차서의 설치본 대조로 넘김, `-XX:+DisableAttachMechanism`과 `-D` 실행 옵션 대조 포함). 자세한 목록은 D-086 위험과 한계.
 - 검증: 테스트 9건과 변조 실험(D-086 검증 절). 운영 코드는 지금 위반 0건이다(`autotrade-config`의 `SecretPaths`는 `RecordComponent`·`Type`으로 구조만 읽고 호출하지 않는다).
 
+### 9.6 보강 5: 감시의 PC CPU·메모리 읽기 예외 (D-095, Q-053 사용자 결정 ①)
+- 9.5의 동적 코드 패키지 금지(`java.lang.management..`, `javax.management..`)에 좁은 예외 하나를 둔다. 허용 읽기 클래스 `ALLOWED_OS_METRIC_READERS`(지금 `com.autotrade.app.watchdog.PlatformOsReadings` 하나)만 허용 메서드 표 `OS_METRIC_METHODS`(`ManagementFactory#getOperatingSystemMXBean`, `java.lang.management.OperatingSystemMXBean`은 타입만, `com.sun.management.OperatingSystemMXBean#getCpuLoad`·`getTotalMemorySize`·`getFreeMemorySize`)를 쓸 수 있다. 의존 검사·상수 풀 검사·호출 검사가 모두 같은 표로 예외를 판정하고, 표 밖 메서드·타입은 이 클래스에서도 위반이다.
+- 두 값은 고정 목록 시험이 정확히 고정하므로 넓히면 보호 테스트 변경(실전 관련 PR)이다. 고정 예제 `OsMetricsProbe`가 허용 경로와 금지 경로(MBean 서버, `RuntimeMXBean`, `getProcessCpuTime`, `getArch`)를 함께 갖고 허용 목록 안·밖 두 경우를 시험한다.
+- 남은 한계: 허용 메서드가 돌려주는 값은 숫자뿐이라 다른 객체에 닿는 길은 없다 `[추론]`. 허용 읽기 클래스 안에 다른 일을 더하는 변경은 클래스 이름이 같으면 허용 목록이 막지 못하고 코드 검토로만 막는다(클래스 설명에 "다른 일을 더하지 않는다" 명시).

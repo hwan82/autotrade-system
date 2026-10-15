@@ -20,7 +20,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 감시 루프(MON-02 1차, D-092). 점검마다 ① 자기 하트비트 기록 ② 드라이브 여유 수집·임계 판정(감시 에이전트 코어) ③ 상주 프로세스
+ * 감시 루프(MON-02 1차, D-092·D-095). 점검마다 ① 자기 하트비트 기록 ② 드라이브 여유·PC CPU·메모리 수집과 임계 판정(감시 에이전트 코어) ③ 상주 프로세스
  * 하트비트 판정 ④ 정지 요청 파일 켜기·갱신·끄기를 한다.
  *
  * <p>점검은 스레드 하나에서 고정 간격으로 돈다. 한 점검의 어느 단계가 던져도 그 단계만 버리고 다음 단계와 다음 점검은 계속한다
@@ -39,19 +39,27 @@ final class Watchdog implements AutoCloseable {
     private final MonitorAgent agent;
     private final HeartbeatWatch heartbeats;
     private final StopRequests stopRequests;
-    private final Set<String> diskReadings = new TreeSet<>();
+    /** 점검마다 있어야 하는 값(드라이브 경로마다 여유, PC CPU·메모리). 하나라도 빠지면 판단 못 함. */
+    private final Set<String> requiredReadings = new TreeSet<>();
     private ScheduledExecutorService scheduler;
 
-    Watchdog(Path configDir, WatchdogSettings settings, Clock clock, DiskFreeSource.FreeSpace freeSpace) {
+    Watchdog(Path configDir, WatchdogSettings settings, Clock clock, DiskFreeSource.FreeSpace freeSpace, OsReadings os) {
         this.settings = settings;
         this.clock = clock;
         this.heartbeat = new HeartbeatWriter(configDir, PROCESS, clock);
         for (Path d : settings.disks()) {
-            diskReadings.add(DiskFreeSource.readingName(d));
+            requiredReadings.add(DiskFreeSource.readingName(d));
         }
+        requiredReadings.add(OsMetricsSource.CPU);
+        requiredReadings.add(OsMetricsSource.MEMORY);
         Threshold disk = new Threshold(DiskFreeSource.METRIC, Threshold.Direction.BELOW, settings.diskWarnGb(),
                 settings.diskCriticalGb(), settings.diskSustain());
-        this.agent = new MonitorAgent(clock, List.of(new DiskFreeSource(settings.disks(), freeSpace)), List.of(disk), 1, 50);
+        Threshold cpu = new Threshold(OsMetricsSource.CPU, Threshold.Direction.ABOVE, settings.cpu().warn(),
+                settings.cpu().critical(), settings.cpu().sustain());
+        Threshold memory = new Threshold(OsMetricsSource.MEMORY, Threshold.Direction.ABOVE, settings.memory().warn(),
+                settings.memory().critical(), settings.memory().sustain());
+        this.agent = new MonitorAgent(clock, List.of(new DiskFreeSource(settings.disks(), freeSpace), new OsMetricsSource(os)),
+                List.of(disk, cpu, memory), 1, 50);
         this.heartbeats = new HeartbeatWatch(configDir, settings.processes(), settings.heartbeatStale());
         this.stopRequests = new StopRequests(configDir, settings.releaseHold());
         stopRequests.adoptLeftovers(clock.instant());
@@ -62,7 +70,7 @@ final class Watchdog implements AutoCloseable {
         Instant now = clock.instant();
         heartbeat.beat();
         StopRequests.Pressure pressure = StopRequests.Pressure.UNKNOWN;
-        String detail = "드라이브 여유를 읽지 못함";
+        String detail = "자원 값을 읽지 못함";
         try {
             MetricSnapshot snapshot = agent.sampleOnce();
             pressure = pressure(snapshot);
@@ -91,7 +99,7 @@ final class Watchdog implements AutoCloseable {
         }
         boolean warn = false;
         boolean missing = false;
-        for (String name : diskReadings) {
+        for (String name : requiredReadings) {
             if (!present.contains(name)) {
                 missing = true;
                 continue;

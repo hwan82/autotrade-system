@@ -157,4 +157,17 @@ class HeartbeatTest {
         Files.writeString(big, "a".repeat((int) SmallFile.MAX_BYTES + 1), StandardCharsets.UTF_8);
         assertThatThrownBy(() -> SmallFile.read(big)).isInstanceOf(java.io.IOException.class).hasMessageContaining("상한 4096");
     }
+
+    @Test
+    void 아주_큰_파일도_상한까지만_읽어_메모리를_쓰지_않는다() throws Exception {
+        // PR #118 독립 QA Q1: 파일 전체를 읽는 구현(readAllBytes)으로 바꿔도 위 시험은 통과한다. 3GB(희소 파일, 디스크는 안 씀)면
+        // 전체 읽기는 배열 한도를 넘어 OutOfMemoryError가 나므로, IOException으로 바로 거절해야만 통과한다
+        Path huge = dir.resolve("huge");
+        try (java.io.RandomAccessFile f = new java.io.RandomAccessFile(huge.toFile(), "rw")) {
+            f.setLength(3L << 30);
+        }
+        long started = System.nanoTime();
+        assertThatThrownBy(() -> SmallFile.read(huge)).isInstanceOf(java.io.IOException.class).hasMessageContaining("상한 4096");
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofSeconds(2));
+    }
 }

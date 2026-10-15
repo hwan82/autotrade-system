@@ -31,5 +31,7 @@
 - 이 모듈에 새로 의존하는 프로세스: `autotrade-app-engine`, `autotrade-app-gateway`(직접), `autotrade-app-lab`(기존 `autotrade-monitor-sources`의 `api`로). 감시는 이미 의존했다.
 - 실전 엔진 런타임에 이 모듈이 들어와도 실전 경로 검사(`RealPathReflectionTest`)는 바뀌지 않는다(이미 감시 때문에 실전 경로 모듈 목록에 있음). `autotrade-monitor-sources`(OSHI)는 엔진·감시 런타임에 들어오지 않고, 두 프로세스의 `processIsolation.forbiddenProjects`가 직접 금지하고 `forbiddenGroups`가 OSHI(`com.github.oshi`)·JNA(`net.java.dev.jna`)를 금지한다(PR #114 QA R5, architect A1, PR #118 architect N4).
 
+- **PC CPU·메모리(D-095, Q-053 사용자 결정 ①)**: 감시의 `PlatformOsReadings` 한 클래스만 JDK `ManagementFactory#getOperatingSystemMXBean`과 `com.sun.management.OperatingSystemMXBean`의 `getCpuLoad`·`getTotalMemorySize`·`getFreeMemorySize`를 쓴다. 다른 감시 클래스는 인터페이스 `OsReadings`만 본다. `RealPathReflectionTest`가 이 클래스 이름과 메서드 셋을 고정하고, 그 밖의 관리 API(MBean 서버, 다른 MXBean, 다른 메서드)는 이 클래스에서도 금지다. OSHI·JNA·`autotrade-monitor-sources` 금지는 그대로다.
+
 ## 4. 되돌릴 조건
 - 하트비트 파일 대신 실전 엔진 상태를 명령 채널(ADR-006)로 묻게 되면(7단계 감시 긴급 경로가 엔진과 통신할 때) 엔진 하트비트는 그 채널의 응답으로 바꿀 수 있다. 그때도 다른 프로세스 하트비트는 파일로 둔다.

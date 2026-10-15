@@ -8,6 +8,7 @@ import com.autotrade.app.engine.archfixture.DynamicCode;
 import com.autotrade.app.engine.archfixture.GuardAsData;
 import com.autotrade.app.engine.archfixture.JacksonObjectAccess;
 import com.autotrade.app.engine.archfixture.NameToClassBinding;
+import com.autotrade.app.engine.archfixture.OsMetricsProbe;
 import com.autotrade.app.engine.archfixture.PolymorphicJson;
 import com.autotrade.app.engine.archfixture.ReflectionFreeEngineCode;
 import com.autotrade.app.engine.archfixture.ReflectiveRaiser;
@@ -112,6 +113,24 @@ class RealPathReflectionTest {
     /** ServiceLoader를 써도 되는 클래스(FQN). 지금은 없다. */
     static final Set<String> ALLOWED_SERVICE_LOADERS = Set.of();
 
+    /**
+     * PC CPU·메모리를 읽어도 되는 클래스(FQN, D-095, Q-053 사용자 결정 ①). 감시 프로세스의 플랫폼 읽기 클래스 하나뿐이다. 이 클래스만
+     * {@link #OS_METRIC_METHODS}의 JDK 관리 타입을 쓰고, 그 표의 읽기 메서드만 부를 수 있다. MBean 서버·다른 MXBean·이름으로 찾는
+     * {@code getPlatformMXBean(Class)}는 열지 않는다. 늘리거나 바꾸는 PR은 보호 테스트 변경이라 risk-ops 검토 뒤 사용자가 머지한다.
+     */
+    static final Set<String> ALLOWED_OS_METRIC_READERS = Set.of("com.autotrade.app.watchdog.PlatformOsReadings");
+
+    /** 허용 클래스가 쓸 수 있는 JDK 관리 타입과 부를 수 있는 메서드(읽기 전용, 외부 jar·네이티브 적재 없음, D-095). */
+    static final java.util.Map<String, Set<String>> OS_METRIC_METHODS = java.util.Map.of(
+            "java.lang.management.ManagementFactory", Set.of("getOperatingSystemMXBean"),
+            "java.lang.management.OperatingSystemMXBean", Set.of(),
+            "com.sun.management.OperatingSystemMXBean", Set.of("getCpuLoad", "getTotalMemorySize", "getFreeMemorySize"));
+
+    /** 허용 클래스의 허용 관리 타입 사용인지(타입 의존). */
+    static boolean osMetricType(String origin, String type, Set<String> readers) {
+        return readers.contains(origin) && OS_METRIC_METHODS.containsKey(type);
+    }
+
     /** 실전 경로 모듈의 패키지(모듈 판정과 이중으로). */
     static final String[] REAL_PATH_PACKAGES = {
         "com.autotrade.app.engine..", "com.autotrade.app.watchdog..",
@@ -163,10 +182,19 @@ class RealPathReflectionTest {
 
     /** 리플렉션 접근(호출·메서드 참조·생성) 대상인지. */
     static boolean reflective(JavaAccess<?> access) {
+        return reflective(access, ALLOWED_OS_METRIC_READERS);
+    }
+
+    static boolean reflective(JavaAccess<?> access, Set<String> osMetricReaders) {
         AccessTarget t = access.getTarget();
         JavaClass owner = t.getOwner();
         String type = owner.getName();
         String name = t.getName();
+        // JDK 관리 API는 허용 클래스가 표의 읽기 메서드를 부를 때만 연다. 그 밖의 사용은 타입 허용 목록·동적 코드 패키지 검사가 잡고,
+        // 허용 클래스가 표 밖 메서드를 부르면 여기서 잡는다(D-095)
+        if (OS_METRIC_METHODS.containsKey(type)) {
+            return osMetricReaders.contains(access.getOriginOwner().getName()) && !OS_METRIC_METHODS.get(type).contains(name);
+        }
         if (type.startsWith("java.lang.invoke.") || type.equals("java.lang.reflect.Proxy")
                 || owner.isAssignableTo("java.io.ObjectInputStream")
                 // 필드 이름 문자열로 필드를 읽고 쓴다(risk-ops PR #108 R1)
@@ -355,11 +383,16 @@ class RealPathReflectionTest {
      * 매개변수·반환 타입과 클래스 파일 상수 풀에 이름이 나오는 모든 타입(형변환 대상 포함)을 본다(독립 QA PR #108 F2).
      */
     static List<String> outsideAllowlist(JavaClass c) {
+        return outsideAllowlist(c, ALLOWED_OS_METRIC_READERS);
+    }
+
+    static List<String> outsideAllowlist(JavaClass c, Set<String> osMetricReaders) {
+        java.util.function.Predicate<String> allowedType = n -> allowedType(n) || osMetricType(c.getName(), n, osMetricReaders);
         List<String> out = new ArrayList<>();
         Set<String> reported = new TreeSet<>();
         for (com.tngtech.archunit.core.domain.Dependency d : c.getDirectDependenciesFromSelf()) {
             JavaClass t = d.getTargetClass().getBaseComponentType();
-            if (!t.isPrimitive() && !allowedType(t.getName())) {
+            if (!t.isPrimitive() && !allowedType.test(t.getName())) {
                 reported.add(t.getName());
                 out.add("허용 목록 밖 타입 " + t.getName() + ": " + d.getDescription());
             }
@@ -373,11 +406,11 @@ class RealPathReflectionTest {
                 signature.add(f.getRawType());
             }
             signature.stream().map(JavaClass::getBaseComponentType)
-                    .filter(t -> !t.isPrimitive() && !allowedType(t.getName()) && reported.add(t.getName()))
+                    .filter(t -> !t.isPrimitive() && !allowedType.test(t.getName()) && reported.add(t.getName()))
                     .forEach(t -> out.add("허용 목록 밖 타입 " + t.getName() + ": " + a.getDescription() + "의 매개변수·반환 타입"));
         }
         c.getSource().ifPresent(src -> ClassFileTypes.of(src.getUri()).stream()
-                .filter(n -> !allowedType(n) && !JAVAC_BOOTSTRAP_TYPES.contains(n) && reported.add(n))
+                .filter(n -> !allowedType.test(n) && !JAVAC_BOOTSTRAP_TYPES.contains(n) && reported.add(n))
                 .forEach(n -> out.add("허용 목록 밖 타입 " + n + ": " + c.getName() + " 클래스 파일 상수(형변환·서술자)")));
         return out;
     }
@@ -481,15 +514,35 @@ class RealPathReflectionTest {
     }
 
     static ArchRule noReflectionIn(DescribedPredicate<JavaClass> scope) {
+        return noReflectionIn(scope, ALLOWED_OS_METRIC_READERS);
+    }
+
+    /** {@code osMetricReaders}: PC CPU·메모리 읽기 허용 클래스(운영은 {@link #ALLOWED_OS_METRIC_READERS}, 시험은 예제 클래스). */
+    static ArchRule noReflectionIn(DescribedPredicate<JavaClass> scope, Set<String> osMetricReaders) {
+        com.tngtech.archunit.core.domain.PackageMatchers dynamicPackages =
+                com.tngtech.archunit.core.domain.PackageMatchers.of(DYNAMIC_CODE_PACKAGES);
         return noClasses()
                 .that(scope)
                 .should().accessTargetWhere(DescribedPredicate.describe(
-                        "리플렉션·MethodHandle·동적 프록시·직렬화·네이티브 적재·Jackson 객체 접근 설정·허용 목록 밖 ServiceLoader", RealPathReflectionTest::reflective))
-                .orShould().dependOnClassesThat().resideInAnyPackage(DYNAMIC_CODE_PACKAGES)
+                        "리플렉션·MethodHandle·동적 프록시·직렬화·네이티브 적재·Jackson 객체 접근 설정·허용 목록 밖 ServiceLoader·허용 밖 JDK 관리 API",
+                        a -> reflective(a, osMetricReaders)))
+                .orShould(new ArchCondition<JavaClass>("동적 코드 패키지에 의존한다") {
+                    @Override
+                    public void check(JavaClass c, ConditionEvents events) {
+                        // 허용 클래스의 허용 관리 타입(D-095)만 빼고 패키지 의존 자체를 막는다
+                        for (com.tngtech.archunit.core.domain.Dependency d : c.getDirectDependenciesFromSelf()) {
+                            JavaClass target = d.getTargetClass().getBaseComponentType();
+                            if (dynamicPackages.test(target.getPackageName())
+                                    && !osMetricType(c.getName(), target.getName(), osMetricReaders)) {
+                                events.add(SimpleConditionEvent.satisfied(c, "동적 코드 패키지 의존: " + d.getDescription()));
+                            }
+                        }
+                    }
+                })
                 .orShould(new ArchCondition<JavaClass>("허용 목록 밖 JDK·외부 타입에 의존한다") {
                     @Override
                     public void check(JavaClass c, ConditionEvents events) {
-                        outsideAllowlist(c).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
+                        outsideAllowlist(c, osMetricReaders).forEach(d -> events.add(SimpleConditionEvent.satisfied(c, d)));
                     }
                 })
                 .orShould(new ArchCondition<JavaClass>("이름 문자열로 클래스를 얻는 데이터 바인딩을 연다") {
@@ -880,6 +933,31 @@ class RealPathReflectionTest {
                 .containsExactly("com.autotrade.config.SecretPaths");
         assertThat(ALLOWED_SERVICE_LOADERS).as("ServiceLoader 허용 목록은 7단계 플러그인 로딩 PR 전까지 비어 있다").isEmpty();
         assertThat(ALLOWED_PROCESS_LAUNCHERS).as("외부 명령 실행 허용 목록은 7단계 감시 재기동 PR 전까지 비어 있다").isEmpty();
+        assertThat(ALLOWED_OS_METRIC_READERS).as("PC CPU·메모리 읽기는 감시의 플랫폼 읽기 클래스 하나뿐이다(D-095)")
+                .containsExactly("com.autotrade.app.watchdog.PlatformOsReadings");
+        assertThat(OS_METRIC_METHODS).as("허용 관리 API는 운영체제 MXBean 하나를 얻고 CPU·메모리 세 값을 읽는 것뿐이다(D-095)")
+                .containsOnly(
+                        java.util.Map.entry("java.lang.management.ManagementFactory", Set.of("getOperatingSystemMXBean")),
+                        java.util.Map.entry("java.lang.management.OperatingSystemMXBean", Set.of()),
+                        java.util.Map.entry("com.sun.management.OperatingSystemMXBean",
+                                Set.of("getCpuLoad", "getTotalMemorySize", "getFreeMemorySize")));
+    }
+
+    @Test
+    void PC_지표_읽기는_허용_클래스의_허용_메서드만_통과한다() {
+        // D-095(Q-053 ①): 허용 클래스로 둔 예제는 운영체제 MXBean 세 값 읽기만 통과하고, MBean 서버·다른 MXBean·표 밖 메서드는 걸린다
+        JavaClasses probe = new ClassFileImporter().importClasses(OsMetricsProbe.class);
+        String reader = OsMetricsProbe.class.getName();
+        EvaluationResult asReader = noReflectionIn(IN_REAL_PATH_PACKAGE, Set.of(reader)).evaluate(probe);
+        String details = String.join("\n", asReader.getFailureReport().getDetails());
+        assertThat(details).contains("OsMetricsProbe.mbeanServer()", "getPlatformMBeanServer", "javax.management.MBeanServer",
+                        "OsMetricsProbe.runtimeBean()", "java.lang.management.RuntimeMXBean",
+                        "OsMetricsProbe.processCpuTime()", "getProcessCpuTime", "OsMetricsProbe.arch()", "getArch")
+                .doesNotContain("OsMetricsProbe.allowed()");
+        // 허용 클래스가 아니면 읽기도 걸린다(운영 허용 목록에 예제가 없다)
+        String asOther = String.join("\n", noReflectionIn(IN_REAL_PATH_PACKAGE).evaluate(probe).getFailureReport().getDetails());
+        assertThat(asOther).contains("OsMetricsProbe.allowed()", "getOperatingSystemMXBean", "getCpuLoad",
+                "허용 목록 밖 타입 com.sun.management.OperatingSystemMXBean", "동적 코드 패키지 의존");
     }
 
     @Test

@@ -30,10 +30,15 @@ import java.util.Set;
  * @param diskWarnGb 여유 GB 경고 경계(이하)
  * @param diskCriticalGb 여유 GB 위험 경계(이하). 위험이면 정지 요청 파일을 만든다
  * @param diskSustain 수준을 바꾸는 데 필요한 연속 판정 수
- * @param releaseHold 정지 요청 파일을 지우려면 모든 드라이브가 경고 경계 위로 이만큼 이어져야 함
+ * @param releaseHold 정지 요청 파일을 지우려면 모든 값이 경고 경계 아래(정상)로 이만큼 이어져야 함
+ * @param cpu PC 전체 CPU 사용률(%) 임계(D-095)
+ * @param memory PC 전체 메모리 사용률(%) 임계(D-095)
  */
 record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String> processes, List<Path> disks,
-        double diskWarnGb, double diskCriticalGb, int diskSustain, Duration releaseHold) {
+        double diskWarnGb, double diskCriticalGb, int diskSustain, Duration releaseHold, Limits cpu, Limits memory) {
+
+    /** 사용률(%) 임계: 경고 이상 WARN, 위험 이상 CRITICAL, 연속 판정 수. */
+    record Limits(double warn, double critical, int sustain) {}
 
     static final String FILE = "watchdog.properties";
 
@@ -43,7 +48,9 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
     static final String DISKS = "disks";
     static final String DISK_FREE_GB = "disk.free-gb";
     static final String RELEASE_HOLD = "release-hold-seconds";
-    static final Set<String> KEYS = Set.of(INTERVAL, HEARTBEAT_STALE, PROCESSES, DISKS, DISK_FREE_GB, RELEASE_HOLD);
+    static final String CPU = "cpu.system";
+    static final String MEMORY = "memory.used";
+    static final Set<String> KEYS = Set.of(INTERVAL, HEARTBEAT_STALE, PROCESSES, DISKS, DISK_FREE_GB, RELEASE_HOLD, CPU, MEMORY);
 
     /** 하트비트를 볼 수 있는 프로세스(감시 자신은 빼고). */
     static final List<String> KNOWN_PROCESSES = List.of("engine", "gateway", "lab");
@@ -52,6 +59,8 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
     static final int DEFAULT_HEARTBEAT_STALE_SECONDS = 15;
     /** 기본 임계 [가정]: 실험실 모니터링 기본(D-090 5번)과 같은 50/20GB, 1회. 20GB는 실시간 모의 입력 기록 하한(D-076)과 같다. */
     static final String DEFAULT_DISK_FREE_GB = "50:20:1";
+    /** CPU·메모리 기본 임계 [가정]: 실험실 모니터링 기본(D-090 5번)과 같은 85/95%, 3회 연속. 경고 경계가 위험 −10%p라 ADR-007 2.7 해제 기준과 같다. */
+    static final String DEFAULT_USAGE_PERCENT = "85:95:3";
     /** 해제 유지 시간 [가정]: ADR-007 2.7의 5분. */
     static final int DEFAULT_RELEASE_HOLD_SECONDS = 300;
 
@@ -129,11 +138,42 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
             }
         }
 
+        Limits cpu = usage(values, CPU, problems);
+        Limits memory = usage(values, MEMORY, problems);
+
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException("감시 설정 오류(" + configDir.resolve(FILE) + "): " + String.join("; ", problems));
         }
         return new WatchdogSettings(Duration.ofSeconds(interval), Duration.ofSeconds(stale), processes, disks, warn, critical,
-                sustain, Duration.ofSeconds(hold));
+                sustain, Duration.ofSeconds(hold), cpu, memory);
+    }
+
+    /** 사용률 임계 {@code 경고%:위험%:연속}. 0 < 경고 ≤ 위험 ≤ 100, 연속 1~10. */
+    private static Limits usage(Map<String, String> values, String key, List<String> problems) {
+        String raw = values.getOrDefault(key, DEFAULT_USAGE_PERCENT);
+        String[] parts = raw.split(":", -1);
+        if (parts.length != 3) {
+            problems.add(key + "는 경고%:위험%:연속 형식입니다(예: " + DEFAULT_USAGE_PERCENT + ")");
+            return null;
+        }
+        try {
+            double warn = new BigDecimal(parts[0].strip()).doubleValue();
+            double critical = new BigDecimal(parts[1].strip()).doubleValue();
+            int sustain = Integer.parseInt(parts[2].strip());
+            boolean ok = true;
+            if (warn <= 0 || critical < warn || critical > 100) {
+                problems.add(key + ": 0 < 경고 ≤ 위험 ≤ 100이어야 합니다: " + raw);
+                ok = false;
+            }
+            if (sustain < 1 || sustain > 10) {
+                problems.add(key + ": 연속은 1~10입니다: " + raw);
+                ok = false;
+            }
+            return ok ? new Limits(warn, critical, sustain) : null;
+        } catch (NumberFormatException e) {
+            problems.add(key + ": 숫자가 아닙니다: " + raw);
+            return null;
+        }
     }
 
     private static int integer(Map<String, String> values, String key, int fallback, int min, int max, List<String> problems) {

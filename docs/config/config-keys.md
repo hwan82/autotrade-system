@@ -59,7 +59,9 @@
 | `processes` | `engine,gateway,lab` | 하트비트를 볼 프로세스(쉼표, 이 셋 중에서). 비우면 기동 거부 | D-092 |
 | `disks` | 설정 폴더 | 여유 공간을 볼 폴더(쉼표). 드라이브마다 그 드라이브의 폴더 하나면 된다. 없는 폴더·같은 폴더 두 번이면 기동 거부. 빼면 설정 폴더(없으면 감시가 만든다) | D-092 |
 | `disk.free-gb` | `50:20:1` | `경고GB:위험GB:연속`. 위험이면 단발 일괄 명령 정지 요청 파일을 만든다. 0 < 위험 ≤ 경고 ≤ 100000, 연속 1~10. 값은 `[가정]` | D-092, D-090 5번 |
-| `release-hold-seconds` | `300` | 정지 요청 파일을 지우려면 모든 폴더 드라이브가 경고 경계 위로 이어져야 하는 시간(초), 0~3600. `[가정]` | D-092, ADR-007 2.7 |
+| `release-hold-seconds` | `300` | 정지 요청 파일을 지우려면 모든 값(드라이브 여유, CPU, 메모리)이 정상(경고 경계 밖)으로 이어져야 하는 시간(초), 0~3600. `[가정]` | D-092, D-095, ADR-007 2.7 |
+| `cpu.system` | `85:95:3` | PC 전체 CPU 사용률 `경고%:위험%:연속`. 위험이면 정지 요청 파일을 만든다. 0 < 경고 ≤ 위험 ≤ 100, 연속 1~10. 값은 `[가정]`(실험실 모니터링 기본과 같음) | D-095, D-090 5번 |
+| `memory.used` | `85:95:3` | PC 전체 물리 메모리 사용률 `경고%:위험%:연속`. 범위는 `cpu.system`과 같다. 값은 `[가정]` | D-095, D-090 5번 |
 
 예시(값만, 비밀값 없음):
 ```
@@ -67,13 +69,15 @@
 interval-seconds=5
 disks=C:\Users\<사용자>\.autotrade,D:\recordings
 disk.free-gb=50:20:1
+cpu.system=85:95:3
+memory.used=85:95:3
 ```
 
 ## 아직 없는 키 (담당 작업에서 추가)
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
-- 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정). 감시 프로세스의 드라이브 임계는 위 `watchdog.properties`로 먼저 정했다(D-092). 실험실 모니터링 화면은 위 `autotrade.lab.monitor.*` 기동 속성으로 먼저 정했다(D-090). 감시 프로세스가 같은 에이전트를 쓸 때 공통 키 `monitor.interval-seconds`, `monitor.thresholds.<지표>.{direction,warn,critical,sustain}`(재기동, 감시·실험실)을 두자는 변경 제안이 D-090에 있다(architect 결정).
+- 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정). 감시 프로세스의 드라이브·CPU·메모리 임계는 위 `watchdog.properties`로 먼저 정했다(D-092, D-095). 실험실 모니터링 화면은 위 `autotrade.lab.monitor.*` 기동 속성으로 먼저 정했다(D-090). 감시 프로세스가 같은 에이전트를 쓸 때 공통 키 `monitor.interval-seconds`, `monitor.thresholds.<지표>.{direction,warn,critical,sustain}`(재기동, 감시·실험실)을 두자는 변경 제안이 D-090에 있다(architect 결정).
 - 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
 - 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.
 - 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
