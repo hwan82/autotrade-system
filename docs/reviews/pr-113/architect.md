@@ -76,3 +76,45 @@
 
 ### 판정
 승인(architect 범위. 머지 조건: risk-ops 재검토 승인, 실전 관련 PR로서 독립 QA와 사용자 직접 머지)
+
+## 재검토 2026-10-15 (2차)
+- 대상: PR #113 / 커밋 `9ffc8cc` / main 대비 diff 전체(`git diff origin/main...HEAD`, merge-base `d6fb6e7`, 파일 41개 +2,347 −49) 다시 읽음. 직전 재검토(`9e51c66`) 뒤 더해진 것은 독립 QA 보고서(`5cffde4`), main `d6fb6e7` 병합(`9e2221f`), QA 권고 반영(`9ffc8cc`, 7개 파일 +119 −13)이고 이 둘은 줄 단위로 대조했다. 이 파일의 앞 내용은 바뀌지 않았다(`git diff b6dab56 HEAD -- docs/reviews/pr-113/architect.md` 빈 출력).
+- 점검표: B
+- 직접 실행한 것:
+  - 새 별도 clone(헤드 `9ffc8cc`)에서 `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**(3분 31초, 130 작업). 테스트 XML 집계 1,175건, 실패·오류 0, 건너뜀 0. `RunProgressTest` 8, `ExperimentJobTest` 15, `ExperimentJobsTest` 1, `ExperimentJobStatusTest` 7, `ExperimentJobControllerTest` 2, `RecordingExperimentTest` 5, `ExperimentGateTest` 19, `ArchitectureTest` 19, `ModuleOwnershipTest` 13, `RealPathReflectionTest` 8 모두 통과.
+  - GitHub REST: PR #113 `mergeable: false`, `mergeable_state: dirty`, 헤드 `9ffc8cc` check run **0건**(PR CI가 돌지 않음).
+  - 현재 main `b4ed7fc`(PR #114 머지) 시험 병합: **충돌 3파일** `docs/decisions/README.md`(D-089 행과 main의 D-090 행), `docs/qa/pending.md`(#113 줄과 #114 줄), `docs/spec/autotrade-spec.md`(버전 칸 v14.33 대 v14.34, 변경 이력 v14.33 행과 v14.34 행). 별도 worktree에서 두 행을 모두 남기고 버전 칸을 v14.34로 둔 뒤 `./gradlew build` → BUILD SUCCESSFUL, 1,211건 실패 0·건너뜀 0(운영 코드끼리는 충돌·호환 문제 없음). 이 시험 병합은 버렸다.
+  - 변이(운영 코드 한 곳씩 고치고 시험 뒤 `git checkout`으로 복원, `git status` 깨끗함 확인):
+    - M4 `SimulationExperimentRunner.java:161` `Math.min(parallelism, cap)` → `parallelism`: `:autotrade-sim:test --tests '*RunProgressTest'` **3회 모두 잡힘**. 실패한 시험은 기존 `병렬_상한_1이면_한_번에_Run_하나만_돈다`와 새 `병렬_상한_1이면_먼저_돈_Run이_오래_걸려도_다음_Run이_겹쳐_시작하지_않는다`("상한 1인데 Run 두 개가 함께 돌았다").
+    - M7 `ExperimentMain.java:116` `control.afterCancel(dispatch(...))` → `dispatch(...)`: `:autotrade-app-experiment:test` **살아남음**(아래 R7).
+    - M8 `ExperimentMain.java:59` `configDir.toAbsolutePath().normalize()` 제거: **살아남음**(아래 R8).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 헤드 `9ffc8cc` 빌드 성공 1,175건 실패 0. 현재 main과의 시험 병합 빌드도 성공(1,211건). 단 PR 자체는 main과 충돌해 CI가 돌지 않음(F1) |
+| B2 | 통과 | `9ffc8cc`에 새 모듈 의존·패키지 없음(`java.util.PriorityQueue`, `java.util.concurrent` 시험용만). `ArchitectureTest`·`ModuleOwnershipTest`·`RealPathReflectionTest` 변경 없음(main에서 온 `RealPathReflectionTest` 변경은 PR #110 것)·통과 |
+| B3 | 통과 | 계약 변경 없음(REST·스키마·설정 키 그대로). 동작 변경(취소 뒤 정지 요청이면 4)이 D-089 결정 2(`D-089-…md:14`)와 검증 절(`:50-52`), 운영 절차서 종료 코드 표(`docs/runbooks/README.md:59` "취소와 겹치면 4가 이김")에 반영. 기획서 v14.33 행 문구("결과 없이 끝남(종료 코드 3)")는 겹침 규칙을 빼고 요약한 것이라 모순은 아님 |
+| B4 | 통과 | `9ffc8cc`는 실행기 운영 코드를 바꾸지 않음. 골든 바이트 일치 시험(`RunProgressTest` 상한 1·2·64) 통과. 새 시험의 1초 대기는 시험 쪽 `CountDownLatch.await`이고 결과 값에 영향 없음. `ExperimentJobs`의 정렬은 수정 시각(파일마다 한 번 읽음) 내림차순 뒤 경로 오름차순으로 순서를 명시, 판정 시각은 주입 `Clock` |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 새 동작마다 시험: `ExperimentJobTest#취소로_멈추는_사이_정지_요청이_생기면_종료_코드_4와_정지_이유를_남긴다`(4·`STOPPED`·메시지에 설정 폴더 경로 없음), `#정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다`(0·2는 정지 요청이 있어도 그대로), `RunProgressTest` 겹침 시험(M4로 물림 확인). `ExperimentJobsTest` 그대로 통과(힙 교체 뒤에도 최근 500개 유지). 시험 삭제·`@Disabled` 없음(시험 diff는 추가만, `Recorder`의 `final` 제거는 익명 하위 클래스용). 배선·정규화의 시험 공백은 R7·R8 |
+| B7 | 통과(risk-ops 검토 필요) | `afterCancel`은 장애표 #10 감지 단서(종료 코드 4)와 정지 순서 0번 경로를 바꾼다. risk-ops 원문(`docs/reviews/pr-113/risk-ops.md`)의 마지막 판정은 `9e51c66` 기준 승인이라 `9ffc8cc` 변경은 risk-ops가 다시 봐야 한다. 실전 관련 PR로 독립 QA 재검토와 사용자 직접 머지 대상 그대로 |
+| B8 | 통과 | `9ffc8cc`에 비밀값 없음. 새 콘솔 출력(`ExperimentJob.java:229-230`)은 정지 이유 문자열만(설정 폴더 경로는 콘솔에는 그대로 두는 기존 기준과 같음). 상태 파일 메시지는 `finish`의 `withoutConfigDir`를 거침(`:249`), 진입점 정규화(`ExperimentMain.java:59`)로 R5 해소 |
+
+### 지난 지적·QA 권고 처리
+- QA A14(main `d6fb6e7` 충돌): `9e2221f`로 해소. 충돌 두 곳 모두 양쪽 행을 남겼고 기획서 버전 칸은 그 시점 main(v14.32)보다 하나 높은 v14.33. 내용 손실 없음(`git show --cc 9e2221f`). 그러나 그 뒤 main이 `b4ed7fc`로 움직여 다시 충돌한다(F1).
+- QA Q1(상한 1 겹침 시험): 해소. M4를 직접 3회 돌려 새 시험이 잡는 것을 확인.
+- QA R1(취소 뒤 정지 요청 표시): 해소(`ExperimentJob.java:220-232`, `ExperimentMain.java:116`). 실행 명령 본체 6개에서 3을 돌려주는 곳은 `e.exitCode()`뿐이라(grep `return [0-9];` 결과에 3 없음) 3이 취소 말고 다른 뜻으로 올라와 4로 바뀌는 경우는 없다. 0·2(결과를 이미 씀)는 바꾸지 않는다.
+- QA R2(작업 목록 메모리): 해소(`ExperimentJobs.java:85-104`). 힙 비교자는 `newestFirst.reversed()`라 머리가 가장 오래된 것이고 넘치면 그것을 버린다. 수정 시각을 못 읽으면 `Instant.MIN`이라 먼저 버려진다.
+- architect R5(설정 폴더 정규화): 해소(`ExperimentMain.java:58-59`). 단 시험 없음(R8).
+- architect R6(조합·워크포워드의 "확인 안 함" 시험): 이번에도 반영 안 됨. 권고로 남김.
+
+### 수정 필요
+- **F1 현재 main `b4ed7fc`와 충돌, PR CI 미실행.** `docs/decisions/README.md`(D-089 행 대 D-090 행), `docs/qa/pending.md`(#113 줄 대 #114 줄), `docs/spec/autotrade-spec.md`(버전 칸, 변경 이력). GitHub `mergeable_state: dirty`, 헤드 check run 0건이라 CI(PostgreSQL 스키마 적용, gitleaks, 수집기 경계 검사 포함)의 통과를 확인하지 못했다. 고칠 방향: main을 병합하고 결정 로그는 D-089·D-090 두 행을 번호 순으로 모두 두며, 기획서 버전 칸은 **v14.34**(main 값, v14.33은 main의 v14.34 행이 이 브랜치 몫으로 비워 둔 번호)로 두고 v14.33 행은 v14.34 행 아래에 남긴다. 병합 뒤 CI 통과를 확인한다. 이 방식으로 시험 병합한 빌드는 위와 같이 통과했다.
+
+### 새 권고(판정을 막지 않음)
+- **R7** `afterCancel`의 배선(`ExperimentMain.java:116`)을 지워도 시험이 통과한다(M7). `ExperimentJob` 단위 시험은 메서드만 고정한다. 장애표 #10 감지 단서에 걸린 경로라, `ExperimentMain.run`에 가짜 본체(또는 기존 시험용 명령)를 넣어 "취소 요청 → 실행 중 정지 요청 생성 → 종료 코드 4·상태 `STOPPED`"를 끝까지 보는 시험이 있으면 좋다. risk-ops 판단에 따라 막는 항목으로 올릴 수 있다.
+- **R8** 설정 폴더 정규화(`ExperimentMain.java:59`)를 지워도 시험이 통과한다(M8). `config.resolve("x/..")` 같은 비정규 경로로 `run`을 불러 상태 파일 메시지에 절대 경로가 없음을 보는 시험 하나로 고정할 수 있다.
+- **R6**(지난 권고) 그대로 열림.
+
+### 판정
+수정 필요(F1 현재 main b4ed7fc와 docs/decisions/README.md·docs/qa/pending.md·docs/spec/autotrade-spec.md 충돌, PR CI 미실행. 코드 쪽 실패 항목은 없음. 병합 뒤 risk-ops 재검토(B7)와 독립 QA 재검토, 사용자 직접 머지 필요)
