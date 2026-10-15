@@ -41,6 +41,11 @@
 | `autotrade.lab.selections-dir` | `selections` (실행 폴더 기준, bootRun은 저장소 루트) | 선정 프로필 YAML 폴더. 실험 실행기가 읽는 `selections/`와 같은 폴더를 가리켜야 화면에서 만든 선정이 실험에 쓰인다 | ADR-005 4·5장, ADR-007 2.1, D-060 |
 | `autotrade.lab.experiments-dir` | `experiments` (실행 폴더 기준, bootRun은 저장소 루트) | 조합 실험 폴더. 실행 명령(`runCombinationExperiment`)이 결과 묶음을 쓰는 `experiments/`와 같은 폴더를 가리켜야 실험 화면에서 불러올 수 있다. 실험 생성 화면도 이 폴더에 새 실험 폴더와 등록 파일(`experiment.yaml`)을 쓴다. 실시간 모의 세션(D-076)도 이 폴더의 `input: "live"` 등록 파일을 읽고 끝낼 때 `live-detail.txt`를 쓴다 | D-062, D-074, D-076 |
 | `autotrade.lab.live.min-free-gb` | `20` | 실시간 모의 입력 기록 폴더(설정 폴더 `live-sessions/`) 디스크 여유 하한(GB). 미만이면 세션을 시작하지 않고, 운용 중이면 1초 안에 멈춘다(실전 엔진 기록과 같은 디스크일 수 있음). 1~1,000,000, 범위 밖이면 실험실이 뜨지 않는다(0이면 하한이 꺼지므로 거부) | D-076, risk-ops PR #87 R1, QA PR #87 R2 |
+| `autotrade.lab.monitor.enabled` | `true` | 모니터링 수집(MON-05). 끄면 수집하지 않고 화면은 꺼짐을 보여 준다 | [D-090](../decisions/D-090-monitor-agent-and-screen.md) |
+| `autotrade.lab.monitor.interval-seconds` | `5` | 수집 주기(초). 1~3600, 범위 밖이면 실험실이 뜨지 않는다 | D-090 |
+| `autotrade.lab.monitor.history-size` | `720` | 화면 그래프용으로 들고 있을 표본 수(5초 주기면 1시간). 1~10000 | D-090 |
+| `autotrade.lab.monitor.disks` | 빈 값 | 지표를 낼 드라이브(마운트) 쉼표 목록(예: `C:\,D:\`, 대소문자 무시). 비면 모든 로컬 드라이브 | D-090 |
+| `autotrade.lab.monitor.thresholds` | 빈 값 | 기본 임계 덮어쓰기. `지표=방향:경고:위험:연속`을 `;`로 잇는다(예: `cpu.system=ABOVE:70:90:3;disk.free-gb=BELOW:100:30:1`). 방향은 ABOVE·BELOW. 기본 임계와 지표 이름은 D-090 5번과 `MetricNames`. 형식이 틀리거나 같은 지표가 두 번이면 실험실이 뜨지 않는다 | D-090 |
 | `autotrade.code-commit` | `unknown` (bootRun은 `git rev-parse HEAD`를 JVM 속성으로 넘김) | 실시간 모의 세션 상세 보고서의 `code` 줄(커밋). 리플레이 확인은 이 줄을 비교에서 뺀다 | D-076 |
 | `autotrade.code-dirty` | `true` (bootRun은 `git status --porcelain`이 비었는지로 넘김) | 같은 보고서의 작업 트리 변경 여부 | D-076 |
 
@@ -48,7 +53,7 @@
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
-- 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정).
+- 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정). 실험실 모니터링 화면은 위 `autotrade.lab.monitor.*` 기동 속성으로 먼저 정했다(D-090). 감시 프로세스가 같은 에이전트를 쓸 때 공통 키 `monitor.interval-seconds`, `monitor.thresholds.<지표>.{direction,warn,critical,sustain}`(재기동, 감시·실험실)을 두자는 변경 제안이 D-090에 있다(architect 결정).
 - 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
 - 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.
 - 참고: DEGRADED 시 재배분 동작(설정 키 아님)은 ADR-003 2.2.
