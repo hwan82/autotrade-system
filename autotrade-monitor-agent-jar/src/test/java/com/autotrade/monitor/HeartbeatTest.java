@@ -157,4 +157,19 @@ class HeartbeatTest {
         Files.writeString(big, "a".repeat((int) SmallFile.MAX_BYTES + 1), StandardCharsets.UTF_8);
         assertThatThrownBy(() -> SmallFile.read(big)).isInstanceOf(java.io.IOException.class).hasMessageContaining("상한 4096");
     }
+
+    @Test
+    void 아주_큰_파일도_상한까지만_읽어_메모리를_쓰지_않는다() throws Exception {
+        // PR #118 독립 QA Q1: 파일 전체를 읽는 구현(readAllBytes)으로 바꿔도 위 시험은 통과한다. 3GB 파일이면 전체 읽기는 배열 한도를
+        // 넘어 OutOfMemoryError가 나므로, IOException으로 바로 거절해야만 통과한다. 끝 1바이트만 써서 희소 파일로 만든다(Linux는 기본,
+        // NTFS는 SPARSE 옵션이 희소 표시를 건다. 그래야 Windows 개발 PC에서 3GB를 할당하지 않는다, PR #122 architect N3)
+        Path huge = dir.resolve("huge");
+        try (java.nio.channels.SeekableByteChannel ch = Files.newByteChannel(huge, java.nio.file.StandardOpenOption.CREATE_NEW,
+                java.nio.file.StandardOpenOption.WRITE, java.nio.file.StandardOpenOption.SPARSE)) {
+            ch.position(3L << 30).write(java.nio.ByteBuffer.wrap(new byte[] {1}));
+        }
+        long started = System.nanoTime();
+        assertThatThrownBy(() -> SmallFile.read(huge)).isInstanceOf(java.io.IOException.class).hasMessageContaining("상한 4096");
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofSeconds(10)); // 느린 PC 여유. 전체 읽기면 시간 전에 실패한다
+    }
 }

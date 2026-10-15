@@ -33,6 +33,15 @@ class WatchdogMainTest {
     }
 
     @Test
+    void PC_CPU_메모리를_줄_수_없는_JVM이면_기동을_거부한다() {
+        // D-095 4번. 기동 점검(run)과 실제 기동(start)이 같은 판정을 한다(PR #122 architect N4)
+        assertThat(WatchdogMain.run(ConfigPaths.in(dir), fixed, java.util.Optional::empty)).isEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
+        assertThatThrownBy(() -> WatchdogMain.start(ConfigPaths.in(dir), fixed, java.util.Optional::empty))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("CPU·메모리").hasMessageContaining("D-095");
+        assertThat(dir.resolve("heartbeat").resolve("watchdog.hb")).doesNotExist(); // 점검을 시작하지 않았다
+    }
+
+    @Test
     void 기동하면_점검을_시작하고_닫으면_자기_하트비트를_지운다() throws Exception {
         Watchdog w = WatchdogMain.start(ConfigPaths.in(dir), fixed);
         Path own = dir.resolve("heartbeat").resolve("watchdog.hb");

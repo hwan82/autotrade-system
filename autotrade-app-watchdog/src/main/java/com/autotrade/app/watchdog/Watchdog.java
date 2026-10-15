@@ -20,7 +20,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 감시 루프(MON-02 1차, D-092). 점검마다 ① 자기 하트비트 기록 ② 드라이브 여유 수집·임계 판정(감시 에이전트 코어) ③ 상주 프로세스
+ * 감시 루프(MON-02 1차, D-092·D-095). 점검마다 ① 자기 하트비트 기록 ② 드라이브 여유·PC CPU·메모리 수집과 임계 판정(감시 에이전트 코어) ③ 상주 프로세스
  * 하트비트 판정 ④ 정지 요청 파일 켜기·갱신·끄기를 한다.
  *
  * <p>점검은 스레드 하나에서 고정 간격으로 돈다. 한 점검의 어느 단계가 던져도 그 단계만 버리고 다음 단계와 다음 점검은 계속한다
@@ -39,19 +39,30 @@ final class Watchdog implements AutoCloseable {
     private final MonitorAgent agent;
     private final HeartbeatWatch heartbeats;
     private final StopRequests stopRequests;
-    private final Set<String> diskReadings = new TreeSet<>();
+    /** 점검마다 있어야 하는 값(드라이브 경로마다 여유, PC CPU·메모리). 하나라도 빠지면 판단 못 함. */
+    private final Set<String> requiredReadings = new TreeSet<>();
+    /** 지난 점검에서 빠진 필수 값. 바뀔 때만 알린다(PR #122 risk-ops R1: 값이 소리 없이 계속 빠지면 위험 판정도 꺼진다). */
+    private Set<String> missingReadings = Set.of();
+    private int missingWarnings;
     private ScheduledExecutorService scheduler;
 
-    Watchdog(Path configDir, WatchdogSettings settings, Clock clock, DiskFreeSource.FreeSpace freeSpace) {
+    Watchdog(Path configDir, WatchdogSettings settings, Clock clock, DiskFreeSource.FreeSpace freeSpace, OsReadings os) {
         this.settings = settings;
         this.clock = clock;
         this.heartbeat = new HeartbeatWriter(configDir, PROCESS, clock);
         for (Path d : settings.disks()) {
-            diskReadings.add(DiskFreeSource.readingName(d));
+            requiredReadings.add(DiskFreeSource.readingName(d));
         }
+        requiredReadings.add(OsMetricsSource.CPU);
+        requiredReadings.add(OsMetricsSource.MEMORY);
         Threshold disk = new Threshold(DiskFreeSource.METRIC, Threshold.Direction.BELOW, settings.diskWarnGb(),
                 settings.diskCriticalGb(), settings.diskSustain());
-        this.agent = new MonitorAgent(clock, List.of(new DiskFreeSource(settings.disks(), freeSpace)), List.of(disk), 1, 50);
+        Threshold cpu = new Threshold(OsMetricsSource.CPU, Threshold.Direction.ABOVE, settings.cpu().warn(),
+                settings.cpu().critical(), settings.cpu().sustain());
+        Threshold memory = new Threshold(OsMetricsSource.MEMORY, Threshold.Direction.ABOVE, settings.memory().warn(),
+                settings.memory().critical(), settings.memory().sustain());
+        this.agent = new MonitorAgent(clock, List.of(new DiskFreeSource(settings.disks(), freeSpace), new OsMetricsSource(os)),
+                List.of(disk, cpu, memory), 1, 50);
         this.heartbeats = new HeartbeatWatch(configDir, settings.processes(), settings.heartbeatStale());
         this.stopRequests = new StopRequests(configDir, settings.releaseHold());
         stopRequests.adoptLeftovers(clock.instant());
@@ -62,9 +73,10 @@ final class Watchdog implements AutoCloseable {
         Instant now = clock.instant();
         heartbeat.beat();
         StopRequests.Pressure pressure = StopRequests.Pressure.UNKNOWN;
-        String detail = "드라이브 여유를 읽지 못함";
+        String detail = "자원 값을 읽지 못함";
         try {
             MetricSnapshot snapshot = agent.sampleOnce();
+            reportMissing(snapshot);
             pressure = pressure(snapshot);
             detail = detail(snapshot);
         } catch (Throwable e) {
@@ -91,7 +103,7 @@ final class Watchdog implements AutoCloseable {
         }
         boolean warn = false;
         boolean missing = false;
-        for (String name : diskReadings) {
+        for (String name : requiredReadings) {
             if (!present.contains(name)) {
                 missing = true;
                 continue;
@@ -106,6 +118,30 @@ final class Watchdog implements AutoCloseable {
             return StopRequests.Pressure.UNKNOWN;
         }
         return warn ? StopRequests.Pressure.ELEVATED : StopRequests.Pressure.CLEAR;
+    }
+
+    /** 빠진 필수 값이 바뀌면 로그를 남긴다: 새로 빠지면 WARN, 모두 돌아오면 INFO. 같은 상태가 이어지면 남기지 않는다. */
+    private void reportMissing(MetricSnapshot snapshot) {
+        Set<String> missing = new TreeSet<>(requiredReadings);
+        for (Reading r : snapshot.readings()) {
+            missing.remove(r.name());
+        }
+        if (missing.equals(missingReadings)) {
+            return;
+        }
+        if (missing.isEmpty()) {
+            LOG.log(Logger.Level.INFO, "자원 값을 다시 읽음: " + missingReadings);
+        } else {
+            missingWarnings++;
+            LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + ". 그 값의 위험 판정을 못 하므로 정지 요청을 새로 만들지 못하고, "
+                    + "켜진 정지 요청은 풀지 않는다(D-092 3번, D-095)");
+        }
+        missingReadings = Set.copyOf(missing);
+    }
+
+    /** 빠진 필수 값으로 WARN을 남긴 횟수(시험용). */
+    int missingWarnings() {
+        return missingWarnings;
     }
 
     private static String detail(MetricSnapshot snapshot) {

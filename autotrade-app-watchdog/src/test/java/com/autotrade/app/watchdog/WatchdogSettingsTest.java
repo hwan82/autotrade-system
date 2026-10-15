@@ -27,6 +27,8 @@ class WatchdogSettingsTest {
         assertThat(s.diskCriticalGb()).isEqualTo(20.0);
         assertThat(s.diskSustain()).isEqualTo(1);
         assertThat(s.releaseHold()).isEqualTo(Duration.ofMinutes(5));
+        assertThat(s.cpu()).isEqualTo(new WatchdogSettings.Limits(85, 95, 3));
+        assertThat(s.memory()).isEqualTo(new WatchdogSettings.Limits(85, 95, 3));
     }
 
     @Test
@@ -40,6 +42,8 @@ class WatchdogSettingsTest {
                 disks=%s,%s
                 disk.free-gb=100:30.5:2
                 release-hold-seconds=0
+                cpu.system=70:90.5:5
+                memory.used = 80:100:1
                 """.formatted(dir, other));
 
         WatchdogSettings s = WatchdogSettings.load(dir);
@@ -52,6 +56,8 @@ class WatchdogSettingsTest {
         assertThat(s.diskCriticalGb()).isEqualTo(30.5);
         assertThat(s.diskSustain()).isEqualTo(2);
         assertThat(s.releaseHold()).isZero();
+        assertThat(s.cpu()).isEqualTo(new WatchdogSettings.Limits(70, 90.5, 5));
+        assertThat(s.memory()).isEqualTo(new WatchdogSettings.Limits(80, 100, 1));
     }
 
     @Test
@@ -96,6 +102,18 @@ class WatchdogSettingsTest {
         assertThatThrownBy(() -> WatchdogSettings.parse("disks=" + dir + "," + dir + "/.", dir))
                 .hasMessageContaining("같은 폴더가 두 번");
         assertThatThrownBy(() -> WatchdogSettings.parse("processes= ", dir)).hasMessageContaining("processes가 비었습니다");
+    }
+
+    @Test
+    void CPU_메모리_임계_형식과_범위를_검사한다() {
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=85:95", dir)).hasMessageContaining("cpu.system는 경고%:위험%:연속");
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=85:x:3", dir)).hasMessageContaining("cpu.system: 숫자가 아닙니다");
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=0:95:3", dir)).hasMessageContaining("0 < 경고 < 위험 ≤ 100");
+        assertThatThrownBy(() -> WatchdogSettings.parse("memory.used=95:85:3", dir)).hasMessageContaining("memory.used: 0 < 경고");
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=90:90:3", dir)).hasMessageContaining("cpu.system: 0 < 경고 < 위험");
+        assertThatThrownBy(() -> WatchdogSettings.parse("memory.used=85:101:3", dir)).hasMessageContaining("≤ 100");
+        assertThatThrownBy(() -> WatchdogSettings.parse("memory.used=85:95:11", dir)).hasMessageContaining("memory.used: 연속은 1~10");
+        assertThatThrownBy(() -> WatchdogSettings.parse("cpu.system=85:95:0", dir)).hasMessageContaining("연속은 1~10");
     }
 
     @Test

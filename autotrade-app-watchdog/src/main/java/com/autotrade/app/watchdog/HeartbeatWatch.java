@@ -44,8 +44,15 @@ final class HeartbeatWatch {
     private final Duration stale;
     private final Map<String, State> states = new HashMap<>();
     private final Map<String, Instant> startedAt = new HashMap<>();
+    /** 기동 뒤 하트비트를 하나도 못 본 채 이어지면 이 간격마다 설정 폴더 경고를 되풀이한다(PR #118 QA R1). */
+    static final Duration ALL_ABSENT_REPEAT = Duration.ofMinutes(10);
+
     private boolean checkedOnce;
     private boolean firstCheckAllAbsent;
+    /** 기동 뒤 어떤 프로세스든 꺼짐이 아닌 상태를 한 번이라도 봤는지. 봤으면 설정 폴더는 맞다. */
+    private boolean seenAny;
+    private Instant lastAllAbsentWarning;
+    private int allAbsentWarnings;
 
     HeartbeatWatch(Path configDir, List<String> processes, Duration stale) {
         this.configDir = configDir;
@@ -89,16 +96,27 @@ final class HeartbeatWatch {
                 log(c);
             }
         }
+        boolean allAbsent = !processes.isEmpty() && processes.stream().allMatch(p -> states.get(p) == State.ABSENT);
+        seenAny |= !allAbsent;
         if (!checkedOnce) {
             checkedOnce = true;
-            firstCheckAllAbsent = !processes.isEmpty() && processes.stream().allMatch(p -> states.get(p) == State.ABSENT);
-            if (firstCheckAllAbsent) {
-                // 설정 폴더(AUTOTRADE_CONFIG_DIR)를 잘못 적으면 빈 폴더를 지키며 모두 꺼짐으로만 보인다(architect PR #116 N2)
-                LOG.log(Level.WARNING, "첫 점검에서 모든 프로세스 하트비트가 없습니다. 아무것도 띄우지 않았다면 정상이고, 띄웠다면 감시의 설정 폴더가 "
-                        + "그 프로세스들과 같은지 확인하세요: " + configDir.toAbsolutePath());
-            }
+            firstCheckAllAbsent = allAbsent;
+        }
+        // 설정 폴더(AUTOTRADE_CONFIG_DIR)를 잘못 적으면 빈 폴더를 지키며 모두 꺼짐으로만 보인다(architect PR #116 N2).
+        // 첫 점검 한 번만 알리면 나중에 프로세스를 띄운 사람이 못 본다. 하트비트를 하나도 못 본 동안 주기로 되풀이한다(PR #118 QA R1)
+        if (!seenAny && (lastAllAbsentWarning == null || !now.isBefore(lastAllAbsentWarning.plus(ALL_ABSENT_REPEAT)))) {
+            lastAllAbsentWarning = now;
+            allAbsentWarnings++;
+            LOG.log(Level.WARNING, (allAbsentWarnings == 1 ? "첫 점검에서" : "감시 시작 뒤 지금까지") + " 모든 프로세스 하트비트가 없습니다. "
+                    + "아무것도 띄우지 않았다면 정상이고, 띄웠다면 감시의 설정 폴더가 그 프로세스들과 같은지 확인하세요: "
+                    + configDir.toAbsolutePath());
         }
         return changes;
+    }
+
+    /** 설정 폴더 경고를 남긴 횟수(시험용). */
+    int allAbsentWarnings() {
+        return allAbsentWarnings;
     }
 
     /** 첫 점검에서 모든 프로세스가 꺼짐(파일 없음)이었는지. */
