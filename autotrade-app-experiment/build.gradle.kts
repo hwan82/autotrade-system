@@ -39,6 +39,8 @@ val gitDirty = providers.exec {
 // 실전 엔진을 끈 날에만: -PallowDuringSession (장 시간 보호만 풀린다. 정지 요청 파일은 풀리지 않는다).
 // 값은 그대로 ExperimentMain에 넘겨 거기서 판단한다: 값 없음·true만 해제, 그 밖의 값(false 포함)은 입력 오류(PR #52 QA F2)
 val allowDuringSession = providers.gradleProperty("allowDuringSession")
+// 병렬 Run 상한(SIM-14, D-089): -PmaxParallelRuns=N(1~64, 기본 4). 등록 파일 parallelism과 작은 쪽을 쓴다. 결과에는 영향 없음
+val maxParallelRuns = providers.gradleProperty("maxParallelRuns")
 
 // 조합 실험(D-061): ./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=<실험ID>
 //     [-PsnapshotsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-Pheap=6g]
@@ -59,6 +61,7 @@ val runCombinationExperiment by tasks.registering(JavaExec::class) {
         buildList {
             add("combination")
             allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
             if (verify.isPresent) add("--verify-determinism")
@@ -85,6 +88,7 @@ val runRecordingExperiment by tasks.registering(JavaExec::class) {
         buildList {
             add("recording")
             allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             recordingsDir.orNull?.let { addAll(listOf("--recordings-dir", it)) }
             if (verify.isPresent) add("--verify-determinism")
@@ -105,6 +109,7 @@ val runStrategyStudy by tasks.registering(JavaExec::class) {
         buildList {
             add("study")
             allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get()))
         }
     })
@@ -129,6 +134,7 @@ val runWalkForwardStudy by tasks.registering(JavaExec::class) {
         buildList {
             add("walkforward")
             allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
             if (verify.isPresent) add("--verify-determinism")
@@ -154,6 +160,7 @@ val runLiveReplayCheck by tasks.registering(JavaExec::class) {
         buildList {
             add("live-check")
             allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }
         }
@@ -180,6 +187,7 @@ val runLiveWeeklyCheck by tasks.registering(JavaExec::class) {
         buildList {
             add("live-weekly")
             allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             to.orNull?.let { addAll(listOf("--to", it)) }
             sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }

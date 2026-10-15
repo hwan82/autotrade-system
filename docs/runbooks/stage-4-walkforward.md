@@ -92,7 +92,8 @@ git diff --exit-code origin/main -- experiments/EXP-<등록일>-WF01/study.yaml
 - `-PverifyDeterminism`은 전체를 병렬 1로 한 번 더 돌려 결과가 바이트까지 같은지 본다(시간이 두 배 넘게 걸린다). 다르면 결과 파일은 쓰되 `inputs.yaml`의 결정론 칸이 "다름"이 되고 종료 코드 2로 끝난다. 이 결과는 쓰지 않는다: 출력과 `inputs.yaml`만 스레드에 붙인다.
 - 메모리: 힙 기본 8GB. `OutOfMemoryError`가 나면 PC 메모리 안에서 `-Pheap=12g`처럼 올려 다시 돌린다(실전 엔진이 돌지 않는 날만).
 - 예열 일수가 모자라거나 구간이 스냅샷 밖이면 종료 코드 1로 바로 끝난다. 메시지를 스레드에 붙인다.
-- 종료 코드: 0 완료, 1 입력 오류, 2 Run 실패(대조군 포함)나 결정론 불일치, 4 정지(결과 파일 없음).
+- 종료 코드: 0 완료, 1 입력 오류(같은 실험이 이미 실행 중 포함), 2 Run 실패(대조군 포함)나 결정론 불일치, 3 실험실에서 취소(결과 파일 없음, D-089), 4 정지(결과 파일 없음).
+- 진행 상황은 `<설정 폴더>/experiment-state/jobs/<실험ID>.status`(실험실 `GET /api/experiment-jobs`)에서 본다. 동시 Run 수는 `-PmaxParallelRuns`(기본 4)와 등록 파일 `parallelism` 중 작은 쪽이고, 실제 병렬 수가 1이면 `-PverifyDeterminism`은 "확인 안 함"으로 남는다(D-089).
 - 감시의 정지 요청 파일(`<설정 폴더>/experiment-state/stop-request`)은 직접 지우지 않는다(D-063).
 
 ## 6. 스레드에 올릴 것

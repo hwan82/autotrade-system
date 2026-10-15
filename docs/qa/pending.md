@@ -31,3 +31,5 @@
 | 2026-10-15 | PR #112 검토해줘 | docs/reviews/pr-112/qa.md | 실전 관련 PR(보호 테스트 강화: PR #110 QA 권고 Q1·R1~R3, `SecretPaths` 바이트코드 지문 고정·와일드카드·중첩 클래스 금지, 브랜치 claude/project-thread-l44wj7) |
 | 2026-10-15 | PR #112 재검토해줘 | docs/reviews/pr-112/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14/F1: 보호 테스트 정의·기계 표시 추가, 권고 R1~R4 반영) |
 | 2026-10-15 | PR #114 검토해줘 | docs/reviews/pr-114/qa.md | 보호 테스트 변경·감시 런타임에 처음 코드가 들어가는 PR(D-090, MON-05 모니터 에이전트·모니터링 화면: 코어 `autotrade-monitor-agent-jar`, 새 모듈 `autotrade-monitor-sources`(OSHI), 실험실 `/api/monitor`·`#/monitor`, `ModuleOwnershipTest`·`ArchitectureTest` 변경, 브랜치 claude/project-thread-y0syxq) |
+| 2026-10-15 | PR #113 검토해줘 | docs/reviews/pr-113/qa.md | 실전 관련 PR(D-089 SIM-14: 실험 실행 명령의 정지 확인 배선을 진행 보고·취소 작업 제어로 감쌈, 정지 순서 0번·장애표 #10 경로, 종료 코드 3 취소 추가, 실험실 /api/experiment-jobs, 브랜치 claude/project-thread-4t6q46) |
+| 2026-10-15 | PR #113 재검토해줘 | docs/reviews/pr-113/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main d6fb6e7·b4ed7fc 병합으로 충돌 해소, 권고 Q1 상한 1 겹침 시험·R1 취소 뒤 정지 요청은 종료 코드 4·R2 작업 목록 메모리 상한 반영, 브랜치 claude/project-thread-4t6q46) |
