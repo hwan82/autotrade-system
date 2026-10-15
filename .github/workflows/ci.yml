@@ -91,6 +91,12 @@ jobs:
             sleep 1
           done
           test -f "$AUTOTRADE_CONFIG_DIR/heartbeat/engine.hb" || { cat engine.log; exit 1; }
+          # 감시가 엔진을 살아 있음으로 볼 때까지 기다린다(점검 주기 5초라 엔진을 너무 빨리 끄면 놓친다)
+          for i in $(seq 1 15); do
+            if grep -qE "engine .*ABSENT .* ALIVE" watchdog.log; then break; fi
+            sleep 1
+          done
+          grep -qE "engine .*ABSENT .* ALIVE" watchdog.log || { echo "감시가 엔진 하트비트를 보지 못했습니다"; cat watchdog.log; exit 1; }
           # 같은 설정 폴더로 두 번째 엔진은 뜨지 않는다(run/engine.lock)
           if autotrade-app-engine/build/install/autotrade-engine/bin/autotrade-engine > engine2.log 2>&1; then
             echo "두 번째 엔진이 떴습니다"; cat engine2.log; exit 1
@@ -114,7 +120,10 @@ jobs:
           test ! -e "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock" || { echo "종료 후 소켓이 남았습니다"; cat engine.log; exit 1; }
           # 정상 종료는 하트비트 파일을 지운다(감시가 꺼짐과 멈춤을 가름, D-092)
           test ! -e "$AUTOTRADE_CONFIG_DIR/heartbeat/engine.hb" || { echo "종료 후 엔진 하트비트가 남았습니다"; exit 1; }
-          sleep 6
+          for i in $(seq 1 15); do
+            if grep -qE "engine .*ALIVE .* ABSENT" watchdog.log; then break; fi
+            sleep 1
+          done
           grep -qE "engine .*ALIVE .* ABSENT" watchdog.log || { echo "감시가 엔진 종료를 보지 못했습니다"; cat watchdog.log; exit 1; }
           kill "$WATCHDOG_PID"
           for i in $(seq 1 10); do
