@@ -127,4 +127,34 @@ class HeartbeatTest {
         }
         assertThat(writer.file()).doesNotExist();
     }
+
+    @Test
+    void 기록기를_만들면_이전_실행이_남긴_자기_임시_파일만_거둔다() throws Exception {
+        // 쓰는 도중 프로세스가 죽으면 <이름>.hb.<pid>.tmp가 남는다(PR #116 QA·architect N3)
+        Path hb = Heartbeat.file(dir, "engine");
+        Files.createDirectories(hb.getParent());
+        Path mine = hb.resolveSibling("engine.hb.12345.tmp");
+        Path otherProcess = hb.resolveSibling("gateway.hb.12345.tmp");
+        Path notPid = hb.resolveSibling("engine.hb.backup.tmp");
+        for (Path p : new Path[] {mine, otherProcess, notPid}) {
+            Files.writeString(p, "반쯤", StandardCharsets.UTF_8);
+        }
+
+        new HeartbeatWriter(dir, "engine", Clock.fixed(Instant.parse("2026-10-15T00:00:00Z"), ZoneOffset.UTC));
+
+        assertThat(mine).doesNotExist();
+        assertThat(otherProcess).exists();
+        assertThat(notPid).exists();
+    }
+
+    @Test
+    void 작은_파일_읽기는_상한을_넘으면_읽지_않는다() throws Exception {
+        Path small = dir.resolve("small");
+        Files.writeString(small, "a".repeat((int) SmallFile.MAX_BYTES), StandardCharsets.UTF_8);
+        assertThat(SmallFile.read(small)).hasSize((int) SmallFile.MAX_BYTES);
+
+        Path big = dir.resolve("big");
+        Files.writeString(big, "a".repeat((int) SmallFile.MAX_BYTES + 1), StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> SmallFile.read(big)).isInstanceOf(java.io.IOException.class).hasMessageContaining("상한 4096");
+    }
 }

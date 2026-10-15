@@ -60,9 +60,10 @@ public final class WatchdogMain {
         ProcessStartup.start(PROCESS, paths, clock);
         Path dir = configDir(paths);
         WatchdogSettings settings = WatchdogSettings.load(dir);
-        LOG.log(Level.INFO, "감시 시작: 주기 {0}초, 하트비트 {1}({2}초 넘으면 멈춤), 드라이브 {3}, 여유 경고 {4}GB·위험 {5}GB",
+        // 지키는 설정 폴더를 남긴다. 잘못 적은 폴더면 모든 프로세스가 꺼짐으로만 보인다(architect PR #116 N2)
+        LOG.log(Level.INFO, "감시 시작: 설정 폴더 {6}, 주기 {0}초, 하트비트 {1}({2}초 넘으면 멈춤), 드라이브 {3}, 여유 경고 {4}GB·위험 {5}GB",
                 settings.interval().toSeconds(), settings.processes(), settings.heartbeatStale().toSeconds(), settings.disks(),
-                Math.round(settings.diskWarnGb()), Math.round(settings.diskCriticalGb()));
+                Math.round(settings.diskWarnGb()), Math.round(settings.diskCriticalGb()), dir.toAbsolutePath());
         Watchdog watchdog = new Watchdog(dir, settings, clock, DiskFreeSource.FILE_STORE);
         watchdog.start();
         return watchdog;

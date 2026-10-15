@@ -107,4 +107,12 @@ class WatchdogSettingsTest {
         assertThat(fresh).isDirectory();
         assertThat(s.disks()).containsExactly(fresh.toAbsolutePath());
     }
+
+    @Test
+    void 상한보다_큰_설정_파일은_읽지_않고_기동을_거부한다() throws Exception {
+        // PR #116 독립 QA R1: 감시 설정은 몇 줄이다. 비정상으로 큰 파일이 힙을 채우지 않게 4KB 상한
+        Files.writeString(dir.resolve(WatchdogSettings.FILE), "# " + "x".repeat(5000) + "\ninterval-seconds=5\n");
+        assertThatThrownBy(() -> WatchdogSettings.load(dir)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("감시 설정 파일을 읽지 못했습니다").hasMessageContaining("상한 4096");
+    }
 }

@@ -113,4 +113,50 @@ class StopRequestsTest {
         stop.update(clock.instant(), Pressure.CRITICAL, "위험");
         assertThat(collector()).exists();
     }
+
+    @Test
+    void 한_파일만_못_지우면_켜진_상태를_유지하고_다음_점검에_다시_쓰고_다시_지운다() throws Exception {
+        // PR #116 독립 QA Q1(변이 M7): 두 파일은 늘 함께 켜지고 함께 꺼진다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        StopRequests stop = new StopRequests(dir, Duration.ZERO);
+        stop.update(clock.instant(), Pressure.CRITICAL, "위험");
+
+        // 실험 파일 자리를 비어 있지 않은 폴더로 바꿔 지우기(와 다시 쓰기)를 실패시킨다
+        Files.delete(experiment());
+        Files.createDirectories(experiment().resolve("blocker"));
+
+        clock.advance(Duration.ofSeconds(5));
+        stop.update(clock.instant(), Pressure.CLEAR, "정상");
+        assertThat(stop.active()).isTrue();
+        // 같은 점검에서 이미 지운 수집기 파일도 다시 쓴다: 한 명령만 풀리는 상태를 만들지 않는다
+        assertThat(Files.readString(collector())).contains("requested-at=2026-10-15T00:00:00Z", "confirmed-at=2026-10-15T00:00:05Z");
+
+        Files.delete(experiment().resolve("blocker"));
+        Files.delete(experiment());
+        clock.advance(Duration.ofSeconds(5));
+        stop.update(clock.instant(), Pressure.CLEAR, "정상");
+        assertThat(stop.active()).isFalse();
+        assertThat(collector()).doesNotExist();
+        assertThat(experiment()).doesNotExist();
+    }
+
+    @Test
+    void 기동_때_남은_임시_파일을_거두고_너무_큰_남은_파일은_지금_시각으로_이어받는다() throws Exception {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Files.createDirectories(collector().getParent());
+        Files.writeString(collector(), "x".repeat(5000)); // 상한(4KB)을 넘는 쓰레기(PR #116 QA R1)
+        Path temp = collector().resolveSibling("stop-request.4242.tmp");
+        Path other = collector().resolveSibling("stop-request.note.tmp");
+        Files.writeString(temp, "반쯤");
+        Files.writeString(other, "남의 파일");
+
+        StopRequests stop = new StopRequests(dir, Duration.ofMinutes(5));
+        stop.adoptLeftovers(clock.instant());
+        stop.update(clock.instant(), Pressure.ELEVATED, "경고");
+
+        assertThat(stop.active()).isTrue();
+        assertThat(temp).doesNotExist();
+        assertThat(other).exists(); // PID가 아닌 이름은 건드리지 않는다
+        assertThat(Files.readString(collector())).contains("requested-at=2026-10-15T00:00:00Z");
+    }
 }

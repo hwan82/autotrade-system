@@ -1,11 +1,10 @@
 package com.autotrade.app.watchdog;
 
 import com.autotrade.monitor.Heartbeat;
+import com.autotrade.monitor.SmallFile;
 import java.io.IOException;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -45,6 +44,8 @@ final class HeartbeatWatch {
     private final Duration stale;
     private final Map<String, State> states = new HashMap<>();
     private final Map<String, Instant> startedAt = new HashMap<>();
+    private boolean checkedOnce;
+    private boolean firstCheckAllAbsent;
 
     HeartbeatWatch(Path configDir, List<String> processes, Duration stale) {
         this.configDir = configDir;
@@ -60,7 +61,7 @@ final class HeartbeatWatch {
             State state;
             Duration age = Duration.ZERO;
             try {
-                String text = Files.readString(Heartbeat.file(configDir, process), StandardCharsets.UTF_8);
+                String text = SmallFile.read(Heartbeat.file(configDir, process));
                 last = Heartbeat.parse(text).filter(h -> h.process().equals(process));
                 if (last.isEmpty()) {
                     state = State.UNREADABLE;
@@ -88,7 +89,21 @@ final class HeartbeatWatch {
                 log(c);
             }
         }
+        if (!checkedOnce) {
+            checkedOnce = true;
+            firstCheckAllAbsent = !processes.isEmpty() && processes.stream().allMatch(p -> states.get(p) == State.ABSENT);
+            if (firstCheckAllAbsent) {
+                // 설정 폴더(AUTOTRADE_CONFIG_DIR)를 잘못 적으면 빈 폴더를 지키며 모두 꺼짐으로만 보인다(architect PR #116 N2)
+                LOG.log(Level.WARNING, "첫 점검에서 모든 프로세스 하트비트가 없습니다. 아무것도 띄우지 않았다면 정상이고, 띄웠다면 감시의 설정 폴더가 "
+                        + "그 프로세스들과 같은지 확인하세요: " + configDir.toAbsolutePath());
+            }
+        }
         return changes;
+    }
+
+    /** 첫 점검에서 모든 프로세스가 꺼짐(파일 없음)이었는지. */
+    boolean firstCheckAllAbsent() {
+        return firstCheckAllAbsent;
     }
 
     Map<String, State> states() {
