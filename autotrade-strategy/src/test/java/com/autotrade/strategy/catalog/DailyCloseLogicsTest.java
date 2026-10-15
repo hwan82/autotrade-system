@@ -207,6 +207,32 @@ class DailyCloseLogicsTest {
         assertThat(noCash).isEqualTo(new EntryFunnel.Totals(1, 0, 0, 1, 0, 1));
     }
 
+    @Test
+    void 청산_사유는_왕복의_진입일부터_청산일까지_낸_마지막_매도_신호의_사유다() {
+        Strategy strategy = FACTORY.create(profile(TradingStyle.SWING, reversal(Map.of())), 42L);
+        Tape tape = new Tape(strategy);
+        long[] closes = {10000, 10000, 10000, 10000, 10000, 10000, 11000};
+        for (int i = 0; i < closes.length; i++) {
+            tape.day(START.plusDays(i)).trade("09:10:00", closes[i], 100);
+        }
+        LocalDate d = START.plusDays(closes.length);
+        tape.hold(A, 10, TODAY);
+        // 11,000 > 평균 10,333: 로직 청산
+        assertThat(tape.day(d).trade("09:10:00", TODAY, 100)).anyMatch(s -> s.intent() == OrderIntent.EXIT);
+        // 체결되지 않아 다음 날도 보유: 평균 단가 100,000 대비 −80%라 손절(50%)이 먼저다
+        tape.hold(A, 10, 100_000);
+        assertThat(tape.day(d.plusDays(1)).trade("09:10:00", TODAY, 100))
+                .anyMatch(s -> s.intent() == OrderIntent.STOP_LOSS);
+
+        ExitLog log = ((ManagedStrategy) strategy).exitLog();
+        assertThat(log.reasonFor(A, START, d)).contains(ExitReason.LOGIC_EXIT);
+        assertThat(log.reasonFor(A, START, d.plusDays(1))).as("마지막 신호가 이긴다").contains(ExitReason.STOP_LOSS);
+        assertThat(log.reasonFor(A, START, d.plusDays(5))).contains(ExitReason.STOP_LOSS);
+        assertThat(log.reasonFor(A, START, d.minusDays(1))).as("청산일 전에 낸 신호가 없다").isEmpty();
+        assertThat(log.reasonFor(A, d.plusDays(2), d.plusDays(5))).as("진입일 전 신호는 이 왕복 것이 아니다").isEmpty();
+        assertThat(log.reasonFor(com.autotrade.domain.market.Symbol.krx("900002"), START, d)).isEmpty();
+    }
+
     private static EntryFunnel.Totals funnelOn(Map<String, String> extra, long[] closes,
             java.util.function.Consumer<Tape> setup, LocalDate day) {
         Strategy strategy = FACTORY.create(profile(TradingStyle.SWING, breakout(extra)), 42L);

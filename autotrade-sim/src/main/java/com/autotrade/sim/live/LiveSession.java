@@ -245,8 +245,7 @@ public final class LiveSession implements AutoCloseable {
         if (closed || !stopReason.isEmpty()) {
             return Accepted.STOPPED;
         }
-        if (!setup.plan().boards().containsKey(event.symbol().code())
-                || event.symbol().market() != setup.plan().market()) {
+        if (!setup.onBoards(event)) {
             skippedSymbol++;
             return Accepted.SKIPPED_SYMBOL;
         }
@@ -317,19 +316,7 @@ public final class LiveSession implements AutoCloseable {
     }
 
     private boolean inPlan(MarketEvent e) {
-        LocalDate from = setup.plan().from();
-        LocalDate to = setup.plan().to();
-        LocalDate received = e.receivedAt().atZone(setup.rules().zone()).toLocalDate();
-        if (received.isBefore(from) || received.isAfter(to)) {
-            return false;
-        }
-        LocalDate trading;
-        try {
-            trading = setup.rules().tradingDate(e.exchangeTime());
-        } catch (RuntimeException ex) {
-            return false; // 캘린더 수록 범위 밖 등 판단할 수 없으면 받지 않는다
-        }
-        return !trading.isBefore(from) && !trading.isAfter(to);
+        return setup.inPlan(e);
     }
 
     /** 쓴 기록을 디스크로 내린다(받을 이벤트가 없을 때 실험실이 주기적으로 부른다). */

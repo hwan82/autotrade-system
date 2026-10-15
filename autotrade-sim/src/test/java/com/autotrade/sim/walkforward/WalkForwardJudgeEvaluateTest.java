@@ -60,7 +60,7 @@ class WalkForwardJudgeEvaluateTest {
             trips.add(new RoundTrip("L" + (++lot), S, eq.get(0).date(), d, Money.of(pnl, Money.KRW)));
         }
         var m = MetricsCalculator.compute(SEED, eq.get(0).date(), eq.get(eq.size() - 1).date(), eq, List.of(), trips, null);
-        return new WindowRun(window, "", m, eq, trips, List.of(), Set.of(), EntryFunnel.Totals.ZERO);
+        return new WindowRun(window, "", m, eq, trips, List.of(), Set.of(), EntryFunnel.Totals.ZERO, ExitMix.ZERO);
     }
 
     private static List<WindowRun> val() {
