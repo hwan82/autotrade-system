@@ -44,3 +44,35 @@
 
 ## 판정
 수정 필요(F1 결정론 확인 기록의 병렬 수, F2 risk-ops 검토 필요(B7), F3 `config-keys.md`의 `lab.max-parallel-runs` 적용 범위(B3))
+
+## 재검토 2026-10-15
+- 대상: PR #113 / 커밋 `9e51c66` / main 대비 diff 전체(`git diff origin/main...HEAD`, merge-base `d0e9f3f`) 다시 읽음. 수정 커밋 `42b2524..9e51c66`(19개 파일, +288 −47)은 줄 단위로 대조. 이 파일(`architect.md`)의 앞 내용은 수정 커밋에서 바뀌지 않았다(`git diff 6cb8de1..9e51c66 -- docs/reviews/pr-113/architect.md` 빈 출력).
+- 점검표: B
+- 직접 실행한 것: 새 별도 clone(헤드 `9e51c66`)에서 `./gradlew build` → **BUILD SUCCESSFUL**(2분 28초, 130 작업). 테스트 XML 집계 1171건, 실패·오류 0, 건너뜀 0. 관련 테스트: `ExperimentJobTest` 13, `ExperimentJobsTest` 1(신규), `RecordingExperimentTest` 5(1건 추가), `ExperimentGateTest` 19, `RunProgressTest` 7, `ExperimentJobStatusTest` 7, `ExperimentJobControllerTest` 2, `ArchitectureTest` 19, `ModuleOwnershipTest` 13 모두 통과. `ArchitectureTest.java`·`ExperimentGateTest.java`는 diff 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 성공, 1171건 실패 0·건너뜀 0 |
+| B2 | 통과 | 수정 커밋에 새 모듈 의존·새 패키지 없음. `ArchitectureTest`·`ModuleOwnershipTest` 변경 없음·통과 |
+| B3 | 통과 | F3 해소: `docs/config/config-keys.md:19`에 "지금 이 키를 읽는 운영 코드는 없다 … `-PmaxParallelRuns`(D-089 결정 4)"를 적음. 새 동작(ID 형식 오류 시 1, 작업 폴더 불가·중복 실행이어도 정지면 4, 상태 파일 메시지의 `<설정 폴더>` 치환, 결정론 기록의 실제 병렬 수)이 D-089 결정 3(`D-089-…md:19-22`), 결정 로그 README, 기획서 v14.33, 운영 절차서(`docs/runbooks/README.md` 종료 코드 표 3·1, `stage-4-walkforward.md:95-96`)에 반영됨 |
+| B4 | 통과 | F1 해소: 실제 병렬 수 `Math.min(plan.parallelism(), gate.maxParallelRuns())`를 실행기 인자·로그·결정론 문구에 같이 씀(`CombinationExperiment.java:166-180`, `RecordingExperiment.java:146-160`, `WalkForwardStudy.java:144-163`). 그 값이 1이면 두 번째 실행을 하지 않고 "확인 안 함(실제 병렬 수가 1이라 …)"으로 적는다. 종료 코드 판정은 `"다름"`/`Boolean.FALSE`만 보므로(`RecordingMain.java:74`, `WalkForwardMain.java:77`) 확인 안 함이 2로 잘못 끝나지 않는다. `RecordingExperimentTest#실행_명령_병렬_상한이_1이면_결정론_확인을_같음으로_적지_않는다` 통과. 골든·`RunProgressTest` 그대로 통과. 시스템 시계 사용 없음(`ExperimentJobs.modified`는 파일 수정 시각을 읽는 것이고 판정 시각은 주입 `Clock`) |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 바뀐 동작마다 테스트: `ExperimentJobTest#작업_폴더를_쓸_수_없어도_정지_요청이면_종료_코드_4다`, `#같은_실험이_도는_중이어도_정지_요청이면_종료_코드_4다`, 취소·정지 메시지에 설정 폴더 절대 경로 없음(기존 테스트 2건의 단언 강화), `ExperimentJobsTest#상한을_넘으면_가장_최근_파일을_남기고_자른다`. R4(ID 형식 오류 → 1)는 기존 `ExperimentGateTest`의 `"../EXP"`·ID 없음 → 1 단언이 그대로 지킨다. 테스트 삭제·`@Disabled` 없음 |
+| B7 | 통과(risk-ops 검토 필요) | 정지 확인 배선 변경이라 risk-ops 검토가 따로 있다(`docs/reviews/pr-113/risk-ops.md`, 판정 수정 필요(A12 F1)). 그 F1은 `ExperimentMain.java:102`, `:108`의 `stoppedOr(gate, 1)`(`:122-129`)로 고쳐졌고 위 테스트 2건이 있지만, **risk-ops 재검토 원문은 아직 없다.** D-089 상태 줄이 이 PR을 실전 관련 PR(사용자 직접 머지, 독립 QA 관문)로 바꿨다(`D-089-…md:4-5`). 머지 전에 risk-ops 재검토 승인과 사용자 머지가 필요하다 |
+| B8 | 통과 | 수정 커밋에 비밀값 없음. 상태 파일(REST로 나감) 메시지에서 설정 폴더 경로를 `<설정 폴더>`로 바꿈(`ExperimentJob.java:230`, `:252-255`) |
+
+### 지난 지적 처리
+- F1(결정론 기록의 병렬 수): 해소(B4).
+- F2(risk-ops 검토): risk-ops 검토 원문이 생겼고 D-089 교차 검토·상태 줄이 맞춰졌다. risk-ops 재검토는 risk-ops 몫으로 남는다(B7).
+- F3(`lab.max-parallel-runs` 문서): 해소(B3).
+- R1(주석 위치): 해소(`LabWebConfiguration.java` 주석이 `snapshotList` 위로 돌아감).
+- R2(REST 메시지의 절대 경로): 해소. 단, 아래 R5.
+- R3(500개 상한 순서): 해소(`ExperimentJobs.java:90`, 수정 시각 내림차순 뒤 자름).
+- R4(ID 형식 오류 때 본체 실행): 해소(`ExperimentMain.java:91-95`, 종료 코드 1).
+
+### 새 권고(판정을 막지 않음)
+- **R5** `withoutConfigDir`는 `files.dir().getParent().getParent()`(정규화한 절대 경로) 문자열을 바꾼다. 그런데 정지 요청 경로는 `configDir.resolve(STOP_REQUEST)`(`ExperimentMain.java:174`)로 정규화하지 않은 채 메시지에 들어간다. 기본 설정 폴더(`ConfigPaths.defaultLocation()`, 홈 아래 절대 경로)에서는 같지만, `AUTOTRADE_CONFIG_DIR`이 상대 경로이거나 `..`·끝 `/`를 포함하면 치환되지 않아 원래 경로가 REST로 나갈 수 있다. 실행 명령 진입점에서 `configDir`를 `toAbsolutePath().normalize()`해 두면 된다.
+- **R6** 결정론 "확인 안 함(병렬 1)" 경로의 테스트는 녹화 실험만 있다. 조합·워크포워드도 같은 형태라 위험은 낮지만, 같은 단언을 하나씩 두면 이후 리팩터링에서 갈라지는 것을 막는다.
+
+### 판정
+승인(architect 범위. 머지 조건: risk-ops 재검토 승인, 실전 관련 PR로서 독립 QA와 사용자 직접 머지)
