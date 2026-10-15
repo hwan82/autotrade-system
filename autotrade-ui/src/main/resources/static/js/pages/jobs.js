@@ -46,7 +46,7 @@ function progress(j) {
   const pctText = `${(j.permille / 10).toFixed(1)}%`;
   const runs = `Run ${number(j.runsFinished)}/${number(j.runsTotal)} 끝`
     + (j.runsFailed ? ` (실패 ${number(j.runsFailed)})` : '')
-    + (j.runsStarted > j.runsFinished ? `, ${number(j.runsStarted - j.runsFinished)}개 진행 중` : '');
+    + (j.state === 'RUNNING' && j.runsStarted > j.runsFinished ? `, ${number(j.runsStarted - j.runsFinished)}개 진행 중` : '');
   const days = j.daysTotal ? `거래일 ${number(j.daysDone)}/${number(j.daysTotal)}` : null;
   const fill = h('span', {});
   fill.style.width = `${Math.min(100, Math.max(0, j.permille / 10))}%`; // CSP 'self': style 속성 대신 CSSOM
@@ -63,9 +63,9 @@ function stateCell(j) {
   const s = JOB_STATE[j.state] || { label: j.state, cls: 'badge' };
   return h('span', {},
     h('span', { class: s.cls }, s.label),
-    j.cancelRequested && j.state === 'RUNNING' ? h('span', { class: 'sub warn' }, ' 취소 요청됨(다음 확인 지점에서 끝남)') : null,
+    j.cancelRequested && j.state === 'RUNNING' ? h('span', { class: 'sub warn-text' }, ' 취소 요청됨(다음 확인 지점에서 끝남)') : null,
     j.state === 'UNRESPONSIVE'
-      ? h('span', { class: 'sub warn' }, ' 60초 넘게 갱신 없음. 터미널이 닫혔거나 강제 종료됐을 수 있습니다') : null);
+      ? h('span', { class: 'sub warn-text' }, ' 60초 넘게 갱신 없음. 터미널이 닫혔거나 강제 종료됐을 수 있습니다') : null);
 }
 
 /**

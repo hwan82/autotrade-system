@@ -68,7 +68,7 @@ function folderSection(res) {
     { label: '기간', render: f => f.period },
     { label: '조합', num: true, render: f => number(f.combinations) },
     { label: '상태', render: f => h('span', {}, FOLDER_STATE[f.state] || f.state,
-      f.lastError ? h('span', { class: 'sub warn' }, ` ${f.state === 'INVALID' ? '' : '실패: '}${f.lastError}`) : null) },
+      f.lastError ? h('span', { class: 'sub warn-text' }, ` ${f.state === 'INVALID' ? '' : '실패: '}${f.lastError}`) : null) },
     { label: '', render: f => f.state === 'READY'
       ? h('button', { class: 'btn secondary', type: 'button', onclick: (ev) => load(f, ev.currentTarget) }, '불러오기')
       : f.state === 'NOT_RUN' || f.state === 'NO_BUNDLE'

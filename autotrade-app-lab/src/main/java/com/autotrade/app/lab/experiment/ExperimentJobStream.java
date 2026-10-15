@@ -114,8 +114,15 @@ public final class ExperimentJobStream implements AutoCloseable {
             last = null; // 다음 연결은 처음부터
             return;
         }
-        Snapshot now = Snapshot.of(jobs.list());
         Instant at = clock.instant();
+        Snapshot now;
+        try {
+            now = Snapshot.of(jobs.list());
+        } catch (RuntimeException e) {
+            // 작업 폴더를 못 읽어도 주석 줄은 보낸다(떠난 연결이 상한 자리를 30분 동안 차지하지 않게, architect PR #117)
+            keepalive(at);
+            throw e;
+        }
         if (!now.equals(last)) {
             last = now;
             fresh.clear();
@@ -129,6 +136,10 @@ public final class ExperimentJobStream implements AutoCloseable {
             fresh.remove(emitter);
             send(emitter, SseEmitter.event().name("jobs").data(now));
         }
+        keepalive(at);
+    }
+
+    private void keepalive(Instant at) {
         if (!at.isBefore(lastSent.plus(KEEPALIVE))) {
             for (SseEmitter emitter : streams) {
                 send(emitter, SseEmitter.event().comment("keepalive"));
