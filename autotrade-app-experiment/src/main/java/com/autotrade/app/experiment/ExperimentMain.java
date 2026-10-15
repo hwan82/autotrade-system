@@ -18,6 +18,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 실험 실행 명령의 프로세스 진입점(D-063, Q-049). 실전 엔진과 같은 PC에서 도는 단발 명령이라 자원 부족 정지 순서 0번
@@ -88,7 +89,9 @@ public final class ExperimentMain {
         String[] forwarded = rest.toArray(String[]::new);
         String job = jobId(args[0], rest);
         if (job == null) {
-            return dispatch(args[0], forwarded, configDir, gate); // 실험 ID가 없거나 형식이 틀림: 본체가 입력 오류로 끝낸다
+            // 잠금·상태 파일·병렬 상한 없이 본체를 돌리지 않는다(PR #113 architect R4)
+            System.err.println("[experiment] 실험 ID 인자가 없거나 실험 ID 형식이 아닙니다(저장소, 커밋, dirty 다음 네 번째 인자)");
+            return 1;
         }
         ExperimentJob control;
         try {
@@ -96,11 +99,13 @@ public final class ExperimentMain {
                     ProcessHandle.current().pid());
         } catch (ExperimentJob.AlreadyRunningException e) {
             System.err.println("[experiment] " + e.getMessage());
-            return 1;
+            return stoppedOr(gate, 1);
         } catch (IOException e) {
             System.err.println("[experiment] 작업 폴더(" + ExperimentJobFiles.in(configDir).dir()
                     + ")를 쓸 수 없어 시작하지 않습니다: " + e.getClass().getSimpleName());
-            return 1;
+            // 디스크 고갈 등으로 작업 폴더를 못 쓸 때도 정지 요청·장 시간 보호는 종료 코드 4와 이유로 알린다(장애표 #10,
+            // PR #113 risk-ops F1). 감시가 남긴 정지 요청 파일을 사람이 알아채는 단서가 이 출력이다
+            return stoppedOr(gate, 1);
         }
         System.out.println("[experiment] 진행 상태 파일: " + control.statusFile() + ", 병렬 Run 상한 "
                 + maxParallelRuns + "(-PmaxParallelRuns, 등록 파일 parallelism과 작은 쪽)");
@@ -111,6 +116,16 @@ public final class ExperimentMain {
         } finally {
             control.finish(code);
         }
+    }
+
+    /** 정지 확인이 멈추라고 하면 본체와 같은 문구·종료 코드 4, 아니면 {@code otherwise}. */
+    private static int stoppedOr(ExperimentGate gate, int otherwise) {
+        Optional<String> stop = gate.stopReason();
+        if (stop.isPresent()) {
+            System.err.println("[experiment] 멈췄습니다(결과 파일을 쓰지 않음): " + stop.get());
+            return 4;
+        }
+        return otherwise;
     }
 
     private static int dispatch(String command, String[] forwarded, Path configDir, RunGate gate) {

@@ -73,32 +73,41 @@ public final class ExperimentJobs {
     public record Listing(List<Job> items, int unreadable, boolean truncated) {
     }
 
-    /** 갱신 시각 내림차순(같으면 작업 ID 오름차순). */
+    /**
+     * 갱신 시각 내림차순(같으면 작업 ID 오름차순). 파일이 {@value #MAX_FILES}개를 넘으면 파일 수정 시각이 최근인 것부터 읽어
+     * 오래된 작업이 잘린다(디렉터리 순서로 자르면 최신 작업이 빠질 수 있음, PR #113 architect R3).
+     */
     public Listing list() {
-        List<Job> out = new ArrayList<>();
-        int unreadable = 0;
-        int seen = 0;
-        boolean truncated = false;
         if (!Files.isDirectory(files.dir())) {
             return new Listing(List.of(), 0, false);
         }
+        List<Path> paths = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(files.dir(), "*.status")) {
-            for (Path p : stream) {
-                if (seen++ >= MAX_FILES) {
-                    truncated = true;
-                    break;
-                }
-                try {
-                    out.add(view(files.read(p)));
-                } catch (IOException | RuntimeException e) {
-                    unreadable++; // 쓰는 중 바꿔 넣기와 겹친 경우도 여기(다음 조회에서 다시 읽음)
-                }
-            }
+            stream.forEach(paths::add);
         } catch (IOException e) {
             throw new UncheckedIOException("작업 폴더를 읽지 못했습니다: " + files.dir(), e);
         }
+        paths.sort(Comparator.comparing(ExperimentJobs::modified).reversed().thenComparing(Path::toString));
+        boolean truncated = paths.size() > MAX_FILES;
+        List<Job> out = new ArrayList<>();
+        int unreadable = 0;
+        for (Path p : truncated ? paths.subList(0, MAX_FILES) : paths) {
+            try {
+                out.add(view(files.read(p)));
+            } catch (IOException | RuntimeException e) {
+                unreadable++; // 쓰는 중 바꿔 넣기와 겹친 경우도 여기(다음 조회에서 다시 읽음)
+            }
+        }
         out.sort(Comparator.comparing(Job::updatedAt).reversed().thenComparing(Job::job));
         return new Listing(List.copyOf(out), unreadable, truncated);
+    }
+
+    private static Instant modified(Path p) {
+        try {
+            return Files.getLastModifiedTime(p).toInstant();
+        } catch (IOException e) {
+            return Instant.MIN;
+        }
     }
 
     /**

@@ -115,7 +115,7 @@ class ExperimentJobTest {
         job.finish(3);
 
         assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.CANCELLED);
-        assertThat(status().message()).contains("취소");
+        assertThat(status().message()).contains("취소").contains("<설정 폴더>").doesNotContain(config.toString());
         assertThat(files().cancelRequest(JOB)).doesNotExist();
     }
 
@@ -131,7 +131,7 @@ class ExperimentJobTest {
         job.finish(4);
 
         assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.STOPPED);
-        assertThat(status().message()).contains("정지를 요청");
+        assertThat(status().message()).contains("정지를 요청").contains("<설정 폴더>").doesNotContain(config.toString());
         assertThat(stop).exists(); // 정지 요청 파일은 감시만 지운다(D-058)
     }
 
@@ -212,6 +212,33 @@ class ExperimentJobTest {
         ExperimentMain.run(new String[] {"combination", "--max-parallel-runs=2", repo.toString(), "abc", "false", JOB},
                 clock, config);
         assertThat(status().maxParallelRuns()).isEqualTo(2);
+    }
+
+    @Test
+    void 작업_폴더를_쓸_수_없어도_정지_요청이면_종료_코드_4다(@TempDir Path repo) throws IOException {
+        // 디스크 고갈처럼 작업 폴더를 못 쓰는 때에도 감시의 정지 요청은 4와 이유로 알린다(장애표 #10, PR #113 risk-ops F1)
+        Files.createDirectories(config.resolve("experiment-state"));
+        Files.writeString(config.resolve(ExperimentJobFiles.JOBS_DIR), "디렉터리 자리에 파일");
+        Clock clock = Clock.fixed(WEEKEND, ZoneOffset.UTC);
+        String[] args = {"combination", repo.toString(), "abc", "false", JOB};
+
+        assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(1); // 정지 요청 없음: 입력 오류
+        Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+        assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(4);
+        assertThat(ExperimentMain.run(new String[] {"combination", "--allow-during-session", repo.toString(), "abc",
+                "false", JOB}, clock, config)).isEqualTo(4);
+    }
+
+    @Test
+    void 같은_실험이_도는_중이어도_정지_요청이면_종료_코드_4다(@TempDir Path repo) throws Exception {
+        ExperimentJob running = start(new MovingClock(WEEKEND));
+        Clock clock = Clock.fixed(WEEKEND, ZoneOffset.UTC);
+        String[] args = {"combination", repo.toString(), "abc", "false", JOB};
+
+        assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(1);
+        Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+        assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(4);
+        running.finish(0);
     }
 
     @Test

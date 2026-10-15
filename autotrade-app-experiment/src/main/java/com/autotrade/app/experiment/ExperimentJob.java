@@ -227,7 +227,7 @@ final class ExperimentJob implements RunGate, AutoCloseable {
                 case COMPLETED -> "";
                 default -> "종료 코드 " + exitCode;
             };
-            status = status.withState(state, clock.instant(), message);
+            status = status.withState(state, clock.instant(), withoutConfigDir(message));
             write();
             finished = true;
         }
@@ -243,6 +243,15 @@ final class ExperimentJob implements RunGate, AutoCloseable {
         } catch (IOException e) {
             // 프로세스가 끝나면 OS가 푼다
         }
+    }
+
+    /**
+     * 상태 파일(실험실 REST로 나감)에는 설정 폴더 절대 경로를 싣지 않는다(ADR-005 live {@code stopReason}과 같은 기준, PR #113
+     * architect R2·risk-ops R1). 콘솔 출력에는 그대로 둔다.
+     */
+    private String withoutConfigDir(String message) {
+        Path configDir = files.dir().getParent().getParent();
+        return message.replace(configDir.toString(), "<설정 폴더>");
     }
 
     /** {@link #finish}를 부르지 않고 닫히면 예상 못 한 오류로 끝난 것이다. */

@@ -302,7 +302,7 @@ final class WalkForwardReport {
                 .append(total).append("개. 결정론 확인(-PverifyDeterminism)은 전체를 병렬 1로 한 번 더 돈다.\n");
         sb.append("- 검증 1년 Run당 이벤트 약 ").append(eventsPerRun).append("개(종목 ").append(symbols).append(" x 거래일 ")
                 .append(testDays).append(" x 6칸, 학습은 3배). `[가정]` 1스레드 초당 100만 이벤트이면 검증 Run당 약 ")
-                .append(eventsPerRun / 1_000_000L).append("초, 대조군 ").append(nullRuns).append("개를 병렬 ")
+                .append(eventsPerRun / 1_000_000L).append("초, 대조군 ").append(nullRuns).append("개를 등록 파일 병렬 ")
                 .append(plan.parallelism()).append("로 돌리면 대략 ").append(nullRuns * eventsPerRun / 1_000_000L / Math.max(1, plan.parallelism()) / 60)
                 .append("분. 실측이 아니라 규모 감을 위한 추정이다(위 가정이 틀리면 배수로 달라진다).\n");
         sb.append("- 기준 규모(대조군 400 x 조합 10 x 4구간, 쌍 4): 대조군 Run ").append(4L * 400 * 4)

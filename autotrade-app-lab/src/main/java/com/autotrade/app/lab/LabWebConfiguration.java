@@ -60,7 +60,6 @@ public class LabWebConfiguration {
         return new ExperimentRegistrations(Path.of(dir), strategies, selections);
     }
 
-    /** 수집 스냅샷 폴더(설정 폴더 아래 {@code snapshots}, 실행 명령의 기본값과 같음, ADR-008 2.4). */
     /** 실험 실행 명령의 진행 상태·취소 요청(D-089). 실행 명령과 같은 설정 폴더의 {@code experiment-state/jobs}를 본다. */
     @Bean
     ExperimentJobs experimentJobs(RuntimeConfigStore store, Clock clock) {
@@ -69,6 +68,7 @@ public class LabWebConfiguration {
         return jobs;
     }
 
+    /** 수집 스냅샷 폴더(설정 폴더 아래 {@code snapshots}, 실행 명령의 기본값과 같음, ADR-008 2.4). */
     @Bean
     SnapshotList snapshotList(RuntimeConfigStore store) {
         SnapshotList list = new SnapshotList(store.paths().runtimeFile().getParent().resolve("snapshots"));
