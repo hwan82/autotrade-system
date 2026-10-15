@@ -26,3 +26,28 @@
 
 ## 판정
 수정 필요(A1, A2)
+
+## 재검토 2026-10-15
+- 대상: PR #115 / 커밋 `490d2a3` / `git diff origin/main...HEAD` 전체(main `b4ed7fc`). 앞 검토(`51f3cf3`) 뒤 바뀐 것은 `490d2a3` 하나(7개 파일)이고, 운영 코드 변경은 `MonitorSettings.java` 클래스 문서 3줄뿐이다
+- 점검표: B
+- 직접 실행한 것: `./gradlew build` (`490d2a3`, 새 worktree에서 처음부터): BUILD SUCCESSFUL, 136 tasks 실행. 모니터링 시험 XML: `MonitorApiTest` 3, `MonitorBadSettingsBootTest` 1, `MonitorConfigurationTest` 3, `MonitorServiceTest` 7, `MonitorSettingsTest` 5, `MonitorShutdownTest` 1, `MonitorUnavailableBootTest` 1, 실패·건너뜀 0. D-090 파일이 main 대비 한 줄만 바뀌었고, 그 줄이 원문 뒤에 대체 링크만 덧붙인 것임을 문자열 비교(`new.startswith(old)` = True)로 확인
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 직접 실행, BUILD SUCCESSFUL |
+| B2 | 통과 | 앞 검토와 같음. `490d2a3`은 문서와 Javadoc만 바꿈 |
+| B3 | 통과 | A1 해소: 새 결정 `docs/decisions/D-091-monitor-settings-error-and-shutdown.md`("대체: D-090 4번의 …실험실이 뜨지 않는다"), README 표 D-091 행(`**D-090 4번 대체**`, 추천안 채택(자율)). D-090은 main 대비 4번 원문을 그대로 두고 끝에 `→ 설정 오류 처리는 D-091이 대체` 링크만 붙임(D-090-monitor-agent-and-screen.md:17). 앞 커밋에서 D-090 3번·검증 절에 넣었던 문장은 main 원문으로 되돌리고 D-091로 옮김. README 표의 D-090 행은 바뀌지 않음. config-keys.md:44~48 근거 칸에 D-091 링크, ADR-005:119 `stale` 설명에 D-091. REST(`startedAt`)·설정 키 의미 변경 모두 문서 반영 |
+| B4 | 통과 | 앞 검토와 같음(코드 변경 없음) |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 앞 검토와 같음. 시험 지움·건너뜀 없음. D-091 검증 절의 시험 이름·건수가 실제 XML과 맞음 |
+| B7 | 해당 없음 | 실전 주문 경로·RealTradingGuard·블랙리스트·리스크 한도·장애 대응·보호 시험 변경 없음 |
+| B8 | 통과 | 비밀값 없음 |
+
+## 점검표 밖 발견 (재검토)
+- A1 해소(위 B3).
+- A2 해소: MonitorSettings.java:12~14가 "생성·읽기가 `IllegalArgumentException`을 던지고 `MonitorConfiguration#load`가 모니터링만 사용 불가로 둔다(D-091)"로 지금 동작과 맞음.
+- A3·A4·A5(참고)는 D-091 "위험과 한계"에 남은 한계로 기록됨. 막지 않음.
+- 새 지적 없음.
+
+## 판정 (재검토)
+승인
