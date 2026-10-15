@@ -8,7 +8,12 @@ import com.autotrade.sim.run.ExperimentJobFiles;
 import com.autotrade.sim.run.ExperimentJobStatus;
 import com.autotrade.sim.run.ExperimentProgress;
 import com.autotrade.sim.run.ExperimentStoppedException;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -152,6 +157,33 @@ class ExperimentJobTest {
     }
 
     @Test
+    void 실행_명령은_취소로_끝난_본체도_정지_요청이_있으면_종료_코드_4로_끝낸다() throws Exception {
+        // architect 2차 R7: afterCancel이 실행 명령 경로에 실제로 연결돼 있는지 본체부터 끝까지 본다
+        ExperimentJob job = start(new MovingClock(WEEKEND));
+        int code = ExperimentMain.runControlled(job, gate -> {
+            try {
+                Files.writeString(files().cancelRequest(JOB), "");
+                gate.check();
+                return 0;
+            } catch (ExperimentCancelledException e) {
+                try {
+                    Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+                } catch (IOException io) {
+                    throw new UncheckedIOException(io);
+                }
+                return e.exitCode();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+
+        assertThat(code).isEqualTo(4);
+        assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.STOPPED);
+        assertThat(status().message()).contains("정지를 요청");
+        assertThat(files().cancelRequest(JOB)).doesNotExist();
+    }
+
+    @Test
     void 정지_요청이_없으면_취소는_취소로_남고_다른_종료_코드는_그대로다() throws Exception {
         ExperimentJob job = start(new MovingClock(WEEKEND));
         assertThat(job.afterCancel(0)).isZero();
@@ -267,6 +299,28 @@ class ExperimentJobTest {
         Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
         assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(4);
         running.finish(0);
+    }
+
+    @Test
+    void 설정_폴더는_상대_경로와_점점이_섞여도_정규화한_절대_경로로_쓴다(@TempDir Path repo) throws Exception {
+        // architect 2차 R8·risk-ops 2차 R4: 상태 파일 메시지에서 설정 폴더를 가리려면 경로 표기가 하나여야 한다
+        Path messy = Path.of("").toAbsolutePath().relativize(config.resolve("sub").resolve(".."));
+        assertThat(messy.isAbsolute()).isFalse();
+        PrintStream original = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+        try {
+            ExperimentMain.run(new String[] {"combination", repo.toString(), "abc", "false", JOB},
+                    Clock.fixed(WEEKEND, ZoneOffset.UTC), messy);
+        } finally {
+            System.setOut(original);
+        }
+
+        String printed = out.toString(StandardCharsets.UTF_8);
+        Path normalized = config.toAbsolutePath().normalize();
+        assertThat(printed).contains("진행 상태 파일: " + ExperimentJobFiles.in(normalized).status(JOB))
+                .contains("정지 요청 파일 확인 위치: " + normalized.resolve(ExperimentGate.STOP_REQUEST))
+                .doesNotContain("sub" + File.separator + "..");
     }
 
     @Test

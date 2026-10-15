@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.ToIntFunction;
 
 /**
  * 실험 실행 명령의 프로세스 진입점(D-063, Q-049). 실전 엔진과 같은 PC에서 도는 단발 명령이라 자원 부족 정지 순서 0번
@@ -54,9 +55,9 @@ public final class ExperimentMain {
         System.exit(run(args, Clock.systemUTC(), ConfigPaths.defaultLocation().runtimeFile().getParent()));
     }
 
-    static int run(String[] args, Clock clock, Path configDir) {
+    static int run(String[] args, Clock clock, Path givenConfigDir) {
         // 상대 경로나 ..가 섞여도 상태 파일 메시지에서 설정 폴더 경로를 가릴 수 있게 한 번 정규화한다(PR #113 architect R5·risk-ops R3)
-        configDir = configDir.toAbsolutePath().normalize();
+        Path configDir = givenConfigDir.toAbsolutePath().normalize();
         if (args.length == 0 || !List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly")
                 .contains(args[0])) {
             System.err.println(
@@ -111,9 +112,17 @@ public final class ExperimentMain {
         }
         System.out.println("[experiment] 진행 상태 파일: " + control.statusFile() + ", 병렬 Run 상한 "
                 + maxParallelRuns + "(-PmaxParallelRuns, 등록 파일 parallelism과 작은 쪽)");
+        return runControlled(control, runGate -> dispatch(args[0], forwarded, configDir, runGate));
+    }
+
+    /**
+     * 본체를 작업 제어 아래에서 돌리고 끝난 상태를 남긴다. 취소로 끝났으면 정지 확인을 한 번 더 본다({@link
+     * ExperimentJob#afterCancel}, 독립 QA PR #113 R1).
+     */
+    static int runControlled(ExperimentJob control, ToIntFunction<RunGate> body) {
         int code = -1;
         try {
-            code = control.afterCancel(dispatch(args[0], forwarded, configDir, control));
+            code = control.afterCancel(body.applyAsInt(control));
             return code;
         } finally {
             control.finish(code);
