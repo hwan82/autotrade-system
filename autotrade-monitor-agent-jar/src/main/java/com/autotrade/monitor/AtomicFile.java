@@ -16,7 +16,8 @@ public final class AtomicFile {
     public static void write(Path target, String content) throws IOException {
         Path dir = target.toAbsolutePath().getParent();
         Files.createDirectories(dir);
-        Path tmp = dir.resolve(target.getFileName() + ".tmp");
+        // 같은 대상을 두 프로세스가 쓰더라도 임시 파일이 겹치지 않게 PID를 붙인다(architect PR #116 R5)
+        Path tmp = dir.resolve(target.getFileName() + "." + ProcessHandle.current().pid() + ".tmp");
         Files.writeString(tmp, content, StandardCharsets.UTF_8);
         try {
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

@@ -93,6 +93,9 @@ class WatchdogSettingsTest {
         assertThatThrownBy(() -> WatchdogSettings.parse("interval-seconds=20\nheartbeat-stale-seconds=10", dir))
                 .hasMessageContaining("interval-seconds(20) 이상");
         assertThatThrownBy(() -> WatchdogSettings.parse("disks= , ", dir)).hasMessageContaining("disks가 비었습니다");
+        assertThatThrownBy(() -> WatchdogSettings.parse("disks=" + dir + "," + dir + "/.", dir))
+                .hasMessageContaining("같은 폴더가 두 번");
+        assertThatThrownBy(() -> WatchdogSettings.parse("processes= ", dir)).hasMessageContaining("processes가 비었습니다");
     }
 
     @Test

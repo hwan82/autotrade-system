@@ -68,7 +68,11 @@ final class StopRequests {
         for (Path f : files) {
             if (Files.exists(f)) {
                 active = true;
-                activeSince = now;
+                // 남은 파일의 처음 요청 시각을 이어 쓴다(architect PR #116 R2). 읽지 못하면 지금
+                Instant first = requestedAt(f).orElse(now);
+                if (activeSince == null || first.isBefore(activeSince)) {
+                    activeSince = first;
+                }
                 reason = "감시 기동 때 남아 있던 정지 요청 파일";
                 LOG.log(Level.WARNING, "남은 정지 요청 파일을 이어받습니다(자원이 정상으로 " + hold.toSeconds() + "초 이어지면 지움): " + f);
             }
@@ -100,6 +104,19 @@ final class StopRequests {
         if (active) {
             refresh(now);
         }
+    }
+
+    private static java.util.Optional<Instant> requestedAt(Path f) {
+        try {
+            for (String line : Files.readString(f, java.nio.charset.StandardCharsets.UTF_8).split("\n")) {
+                if (line.startsWith("requested-at=")) {
+                    return java.util.Optional.of(Instant.parse(line.substring("requested-at=".length()).strip()));
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            // 형식이 틀리면 지금 시각을 쓴다
+        }
+        return java.util.Optional.empty();
     }
 
     boolean active() {
@@ -143,6 +160,8 @@ final class StopRequests {
             }
         }
         deleteFailing = !ok;
+        // 하나라도 못 지우면 켜진 상태를 유지한다. 그래서 같은 점검의 refresh가 이미 지운 파일도 다시 쓴다: 두 파일은 늘 함께
+        // 켜지고 함께 꺼진다(어느 명령만 풀리는 상태를 만들지 않음, architect PR #116 R3)
         if (ok) {
             active = false;
             activeSince = null;

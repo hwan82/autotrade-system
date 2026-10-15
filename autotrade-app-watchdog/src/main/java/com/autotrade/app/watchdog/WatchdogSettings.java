@@ -168,6 +168,10 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
                 out.add(name);
             }
         }
+        if (out.isEmpty()) {
+            // 빈 값이면 아무 하트비트도 보지 않는 감시가 뜬다(architect PR #116 A3). 빼면 기본값 셋이다
+            problems.add(PROCESSES + "가 비었습니다(빼면 " + String.join(",", KNOWN_PROCESSES) + ")");
+        }
         return out;
     }
 
@@ -189,7 +193,13 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
                     continue;
                 }
                 try {
-                    out.add(Path.of(s).toAbsolutePath());
+                    Path d = Path.of(s).toAbsolutePath().normalize();
+                    if (out.contains(d)) {
+                        // 같은 대상을 한 주기에 두 번 세면 연속 판정(sustain) 의미가 깨진다(architect PR #116 A3)
+                        problems.add(DISKS + ": 같은 폴더가 두 번 있습니다: " + d);
+                    } else {
+                        out.add(d);
+                    }
                 } catch (InvalidPathException e) {
                     problems.add(DISKS + ": 경로 형식이 틀렸습니다: " + s);
                 }

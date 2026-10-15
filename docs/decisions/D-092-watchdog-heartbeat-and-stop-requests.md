@@ -3,6 +3,7 @@
 - 날짜: 2026-10-15
 - 상태: 확정 · **추천안 채택(자율)**(지침 8장). 감시 프로세스와 실전 엔진에 코드가 들어가고 장애 대응(5.2 0번, 장애표 #8·#9·#10 감지)을 바꾸므로 실전 관련 PR이다. risk-ops·architect 검토와 독립 QA 뒤 **사용자 머지로 확정**한다(지침 10장).
 - 담당: risk-ops. 교차 검토: architect(모듈 의존, 감시 설정 파일, `StopRequestPathTest`), risk-ops
+- 계약: [ADR-011](../adr/ADR-011-watchdog-heartbeat.md)(하트비트 파일 형식, 감시 설정 원천, 모듈 의존)
 - 근거: 기획서 MON-02, [broker-and-fault-design.md](../team/broker-and-fault-design.md) 5.1·5.2·6장 #8·#9·#10, [D-058](README.md)(정지 요청 파일, ④ 감시 쪽 후속), [ADR-007](../adr/ADR-007-selection-combination.md) 2.7(해제 기준), [D-063](D-063-experiment-command-stop-gate.md)·[D-085](D-085-replay-check-gate.md)·D-076(실험 정지 요청 파일을 보는 명령), [D-086](D-086-real-path-reflection-ban.md)(실전 경로 JDK·외부 jar 허용 목록), [D-090](D-090-monitor-agent-and-screen.md)·[D-091](D-091-monitor-settings-error-and-shutdown.md)(감시 에이전트 코어, PR #115 risk-ops K2), PR #114 risk-ops K2~K6
 
 ## 결정
@@ -63,8 +64,9 @@
 
 ## 검증
 - 코어: `HeartbeatTest` 6건(형식 왕복, 틀린 내용 거절, 경로·이름 검사, 기록 갱신과 닫으면 삭제, 쓰기 실패 주입 뒤 복구, 주기 기록 스레드).
+- 게이트웨이·실험실: `GatewayMainTest` 1건, `LabHeartbeatTest` 1건(하트비트 생성과 종료 때 삭제, architect A2).
 - 실전 엔진: `EngineMainTest` 2건(기동하면 `engine.hb`를 쓰고 닫으면 지움, 하트비트 폴더를 막아도 기동·Guard 모두 OFF·상태 응답, risk-ops K1).
-- 감시: `WatchdogSettingsTest` 6건(기본값, 설정 폴더가 없으면 만듦, 파일 값, 모르는 키 거부, 틀린 값 모두 모아 거부, 임계 형식), `HeartbeatWatchTest` 3건(살아 있음·멈춤·꺼짐 전환과 바뀔 때만 알림, 해석 불가·다른 이름, 미래 시각), `StopRequestsTest` 5건(위험 때 두 파일 생성과 점검마다 갱신·지워도 다시 만듦, 해제 유지 시간·경고·판단 못 함, 판단 못 할 때 새로 안 만듦, 남은 파일 이어받아 지움, 쓰기 실패 주입), `WatchdogTest` 5건(드라이브 여유 주입으로 생성·경고 유지·회복 뒤 해제, 읽기 실패 주입 시 해제 안 함, 자기 하트비트·다른 프로세스 판정, 닫아도 파일 유지·다음 감시 이어받음, 주기 스레드), `WatchdogMainTest` 3건(설정 없음 기동, 틀린 설정 종료 코드 2, 기동·종료 하트비트).
+- 감시: `WatchdogSettingsTest` 6건(기본값, 설정 폴더가 없으면 만듦, 같은 폴더 두 번·빈 processes 거부, 파일 값, 모르는 키 거부, 틀린 값 모두 모아 거부, 임계 형식), `HeartbeatWatchTest` 4건(살아 있음·멈춤·꺼짐 전환과 바뀔 때만 알림, 해석 불가·다른 이름, 미래 시각, 점검 사이 재기동은 시작 시각으로 로그), `StopRequestsTest` 5건(위험 때 두 파일 생성과 점검마다 갱신·지워도 다시 만듦, 해제 유지 시간·경고·판단 못 함, 판단 못 할 때 새로 안 만듦, 남은 파일 이어받아 지움, 쓰기 실패 주입), `WatchdogTest` 5건(드라이브 여유 주입으로 생성·경고 유지·회복 뒤 해제, 읽기 실패 주입 시 해제 안 함, 자기 하트비트·다른 프로세스 판정, 닫아도 파일 유지·다음 감시 이어받음, 주기 스레드), `WatchdogMainTest` 3건(설정 없음 기동, 틀린 설정 종료 코드 2, 기동·종료 하트비트).
 - CI 기동 확인(ARC-03 단계): 틀린 감시 설정 종료 코드 2, 감시가 계속 돌며 자기 하트비트를 씀, 실전 엔진 하트비트 생성·정상 종료 시 삭제, 감시 로그의 엔진 `ALIVE → ABSENT`, SIGTERM 뒤 감시 종료와 하트비트 삭제.
 - 아키텍처: `StopRequestPathTest`에 감시가 만드는 두 파일이 수집기(`CollectorMain.Options.stopRequest()`)·실험 명령(`ExperimentGate.STOP_REQUEST`)과 같은지 더함. `RealPathReflectionTest`·`WATCHDOG_KILLS_NO_PROCESS`는 바꾸지 않고 통과.
 - 검증하지 못한 것: Windows에서 `ATOMIC_MOVE` 덮어쓰기와 `FileStore` 값(이 환경은 Linux). 사용자 PC 6단계 운영 첫 주 점검 항목으로 둔다.

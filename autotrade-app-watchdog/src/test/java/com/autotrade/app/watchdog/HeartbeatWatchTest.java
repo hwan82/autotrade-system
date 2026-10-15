@@ -77,4 +77,18 @@ class HeartbeatWatchTest {
 
         assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.STALE);
     }
+
+    @Test
+    void 점검_사이_재기동은_상태가_그대로여도_시작_시각으로_알아본다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("lab"), Duration.ofSeconds(15));
+        new HeartbeatWriter(dir, "lab", clock).beat();
+        watch.check(clock.instant());
+
+        clock.advance(Duration.ofSeconds(5));
+        new HeartbeatWriter(dir, "lab", clock).beat(); // 새 프로세스(새 시작 시각)
+
+        assertThat(watch.check(clock.instant())).isEmpty(); // 상태는 계속 ALIVE
+        assertThat(watch.states()).containsEntry("lab", State.ALIVE);
+    }
 }

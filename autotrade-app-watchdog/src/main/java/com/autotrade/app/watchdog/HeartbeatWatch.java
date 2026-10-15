@@ -44,6 +44,7 @@ final class HeartbeatWatch {
     private final List<String> processes;
     private final Duration stale;
     private final Map<String, State> states = new HashMap<>();
+    private final Map<String, Instant> startedAt = new HashMap<>();
 
     HeartbeatWatch(Path configDir, List<String> processes, Duration stale) {
         this.configDir = configDir;
@@ -72,6 +73,13 @@ final class HeartbeatWatch {
                 state = State.ABSENT;
             } catch (IOException | RuntimeException e) {
                 state = State.UNREADABLE;
+            }
+            if (last.isPresent()) {
+                Instant prev = startedAt.put(process, last.get().startedAt());
+                if (prev != null && !prev.equals(last.get().startedAt())) {
+                    // 점검 사이에 죽고 다시 떴으면 상태는 계속 ALIVE라 바뀜이 없다. 재기동은 따로 알린다(architect PR #116 R4)
+                    LOG.log(Level.WARNING, process + " 재기동 감지(이전 시작 " + prev + ", 새 시작 " + last.get().startedAt() + ")");
+                }
             }
             State before = states.put(process, state);
             if (before != state) {

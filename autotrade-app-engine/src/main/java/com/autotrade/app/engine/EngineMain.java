@@ -159,8 +159,12 @@ public final class EngineMain {
             implements AutoCloseable {
         @Override
         public void close() {
-            server.close();
-            heartbeat.close();
+            try {
+                server.close();
+            } finally {
+                // 채널 닫기가 실패해도 정상 종료 표시는 남긴다(멈춤으로 오인되지 않게, architect PR #116 R1)
+                heartbeat.close();
+            }
         }
     }
 }

@@ -66,9 +66,7 @@ public final class GatewayMain {
             System.exit(1);
             return;
         }
-        // 감시가 읽는 하트비트(MON-02, D-092). 쓰기 실패는 로그만 남긴다
-        HeartbeatWriter heartbeat = HeartbeatWriter.start(paths.runtimeFile().getParent(), PROCESS, clock,
-                HeartbeatWriter.DEFAULT_INTERVAL);
+        HeartbeatWriter heartbeat = startHeartbeat(paths, clock);
         CountDownLatch stopped = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             heartbeat.close();
@@ -77,6 +75,11 @@ public final class GatewayMain {
             stopped.countDown();
         }, "gateway-shutdown"));
         stopped.await();
+    }
+
+    /** 감시가 읽는 하트비트(MON-02, D-092). 쓰기 실패는 로그만 남기고, 종료 훅에서 닫아 파일을 지운다. */
+    static HeartbeatWriter startHeartbeat(ConfigPaths paths, Clock clock) {
+        return HeartbeatWriter.start(paths.runtimeFile().getParent(), PROCESS, clock, HeartbeatWriter.DEFAULT_INTERVAL);
     }
 
     /** 기동 점검. 설정만 읽고 연결하지 않는다. 종료 코드를 돌려준다(0: 정상). */

@@ -90,6 +90,7 @@ class StopRequestsTest {
         stop.adoptLeftovers(clock.instant());
         assertThat(stop.active()).isTrue();
         stop.update(clock.instant(), Pressure.CLEAR, "정상");
+        assertThat(Files.readString(collector())).contains("requested-at=2026-10-14T00:00:00Z"); // 처음 요청 시각을 이어 씀
         assertThat(collector()).exists(); // 이어받는 동안 두 파일 모두 유지·갱신
         assertThat(Files.readString(experiment())).contains("confirmed-at=2026-10-15T00:00:00Z");
 
