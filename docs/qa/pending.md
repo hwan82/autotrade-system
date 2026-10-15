@@ -23,4 +23,7 @@
 | 2026-10-14 | PR #102 검토해줘 | docs/reviews/pr-102/qa.md | 실전 관련 PR(PR #101 QA 권고 Q1·R1·R2: 설정 경고에서 값 자리 아래 키 가림, 겹친 계좌 id는 위치만, 실전 엔진 로그·운영 화면 경고 변경, 브랜치 claude/project-thread-gayfxk) |
 | 2026-10-14 | PR #108 검토해줘 | docs/reviews/pr-108/qa.md | 실전 관련 PR(보호 테스트 강화: D-086 실전 경로 리플렉션 금지·JDK·Jackson·외부 jar 허용 목록, `RealPathReflectionTest`, 독립 QA PR #21 Q-4·risk-ops R-8 후속, 브랜치 claude/project-thread-l44wj7) |
 | 2026-10-14 | PR #108 재검토해줘 | docs/reviews/pr-108/qa.md (## 재검토) | 실전 관련 PR(QA 수정 필요 F1·F2 반영, 브랜치 claude/project-thread-l44wj7) |
+| 2026-10-14 | PR #105 검토해줘 | docs/reviews/pr-105/qa.md | 실전 관련 PR(D-085, Q-050: 리플레이 점검에 장 시간 보호·실험 정지 요청 파일 관문, 정지 순서 0번·장애표 #10 변경, 브랜치 claude/project-thread-g5f5i8) |
+| 2026-10-15 | PR #105 재검토해줘 | docs/reviews/pr-105/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main 병합 충돌 해결, docs/runbooks/README.md replayCheck 설명 D-085에 맞춤, 브랜치 claude/project-thread-g5f5i8) |
 | 2026-10-15 | PR #109 검토해줘 | docs/reviews/pr-109/qa.md | 실전 관련 PR(보호 테스트 강화: PR #108 QA 권고 R7, 레코드 구성 요소 읽기를 `SecretPaths`만 허용, 브랜치 claude/project-thread-l44wj7) |
+| 2026-10-15 | PR #109 재검토해줘 | docs/reviews/pr-109/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main 460cad2와 pending.md 충돌, main 병합으로 해소) |
