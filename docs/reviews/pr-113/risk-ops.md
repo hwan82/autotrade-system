@@ -41,3 +41,40 @@
 수정 필요(A12: F1 — 작업 폴더를 쓸 수 없을 때 정지 요청·장 시간 보호 확인 전에 종료 코드 1로 끝나 장애표 #10의 감지 전제(종료 코드 4와 정지 메시지)가 깨짐. 고친 뒤 같은 검토자 재검토. R1·R2는 권고)
 
 - 실전 관련 PR 여부: 이 PR은 broker-and-fault-design 5.2 0번(장애표 #10)의 정지 확인이 지나가는 실험 실행 명령의 관문 배선(`ExperimentMain`의 `RunGate`를 `ExperimentJob`으로 감쌈)을 바꾼다. 규칙 자체(정지 요청 우선, 감시만 파일 삭제, 장 시간 보호)는 바뀌지 않았고 보호 테스트도 그대로지만, 장애 대응 경로의 코드를 건드리므로 같은 경로를 바꾼 PR #105(D-085)의 선례대로 지침 10장의 실전 관련 PR(사용자 직접 머지, 독립 QA 관문)로 다루기를 권한다.
+
+## 재검토 2026-10-15
+- 대상: PR #113 / 커밋 9e51c66 / main 대비 diff `git diff origin/main...HEAD` 전체(merge-base d0e9f3f). 직전 검토(4015e58) 뒤 바뀐 것은 9e51c66 한 커밋(17개 파일): `ExperimentMain`·`ExperimentJob`·`ExperimentJobTest`, 실험실 `ExperimentJobs`·`LabWebConfiguration`·`ExperimentJobsTest`(신규), sim `CombinationExperiment`·`RecordingExperiment`·`WalkForwardStudy`·`WalkForwardReport`·`RecordingExperimentTest`, 문서 D-089·결정 로그·기획서·config-keys·runbooks 2개.
+- 점검표: A
+- 직접 실행한 것 (별도 clone, 헤드 9e51c66, 작업 트리 깨끗함 확인):
+  - `./gradlew build --no-daemon`: **BUILD SUCCESSFUL**(1분 41초). `:autotrade-risk:test` 55/실패 0/건너뜀 0, `:autotrade-architecture-test:test` 40/0/0, `:autotrade-app-engine:test` 50/0/0, `:autotrade-sim:test` 240/0/0, `:autotrade-app-experiment:test` 32/0/0, `:autotrade-app-lab:test` 159/0/0, `:autotrade-app-gateway:test` 49/0/0, `:autotrade-app-watchdog:test` 1/0/0.
+  - 실제 Gradle 작업(`AUTOTRADE_CONFIG_DIR`=임시 절대 경로, 2026-10-15T06:41Z = KST 15:41, 국내 보호 구간 안):
+    - 정지 요청 파일 + 작업 폴더 쓰기 불가(`experiment-state/jobs`를 일반 파일로) + `-PallowDuringSession`, `runRecordingExperiment` → **종료 코드 4**, 작업 폴더 경고 다음 줄에 "멈췄습니다(결과 파일을 쓰지 않음): 감시 프로세스가 자원 부족으로 정지를 요청했습니다(… 만든 시각 …)" 출력. 정지 요청 파일 그대로.
+    - 정지 요청 없음 + 작업 폴더 쓰기 불가 + 보호 구간, `runStrategyStudy` → **종료 코드 4**, "KRX 장 시간 보호 구간(08:00~16:00 Asia/Seoul)" 출력.
+    - 정지 요청 파일 + 정상 작업 폴더, `runRecordingExperiment -PallowDuringSession` → 종료 코드 4, 상태 파일 `message`가 `<설정 폴더>/experiment-state/stop-request`로 절대 경로가 빠짐, 정지 요청 파일 그대로.
+  - 변이 시험(되돌림, 되돌린 뒤 `:autotrade-app-experiment:test` 통과 확인): `ExperimentMain`의 `stoppedOr(gate, 1)` 두 곳을 `return 1`로 되돌리면 `ExperimentJobTest#작업_폴더를_쓸_수_없어도_정지_요청이면_종료_코드_4다`·`#같은_실험이_도는_중이어도_정지_요청이면_종료_코드_4다` 2건 실패. 직전 검토의 변이 2종(취소를 정지보다 앞에, 관문 무시)은 해당 코드가 바뀌지 않아 다시 돌리지 않음.
+  - `git diff --name-status origin/main...HEAD`: 기존 테스트 파일 수정은 `RecordingExperimentTest` 하나이고 추가만 있음(삭제 줄 0). `autotrade-architecture-test`·`autotrade-risk`·`autotrade-app-engine`·`autotrade-app-watchdog`·`autotrade-app-gateway`·증권사 플러그인 변경 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard·엔진·설정 로더 변경 없음(위 diff 확인). `:autotrade-risk:test` 55/0, `:autotrade-app-engine:test` 50/0 |
+| A2 | 통과 | `ArchitectureTest.java` 변경 없음, `:autotrade-architecture-test:test` 40/0. 실험 명령 패키지의 `EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG`(ArchitectureTest.java:273-282) 그대로 통과. 실험실은 상태 파일 읽기와 `cancel-request` 생성만(ExperimentJobs.java `cancel`·`read`) |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음. 실험 명령은 `com.autotrade.broker..` 의존 금지(ArchitectureTest.java:281) |
+| A4 | 해당 없음 | 실전 주문·타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음. `RunProgressTest#진행_보고와_병렬_상한은_골든_결과를_바꾸지_않는다` 통과(골든 바이트 일치) |
+| A6 | 통과 | 블랙리스트·`RiskChain` 변경 없음. 이번 수정의 `CombinationExperiment`·`RecordingExperiment`·`WalkForwardStudy` 변경은 실행기에 넘기는 병렬 수(`Math.min(plan.parallelism(), gate.maxParallelRuns())`)와 결정론 기록 문구뿐이고 `risk`·블랙리스트 인자는 그대로 |
+| A7 | 해당 없음 | 실전 계좌 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 실전 엔진·게이트웨이·감시 변경 없음. 5.2 0번 정지 확인은 래퍼를 지나서도 정지 요청이 취소보다 먼저이고 파일을 지우지 않으며(ExperimentJob.java:149-158), 작업 폴더를 못 쓰거나 같은 실험이 이미 돌 때도 정지 확인 결과로 4를 냄(ExperimentMain.java:102·108·122). 병렬 Run 기본 상한 4 유지. 실험실은 `stop-request`를 만들거나 지울 수 없음(실험 ID 정규식) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 비밀값 없음. 상태 파일(실험실 REST로 나감) 메시지의 설정 폴더 절대 경로를 `<설정 폴더>`로 바꿈(ExperimentJob.java:230·252), `ExperimentJobTest`가 `doesNotContain(config.toString())`로 확인하고 실제 실행에서도 확인함 |
+| A11 | 통과 | 보호 테스트(`ArchitectureTest`, Guard·GuardedOrderGateway 테스트, `ExperimentGateTest`, `StopRequestPathTest`) 변경 없이 통과. 기존 테스트 수정은 `RecordingExperimentTest`에 1건 추가뿐(삭제 0). 새 동작마다 실패 경우 테스트가 있고(F1 테스트 2건, 경로 제거, 병렬 1 결정론 기록, 500개 상한), F1 수정은 변이 시험으로 테스트가 실제로 잡음을 확인 |
+| A12 | 통과 | 직전 F1 해소. 장애표 #10(broker-and-fault-design.md:169)의 감지 전제(정지 요청이 있으면 실험 실행 명령은 종료 코드 4와 파일 시각이 담긴 메시지)가 작업 폴더 쓰기 불가·같은 실험 실행 중일 때도 유지됨(`ExperimentJobTest` 새 2건, 실제 Gradle 실행 2종). 종료 코드 3(취소)은 사람의 취소에만 쓰이고 자원 보호 정지는 4 그대로라 #10 문구는 바꿀 필요 없음. 실험 ID 인자가 없거나 틀리면 이제 본체를 돌리지 않고 1로 끝나는데, 이는 기존에도 본체가 정지 확인 전에 내던 입력 오류(1)와 같은 분류다(직전 검토에서 등록 파일 없음 → 1을 실행으로 확인) |
+| A13 | 통과 | 진행률 거래일 수는 `rules.tradingDate`(MarketRules, 거래소 현지 날짜). 장 시간 보호(`SessionProtection`) 변경 없음 |
+| A14 | 통과 | D-089 상태 줄이 "실전 관련 PR(지침 10장)로 처리, 사용자 직접 머지로 확정"으로 바뀌고 교차 검토에 risk-ops가 들어감. 결정 3의 새 하위 항목(작업 폴더 못 써도 4, 경로 제거, 병렬 1이면 결정론 "확인 안 함")이 코드와 일치. runbooks README 종료 코드 표에 3(취소)과 "같은 실험 실행 중이면 1"이 들어가고, stage-4-walkforward.md도 갱신(직전 R2 해소). config-keys.md의 `lab.max-parallel-runs`에 "지금 이 키를 읽는 운영 코드는 없다"가 적힘 |
+
+## 점검표 밖 발견 (재검토)
+- F1 해소(위 A12). R1(상태 파일의 절대 경로) 해소, R2(운영 절차서 종료 코드) 해소.
+- R3 (권고, 막지 않음): `ExperimentJob.withoutConfigDir`는 정규화된 절대 경로(`files.dir().getParent().getParent()`)를 문자열로 지운다. `ExperimentGate`는 `configDir.resolve(STOP_REQUEST)`를 정규화하지 않으므로, `AUTOTRADE_CONFIG_DIR`가 상대 경로이거나 `..`를 담으면(직전 검토 첫 실행에서 `…/autotrade-app-experiment/../tmp…` 형태를 실제로 봄) 메시지의 경로가 그대로 남는다. 비밀값이 아니고 실험실 REST는 로컬 전용이라 안전 문제는 아니다. 기본값(`~/.autotrade`)과 절대 경로 설정에서는 동작함을 실제 실행으로 확인했다. 맞추려면 `ExperimentGate`에 넘기는 경로도 `toAbsolutePath().normalize()`로 통일하면 된다.
+- 결정론 기록(`inputs.yaml`)의 병렬 수 수정(architect F1)은 sim 결과 기록 문제이고 실전 경로와 무관하다. `RecordingExperimentTest#실행_명령_병렬_상한이_1이면_결정론_확인을_같음으로_적지_않는다`로 확인됨.
+
+## 판정 (재검토)
+승인 (점검표 A 전 항목 통과 또는 해당 없음, 확인 못 함 없음. 직전 F1·R1·R2 해소, R3은 막지 않는 권고. 실전 관련 PR이므로 지침 10장·11장에 따라 사용자 직접 머지·독립 QA 관문 대상)
