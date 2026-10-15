@@ -27,3 +27,4 @@
 | 2026-10-15 | PR #105 재검토해줘 | docs/reviews/pr-105/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main 병합 충돌 해결, docs/runbooks/README.md replayCheck 설명 D-085에 맞춤, 브랜치 claude/project-thread-g5f5i8) |
 | 2026-10-15 | PR #109 검토해줘 | docs/reviews/pr-109/qa.md | 실전 관련 PR(보호 테스트 강화: PR #108 QA 권고 R7, 레코드 구성 요소 읽기를 `SecretPaths`만 허용, 브랜치 claude/project-thread-l44wj7) |
 | 2026-10-15 | PR #109 재검토해줘 | docs/reviews/pr-109/qa.md (## 재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A14: main 460cad2와 pending.md 충돌, main 병합으로 해소) |
+| 2026-10-15 | PR #110 검토해줘 | docs/reviews/pr-110/qa.md | 실전 관련 PR(보호 테스트 강화: PR #109 QA 권고 Q1·Q2·R1, `SecretPaths` 모양 고정·고정 타입 목록·같은 패키지 위반 예제, D-086 한계 갱신, 브랜치 claude/project-thread-l44wj7) |
