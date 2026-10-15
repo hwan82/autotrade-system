@@ -25,5 +25,9 @@ public final class MetricNames {
     /** 이 JVM 프로세스의 CPU 사용률(PC 전체 대비 %). */
     public static final String JVM_CPU = "jvm.cpu";
 
+    /** 위 이름 전부. 임계 덮어쓰기에서 오타를 거절하는 데 쓴다. */
+    public static final java.util.Set<String> ALL = java.util.Set.of(CPU_SYSTEM, MEMORY_USED, MEMORY_USED_GB, DISK_USED,
+            DISK_FREE_GB, NET_RX, NET_TX, JVM_HEAP_USED, JVM_HEAP_USED_MB, JVM_GC_TIME, JVM_GC_COUNT, JVM_THREADS, JVM_CPU);
+
     private MetricNames() {}
 }

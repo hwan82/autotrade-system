@@ -75,6 +75,24 @@ class ThresholdEvaluatorTest {
     }
 
     @Test
+    void 경계는_나빠질_때_새_수준의_경계_좋아질_때_떠난_수준의_경계다() {
+        for (int i = 0; i < 3; i++) {
+            feed("cpu.system", 99, "%");
+        }
+        feed("cpu.system", 90, "%");
+        feed("cpu.system", 90, "%");
+        // CRITICAL → WARN: 위험 경계(95) 아래로 내려왔다
+        assertThat(feed("cpu.system", 90, "%")).singleElement().satisfies(e -> {
+            assertThat(e.to()).isEqualTo(Level.WARN);
+            assertThat(e.limit()).isEqualTo(95);
+        });
+        feed("cpu.system", 99, "%");
+        feed("cpu.system", 99, "%");
+        // WARN → CRITICAL: 위험 경계(95)를 넘었다
+        assertThat(feed("cpu.system", 99, "%")).singleElement().satisfies(e -> assertThat(e.limit()).isEqualTo(95));
+    }
+
+    @Test
     void 아래쪽_임계는_대상별로_따로_판정한다() {
         List<ThresholdEvent> events = evaluator.evaluate(T, List.of(
                 new Reading("disk.free-gb:D:\\", 10, "GB"),

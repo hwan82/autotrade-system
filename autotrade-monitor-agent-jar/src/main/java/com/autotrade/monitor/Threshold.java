@@ -45,7 +45,7 @@ public record Threshold(String metric, Direction direction, double warn, double 
         return value <= critical ? Level.CRITICAL : value <= warn ? Level.WARN : Level.OK;
     }
 
-    /** 그 수준에 들어서는 경계(OK면 경고 경계: 그 경계를 벗어나 돌아왔다는 뜻). */
+    /** 그 수준의 경계: CRITICAL은 위험 경계, 그 밖(WARN·OK)은 경고 경계. */
     public double limitOf(Level level) {
         return level == Level.CRITICAL ? critical : warn;
     }

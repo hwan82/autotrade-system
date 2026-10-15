@@ -59,8 +59,10 @@ public record MonitorSettings(boolean enabled, int intervalSeconds, int historyS
     /**
      * 임계 덮어쓰기 문자열: {@code 지표=방향:경고:위험:연속}을 {@code ;}로 잇는다. 예:
      * {@code cpu.system=ABOVE:70:90:3;disk.free-gb=BELOW:100:30:1}. 방향은 ABOVE(높을수록 나쁨)·BELOW(낮을수록 나쁨).
+     * 지표 이름이 {@code known}에 없으면 거절한다(오타면 아무 효과 없는 새 임계가 되고 기본 임계는 그대로 남는다, architect
+     * PR #114 R2).
      */
-    public static List<Threshold> parseThresholds(String text) {
+    public static List<Threshold> parseThresholds(String text, Set<String> known) {
         List<Threshold> out = new ArrayList<>();
         if (text == null || text.isBlank()) {
             return out;
@@ -75,8 +77,13 @@ public record MonitorSettings(boolean enabled, int intervalSeconds, int historyS
             if (eq <= 0 || parts.length != 4) {
                 throw new IllegalArgumentException("임계 형식은 지표=방향:경고:위험:연속입니다(autotrade.lab.monitor.thresholds): " + entry);
             }
+            String metric = entry.substring(0, eq).trim();
+            if (!known.contains(metric)) {
+                throw new IllegalArgumentException("모르는 지표 이름입니다(autotrade.lab.monitor.thresholds): " + metric
+                        + " — 쓸 수 있는 이름: " + String.join(", ", new java.util.TreeSet<>(known)));
+            }
             try {
-                out.add(new Threshold(entry.substring(0, eq).trim(), Direction.valueOf(parts[0].trim().toUpperCase(Locale.ROOT)),
+                out.add(new Threshold(metric, Direction.valueOf(parts[0].trim().toUpperCase(Locale.ROOT)),
                         Double.parseDouble(parts[1].trim()), Double.parseDouble(parts[2].trim()),
                         Integer.parseInt(parts[3].trim())));
             } catch (IllegalArgumentException e) {

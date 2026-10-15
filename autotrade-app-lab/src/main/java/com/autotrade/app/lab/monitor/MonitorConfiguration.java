@@ -1,6 +1,7 @@
 package com.autotrade.app.lab.monitor;
 
 import com.autotrade.monitor.MonitorAgent;
+import com.autotrade.monitorsources.MetricNames;
 import com.autotrade.monitorsources.StandardSources;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,7 +19,7 @@ public class MonitorConfiguration {
             @Value("${autotrade.lab.monitor.disks:}") String disks,
             @Value("${autotrade.lab.monitor.thresholds:}") String thresholds) {
         return new MonitorSettings(enabled, intervalSeconds, historySize, MonitorSettings.parseDisks(disks),
-                MonitorSettings.parseThresholds(thresholds));
+                MonitorSettings.parseThresholds(thresholds, MetricNames.ALL));
     }
 
     @Bean(initMethod = "start", destroyMethod = "close")

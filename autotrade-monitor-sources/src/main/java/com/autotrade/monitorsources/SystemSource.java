@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import oshi.SystemInfo;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
@@ -23,9 +24,10 @@ public final class SystemSource implements MetricSource {
     static final double GIB = 1024.0 * 1024 * 1024;
 
     private final Clock clock;
-    private final HardwareAbstractionLayer hal;
-    private final oshi.software.os.FileSystem fileSystem;
+    private final Supplier<SystemInfo> oshi;
     private final Predicate<String> diskFilter;
+    private HardwareAbstractionLayer hal;
+    private oshi.software.os.FileSystem fileSystem;
     private long[] previousTicks;
     private long previousRx = -1;
     private long previousTx = -1;
@@ -35,11 +37,17 @@ public final class SystemSource implements MetricSource {
      * @param diskFilter 지표를 낼 마운트(Windows는 {@code C:\} 같은 드라이브)를 고른다. 로컬 드라이브만 본다
      */
     public SystemSource(Clock clock, Predicate<String> diskFilter) {
+        this(clock, diskFilter, SystemInfo::new);
+    }
+
+    /**
+     * OSHI는 첫 {@link #read()}에서 만든다. 네이티브 적재(JNA)가 실패해도 이 수집원을 붙인 프로세스의 기동은 막지 않고, 그 주기의
+     * 이 수집원만 실패로 남는다(architect PR #114 R3).
+     */
+    SystemSource(Clock clock, Predicate<String> diskFilter, Supplier<SystemInfo> oshi) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.diskFilter = Objects.requireNonNull(diskFilter, "diskFilter");
-        SystemInfo info = new SystemInfo();
-        this.hal = info.getHardware();
-        this.fileSystem = info.getOperatingSystem().getFileSystem();
+        this.oshi = Objects.requireNonNull(oshi, "oshi");
     }
 
     @Override
@@ -47,8 +55,28 @@ public final class SystemSource implements MetricSource {
         return "system";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>OSHI 초기화·네이티브 호출이 {@link LinkageError}(예: {@code UnsatisfiedLinkError}, {@code NoClassDefFoundError})를 내면
+     * {@link IllegalStateException}으로 감싸 던진다. 에이전트는 그 주기의 이 수집원만 실패로 남기고 다음 주기에 다시 부른다
+     * ({@link MetricSource} 계약). 메모리 부족 같은 {@code VirtualMachineError}는 감싸지 않는다.
+     */
     @Override
     public List<Reading> read() {
+        try {
+            if (hal == null) {
+                SystemInfo info = oshi.get();
+                fileSystem = info.getOperatingSystem().getFileSystem();
+                hal = info.getHardware();
+            }
+            return readAll();
+        } catch (LinkageError e) {
+            throw new IllegalStateException("OSHI 네이티브 호출 실패: " + e.getClass().getSimpleName(), e);
+        }
+    }
+
+    private List<Reading> readAll() {
         List<Reading> out = new ArrayList<>();
         CentralProcessor cpu = hal.getProcessor();
         long[] ticks = cpu.getSystemCpuLoadTicks();

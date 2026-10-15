@@ -45,7 +45,7 @@
 | `autotrade.lab.monitor.interval-seconds` | `5` | 수집 주기(초). 1~3600, 범위 밖이면 실험실이 뜨지 않는다 | D-090 |
 | `autotrade.lab.monitor.history-size` | `720` | 화면 그래프용으로 들고 있을 표본 수(5초 주기면 1시간). 1~10000 | D-090 |
 | `autotrade.lab.monitor.disks` | 빈 값 | 지표를 낼 드라이브(마운트) 쉼표 목록(예: `C:\,D:\`, 대소문자 무시). 비면 모든 로컬 드라이브 | D-090 |
-| `autotrade.lab.monitor.thresholds` | 빈 값 | 기본 임계 덮어쓰기. `지표=방향:경고:위험:연속`을 `;`로 잇는다(예: `cpu.system=ABOVE:70:90:3;disk.free-gb=BELOW:100:30:1`). 방향은 ABOVE·BELOW. 기본 임계와 지표 이름은 D-090 5번과 `MetricNames`. 형식이 틀리거나 같은 지표가 두 번이면 실험실이 뜨지 않는다 | D-090 |
+| `autotrade.lab.monitor.thresholds` | 빈 값 | 기본 임계 덮어쓰기. `지표=방향:경고:위험:연속`을 `;`로 잇는다(예: `cpu.system=ABOVE:70:90:3;disk.free-gb=BELOW:100:30:1`). 방향은 ABOVE·BELOW. 기본 임계와 지표 이름은 D-090 5번과 `MetricNames`. 형식이 틀리거나, 같은 지표가 두 번이거나, 지표 이름이 `MetricNames.ALL`에 없으면(오타, 대상까지 쓴 이름) 실험실이 뜨지 않는다 | D-090 |
 | `autotrade.code-commit` | `unknown` (bootRun은 `git rev-parse HEAD`를 JVM 속성으로 넘김) | 실시간 모의 세션 상세 보고서의 `code` 줄(커밋). 리플레이 확인은 이 줄을 비교에서 뺀다 | D-076 |
 | `autotrade.code-dirty` | `true` (bootRun은 `git status --porcelain`이 비었는지로 넘김) | 같은 보고서의 작업 트리 변경 여부 | D-076 |
 

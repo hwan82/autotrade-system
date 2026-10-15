@@ -55,7 +55,8 @@ public final class ThresholdEvaluator {
                 s.level = judged;
                 s.pending = null;
                 s.count = 0;
-                double limit = t.limitOf(judged == Level.OK ? from : judged);
+                // 넘은 경계: 나빠질 때는 새 수준의 경계, 좋아질 때는 떠난 수준의 경계
+                double limit = t.limitOf(judged.compareTo(from) > 0 ? judged : from);
                 events.add(new ThresholdEvent(at, r.name(), from, judged, r.value(), limit, r.unit()));
             }
         }

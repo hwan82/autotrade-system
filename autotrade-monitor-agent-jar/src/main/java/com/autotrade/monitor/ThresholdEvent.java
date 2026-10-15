@@ -11,7 +11,8 @@ import java.util.Objects;
  * @param from 이전 수준
  * @param to 새 수준
  * @param value 수준을 바꾼 표본의 값
- * @param limit 넘은(또는 돌아온) 경계
+ * @param limit 넘은 경계. 나빠질 때(OK→WARN, WARN→CRITICAL, OK→CRITICAL)는 새 수준의 경계, 좋아질 때(CRITICAL→WARN,
+ *     WARN→OK, CRITICAL→OK)는 떠난 수준의 경계다
  * @param unit 단위
  */
 public record ThresholdEvent(Instant at, String reading, Level from, Level to, double value, double limit, String unit) {

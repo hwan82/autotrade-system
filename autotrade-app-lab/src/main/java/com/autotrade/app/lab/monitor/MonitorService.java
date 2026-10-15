@@ -72,11 +72,15 @@ public final class MonitorService implements AutoCloseable {
 
     /** 새 표본을 받을 SSE 연결. 꺼져 있거나 연결이 너무 많으면 빈 값. */
     public Optional<SseEmitter> openStream() {
-        if (agent == null || streams.size() >= MAX_STREAMS) {
-            return Optional.empty();
+        SseEmitter emitter;
+        // 상한 검사와 추가를 한 번에(동시 요청이 함께 상한을 넘지 않게, architect PR #114 A2)
+        synchronized (streams) {
+            if (agent == null || streams.size() >= MAX_STREAMS) {
+                return Optional.empty();
+            }
+            emitter = new SseEmitter(SSE_TIMEOUT_MILLIS);
+            streams.add(emitter);
         }
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLIS);
-        streams.add(emitter);
         emitter.onCompletion(() -> streams.remove(emitter));
         emitter.onTimeout(() -> streams.remove(emitter));
         emitter.onError(e -> streams.remove(emitter));
