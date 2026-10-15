@@ -8,6 +8,7 @@ import { profilesPage, profilePage, newProfilePage } from './pages/profiles.js';
 import { settingsPage } from './pages/settings.js';
 import { realPage } from './pages/real.js';
 import { livePage } from './pages/live.js';
+import { monitorPage } from './pages/monitor.js';
 
 const routes = [
   [/^#\/experiments$/, 'experiments', () => experimentsPage()],
@@ -22,6 +23,7 @@ const routes = [
   [/^#\/profiles$/, 'profiles', () => profilesPage()],
   [/^#\/profiles\/new$/, 'profiles', () => newProfilePage()],
   [/^#\/profiles\/([a-z0-9-]+)(?:\/v(\d+))?$/, 'profiles', m => profilePage(m[1], m[2] ? Number(m[2]) : null)],
+  [/^#\/monitor$/, 'monitor', () => monitorPage()],
   [/^#\/settings$/, 'settings', () => settingsPage()],
   [/^#\/real$/, 'real', () => realPage()],
 ];

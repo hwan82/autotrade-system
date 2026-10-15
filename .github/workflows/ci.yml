@@ -156,6 +156,8 @@ jobs:
         run: scripts/ci/check-python-collectors.sh
       - name: Collector key values (MD-11, ADR-008)
         run: scripts/ci/check-collector-keys.sh
+      - name: Protected change marker self-test
+        run: scripts/ci/test-mark-protected-changes.sh
       - name: Protected change marker (QA PR #112 F1)
         if: github.event_name == 'pull_request'
         run: scripts/ci/mark-protected-changes.sh "${{ github.base_ref }}"

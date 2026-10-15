@@ -16,6 +16,8 @@ dependencies {
     implementation(project(":autotrade-config"))
     implementation(project(":autotrade-control"))
     implementation(project(":autotrade-notification-jar"))
+    // 모니터링 화면(MON-05, D-090): 감시 에이전트 코어와 표준 수집원(OSHI)
+    implementation(project(":autotrade-monitor-sources"))
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     runtimeOnly(project(":autotrade-ui"))

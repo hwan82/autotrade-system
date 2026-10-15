@@ -5,7 +5,18 @@
 /autotrade-app-engine/ @hwan82
 /autotrade-app-watchdog/ @hwan82
 /autotrade-broker-*/ @hwan82
-/autotrade-config/src/main/java/com/autotrade/config/SecretPaths.java @hwan82
+/autotrade-config/ @hwan82
+/autotrade-control/ @hwan82
+/autotrade-domain/ @hwan82
+/autotrade-marketdata/ @hwan82
+/autotrade-strategy/ @hwan82
+/autotrade-notification-jar/ @hwan82
+/autotrade-monitor-agent-jar/ @hwan82
+/docs/team/project-instructions.md @hwan82
+/docs/qa/README.md @hwan82
+/docs/qa/checklists.md @hwan82
+/docs/decisions/D-086-real-path-reflection-ban.md @hwan82
+/docs/adr/ADR-002-real-trading-guard.md @hwan82
 /gradle/libs.versions.toml @hwan82
 /build-logic/ @hwan82
 /settings.gradle.kts @hwan82
@@ -13,3 +24,4 @@
 /.github/CODEOWNERS @hwan82
 /scripts/ci/protected-paths.txt @hwan82
 /scripts/ci/mark-protected-changes.sh @hwan82
+/scripts/ci/test-mark-protected-changes.sh @hwan82
