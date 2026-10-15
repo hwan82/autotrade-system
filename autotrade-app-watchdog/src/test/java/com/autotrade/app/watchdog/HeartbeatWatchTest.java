@@ -113,7 +113,7 @@ class HeartbeatWatchTest {
         HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("engine"), Duration.ofSeconds(15));
         Path file = Heartbeat.file(dir, "engine");
         Files.createDirectories(file.getParent());
-        Files.writeString(file, new Heartbeat("engine", 1, clock.instant(), clock.instant(), 1).format() + "#".repeat(5000));
+        Files.writeString(file, new Heartbeat("engine", 1, clock.instant(), clock.instant(), 1).format() + "\n".repeat(5000)); // 다 읽으면 정상으로 해석되는 내용
         assertThat(watch.check(clock.instant())).extracting(Change::to).containsExactly(State.UNREADABLE);
     }
 }

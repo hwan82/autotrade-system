@@ -1,6 +1,7 @@
 package com.autotrade.monitor;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -19,11 +20,15 @@ public final class SmallFile {
 
     /** UTF-8로 읽는다. 상한보다 크면 읽지 않고 {@link IOException}을 던진다. */
     public static String read(Path file) throws IOException {
-        long size = Files.size(file);
-        if (size > MAX_BYTES) {
-            throw new IOException("파일이 너무 큽니다(" + size + "바이트, 상한 " + MAX_BYTES + "): " + file);
+        // 크기를 따로 본 뒤 읽으면 그 사이 커진 파일을 다 읽는다. 상한+1바이트까지만 한 번에 읽는다(PR #118 architect N1·risk-ops R1)
+        byte[] bytes;
+        try (InputStream in = Files.newInputStream(file)) {
+            bytes = in.readNBytes((int) MAX_BYTES + 1);
         }
-        return Files.readString(file, StandardCharsets.UTF_8);
+        if (bytes.length > MAX_BYTES) {
+            throw new IOException("파일이 너무 큽니다(상한 " + MAX_BYTES + "바이트 초과): " + file);
+        }
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     /**
@@ -31,12 +36,23 @@ public final class SmallFile {
      * 지우지 못한 파일은 건너뛴다(예외를 던지지 않는다).
      */
     public static int deleteLeftoverTemps(Path target) {
-        Path dir = target.toAbsolutePath().getParent();
-        if (dir == null || !Files.isDirectory(dir)) {
-            return 0;
-        }
         int deleted = 0;
-        String prefix = target.getFileName() + ".";
+        try {
+            // toAbsolutePath는 IOError를 낼 수 있어 쓰지 않는다(상대 경로도 부모 폴더로 충분하다). 이 정리가 실전 엔진 기동을 막지 않게
+            // 한다(PR #118 architect N2)
+            Path dir = target.getParent();
+            if (dir == null || !Files.isDirectory(dir)) {
+                return 0;
+            }
+            deleted = deleteTemps(dir, target.getFileName() + ".");
+        } catch (RuntimeException e) {
+            // 정리하지 않고 넘어간다
+        }
+        return deleted;
+    }
+
+    private static int deleteTemps(Path dir, String prefix) {
+        int deleted = 0;
         try (DirectoryStream<Path> temps = Files.newDirectoryStream(dir, prefix + "*.tmp")) {
             for (Path tmp : temps) {
                 String middle = tmp.getFileName().toString();

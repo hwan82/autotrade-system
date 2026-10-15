@@ -144,7 +144,8 @@ class StopRequestsTest {
     void 기동_때_남은_임시_파일을_거두고_너무_큰_남은_파일은_지금_시각으로_이어받는다() throws Exception {
         TestClock clock = new TestClock("2026-10-15T00:00:00Z");
         Files.createDirectories(collector().getParent());
-        Files.writeString(collector(), "x".repeat(5000)); // 상한(4KB)을 넘는 쓰레기(PR #116 QA R1)
+        // 다 읽으면 이른 요청 시각을 이어받을 내용을 4KB 넘게 만든다(PR #116 QA R1, PR #118 architect R1·risk-ops K1)
+        Files.writeString(collector(), "requested-at=2026-10-14T00:00:00Z\n" + "\n".repeat(5000));
         Path temp = collector().resolveSibling("stop-request.4242.tmp");
         Path other = collector().resolveSibling("stop-request.note.tmp");
         Files.writeString(temp, "반쯤");
@@ -157,6 +158,7 @@ class StopRequestsTest {
         assertThat(stop.active()).isTrue();
         assertThat(temp).doesNotExist();
         assertThat(other).exists(); // PID가 아닌 이름은 건드리지 않는다
-        assertThat(Files.readString(collector())).contains("requested-at=2026-10-15T00:00:00Z");
+        // 상한을 넘어 내용을 읽지 않았으므로 지금 시각을 요청 시각으로 쓴다
+        assertThat(Files.readString(collector())).contains("requested-at=2026-10-15T00:00:00Z").doesNotContain("2026-10-14");
     }
 }
