@@ -39,7 +39,7 @@ val gitDirty = providers.exec {
 // 실전 엔진을 끈 날에만: -PallowDuringSession (장 시간 보호만 풀린다. 정지 요청 파일은 풀리지 않는다).
 // 값은 그대로 ExperimentMain에 넘겨 거기서 판단한다: 값 없음·true만 해제, 그 밖의 값(false 포함)은 입력 오류(PR #52 QA F2)
 val allowDuringSession = providers.gradleProperty("allowDuringSession")
-// 병렬 Run 상한(SIM-14, D-089): -PmaxParallelRuns=N(1~64, 기본 4). 등록 파일 parallelism과 작은 쪽을 쓴다. 결과에는 영향 없음
+// 병렬 Run 상한(SIM-14, D-089): -PmaxParallelRuns=N(1~64). 없으면 실험실 설정의 상한 파일, 그것도 없으면 4(D-094). 등록 파일 parallelism과 작은 쪽을 쓴다. 결과에는 영향 없음
 val maxParallelRuns = providers.gradleProperty("maxParallelRuns")
 
 // 조합 실험(D-061): ./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=<실험ID>

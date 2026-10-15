@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.autotrade.sim.run.ExperimentCancelledException;
 import com.autotrade.sim.run.ExperimentJobFiles;
 import com.autotrade.sim.run.ExperimentJobStatus;
+import com.autotrade.sim.run.ExperimentLimits;
 import com.autotrade.sim.run.ExperimentProgress;
 import com.autotrade.sim.run.ExperimentStoppedException;
 import java.io.ByteArrayOutputStream;
@@ -306,6 +307,51 @@ class ExperimentJobTest {
         ExperimentMain.run(new String[] {"combination", "--max-parallel-runs=2", repo.toString(), "abc", "false", JOB},
                 clock, config);
         assertThat(status().maxParallelRuns()).isEqualTo(2);
+    }
+
+    @Test
+    void 옵션이_없으면_실험실이_쓴_상한_파일을_따르고_옵션이_이긴다(@TempDir Path repo) throws Exception {
+        Clock clock = Clock.fixed(WEEKEND, ZoneOffset.UTC);
+        new ExperimentLimits(2, WEEKEND).write(config);
+
+        ExperimentMain.run(new String[] {"combination", repo.toString(), "abc", "false", JOB}, clock, config);
+        assertThat(status().maxParallelRuns()).isEqualTo(2);
+        ExperimentMain.run(new String[] {"combination", "--max-parallel-runs=5", repo.toString(), "abc", "false", JOB},
+                clock, config);
+        assertThat(status().maxParallelRuns()).isEqualTo(5);
+
+        assertThat(ExperimentMain.maxParallelRuns(null, config).source()).contains("lab.max-parallel-runs");
+        assertThat(ExperimentMain.maxParallelRuns(7, config)).isEqualTo(new ExperimentMain.MaxParallel(7, "-PmaxParallelRuns"));
+        Files.delete(ExperimentLimits.file(config));
+        assertThat(ExperimentMain.maxParallelRuns(null, config).value()).isEqualTo(ExperimentMain.DEFAULT_MAX_PARALLEL_RUNS);
+    }
+
+    @Test
+    void 상한_파일이_깨졌으면_기본값으로_넘지_않고_입력_오류다(@TempDir Path repo) throws Exception {
+        // 실험실에서 1로 낮춘 상한이 파일 손상으로 기본 4가 되지 않게 한다(D-094)
+        Files.createDirectories(ExperimentLimits.file(config).getParent());
+        Files.writeString(ExperimentLimits.file(config), "format: experiment-limits-v1\nmax-parallel-runs: 0\n");
+        Clock clock = Clock.fixed(WEEKEND, ZoneOffset.UTC);
+        String[] args = {"combination", repo.toString(), "abc", "false", JOB};
+        PrintStream err = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+        try {
+            assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(1);
+        } finally {
+            System.setErr(err);
+        }
+        assertThat(captured.toString(StandardCharsets.UTF_8)).contains("병렬 상한 파일", "-PmaxParallelRuns=N");
+        assertThat(files().status(JOB)).doesNotExist(); // 작업을 시작하지 않는다
+
+        // 옵션을 주면 파일을 보지 않는다
+        ExperimentMain.run(new String[] {"combination", "--max-parallel-runs=1", repo.toString(), "abc", "false", JOB},
+                clock, config);
+        assertThat(status().maxParallelRuns()).isEqualTo(1);
+
+        // 정지 요청이 있으면 상한 파일 오류보다 종료 코드 4가 먼저다
+        Files.writeString(config.resolve(ExperimentGate.STOP_REQUEST), "");
+        assertThat(ExperimentMain.run(args, clock, config)).isEqualTo(4);
     }
 
     @Test

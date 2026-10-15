@@ -37,7 +37,8 @@ class SettingsDiskGuardTest {
         ConfigPaths paths = ConfigPaths.in(dir);
         RuntimeConfigStore store = new RuntimeConfigStore(paths);
         LoadedConfig loaded = new ConfigLoader().load(paths);
-        return new SettingsController(new RuntimeConfigHolder(loaded.config(), store), store, loaded);
+        return new SettingsController(new RuntimeConfigHolder(loaded.config(), store), store, loaded,
+                new ExperimentLimitsPublisher(dir, java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC)));
     }
 
     private static SettingsController.UpdateRequest lab(String parallel) {

@@ -9,6 +9,7 @@ import com.autotrade.sim.live.LiveWeeklyMain;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.recording.RecordingMain;
 import com.autotrade.sim.run.ExperimentJobFiles;
+import com.autotrade.sim.run.ExperimentLimits;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.study.StudyMain;
 import com.autotrade.sim.walkforward.WalkForwardMain;
@@ -38,8 +39,9 @@ import java.util.function.ToIntFunction;
  *
  * <p>진행 보고·취소·자원 상한(SIM-14, D-089): 실험 ID마다 {@link ExperimentJob}이 잠금을 잡고
  * {@code <설정 폴더>/experiment-state/jobs/<실험ID>.status}에 진행 상태를 쓰며, 같은 폴더의 취소 요청 파일을 확인한다. 동시에
- * 도는 Run 수는 등록 파일의 {@code parallelism}과 {@code --max-parallel-runs}(Gradle {@code -PmaxParallelRuns}, 기본 4) 중 작은
- * 쪽이다.
+ * 도는 Run 수는 등록 파일의 {@code parallelism}과 병렬 상한 중 작은 쪽이다. 병렬 상한은 {@code --max-parallel-runs}(Gradle
+ * {@code -PmaxParallelRuns})가 있으면 그 값, 없으면 실험실이 설정 화면의 {@code lab.max-parallel-runs}로 쓴 상한 파일
+ * {@code <설정 폴더>/experiment-state/limits}({@link ExperimentLimits}, D-094), 그 파일도 없으면 기본 4다.
  */
 public final class ExperimentMain {
 
@@ -76,7 +78,7 @@ public final class ExperimentMain {
         }
         List<String> rest = new ArrayList<>();
         boolean allow = false;
-        int maxParallelRuns = DEFAULT_MAX_PARALLEL_RUNS;
+        Integer optionMaxParallelRuns = null;
         for (String a : Arrays.asList(args).subList(1, args.length)) {
             if (a.startsWith(MAX_PARALLEL_OPTION)) {
                 Integer n = maxParallelRuns(a);
@@ -84,7 +86,7 @@ public final class ExperimentMain {
                     System.err.println("--max-parallel-runs는 1~64여야 합니다: " + a);
                     return 1;
                 }
-                maxParallelRuns = n;
+                optionMaxParallelRuns = n;
             } else if (List.of("--allow-during-session", "--allow-during-session=", "--allow-during-session=true").contains(a)) {
                 allow = true;
             } else if (a.startsWith("--allow-during-session")) {
@@ -99,6 +101,17 @@ public final class ExperimentMain {
         if (allow) {
             System.out.println("[experiment] 장 시간 보호 해제됨(실전 엔진을 끈 날만). 정지 요청 파일은 계속 확인합니다");
         }
+        MaxParallel cap;
+        try {
+            cap = maxParallelRuns(optionMaxParallelRuns, configDir);
+        } catch (IllegalArgumentException e) {
+            // 사용자가 실험실에서 낮춰 둔 상한을 기본값으로 조용히 넘지 않는다(D-094)
+            System.err.println("[experiment] 병렬 상한 파일(" + ExperimentLimits.file(configDir) + ")을 읽을 수 없어 시작하지 않습니다: "
+                    + e.getMessage() + ". 실험실 설정 화면에서 다시 저장하거나 -PmaxParallelRuns=N으로 주세요");
+            // 정지 요청이 있으면 그 이유와 종료 코드 4가 먼저다(PR #113 risk-ops F1과 같은 원칙)
+            return stoppedOr(gate, 1);
+        }
+        int maxParallelRuns = cap.value();
         String[] forwarded = rest.toArray(String[]::new);
         String job = jobId(args[0], rest);
         if (job == null) {
@@ -121,7 +134,7 @@ public final class ExperimentMain {
             return stoppedOr(gate, 1);
         }
         System.out.println("[experiment] 진행 상태 파일: " + control.statusFile() + ", 병렬 Run 상한 "
-                + maxParallelRuns + "(-PmaxParallelRuns, 등록 파일 parallelism과 작은 쪽)");
+                + maxParallelRuns + "(" + cap.source() + ", 등록 파일 parallelism과 작은 쪽)");
         return runControlled(control, runGate -> body.run(args[0], forwarded, configDir, runGate));
     }
 
@@ -175,10 +188,32 @@ public final class ExperimentMain {
         }
     }
 
+    /** 이 실행이 쓸 병렬 Run 상한과 그 출처(시작 출력용). */
+    record MaxParallel(int value, String source) {
+    }
+
     /**
-     * 병렬 Run 상한 옵션 {@code --max-parallel-runs=N}(SIM-14, D-089). 1~64, 없으면 {@value #DEFAULT_MAX_PARALLEL_RUNS}. 이 명령은
-     * 설정 로더를 쓰지 않으므로(ArchUnit {@code EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG}, D-063) 설정 키
-     * {@code lab.max-parallel-runs}를 읽지 않고 Gradle 속성 {@code -PmaxParallelRuns}로 받는다. 형식이 틀리면 null.
+     * 병렬 Run 상한(SIM-14, D-089·D-094). 옵션이 있으면 옵션, 없으면 실험실이 쓴 상한 파일, 그것도 없으면
+     * {@value #DEFAULT_MAX_PARALLEL_RUNS}. 이 명령은 설정 로더와 {@code runtime-config.json}을 쓰지 않는다(ArchUnit
+     * {@code EXPERIMENT_COMMAND_READS_NO_PROCESS_CONFIG}, D-063). 상한 파일이 있는데 읽지 못하거나 형식이 틀리면
+     * {@link IllegalArgumentException}(입력 오류).
+     */
+    static MaxParallel maxParallelRuns(Integer option, Path configDir) {
+        if (option != null) {
+            return new MaxParallel(option, "-PmaxParallelRuns");
+        }
+        Optional<ExperimentLimits> limits;
+        try {
+            limits = ExperimentLimits.read(configDir);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("읽기 실패 " + e.getClass().getSimpleName(), e);
+        }
+        return limits.map(l -> new MaxParallel(l.maxParallelRuns(), "실험실 설정 lab.max-parallel-runs, " + l.updatedAt() + " 저장"))
+                .orElseGet(() -> new MaxParallel(DEFAULT_MAX_PARALLEL_RUNS, "기본값, 실험실 상한 파일 없음"));
+    }
+
+    /**
+     * 병렬 Run 상한 옵션 {@code --max-parallel-runs=N}(SIM-14, D-089). 1~64. 형식이 틀리면 null.
      */
     static Integer maxParallelRuns(String option) {
         String v = option.substring(MAX_PARALLEL_OPTION.length());

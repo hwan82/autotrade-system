@@ -10,6 +10,9 @@ import com.autotrade.app.lab.experiment.SnapshotList;
 import com.autotrade.app.lab.live.LiveLabService;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
+import com.autotrade.app.lab.settings.ExperimentLimitsPublisher;
+import com.autotrade.config.LoadedConfig;
+import com.autotrade.config.RuntimeConfigHolder;
 import com.autotrade.config.RuntimeConfigStore;
 import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
@@ -68,6 +71,20 @@ public class LabWebConfiguration {
         ExperimentJobs jobs = new ExperimentJobs(store.paths().runtimeFile().toAbsolutePath().getParent(), clock);
         log.info("실험 작업 상태 폴더: {}", jobs.root());
         return jobs;
+    }
+
+    /**
+     * 실험실 설정의 병렬 상한을 실험 실행 명령이 읽는 상한 파일로 내보낸다(D-094). 기동 때 한 번 쓰고, 설정 화면 저장 뒤에 다시 쓴다.
+     * 실험실이 꺼져 있을 때 {@code runtime-config.json}을 손으로 고쳤다면 다음 기동 때 반영된다. 그 파일이 깨져 기본값으로 떴으면
+     * 기동 때 쓰지 않는다(PR #121 architect F1).
+     */
+    @Bean
+    ExperimentLimitsPublisher experimentLimitsPublisher(RuntimeConfigStore store, RuntimeConfigHolder holder,
+            LoadedConfig loaded, Clock clock) {
+        ExperimentLimitsPublisher publisher =
+                new ExperimentLimitsPublisher(store.paths().runtimeFile().toAbsolutePath().getParent(), clock);
+        publisher.publishAtStartup(loaded, holder::current);
+        return publisher;
     }
 
     /** 실험 진행 상태 SSE(UI-01·UI-02, D-093). 연결이 있을 때만 작업 폴더를 다시 읽는다. */
