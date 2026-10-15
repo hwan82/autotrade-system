@@ -244,3 +244,12 @@ td pre.yaml { white-space: pre-wrap; word-break: break-all; min-width: 14rem; ma
 .spark .warn-line, .spark .critical-line { stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .spark .warn-line { stroke: var(--warn); }
 .spark .critical-line { stroke: var(--danger); }
+
+/* 실험 진행 상태(UI-02, D-093) */
+.jobs { margin-bottom: 1.5rem; }
+.section-head { display: flex; align-items: center; gap: .8rem; }
+.jobs td .sub { display: block; font-size: .75rem; font-weight: 400; }
+.job-progress { display: grid; gap: .2rem; min-width: 14rem; }
+.job-bar { height: .5rem; background: var(--lab-soft); border-radius: 2px; overflow: hidden; }
+.job-bar span { display: block; height: 100%; background: var(--lab); }
+tr.row-warn td { background: var(--warn-soft); }
