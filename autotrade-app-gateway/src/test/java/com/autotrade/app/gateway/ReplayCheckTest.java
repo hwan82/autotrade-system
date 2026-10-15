@@ -1,6 +1,7 @@
 package com.autotrade.app.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
@@ -37,8 +38,22 @@ class ReplayCheckTest {
     private static final Symbol SAMSUNG = Symbol.krx("005930");
     private static final Symbol HYNIX = Symbol.krx("000660");
 
+    /** 서울 2026-10-10(토) 10:00: 국내·미국 모두 장 시간 보호 구간 밖. */
+    private static final String WEEKEND = "2026-10-10T01:00:00Z";
+    /** 서울 2026-10-08(목) 10:00: 국내 정규장. */
+    private static final String KRX_SESSION = "2026-10-08T01:00:00Z";
+
     @TempDir
     Path root;
+
+    private Path config() {
+        return root.resolve("cfg");
+    }
+
+    /** 명령 진입({@link ReplayCheckMain}과 같은 경로)을 고정 시각과 임시 설정 폴더로 부른다. */
+    private int command(String instant, PrintStream out, PrintStream err, String... args) {
+        return ReplayCheck.run(args, Clock.fixed(Instant.parse(instant), ZoneOffset.UTC), config(), out, err);
+    }
 
     private Path recordDay() {
         MarketEventRecorder rec = new MarketEventRecorder(new RecordingLayout(root), Market.KRX, ZoneId.of("Asia/Seoul"),
@@ -99,8 +114,8 @@ class ReplayCheckTest {
         assertThat(named.firstDigest()).isEqualTo(unnamed.firstDigest());
         PrintStream sink = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        assertThat(ReplayCheck.run(new String[] {day.toString()}, SymbolNameFiles.load(config).names(),
-                new PrintStream(stdout, true, StandardCharsets.UTF_8), sink)).isZero();
+        assertThat(ReplayCheck.run(new String[] {day.toString()}, config, ReplayCheck.StopCheck.NONE,
+                SymbolNameFiles.load(config).names(), new PrintStream(stdout, true, StandardCharsets.UTF_8), sink)).isZero();
         assertThat(stdout.toString(StandardCharsets.UTF_8)).contains("| 005930 | 삼성전자 |");
     }
 
@@ -109,8 +124,8 @@ class ReplayCheckTest {
         Path day = recordDay();
         Path out = root.resolve("report.md");
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        int code = ReplayCheck.run(new String[] {day.toString(), out.toString()},
-                new PrintStream(stdout, true, StandardCharsets.UTF_8), new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+        int code = command(WEEKEND, new PrintStream(stdout, true, StandardCharsets.UTF_8),
+                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8), day.toString(), out.toString());
 
         assertThat(code).isZero();
         assertThat(Files.readString(out, StandardCharsets.UTF_8)).isEqualTo(stdout.toString(StandardCharsets.UTF_8));
@@ -127,7 +142,7 @@ class ReplayCheckTest {
         assertThat(r.hashVerified()).isFalse();
         assertThat(r.verdict()).isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
         assertThat(r.toMarkdown()).contains("파일 해시 대조 안 함").contains("**불완전**").doesNotContain("일치 확인됨");
-        assertThat(ReplayCheck.run(new String[] {day.toString()}, sink, sink)).isEqualTo(3);
+        assertThat(command(WEEKEND, sink, sink, day.toString())).isEqualTo(3);
     }
 
     @Test
@@ -185,9 +200,151 @@ class ReplayCheckTest {
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         PrintStream sink = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
 
-        assertThat(ReplayCheck.run(new String[] {day.toString()}, sink, new PrintStream(err, true, StandardCharsets.UTF_8))).isEqualTo(2);
-        assertThat(ReplayCheck.run(new String[] {root.resolve("KRX/2026-01-02").toString()}, sink, sink)).isEqualTo(2);
-        assertThat(ReplayCheck.run(new String[0], sink, sink)).isEqualTo(2);
+        assertThat(command(WEEKEND, sink, new PrintStream(err, true, StandardCharsets.UTF_8), day.toString())).isEqualTo(2);
+        assertThat(command(WEEKEND, sink, sink, root.resolve("KRX/2026-01-02").toString())).isEqualTo(2);
+        assertThat(command(WEEKEND, sink, sink)).isEqualTo(2);
         assertThat(err.toString(StandardCharsets.UTF_8)).contains("녹화 확인 실패");
+    }
+    private static PrintStream sink() {
+        return new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+    }
+
+    private Path stopRequest() throws Exception {
+        Path stop = config().resolve(ReplayCheckGate.STOP_REQUEST);
+        Files.createDirectories(stop.getParent());
+        return Files.writeString(stop, "");
+    }
+
+    @Test
+    void 장_시간_보호_구간이면_시작하지_않고_4를_돌려주며_보고서를_쓰지_않는다() throws Exception {
+        Path day = recordDay();
+        Path report = root.resolve("report.md");
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+
+        int code = command(KRX_SESSION, new PrintStream(stdout, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8), day.toString(), report.toString());
+
+        assertThat(code).isEqualTo(4);
+        assertThat(report).doesNotExist();
+        assertThat(stdout.size()).isZero();
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("시작하지 않습니다").contains("KRX 장 시간 보호 구간")
+                .contains("-PallowDuringSession").contains(config().resolve(ReplayCheckGate.STOP_REQUEST).toString());
+    }
+
+    @Test
+    void 장_시간_보호는_해제_옵션으로만_풀린다() throws Exception {
+        Path day = recordDay();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+
+        assertThat(command(KRX_SESSION, sink(), new PrintStream(err, true, StandardCharsets.UTF_8), day.toString(),
+                "--allow-during-session")).isZero();
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("장 시간 보호 해제됨");
+        assertThat(command(KRX_SESSION, sink(), sink(), "--allow-during-session=true", day.toString())).isZero();
+        assertThat(command(KRX_SESSION, sink(), sink(), day.toString(), "--allow-during-session=")).isZero();
+    }
+
+    @Test
+    void 해제_옵션은_값이_없거나_true일_때만이고_그_밖의_값은_입력_오류다() throws Exception {
+        Path day = recordDay();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+
+        assertThat(command(WEEKEND, sink(), new PrintStream(err, true, StandardCharsets.UTF_8), day.toString(),
+                "--allow-during-session=false")).isEqualTo(2);
+        assertThat(command(WEEKEND, sink(), sink(), day.toString(), "--allow-during-sessions")).isEqualTo(2);
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("값이 없거나 true");
+    }
+
+    @Test
+    void 미국_장_시간과_캘린더_수록_범위_밖도_멈춘다() throws Exception {
+        Path day = recordDay();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        PrintStream e = new PrintStream(err, true, StandardCharsets.UTF_8);
+
+        // 뉴욕 2026-10-08(목, EDT) 08:30 = 12:30Z
+        assertThat(command("2026-10-08T12:29:00Z", sink(), sink(), day.toString())).isZero();
+        assertThat(command("2026-10-08T12:30:00Z", sink(), e, day.toString())).isEqualTo(4);
+        assertThat(command("2028-01-05T10:00:00Z", sink(), e, day.toString())).isEqualTo(4);
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("US 장 시간 보호 구간").contains("수록 범위 밖");
+    }
+
+    @Test
+    void 정지_요청_파일은_해제_옵션과_상관없이_멈추고_지우지_않는다() throws Exception {
+        Path day = recordDay();
+        Path stop = stopRequest();
+        Path report = root.resolve("report.md");
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+
+        assertThat(command(WEEKEND, sink(), new PrintStream(err, true, StandardCharsets.UTF_8), day.toString(),
+                report.toString())).isEqualTo(4);
+        assertThat(command(KRX_SESSION, sink(), sink(), day.toString(), report.toString(), "--allow-during-session"))
+                .isEqualTo(4);
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("정지를 요청").contains(stop.toString());
+        assertThat(stop).exists();
+        assertThat(report).doesNotExist();
+    }
+
+    @Test
+    void 정지_요청이_있는지_판단할_수_없으면_해제_옵션과_상관없이_멈춘다() throws Exception {
+        Path day = recordDay();
+        // 부모가 일반 파일이라 exists·notExists 둘 다 false: 확인 실패는 요청 있음으로 본다(D-063과 같은 규칙)
+        Files.createDirectories(config());
+        Files.writeString(config().resolve("experiment-state"), "file");
+
+        assertThat(command(WEEKEND, sink(), sink(), day.toString(), "--allow-during-session")).isEqualTo(4);
+    }
+
+    @Test
+    void 실행_중에_정지_요청이_오면_회차_안에서_멈추고_보고서를_쓰지_않는다() throws Exception {
+        Path day = recordDay();
+        Path report = root.resolve("report.md");
+        int[] calls = {0};
+        ReplayCheck.StopCheck stopsOnThird = () -> ++calls[0] >= 3 ? Optional.of("테스트 정지") : Optional.empty();
+
+        assertThatThrownBy(() -> ReplayCheck.check(day, SymbolNames.empty(), stopsOnThird, 2))
+                .isInstanceOf(ReplayCheck.StoppedException.class).hasMessage("테스트 정지");
+        // 1회차 시작(1), 2줄째(2), 4줄째(3)에서 멈춘다: 9줄을 다 읽기 전
+        assertThat(calls[0]).isEqualTo(3);
+
+        calls[0] = 0;
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        int code = ReplayCheck.run(new String[] {day.toString(), report.toString()}, config(), stopsOnThird,
+                SymbolNames.empty(), sink(), new PrintStream(err, true, StandardCharsets.UTF_8));
+        assertThat(code).isEqualTo(4);
+        assertThat(report).doesNotExist();
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("멈췄습니다").contains("테스트 정지");
+    }
+
+    @Test
+    void 리플레이_도중에_정지_요청이_오면_그_회차에서_멈춘다() {
+        Path day = recordDay();
+        int[] calls = {0};
+        // 1회차: 시작(1), 수집 2·4·6·8줄(2~5), 수집 뒤(6), 리플레이 2건째(7)에서 멈춘다
+        ReplayCheck.StopCheck stopsInReplay = () -> ++calls[0] >= 7 ? Optional.of("리플레이 중 정지") : Optional.empty();
+
+        assertThatThrownBy(() -> ReplayCheck.check(day, SymbolNames.empty(), stopsInReplay, 2))
+                .isInstanceOf(ReplayCheck.StoppedException.class).hasMessage("리플레이 중 정지");
+        assertThat(calls[0]).isEqualTo(7);
+    }
+
+    @Test
+    void 정지_확인은_회차_시작과_정해진_줄마다_묻고_멈추지_않으면_결과가_같다() {
+        Path day = recordDay();
+        int[] calls = {0};
+        ReplayCheck.StopCheck counting = () -> {
+            calls[0]++;
+            return Optional.empty();
+        };
+
+        ReplayCheck.Report gated = ReplayCheck.check(day, SymbolNames.empty(), counting, 2);
+        ReplayCheck.Report plain = ReplayCheck.check(day);
+
+        // 회차마다: 시작 1 + 종목 수집 9줄 중 2줄마다 4 + 수집 뒤 1 + 리플레이 9건 중 2건마다 4 = 10
+        assertThat(calls[0]).isEqualTo(20);
+        assertThat(gated.toMarkdown()).isEqualTo(plain.toMarkdown());
+
+        calls[0] = 0;
+        ReplayCheck.check(day, SymbolNames.empty(), counting);
+        assertThat(calls[0]).isEqualTo(4); // 기본 간격(50,000줄)에서는 회차마다 시작·수집 뒤 2번
     }
 }
