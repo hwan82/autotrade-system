@@ -174,6 +174,8 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 | 프로세스 | CI: 엔진을 띄워 소켓 600·폴더 700 확인, 실험실 `/api/real/status`가 `UP`, 종료 후 소켓 삭제 |
 | 화면 | 실제 엔진 + 실험실로 브라우저 확인: 문구가 틀리면 버튼 꺼짐, 활성화 시도 → "AUTHENTICATED 단계 수행 불가, OFF" 결과, DOM에 비밀번호 없음, 틀린 비밀번호 토스트·입력란 비움, 전체 PANIC 단계표, 실전 띠, 390px 모바일 |
 
+명령 채널·엔진 쪽 ArchUnit 규칙(`ONLY_ENGINE_OPENS_CONTROL_SERVER`, `ONLY_LAB_SENDS_CONTROL_COMMANDS`, `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`, `ONLY_COMMAND_CHANNEL_RAISES_GUARD`)은 패키지 이름으로 허용 대상을 정하므로 `ModuleOwnershipTest`의 패키지 소유 규칙(ADR-002 9장)을 전제로 한다. 소유 규칙 없이는 같은 이름 패키지·FQN 위장이 이 규칙들을 통과한다(PR #21 risk-ops 재검토 4). 이 규칙을 패키지 허용으로 더 추가할 때도 같다.
+
 검증하지 못한 것: Windows·macOS에서의 소켓 권한과 경로 길이, Windows에서 잠금 파일 PID 읽기(읽지 못하면 `UNKNOWN`으로 떨어지게만 해 둠, 리눅스에서만 실행), 실제 증권사 연동 상태의 활성화·PANIC(7단계).
 
 ## 6. 범위 밖 (후속)
