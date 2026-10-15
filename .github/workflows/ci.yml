@@ -32,13 +32,25 @@ jobs:
         run: |
           ./gradlew --no-daemon :autotrade-app-engine:installDist :autotrade-app-gateway:installDist \
             :autotrade-app-watchdog:installDist :autotrade-app-lab:bootJar
-          for p in watchdog; do
-            "autotrade-app-$p/build/install/autotrade-$p/bin/autotrade-$p"
-          done
+          WATCHDOG=autotrade-app-watchdog/build/install/autotrade-watchdog/bin/autotrade-watchdog
+          # 감시 설정이 틀리면 감시는 종료 코드 2로 뜨지 않는다(D-092, PR #115 risk-ops K2)
+          BAD_CFG="$RUNNER_TEMP/watchdog-bad-config"
+          mkdir -p "$BAD_CFG" && echo "interval-second=5" > "$BAD_CFG/watchdog.properties"
+          set +e; AUTOTRADE_CONFIG_DIR="$BAD_CFG" "$WATCHDOG" > watchdog-bad.log 2>&1; BAD_EXIT=$?; set -e
+          test "$BAD_EXIT" = "2" || { echo "틀린 감시 설정인데 종료 코드 $BAD_EXIT"; cat watchdog-bad.log; exit 1; }
           # 실전 엔진은 명령 채널(로컬 소켓)을 열고 계속 돈다(ADR-006). 소켓이 생기는지 확인하고, 실험실이 붙은 뒤에 끈다
-          ENGINE_PID=""; LAB_PID=""; GW_PID=""
+          ENGINE_PID=""; LAB_PID=""; GW_PID=""; WATCHDOG_PID=""
           # 어느 단계에서 실패해도 띄운 프로세스를 남기지 않는다
-          trap 'kill $LAB_PID $ENGINE_PID $GW_PID 2>/dev/null || true' EXIT
+          trap 'kill $LAB_PID $ENGINE_PID $GW_PID $WATCHDOG_PID 2>/dev/null || true' EXIT
+          # 감시는 계속 돌며 점검마다 자기 하트비트를 쓴다(D-092). 설정 폴더가 없어도 만들고 뜬다
+          "$WATCHDOG" > watchdog.log 2>&1 &
+          WATCHDOG_PID=$!
+          for i in $(seq 1 30); do
+            if [ -f "$AUTOTRADE_CONFIG_DIR/heartbeat/watchdog.hb" ]; then break; fi
+            if ! kill -0 "$WATCHDOG_PID" 2>/dev/null; then cat watchdog.log; exit 1; fi
+            sleep 1
+          done
+          test -f "$AUTOTRADE_CONFIG_DIR/heartbeat/watchdog.hb" || { cat watchdog.log; exit 1; }
           # 시세 게이트웨이는 수신·녹화를 위해 계속 돈다(ADR-003). 기동 로그를 확인하고, 살아 있는지 본 뒤
           # SIGTERM으로 40초 안에 종료(종료 훅이 녹화기를 닫음)되는지 확인한다
           autotrade-app-gateway/build/install/autotrade-gateway/bin/autotrade-gateway > gateway.log 2>&1 &
@@ -73,6 +85,18 @@ jobs:
           test -S "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock" || { cat engine.log; exit 1; }
           test "$(stat -c '%a' "$AUTOTRADE_CONFIG_DIR/run")" = "700"
           test "$(stat -c '%a' "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock")" = "600"
+          # 실전 엔진 하트비트(D-092)
+          for i in $(seq 1 10); do
+            if [ -f "$AUTOTRADE_CONFIG_DIR/heartbeat/engine.hb" ]; then break; fi
+            sleep 1
+          done
+          test -f "$AUTOTRADE_CONFIG_DIR/heartbeat/engine.hb" || { cat engine.log; exit 1; }
+          # 감시가 엔진을 살아 있음으로 볼 때까지 기다린다(점검 주기 5초라 엔진을 너무 빨리 끄면 놓친다)
+          for i in $(seq 1 15); do
+            if grep -qE "engine .*ABSENT .* ALIVE" watchdog.log; then break; fi
+            sleep 1
+          done
+          grep -qE "engine .*ABSENT .* ALIVE" watchdog.log || { echo "감시가 엔진 하트비트를 보지 못했습니다"; cat watchdog.log; exit 1; }
           # 같은 설정 폴더로 두 번째 엔진은 뜨지 않는다(run/engine.lock)
           if autotrade-app-engine/build/install/autotrade-engine/bin/autotrade-engine > engine2.log 2>&1; then
             echo "두 번째 엔진이 떴습니다"; cat engine2.log; exit 1
@@ -94,6 +118,22 @@ jobs:
           kill "$LAB_PID" "$ENGINE_PID"
           wait "$ENGINE_PID" || true
           test ! -e "$AUTOTRADE_CONFIG_DIR/run/engine-control.sock" || { echo "종료 후 소켓이 남았습니다"; cat engine.log; exit 1; }
+          # 정상 종료는 하트비트 파일을 지운다(감시가 꺼짐과 멈춤을 가름, D-092)
+          test ! -e "$AUTOTRADE_CONFIG_DIR/heartbeat/engine.hb" || { echo "종료 후 엔진 하트비트가 남았습니다"; exit 1; }
+          for i in $(seq 1 15); do
+            if grep -qE "engine .*ALIVE .* ABSENT" watchdog.log; then break; fi
+            sleep 1
+          done
+          grep -qE "engine .*ALIVE .* ABSENT" watchdog.log || { echo "감시가 엔진 종료를 보지 못했습니다"; cat watchdog.log; exit 1; }
+          kill "$WATCHDOG_PID"
+          for i in $(seq 1 10); do
+            if ! kill -0 "$WATCHDOG_PID" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat watchdog.log
+          if kill -0 "$WATCHDOG_PID" 2>/dev/null; then echo "감시가 SIGTERM 뒤 10초 안에 끝나지 않았습니다"; kill -9 "$WATCHDOG_PID"; exit 1; fi
+          WATCHDOG_PID=""
+          test ! -e "$AUTOTRADE_CONFIG_DIR/heartbeat/watchdog.hb" || { echo "종료 후 감시 하트비트가 남았습니다"; exit 1; }
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4

@@ -46,4 +46,20 @@ class GatewayMainTest {
         assertThat(keys.isConfigured()).isTrue();
         assertThat(GatewayMain.plugin(BrokerId.TOSS, keys, null)).isEmpty();
     }
+
+    @Test
+    void 하트비트를_쓰고_닫으면_지운다() throws Exception {
+        com.autotrade.monitor.HeartbeatWriter heartbeat = GatewayMain.startHeartbeat(ConfigPaths.in(dir), Clock.systemUTC());
+        Path file = dir.resolve("heartbeat").resolve("gateway.hb");
+        try {
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (!java.nio.file.Files.exists(file) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(java.nio.file.Files.readString(file)).contains("process=gateway");
+        } finally {
+            heartbeat.close();
+        }
+        assertThat(file).doesNotExist();
+    }
 }

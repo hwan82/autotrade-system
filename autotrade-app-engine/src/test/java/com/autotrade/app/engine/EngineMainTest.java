@@ -108,6 +108,40 @@ class EngineMainTest {
     }
 
     @Test
+    void 기동하면_하트비트를_쓰고_닫으면_지운다() throws Exception {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        Path heartbeat = dir.resolve("heartbeat").resolve("engine.hb");
+
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED)) {
+            assertThat(engine.heartbeat().file()).isEqualTo(heartbeat);
+            long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+            while (!Files.exists(heartbeat) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(Files.readString(heartbeat)).contains("process=engine", "written-at=" + FIXED.instant());
+        }
+        assertThat(heartbeat).doesNotExist(); // 정상 종료 표시(감시가 꺼짐으로 본다, D-092)
+    }
+
+    @Test
+    void 하트비트를_쓰지_못해도_엔진은_뜨고_Guard는_OFF이며_상태에_응답한다() throws Exception {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        Files.writeString(paths.runtimeFile(), """
+                { "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] } }
+                """);
+        Files.writeString(dir.resolve("heartbeat"), "폴더 자리에 파일"); // 하트비트 폴더를 만들 수 없게 막는다
+
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED);
+                ControlClient client = new ControlClient(ControlSocket.path(paths), Duration.ofSeconds(5))) {
+            assertThat(engine.heartbeat().beat()).isFalse();
+            ControlResponse status = client.send(ControlRequest.status());
+            assertThat(status.status().accounts()).singleElement()
+                    .satisfies(a -> assertThat(a.state()).isEqualTo("OFF"));
+            assertThat(engine.guard().state(new AccountId("KIS-US-1"))).isEqualTo(GuardState.OFF);
+        }
+    }
+
+    @Test
     void 설정_파일을_버리고_기동하면_상태_조회에_그_경고가_실린다() throws Exception {
         // 1단계 QA 권고 R3: 오타 키 하나로 runtime-config.json을 통째로 버리면 실전 계좌도 사라진다. 운영 화면이 알 수 있어야 한다
         ConfigPaths paths = ConfigPaths.in(dir);

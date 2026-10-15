@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":autotrade-config"))
     implementation(project(":autotrade-broker-kiwoom"))
     implementation(project(":autotrade-broker-kis"))
+    implementation(project(":autotrade-monitor-agent-jar")) // 하트비트 기록(MON-02, D-092)
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)
 }

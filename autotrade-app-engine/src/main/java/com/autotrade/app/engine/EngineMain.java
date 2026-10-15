@@ -14,6 +14,7 @@ import com.autotrade.config.RuntimeConfig;
 import com.autotrade.control.ControlServer;
 import com.autotrade.control.ControlSocket;
 import com.autotrade.domain.account.AccountRef;
+import com.autotrade.monitor.HeartbeatWriter;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.io.Console;
 import java.io.IOException;
@@ -78,7 +79,7 @@ public final class EngineMain {
         }
     }
 
-    /** 설정 로딩 → Guard(모두 OFF) → 명령 채널. */
+    /** 설정 로딩 → Guard(모두 OFF) → 명령 채널 → 하트비트(감시가 읽음, MON-02·D-092). */
     static Engine start(ConfigPaths paths, Clock clock) throws IOException {
         LoadedConfig loaded = ProcessStartup.start(PROCESS, paths, clock);
         RuntimeConfig config = loaded.config();
@@ -86,7 +87,10 @@ public final class EngineMain {
         EngineCommandHandler handler = commandHandler(config, guard, clock, loaded.warning());
         ControlServer server = ControlServer.start(ControlSocket.path(paths), handler);
         LOG.log(Level.INFO, "실전 제어 명령 채널을 열었습니다(로컬 소켓, 네트워크 포트 없음)");
-        return new Engine(guard, handler, server);
+        // 하트비트 쓰기 실패는 로그만 남기고 엔진을 멈추지 않는다(HeartbeatWriter)
+        HeartbeatWriter heartbeat = HeartbeatWriter.start(paths.runtimeFile().getParent(), PROCESS, clock,
+                HeartbeatWriter.DEFAULT_INTERVAL);
+        return new Engine(guard, handler, server, heartbeat);
     }
 
     /**
@@ -150,11 +154,17 @@ public final class EngineMain {
         }
     }
 
-    /** 실행 중인 엔진. 닫으면 명령 채널만 닫는다(Guard는 메모리 상태라 함께 사라진다). */
-    record Engine(RealTradingGuard guard, EngineCommandHandler handler, ControlServer server) implements AutoCloseable {
+    /** 실행 중인 엔진. 닫으면 명령 채널을 닫고 하트비트 파일을 지운다(정상 종료 표시). Guard는 메모리 상태라 함께 사라진다. */
+    record Engine(RealTradingGuard guard, EngineCommandHandler handler, ControlServer server, HeartbeatWriter heartbeat)
+            implements AutoCloseable {
         @Override
         public void close() {
-            server.close();
+            try {
+                server.close();
+            } finally {
+                // 채널 닫기가 실패해도 정상 종료 표시는 남긴다(멈춤으로 오인되지 않게, architect PR #116 R1)
+                heartbeat.close();
+            }
         }
     }
 }
