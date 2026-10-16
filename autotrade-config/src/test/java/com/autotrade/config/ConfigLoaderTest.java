@@ -130,6 +130,25 @@ class ConfigLoaderTest {
     }
 
     @Test
+    void 갱신_키_없이_카카오를_켠_예전_파일도_받아들인다() throws IOException {
+        // D-100 이전 파일(access-token만으로 켬)을 거부하면 다른 설정까지 사라진다. 받아들이고 엔진·감시가 카카오만 끈다(PR #128 architect F3)
+        runtime("""
+                { "lab": { "max-parallel-runs": 2 }, "notification": { "kakao": { "enabled": true } } }
+                """);
+        secrets("""
+                { "notification": { "kakao": { "access-token": "%s" } } }
+                """.formatted(FAKE_SECRET));
+
+        LoadedConfig loaded = loader.load(paths);
+
+        assertThat(loaded.source()).isEqualTo(ConfigSource.RUNTIME_FILE);
+        assertThat(loaded.warning()).isEmpty();
+        assertThat(loaded.config().lab().maxParallelRuns()).isEqualTo(2);
+        assertThat(loaded.config().notification().kakao().enabled()).isTrue();
+        assertThat(loaded.config().notification().kakao().meReady()).isFalse();
+    }
+
+    @Test
     void 모르는_키는_오타로_보고_default로_기동한다() throws IOException {
         runtime("""
                 { "lab": { "max-paralel-runs": 8 } }
@@ -438,6 +457,8 @@ class ConfigLoaderTest {
                         "brokers/kiwoom/app-key", "brokers/kiwoom/app-secret",
                         "brokers/toss/app-key", "brokers/toss/app-secret",
                         "notification/slack/webhook-url", "notification/kakao/access-token",
+                        "notification/kakao/rest-api-key", "notification/kakao/refresh-token",
+                        "notification/kakao/client-secret",
                         "real-trading/account-numbers/*", "real-trading/operator-password-hash");
     }
 

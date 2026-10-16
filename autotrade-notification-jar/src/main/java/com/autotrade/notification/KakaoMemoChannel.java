@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 카카오톡 "나에게 보내기" 채널(무료, 본인 나와의 채팅방으로만 간다). 유료 알림톡(BIZ)은 이 라이브러리에 없다.
@@ -30,6 +31,11 @@ import java.util.Objects;
  * (이번 발송에서 아직 갱신을 시도하지 않았을 때만) 한 번 갱신하고 한 번 더 보낸다. 갱신이 400·401이면 리프레시 토큰이 만료·폐기된 것이라 사용자가 다시 동의해 토큰을 받아야 한다
  * ({@code kakao-refresh-rejected}). 그 밖의 실패는 그 알림만 실패로 돌려주고 {@link Notifier}가 다음 채널로 넘긴다.
  *
+ * <p>갱신이 거절되면 그 리프레시 토큰을 기억하고, 같은 토큰인 동안은 카카오에 다시 묻지 않고 {@value #RECONSENT_REQUIRED}로 바로
+ * 실패한다(PR #127 QA R1). 거절을 처음 알린 발송만 {@value #REFRESH_REJECTED}를 돌려주므로 연결하는 쪽은 이 코드를 한 번 보고
+ * "카카오 재동의 필요"를 한 번만 알린다({@link NotificationQueue}). 저장소({@link KakaoTokenStore#latest})에 다른 리프레시 토큰이
+ * 들어오면(다른 프로세스가 받은 새 토큰) 그 토큰으로 갈아타고 거절 상태를 푼다.
+ *
  * <p>여러 스레드가 같이 불러도 토큰 상태가 꼬이지 않게 {@link #send}는 직렬로 돈다.
  */
 public final class KakaoMemoChannel implements Channel {
@@ -38,6 +44,15 @@ public final class KakaoMemoChannel implements Channel {
     static final String TOKEN_URL = "https://kauth.kakao.com/oauth/token";
     static final int MAX_TEXT = 200;
     static final long REFRESH_MARGIN_MINUTES = 5;
+    /** 리프레시 토큰이 거절된 첫 발송의 사유 코드. 사용자가 다시 동의해 토큰을 받아야 한다. */
+    public static final String REFRESH_REJECTED = "kakao-refresh-rejected";
+    /** 거절된 리프레시 토큰을 아직 들고 있어 카카오에 묻지 않고 실패한 발송의 사유 코드. */
+    public static final String RECONSENT_REQUIRED = "kakao-reconsent-required";
+    /**
+     * 갱신 응답 {@code expires_in} 상한. 넘으면 이상 응답으로 본다(PR #127 QA R2: 아주 큰 값이 시각 계산에서 런타임 예외로 새지
+     * 않게). 문서 예시는 약 12시간이고 보장 값은 없어 {@code [가정]} 여유를 둔 7일이다.
+     */
+    static final Duration MAX_EXPIRES_IN = Duration.ofDays(7);
     private static final Duration REFRESH_MARGIN = Duration.ofMinutes(REFRESH_MARGIN_MINUTES);
     private static final String FORM = "application/x-www-form-urlencoded;charset=utf-8";
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -50,6 +65,8 @@ public final class KakaoMemoChannel implements Channel {
     private final HttpTransport http;
     private final Clock clock;
     private KakaoToken token;
+    /** 갱신이 거절된 리프레시 토큰. 거절 상태가 아니면 null. */
+    private String rejectedRefreshToken;
 
     /**
      * @param restApiKey 앱 REST API 키(갱신 요청의 {@code client_id})
@@ -94,13 +111,17 @@ public final class KakaoMemoChannel implements Channel {
 
     @Override
     public synchronized SendResult send(Notification notification) throws InterruptedException {
+        adoptLatest();
+        if (token.refreshToken().equals(rejectedRefreshToken)) {
+            return SendResult.failed(RECONSENT_REQUIRED);
+        }
         Instant now = clock.instant();
         boolean refreshTried = false;
         if (!now.isBefore(token.accessExpiresAt().minus(REFRESH_MARGIN))) {
             String refreshed = refresh();
             refreshTried = true;
             // 미리 갱신이 일시 장애로 실패해도 아직 만료 전이면 지금 토큰으로 보낸다(PR #127 architect R1). 거절이면 멈춘다
-            if (refreshed != null && (refreshed.equals("kakao-refresh-rejected") || !now.isBefore(token.accessExpiresAt()))) {
+            if (refreshed != null && (refreshed.equals(REFRESH_REJECTED) || !now.isBefore(token.accessExpiresAt()))) {
                 return SendResult.failed(refreshed);
             }
         }
@@ -116,6 +137,28 @@ public final class KakaoMemoChannel implements Channel {
             return SendResult.failed(refreshed);
         }
         return post(form);
+    }
+
+    /** 저장소에 더 늦게 만료되는 토큰이나(다른 프로세스가 갱신) 거절된 것과 다른 리프레시 토큰이 있으면 갈아탄다. */
+    private void adoptLatest() {
+        Optional<KakaoToken> latest;
+        try {
+            latest = store.latest();
+        } catch (RuntimeException e) {
+            return; // 저장소를 못 읽어도 지금 토큰으로 보낸다
+        }
+        if (latest == null || latest.isEmpty()) {
+            return;
+        }
+        KakaoToken other = latest.get();
+        boolean newer = other.accessExpiresAt().isAfter(token.accessExpiresAt());
+        boolean freshRefresh = rejectedRefreshToken != null && !other.refreshToken().equals(rejectedRefreshToken);
+        if (newer || freshRefresh) {
+            token = other;
+            if (!token.refreshToken().equals(rejectedRefreshToken)) {
+                rejectedRefreshToken = null;
+            }
+        }
     }
 
     private SendResult post(String form) throws InterruptedException {
@@ -148,7 +191,8 @@ public final class KakaoMemoChannel implements Channel {
             return "kakao-refresh-" + Failures.of(e);
         }
         if (r.status() == 400 || r.status() == 401) {
-            return "kakao-refresh-rejected";
+            rejectedRefreshToken = token.refreshToken();
+            return REFRESH_REJECTED;
         }
         if (r.status() != 200) {
             return "kakao-refresh-http-" + r.status();
@@ -156,7 +200,8 @@ public final class KakaoMemoChannel implements Channel {
         JsonNode body = parse(r.body());
         JsonNode access = body.path("access_token");
         JsonNode expiresIn = body.path("expires_in");
-        if (!access.isTextual() || access.textValue().isBlank() || !expiresIn.canConvertToLong() || expiresIn.longValue() <= 0) {
+        if (!access.isTextual() || access.textValue().isBlank() || !expiresIn.canConvertToLong() || expiresIn.longValue() <= 0
+                || expiresIn.longValue() > MAX_EXPIRES_IN.toSeconds()) {
             return "kakao-refresh-bad-response";
         }
         JsonNode rotated = body.path("refresh_token");
@@ -197,6 +242,11 @@ public final class KakaoMemoChannel implements Channel {
         } catch (JsonProcessingException e) {
             return JSON.createObjectNode();
         }
+    }
+
+    /** 갱신이 거절된 리프레시 토큰을 들고 있는지(사용자 재동의가 필요한 상태). */
+    public synchronized boolean reconsentRequired() {
+        return rejectedRefreshToken != null && token.refreshToken().equals(rejectedRefreshToken);
     }
 
     /** 시험용: 지금 들고 있는 토큰. */

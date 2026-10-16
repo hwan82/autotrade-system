@@ -107,4 +107,18 @@ class SettingsDiskGuardTest {
         controller.update(new SettingsController.UpdateRequest(Map.of("notification.kakao.enabled", "true"), List.of(), true));
         assertThat(new ConfigLoader().load(ConfigPaths.in(dir)).config().notification().kakao().enabled()).isTrue();
     }
+    @Test
+    void 갱신_키_없이_카카오를_켠_예전_파일이어도_다른_항목은_저장하고_카카오를_고칠_때만_거부한다() throws Exception {
+        // 예전 파일(access-token만으로 켬)은 받아들이므로(PR #128 architect F3) 다른 항목 저장을 막지 않는다
+        SettingsController controller = start(
+                "{\"notification\": {\"kakao\": {\"enabled\": true}}}",
+                "{\"notification\": {\"kakao\": {\"access-token\": \"PLACEHOLDER-T\"}}}");
+        controller.update(new SettingsController.UpdateRequest(Map.of("lab.max-parallel-runs", "2"), List.of(), null));
+        assertThat(new ConfigLoader().load(ConfigPaths.in(dir)).config().lab().maxParallelRuns()).isEqualTo(2);
+        assertThatThrownBy(() -> controller.update(new SettingsController.UpdateRequest(
+                Map.of("notification.kakao.access-token", "PLACEHOLDER-T2"), List.of(), null)))
+                .isInstanceOf(ApiException.class);
+        controller.update(new SettingsController.UpdateRequest(Map.of("notification.kakao.enabled", "false"), List.of(), null));
+        assertThat(new ConfigLoader().load(ConfigPaths.in(dir)).config().notification().kakao().enabled()).isFalse();
+    }
 }

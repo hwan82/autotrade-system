@@ -7,6 +7,9 @@ package com.autotrade.notification;
  */
 public final class LogChannel implements Channel {
 
+    /** 로그 채널 이름. 다른 채널은 쓸 수 없다({@link Notifier}). */
+    public static final String NAME = "log";
+
     private final System.Logger log;
 
     public LogChannel() {
@@ -19,7 +22,7 @@ public final class LogChannel implements Channel {
 
     @Override
     public String name() {
-        return "log";
+        return NAME;
     }
 
     @Override

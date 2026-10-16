@@ -80,13 +80,30 @@ public record RuntimeConfig(
         }
     }
 
-    public record Kakao(boolean enabled, KakaoMode mode, Secret accessToken) {
+    /**
+     * 카카오톡 알림(D-100). 나에게 보내기(ME)는 액세스 토큰이 약 12시간이면 만료되므로 REST API 키와 리프레시 토큰으로 갱신한다.
+     * 액세스 토큰은 선택이다(없으면 첫 발송 전에 갱신해 받는다). 링크 URL은 카카오 앱에 등록한 웹 도메인이어야 한다(카카오 템플릿 규칙).
+     * 알림톡(BIZ)은 알림 라이브러리가 만들지 않으므로 이 키들을 요구하지 않는다.
+     *
+     * <p>켜져 있는데 갱신 키가 모자라도 여기서 거부하지 않는다. 거부하면 설정 파일 전체가 빠져 실전 계좌 등 다른 설정까지 사라지므로
+     * (D-099 이전에 access-token만으로 켠 파일), 실전 엔진·감시는 카카오 채널만 끄고 ERROR 로그를 남긴다. 화면에서 고칠 때만
+     * {@link #meReady()}로 거부한다(PR #128 architect F3).
+     */
+    public record Kakao(boolean enabled, KakaoMode mode, Secret accessToken, Secret restApiKey, Secret refreshToken,
+            Secret clientSecret, String linkUrl) {
         public Kakao {
             Objects.requireNonNull(mode, "notification.kakao.mode");
             accessToken = accessToken == null ? Secret.empty() : accessToken;
-            if (enabled && !accessToken.isPresent()) {
-                throw new IllegalArgumentException("notification.kakao.enabled=true면 access-token이 필요합니다");
-            }
+            restApiKey = restApiKey == null ? Secret.empty() : restApiKey;
+            refreshToken = refreshToken == null ? Secret.empty() : refreshToken;
+            clientSecret = clientSecret == null ? Secret.empty() : clientSecret;
+            linkUrl = linkUrl == null ? "" : linkUrl.strip();
+        }
+
+        /** 나에게 보내기(ME)로 켰을 때 보낼 수 있는 키(rest-api-key·refresh-token·link-url)가 다 있는지. 꺼져 있거나 BIZ면 참. */
+        public boolean meReady() {
+            return !enabled || mode != KakaoMode.ME
+                    || (restApiKey.isPresent() && refreshToken.isPresent() && !linkUrl.isEmpty());
         }
     }
 

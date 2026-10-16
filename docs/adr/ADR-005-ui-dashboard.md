@@ -136,8 +136,9 @@ parameters:
 
 | 키 | 화면 |
 |---|---|
-| `lab.*`, `notification.*` | 편집 가능(실시간 변경 "즉시" 키). `RuntimeConfigHolder.update`로 디스크 먼저, 성공하면 메모리 |
-| `notification.*.webhook-url`·`access-token` 🔒 | 쓰기 전용 입력(`type=password`). 빈 입력은 그대로 두기, 지우기는 `clearSecrets`로 명시. 응답에는 `****`와 설정 여부만 |
+| `lab.*` | 편집 가능(실시간 변경 "즉시" 키). `RuntimeConfigHolder.update`로 디스크 먼저, 성공하면 메모리 |
+| `notification.*` | 편집 가능. 저장은 `lab.*`와 같지만 반영은 "실전 엔진·감시 재기동"(두 프로세스가 기동 때 읽음, [D-100](../decisions/D-100-notification-wiring-watchdog-engine.md)). `notification.kakao.link-url`은 카카오 앱 등록 도메인과 맞춰야 해서 화면에서 바꾸지 않고 `runtime-config.json`에서 고친다. 카카오 ME를 켜거나 카카오 값을 고칠 때 `rest-api-key`·`refresh-token`·`link-url`이 모자라면 거부한다(파일은 받아들이고 엔진·감시가 카카오만 끔) |
+| `notification.slack.webhook-url`, `notification.kakao.{access-token,rest-api-key,refresh-token,client-secret}` 🔒 | 쓰기 전용 입력(`type=password`). 빈 입력은 그대로 두기, 지우기는 `clearSecrets`로 명시. 응답에는 `****`와 설정 여부만 |
 | `notification.kakao.mode=BIZ` | 유료라서 BIZ로 바꾸거나 BIZ 상태에서 켤 때 `acknowledgePaid=true`가 필요(서버가 판단, 화면은 확인 대화상자 후 재전송, 지침 8장 1번) |
 | `market-data.*` | 읽기 전용(재기동 필요) |
 | `brokers.*` 🔒 | 설정 여부만, 읽기 전용(재연결 절차 구현 전, `RuntimeConfigHolder`도 막음) |

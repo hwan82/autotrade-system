@@ -19,7 +19,7 @@ public record DispatchReport(Notification notification, List<Attempt> attempts, 
 
     /** 외부 채널(로그 말고) 하나라도 받았는지. 로그 대체만 됐으면 false라 부르는 쪽이 "알림 채널 없음"을 이상으로 볼 수 있다. */
     public boolean delivered() {
-        return attempts.stream().anyMatch(a -> a.result().sent() && !a.channel().equals("log"));
+        return attempts.stream().anyMatch(a -> a.result().sent() && !a.channel().equals(LogChannel.NAME));
     }
 
     /** 첫 채널이 아닌 채널로 보냈는지(대체 발송). */

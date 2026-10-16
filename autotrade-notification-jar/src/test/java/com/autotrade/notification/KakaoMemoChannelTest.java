@@ -126,6 +126,111 @@ class KakaoMemoChannelTest {
     }
 
     @Test
+    void 거절된_뒤에는_같은_리프레시_토큰으로_카카오에_다시_묻지_않는다() throws Exception {
+        FakeHttp http = new FakeHttp().reply(400, "{\"error\":\"invalid_grant\"}");
+        KakaoMemoChannel kakao = channel(http, NOW, "");
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.REFRESH_REJECTED));
+        assertThat(kakao.reconsentRequired()).isTrue();
+        // 두 번째부터는 HTTP 없이 다른 사유 코드로 실패한다(그래서 연결하는 쪽은 재동의 알림을 한 번만 낸다, PR #127 QA R1)
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.RECONSENT_REQUIRED));
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.RECONSENT_REQUIRED));
+        assertThat(http.requests).hasSize(1);
+    }
+
+    @Test
+    void 발송_401_뒤_갱신이_거절돼도_거절을_기억한다() throws Exception {
+        FakeHttp http = new FakeHttp().reply(401, "{\"code\":-401}").reply(401, "{\"error\":\"invalid_grant\"}");
+        KakaoMemoChannel kakao = channel(http, NOW.plusSeconds(3600), "");
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.REFRESH_REJECTED));
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.RECONSENT_REQUIRED));
+        assertThat(http.requests).hasSize(2);
+    }
+
+    @Test
+    void 거절_뒤_저장소에_다른_리프레시_토큰이_오면_갈아타고_다시_보낸다() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<KakaoToken> stored = new java.util.concurrent.atomic.AtomicReference<>();
+        KakaoTokenStore store = new KakaoTokenStore() {
+            @Override
+            public void save(KakaoToken token) {
+                stored.set(token);
+            }
+
+            @Override
+            public java.util.Optional<KakaoToken> latest() {
+                return java.util.Optional.ofNullable(stored.get());
+            }
+        };
+        FakeHttp http = new FakeHttp().reply(400, "{\"error\":\"invalid_grant\"}").reply(200, OK);
+        KakaoMemoChannel kakao = new KakaoMemoChannel("REST-KEY-PH", "", LINK,
+                new KakaoToken("ACCESS-OLD", "REFRESH-OLD", NOW), store, http, CLOCK);
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.REFRESH_REJECTED));
+
+        // 같은 거절 토큰이 저장소에 있으면(만료도 같음) 그대로 거절 상태
+        stored.set(new KakaoToken("ACCESS-OLD", "REFRESH-OLD", NOW));
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed(KakaoMemoChannel.RECONSENT_REQUIRED));
+
+        // 다른 프로세스가 받은 새 토큰: 만료 전이라 갱신 없이 그 토큰으로 바로 보낸다
+        stored.set(new KakaoToken("ACCESS-OTHER", "REFRESH-OTHER", NOW.plusSeconds(3600)));
+        assertThat(kakao.send(N)).isEqualTo(SendResult.ok());
+        assertThat(kakao.reconsentRequired()).isFalse();
+        assertThat(http.requests.get(1).headers()).containsEntry("Authorization", "Bearer ACCESS-OTHER");
+        assertThat(http.requests).hasSize(2);
+    }
+
+    @Test
+    void 저장소의_토큰이_더_늦게_만료되면_갱신하지_않고_그_토큰을_쓴다() throws Exception {
+        KakaoTokenStore store = new KakaoTokenStore() {
+            @Override
+            public void save(KakaoToken token) {}
+
+            @Override
+            public java.util.Optional<KakaoToken> latest() {
+                return java.util.Optional.of(new KakaoToken("ACCESS-OTHER", "REFRESH-OLD", NOW.plusSeconds(3600)));
+            }
+        };
+        FakeHttp http = new FakeHttp().reply(200, OK);
+        KakaoMemoChannel kakao = new KakaoMemoChannel("REST-KEY-PH", "", LINK,
+                new KakaoToken("ACCESS-OLD", "REFRESH-OLD", NOW), store, http, CLOCK);
+        assertThat(kakao.send(N)).isEqualTo(SendResult.ok());
+        assertThat(http.requests).singleElement().satisfies(
+                r -> assertThat(r.headers()).containsEntry("Authorization", "Bearer ACCESS-OTHER"));
+    }
+
+    @Test
+    void 저장소를_읽다_런타임_예외가_나도_지금_토큰으로_보낸다() throws Exception {
+        KakaoTokenStore store = new KakaoTokenStore() {
+            @Override
+            public void save(KakaoToken token) {}
+
+            @Override
+            public java.util.Optional<KakaoToken> latest() {
+                throw new IllegalStateException("broken");
+            }
+        };
+        FakeHttp http = new FakeHttp().reply(200, OK);
+        KakaoMemoChannel kakao = new KakaoMemoChannel("REST-KEY-PH", "", LINK,
+                new KakaoToken("ACCESS-OLD", "REFRESH-OLD", NOW.plusSeconds(3600)), store, http, CLOCK);
+        assertThat(kakao.send(N)).isEqualTo(SendResult.ok());
+    }
+
+    @Test
+    void 만료_시간이_상한을_넘는_갱신_응답은_이상_응답이다() throws Exception {
+        long max = KakaoMemoChannel.MAX_EXPIRES_IN.toSeconds();
+        assertThat(max).isEqualTo(7L * 24 * 3600);
+        FakeHttp http = new FakeHttp()
+                .reply(200, "{\"access_token\":\"A\",\"expires_in\":" + Long.MAX_VALUE + "}")
+                .reply(200, "{\"access_token\":\"A\",\"expires_in\":" + (max + 1) + "}")
+                .reply(200, "{\"access_token\":\"ACCESS-NEW\",\"expires_in\":" + max + "}")
+                .reply(200, OK);
+        KakaoMemoChannel kakao = channel(http, NOW, "");
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed("kakao-refresh-bad-response"));
+        assertThat(kakao.send(N)).isEqualTo(SendResult.failed("kakao-refresh-bad-response"));
+        assertThat(kakao.currentToken().accessToken()).isEqualTo("ACCESS-OLD");
+        assertThat(kakao.send(N)).isEqualTo(SendResult.ok());
+        assertThat(kakao.currentToken().accessExpiresAt()).isEqualTo(NOW.plusSeconds(max));
+    }
+
+    @Test
     void 갱신_응답이_이상하거나_장애면_토큰을_바꾸지_않는다() throws Exception {
         FakeHttp http = new FakeHttp()
                 .reply(200, "{\"access_token\":\"\",\"expires_in\":43199}")

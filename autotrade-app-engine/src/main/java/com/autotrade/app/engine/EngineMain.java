@@ -2,12 +2,14 @@ package com.autotrade.app.engine;
 
 import com.autotrade.app.engine.command.ActivationStepRunner;
 import com.autotrade.app.engine.command.CommandAuditLog;
+import com.autotrade.app.engine.command.NotifyingCommandAuditLog;
 import com.autotrade.app.engine.command.EngineCommandHandler;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.command.OperatorPasswordHash;
 import com.autotrade.app.engine.command.PanicLiquidator;
 import com.autotrade.app.engine.order.LoggingGuardAuditLog;
 import com.autotrade.config.ConfigPaths;
+import com.autotrade.config.KakaoMode;
 import com.autotrade.config.LoadedConfig;
 import com.autotrade.config.ProcessStartup;
 import com.autotrade.config.RuntimeConfig;
@@ -15,6 +17,10 @@ import com.autotrade.control.ControlServer;
 import com.autotrade.control.ControlSocket;
 import com.autotrade.domain.account.AccountRef;
 import com.autotrade.monitor.HeartbeatWriter;
+import com.autotrade.notification.EventRoutes;
+import com.autotrade.notification.NotificationQueue;
+import com.autotrade.notification.NotificationSetup;
+import com.autotrade.notification.Severity;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.io.Console;
 import java.io.IOException;
@@ -79,18 +85,52 @@ public final class EngineMain {
         }
     }
 
-    /** 설정 로딩 → Guard(모두 OFF) → 명령 채널 → 하트비트(감시가 읽음, MON-02·D-092). */
+    /** 설정 로딩 → Guard(모두 OFF) → 알림 큐 → 명령 채널 → 하트비트(감시가 읽음, MON-02·D-092). */
     static Engine start(ConfigPaths paths, Clock clock) throws IOException {
         LoadedConfig loaded = ProcessStartup.start(PROCESS, paths, clock);
         RuntimeConfig config = loaded.config();
         RealTradingGuard guard = startGuard(config, clock);
-        EngineCommandHandler handler = commandHandler(config, guard, clock, loaded.warning());
-        ControlServer server = ControlServer.start(ControlSocket.path(paths), handler);
-        LOG.log(Level.INFO, "실전 제어 명령 채널을 열었습니다(로컬 소켓, 네트워크 포트 없음)");
-        // 하트비트 쓰기 실패는 로그만 남기고 엔진을 멈추지 않는다(HeartbeatWriter)
-        HeartbeatWriter heartbeat = HeartbeatWriter.start(paths.runtimeFile().getParent(), PROCESS, clock,
-                HeartbeatWriter.DEFAULT_INTERVAL);
-        return new Engine(guard, handler, server, heartbeat);
+        // 알림은 전용 스레드 하나에서만 보내고, 엔진 스레드는 큐에 넣기만 한다(D-100, 절대 규칙 6)
+        NotificationQueue notifications = startNotifications(config, paths, clock, guard.accounts().size());
+        try {
+            EngineCommandHandler handler = commandHandler(config, guard, clock, loaded.warning(),
+                    new NotifyingCommandAuditLog(CommandAuditLog.LOGGING, notifications));
+            ControlServer server = ControlServer.start(ControlSocket.path(paths), handler);
+            LOG.log(Level.INFO, "실전 제어 명령 채널을 열었습니다(로컬 소켓, 네트워크 포트 없음)");
+            // 하트비트 쓰기 실패는 로그만 남기고 엔진을 멈추지 않는다(HeartbeatWriter)
+            HeartbeatWriter heartbeat = HeartbeatWriter.start(paths.runtimeFile().getParent(), PROCESS, clock,
+                    HeartbeatWriter.DEFAULT_INTERVAL);
+            notifications.offer(EventRoutes.ENGINE_STARTED, PROCESS, "실전 엔진 시작",
+                    "실전 계좌 " + guard.accounts().size() + "개, RealTradingGuard 모두 OFF");
+            if (!loaded.warning().isEmpty()) {
+                // 설정 경고 문구는 값을 싣지 않는다(실전 운영 화면에도 나가는 문구, PR #100·#101)
+                notifications.offer(EventRoutes.CONFIG_WARNING, PROCESS, "실전 엔진 설정 파일 경고", loaded.warning());
+            }
+            return new Engine(guard, handler, server, heartbeat, notifications);
+        } catch (IOException | RuntimeException e) {
+            notifications.close();
+            throw e;
+        }
+    }
+
+    /** 설정의 알림 값으로 채널을 꾸리고 보내는 스레드를 띄운다. 채널 설정이 틀려도 기동을 막지 않는다(로그 채널은 늘 있음). */
+    static NotificationQueue startNotifications(RuntimeConfig config, ConfigPaths paths, Clock clock, int realAccounts) {
+        NotificationQueue queue = setup(config.notification()).start(paths.runtimeFile().getParent(), PROCESS, clock);
+        LOG.log(Level.INFO, "알림 채널: 긴급 {0}, 정보 {1}", queue.notifier().channelNames(Severity.URGENT),
+                queue.notifier().channelNames(Severity.INFO));
+        if (realAccounts > 0 && !queue.notifier().hasExternalChannel(Severity.URGENT)) {
+            // 실전 계좌가 있는데 긴급 알림이 로그로만 가면 사람이 장애를 늦게 안다(ADR-005 표: 마지막 알림 채널 경고)
+            LOG.log(Level.WARNING, "실전 계좌가 있는데 외부 알림 채널(Slack·카카오톡)이 없습니다. 긴급 알림이 엔진 로그에만 남습니다");
+        }
+        return queue;
+    }
+
+    /** 설정 값을 알림 모듈 값으로 옮긴다(알림 모듈은 설정 모듈을 모른다). */
+    static NotificationSetup setup(RuntimeConfig.Notification n) {
+        RuntimeConfig.Kakao k = n.kakao();
+        return new NotificationSetup(n.slack().enabled(), n.slack().webhookUrl().reveal(), k.enabled(),
+                k.mode() == KakaoMode.BIZ, k.restApiKey().reveal(), k.clientSecret().reveal(), k.accessToken().reveal(),
+                k.refreshToken().reveal(), k.linkUrl());
     }
 
     /**
@@ -111,6 +151,11 @@ public final class EngineMain {
     /** @param configWarning 기동 때 설정 로딩 경고. 상태 조회로 운영 화면에 보인다(1단계 QA 권고 R3) */
     static EngineCommandHandler commandHandler(
             RuntimeConfig config, RealTradingGuard guard, Clock clock, String configWarning) {
+        return commandHandler(config, guard, clock, configWarning, CommandAuditLog.LOGGING);
+    }
+
+    static EngineCommandHandler commandHandler(
+            RuntimeConfig config, RealTradingGuard guard, Clock clock, String configWarning, CommandAuditLog audit) {
         RuntimeConfig.RealTrading realTrading = config.realTrading();
         Optional<OperatorPasswordHash> hash = OperatorPasswordHash.parse(realTrading.operatorPasswordHash().reveal());
         if (hash.isEmpty()) {
@@ -120,8 +165,7 @@ public final class EngineMain {
         }
         // 증권사 주문 연동 전이라 활성화 단계와 PANIC 증권사 단계는 수행 불가로 끝난다(ADR-006 2.5)
         return new EngineCommandHandler(guard, new OperatorAuthenticator(hash, clock), realTrading::isConfigured,
-                ActivationStepRunner.BROKER_NOT_CONNECTED, PanicLiquidator.BROKER_NOT_CONNECTED, CommandAuditLog.LOGGING,
-                configWarning);
+                ActivationStepRunner.BROKER_NOT_CONNECTED, PanicLiquidator.BROKER_NOT_CONNECTED, audit, configWarning);
     }
 
     /** 비밀번호를 두 번 입력받아(화면에 보이지 않음) 해시를 출력한다. 평문은 출력·저장하지 않는다. */
@@ -154,16 +198,23 @@ public final class EngineMain {
         }
     }
 
-    /** 실행 중인 엔진. 닫으면 명령 채널을 닫고 하트비트 파일을 지운다(정상 종료 표시). Guard는 메모리 상태라 함께 사라진다. */
-    record Engine(RealTradingGuard guard, EngineCommandHandler handler, ControlServer server, HeartbeatWriter heartbeat)
-            implements AutoCloseable {
+    /**
+     * 실행 중인 엔진. 닫으면 명령 채널을 닫고 하트비트 파일을 지운다(정상 종료 표시). 알림 큐는 남은 알림을 최대 3초 보내 보고
+     * 나머지는 로그에만 남긴다. Guard는 메모리 상태라 함께 사라진다.
+     */
+    record Engine(RealTradingGuard guard, EngineCommandHandler handler, ControlServer server, HeartbeatWriter heartbeat,
+            NotificationQueue notifications) implements AutoCloseable {
         @Override
         public void close() {
             try {
                 server.close();
             } finally {
-                // 채널 닫기가 실패해도 정상 종료 표시는 남긴다(멈춤으로 오인되지 않게, architect PR #116 R1)
-                heartbeat.close();
+                try {
+                    // 채널 닫기가 실패해도 정상 종료 표시는 남긴다(멈춤으로 오인되지 않게, architect PR #116 R1)
+                    heartbeat.close();
+                } finally {
+                    notifications.close();
+                }
             }
         }
     }
