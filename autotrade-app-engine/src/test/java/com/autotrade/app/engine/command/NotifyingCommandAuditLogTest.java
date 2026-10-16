@@ -39,7 +39,8 @@ class NotifyingCommandAuditLogTest {
     };
     private final NotificationQueue queue = new NotificationQueue(
             Notifier.of(List.of(sink, new LogChannel()), List.of(sink, new LogChannel())), EventRoutes.defaults(),
-            Clock.fixed(Instant.parse("2026-10-16T00:00:00Z"), ZoneOffset.UTC), ZoneOffset.UTC, "engine-test").start();
+            Clock.fixed(Instant.parse("2026-10-16T00:00:00Z"), ZoneOffset.UTC), ZoneOffset.UTC, "engine-test",
+            NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP).start();
     private final List<String> audited = new ArrayList<>();
 
     @AfterEach

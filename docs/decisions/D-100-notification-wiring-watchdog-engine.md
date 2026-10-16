@@ -83,4 +83,7 @@
   - architect R1: `NotificationSetup`을 위치 인자 생성자 대신 이름 있는 빌더(`NotificationSetup.builder()`)로만 만든다. 엔진·감시의 설정 옮기기(`EngineMain.setup`·`WatchdogMain.setup`)는 값마다 다른 설정으로 제자리에 갔는지 시험한다(`EngineMainTest`·`WatchdogMainTest#알림_설정_값을_이름대로_옮기고_시간대와_재동의_문구를_넘긴다`). 두 곳의 옮기는 코드는 그대로 둘이다(알림 모듈은 설정 모듈을 모르고, 둘이 함께 기대는 모듈을 새로 만들 만큼 크지 않음).
   - architect R2: 알림 라이브러리에서 이 시스템의 설정 키·프로세스 이름이 든 재동의 문구와 `Asia/Seoul`을 뺐다. 부르는 쪽이 `displayZone`(필수)과 `kakaoReconsentHelp`를 넘기고, 값은 `RuntimeConfig.Notification.DISPLAY_ZONE`·`KAKAO_RECONSENT_HELP`에 둔다. 라이브러리에는 일반 문구(`NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP`)만 남는다. 사용자가 받는 알림 문구와 시각 표시는 바뀌지 않는다.
   - QA 재검토 Q1(변이 M17): 버린 종류가 같은 대상으로 다시 오는 순서 시험 둘(`NotificationQueueTest#상한으로_버린_종류가_새_창에서_다시_오면_받는다`, `#큐가_차서_버린_긴급_알림도_같은_종류가_다시_오면_받는다`). 조건 `last.at() != null`을 지우면 둘 다 실패함을 확인했다.
+- 2026-10-16, PR #132 독립 QA 권고 반영(결정 내용은 바뀌지 않아 새 번호를 쓰지 않음):
+  - Q1(변이 M15): 재동의 안내 문구 전체를 시험으로 고정했다(`RuntimeConfigNotificationTest#재동의_안내는_토큰을_넣을_곳과_다시_시작할_프로세스와_그동안의_채널을_모두_알린다`). "실전 엔진·감시를 다시 시작하세요"가 빠지면 실패한다.
+  - R1: 재동의 문구를 받지 않는 공개 5인자 `NotificationQueue` 생성자를 지웠다(추천안 채택(자율)). 공개 생성자는 문구를 받는 6인자 하나이고, 일반 문구가 맞으면 `NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP`를 직접 넘긴다. 대안 "남기고 문서에 적기"는 버렸다: 운영 호출부는 `NotificationSetup.start` 한 곳뿐이고 5인자를 쓰던 곳은 엔진 시험 하나라 지우는 비용이 작은 반면, 남기면 앞으로 부르는 쪽이 문구를 빠뜨려도 컴파일이 막지 못한다. 되돌릴 조건: 이 시스템 밖에서 라이브러리를 쓰는 곳이 생겨 일반 문구 기본값이 필요할 때.
 
