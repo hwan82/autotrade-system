@@ -94,3 +94,32 @@
 
 ## 판정 (재검토 2026-10-16)
 수정 필요(R1: `guard.mjs` 장 시간 구간이 특별 운영일(2026-11-19 수능일 16:30 폐장)에 실제 보호 구간보다 좁아 장중 16:00~16:30을 통과시키고, D-101·README의 "실제 규칙보다 넓게" 기술과 어긋남). 1차 F1·F2와 N1·N2·N5는 해결. B7은 risk-ops 검토로 따로 판정한다.
+
+## 재검토 2026-10-16 (2차)
+- 대상: PR #129 / 커밋 e9a2f3a(직전 재검토 49218db 이후 f547a17 검토 원문, e9a2f3a 검토 반영) / `git diff origin/main...HEAD` 전체를 다시 봄. 49218db 이후 코드·문서 변경은 `git diff 49218db..e9a2f3a`(검토 원문 제외 6개 파일: `ci.yml`, `autotrade-ui/README.md`, `e2e/package.json`, `support/guard.mjs`, 새 `support/guard.test.mjs`, D-101). 앞선 architect 원문 두 절은 바뀌지 않고 그대로 커밋됨(diff는 덧붙임만)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build`는 요청자 지시로 돌리지 않음. CI를 GitHub REST로 직접 확인: 실행 38856284464, `head_sha=e9a2f3a6bc8ba0705efc38d353f424b27b7432ce`(HEAD와 같음), event `pull_request`, 잡 4개 success. `Gradle build` "Build and test" success(05:32:26~05:35:13Z). `Lab screens (Playwright)`: 새 단계 "PC protection guard unit tests" success(05:33:36Z), "Lab screen tests" success(05:33:36~05:34:14Z, KST 14:33 장중 → 러너 해제 경로가 다시 돌았음 `[추론]`), "Upload Playwright report" skipped.
+  - `cd autotrade-ui/e2e && node --test support/guard.test.mjs`(node v22.22.0, 이 컨테이너) → tests 7, pass 7, fail 0, skipped 0.
+  - 저장소 캘린더 확인(node): `krx.json` market `KRX`, Asia/Seoul 09:00~15:30, 수록 2026-01-01~2027-12-31, 특별 운영일 4개(2026-01-02·2027-01-04 10:00 개장, 2026-11-19·2027-11-18 16:30 폐장) 모두 평일. `us.json` market `US`, America/New_York 09:30~16:00, 수록 ~2028-12-31, 특별 운영일 5개 모두 13:00 조기 폐장·평일.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(CI로 대체) | CI 실행 38856284464(헤드 e9a2f3a) `Gradle build` success. 이번 변경에도 `.java`·`.kts` 0개 |
+| B2 | 통과 | Java 모듈·ArchUnit 무변경. `guard.mjs`가 `autotrade-marketdata`의 캘린더 JSON을 파일로 읽지만(`guard.mjs` `CALENDARS`) 시험 도구가 저장소 데이터를 읽는 것이고 모듈 의존이 아니다(`snapshot.mjs`도 같은 파일을 이미 읽음). 같은 캘린더를 써서 실제 보호(`ExchangeCalendar`)와 데이터 원본이 하나로 유지된다 |
+| B3 | 통과 | 계약 변경 없음. `package.json`에 `test:guard` 스크립트만 추가 |
+| B4 | 통과 | `guard.test.mjs`는 모든 시각을 고정 값으로 넣고(`at('2026-…Z')`) 환경도 인자로 넘겨 실행 시각·러너 환경과 무관하게 같은 결과를 낸다. 시뮬레이션 영향 없음 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 새 동작(특별 운영일 합치기)에 시험: 수능일 16:10·16:59 KST → KRX, 17:00 → null, 전날 16:10 → null(`guard.test.mjs` "특별 운영일은 정규장과 합친 구간"). 경계(08:00·16:00 KST, 08:30·16:30 뉴욕), 서머타임 끝난 뒤 월요일, 주말, 해제 변수 조합 5개(`CI`만·`GITHUB_ACTIONS`만·전용 변수만·값 `1` → 해제 안 됨), 장중 거절, 정지 요청은 해제 때도 거절. CI가 Playwright 앞 단계로 돌린다(`ci.yml` "PC protection guard unit tests"). 지우거나 건너뛴 시험 없음 |
+| B7 | 실패(별도 검토 필요) | 보호 경로 `.github/workflows/ci.yml` 변경과 장 시간 보호 해제 조건. **risk-ops 검토 필요**(risk-ops 재검토 판정은 독립이라 보지 않음). 사용자 머지·독립 QA 대상(`docs/qa/pending.md` 줄 있음) |
+| B8 | 통과 | 비밀값 없음. 시험은 `os.tmpdir()` 아래 임시 폴더만 쓴다 |
+
+### 직전 항목 처리
+- **R1 해결**: `insideSession`이 캘린더의 그날 특별 운영 구간을 확인 여부와 관계없이 정규장과 합친다(`open = min`, `close = max`, `guard.mjs` `insideSession`). 실제 `protectionSession`(`ExchangeCalendar.java:137-155`)은 미확인 특별 운영일만 합치고 확인된 날은 그 구간을 쓰므로, 합치는 쪽이 항상 넓거나 같다. 휴장일도 평일이면 막아 넓은 쪽. 미국 조기 폐장(13:00)은 `max`로 정규 16:00을 유지해 넓은 쪽. D-101 결정 4와 README의 "넓거나 같다" 기술이 이제 동작과 맞다. 수능일 16:10·16:59 KST를 node 시험으로 직접 확인(위 7건 통과).
+- **N8 해결**: 보호 확인 단위 시험 7건과 CI 단계. **N9 해결**: `-Dautotrade.config-dir`로 띄운 경우의 안내가 `guard.mjs` 주석과 README에 있음. **N10**: 판정과 무관, 그대로.
+
+### 권고(비차단)
+- **N11 캘린더 수록 범위 밖**: `krx.json` 수록은 2027-12-31까지다. 그 뒤 날짜에서 `ExchangeCalendar`는 판단할 수 없어 실행 명령을 멈추지만(`ExperimentGate`), `guard.mjs`는 특별 운영일 표가 비어 있을 뿐 정규장 구간으로 계속 판단한다. 2028년 수능일처럼 늦게 닫는 날이 캘린더에 들어오기 전이면 그날 16:00~17:00을 놓칠 수 있다. 실행 명령은 여전히 막히므로 실험 계산은 돌지 않는다. 캘린더 갱신 때 함께 확인되도록, `guard.mjs`가 `coverageTo` 뒤 날짜이면 거절하거나(실제 보호와 같은 "판단 못 하면 멈춤") 최소한 D-101 위험과 한계에 한 줄 적기를 권한다.
+
+## 판정 (재검토 2026-10-16 2차)
+승인(architect 범위). 1차 F1·F2, 재검토 R1과 권고 N1~N9는 해소되었고, 확인 못 한 점검 항목은 없다(B1은 요청자 지시로 로컬 Gradle 대신 같은 헤드의 CI를 직접 확인, 앞선 PR과 같은 방식). 단 B7: 보호 경로를 바꾸는 실전 관련 PR이므로 risk-ops 승인, 독립 QA, 사용자 머지가 따로 필요하다.

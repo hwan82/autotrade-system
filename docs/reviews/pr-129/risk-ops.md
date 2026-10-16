@@ -88,3 +88,43 @@
 
 ## 판정
 수정 필요(M4: A8·A11·A14)
+
+## 재검토 2026-10-16 (2차)
+- 대상: PR #129 / 커밋 e9a2f3a6bc8ba0705efc38d353f424b27b7432ce / main(0e1a6d7) 대비 diff 전체(검토 원문 제외 17개 파일, 모두 추가). 직전 재검토 뒤 변경은 `git diff 49218db..e9a2f3a`(ci.yml +2, README, package.json, guard.mjs, 새 guard.test.mjs, D-101)
+- 점검표: A
+- 직접 실행한 것:
+  - 앞선 원문 보존 확인: 커밋 f547a17·e9a2f3a의 이 파일 본문이 내가 쓴 그대로다(작업 트리와 HEAD 차이 없음).
+  - 보호 경로 변경은 여전히 `.github/workflows/ci.yml` 하나(+46/-0). 이번 추가는 "PC protection guard unit tests" 단계(`node --test support/guard.test.mjs`, ci.yml:174-175)를 "Lab screen tests" 앞에 둔 것뿐. 기존 잡 무변경.
+  - `./gradlew build`: 이번에도 돌리지 못함(요청자 지시, 컨테이너 Gradle 캐시 없음·Maven Central 429). GitHub Actions API로 직접 조회: run 38856284464, head_sha e9a2f3a…, 잡 4개 success. "Gradle build"(job 116828363495) `./gradlew build --no-daemon`·ARC-03 기동 success. "Lab screens (Playwright)"(job 116828363594) 로그: guard 단위 시험 `# tests 7 / # pass 7 / # fail 0`(05:33:36Z), Playwright `✓ 1 …01-jobs-progress`, `✓ 2 …02-experiment-flow`, `2 passed (36.5s)`. 실행 05:33Z = 14:33 KST 국내 장중이라 해제 경로가 다시 동작했다.
+  - 이 컨테이너에서 `cd autotrade-ui/e2e && node --test support/guard.test.mjs`(node 22.22.0): tests 7, pass 7, fail 0.
+  - 스크래치 스크립트로 guard.mjs 추가 확인: 2026-11-19 16:10·16:59 KST → KRX, 17:00 → null(시험과 같음). 2026-01-02(연초 10:00 개장, 확인됨) 09:30·15:59 KST → KRX. 2026-11-27(미국 13:00 조기 폐장) 16:29 뉴욕 → US(정규장과 합쳐 더 넓음). 2026-12-24 15:00 뉴욕 → US. 2028-01-03 18:00 KST → null(아래 관찰 K1). 인자 없는 `refuseReason()` 호출(playwright.config.mjs:21, 02-experiment-flow.spec.mjs:65)이 새 시그니처의 기본값 `{}`로 동작함을 확인(장중이라 KRX 거절 문구 반환).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | RealTradingGuard·설정 로딩 변경 없음(`autotrade-risk/`·`autotrade-config/`·`autotrade-app-engine/` 변경 0). 시험 실험실은 임시 설정 폴더(`ConfigPaths.java:27-29`, `DemoLabApplication.java:36-37`) |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음(`autotrade-architecture-test/` 변경 0). CI `./gradlew build` success(job 116828363495) |
+| A3 | 해당 없음 | 증권사 플러그인·라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | M4 해결: guard가 `krx.json`·`us.json`을 읽어(guard.mjs:10-11, 31-37) 그날 특별 운영 구간을 확인 여부와 관계없이 정규장과 합치고(guard.mjs:57-59), 평일이면 휴장일도 막으며(:56), 개장 60분 전 ~ 폐장 30분 뒤(:13-14, :60)로 판정한다. `ExchangeCalendar.protectionSession`(ExchangeCalendar.java:137-155, 확인된 특별일은 특별 구간만, 미확인은 합침)과 `SessionProtection.check`(SessionProtection.java:52-72)보다 현재 캘린더 수록 범위 안에서는 넓거나 같다(수능일 16:00~17:00 누락 해소, 시험 guard.test.mjs:33-38). 해제 조건(guard.mjs:17-19, ci.yml:178-179)과 시작 전·실행 직전 확인(playwright.config.mjs:21-22, 02-experiment-flow.spec.mjs:65-66)은 그대로. 캘린더 파일을 못 읽으면 예외로 시험이 시작하지 않는다(:32, 안전한 쪽). 수록 범위 밖 동작은 관찰 K1 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | diff에 키·계좌번호·토큰 없음(직접 검색). 단위 시험은 임시 폴더만 쓴다(guard.test.mjs:10). 새 잡 `secrets.*` 미사용, 워크플로 권한 `contents: read`(ci.yml:7-8). gitleaks 전체 이력 success(job 116828363532) |
+| A11 | 통과 | 보호 테스트 삭제·약화·고정 값 변경 없음. 새 안전 동작 guard.mjs에 실패 경우를 포함한 단위 시험 7건(guard.test.mjs): 국내 경계 :12-17, 미국 경계와 서머타임 끝난 뒤 :19-26, 주말 :28-31, 수능일 합침 :33-38, 해제 조건(`CI`만·`GITHUB_ACTIONS`만·전용 변수만·값 `1` 거부) :40-46, 장중 거절과 `CI`로 안 풀림 :48-56, 정지 요청은 해제 때도 거절 :58-64. CI가 Playwright 전에 돌리고(ci.yml:174-175) 실패하면 잡이 실패한다. 직접 실행 7/7 통과 |
+| A12 | 통과 | 장애 대응표 17종·O1~O8·장애 테스트 8종의 감지·대응 코드 변경 없음. 5.2 0번 정지 요청 경로·의미(`ExperimentGate.java:31,51-55`)는 그대로이고 시험 쪽이 같은 파일을 시작 전·실행 직전에 따른다(guard.mjs:76-80). 실행 중 정지 요청을 못 보는 한계는 D-101:24·README:18에 기재 |
+| A13 | 해당 없음 | MarketRules·금액 계산 변경 없음. guard는 거래소 현지 시간대·현지 날짜로 계산(guard.mjs:40-46), 특별 운영일 조회도 현지 날짜 기준 |
+| A14 | 통과 | 결정 로그 표 D-101 행(`docs/decisions/README.md:106`), `docs/qa/pending.md:42` 요청 줄. D-101:23과 README:18이 바뀐 동작(특별 운영일 합침, 휴장일도 막음, 넓거나 같음)과 일치하고, D-101 "검증"이 단위 시험 7건과 CI 해제 경로 확인을 적었다. "넓거나 같음"은 캘린더 수록 범위 안에서 사실이다(범위 밖은 K1) |
+
+### 직전 수정 요청 처리
+- M4: 해결(A8·A11·A14). 추천안(캘린더 특별 운영일 반영 + `node --test` 단위 시험을 Playwright 전에)대로 고쳤다.
+- 직전 관찰(`-Dautotrade.config-dir`)도 README:18과 guard.mjs:22-23에 안내가 들어갔다.
+
+## 점검표 밖 발견
+- **K1 [관찰, 막지 않음, 후속 권장]** 캘린더 수록 범위 밖 날짜에서 guard는 정규장 시각만 막는다(2028-01-03 18:00 KST → null 확인). Java `SessionProtection`은 수록 범위 밖이면 `Unknown`으로 하루 종일 멈추므로(SessionProtection.java:60-62), 이때만은 guard가 더 좁다. KRX 수록 끝은 2027-12-31, 미국은 2028-12-31이라 지금부터 14개월 넘게 생기지 않는다. 그 전에 캘린더를 늘리지 않으면 수집기·실험 실행 명령이 모두 멈춰 갱신이 강제되고, 그 시각 시험의 실행 명령도 `ExperimentGate`가 막는다. 그래서 이 PR을 막지 않는다. 후속으로 guard가 `coverageFrom`/`coverageTo` 밖이면 거절하게 하고 시험 한 건을 더하기를 권한다. 같은 김에 주말 특별 운영일도 막도록 하면(`protectionSession`은 주말이라도 그날 세션을 돌려줌, ExchangeCalendar.java:140-142) "항상 넓거나 같음"이 된다. 지금 두 캘린더에 주말 특별 운영일은 없다.
+- [관찰, 1차와 같음] CI 로그의 SSE 끊김 `ApiExceptionHandler` ERROR는 실험실 소관이다.
+- 로컬 `./gradlew build`는 세 번 모두 돌리지 못했다. 이 PR은 Java 소스·Gradle 스크립트·보호 테스트를 바꾸지 않는다(diff로 확인). 그래서 A 항목은 diff 대조, guard 단위 시험과 추가 경우의 직접 실행, API로 조회한 같은 head의 CI 결과(잡 4개 success, 로그 본문 확인)로 판정했다. 점검표에 "확인 못 함"인 항목은 없다.
+- 이 PR은 보호 경로(`.github/workflows/ci.yml`)를 바꾸므로 지침 10·11장대로 독립 QA 판정 뒤 사용자가 직접 머지한다. 이 승인은 그 절차를 대신하지 않는다.
+
+## 판정
+승인
