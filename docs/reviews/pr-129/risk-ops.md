@@ -42,3 +42,49 @@
 
 ## 판정
 수정 필요(A14: M1, M3 / A8 조건: M2)
+
+## 재검토 2026-10-16
+- 대상: PR #129 / 커밋 49218db6b9938c25e7ed918ff63514a252202888 / main(0e1a6d7) 대비 diff 전체(18개 파일, +727/-0. 1차 뒤 변경은 `git diff ade1d56..49218db`, 검토 원문 제외 10개 파일)
+- 점검표: A
+- 직접 실행한 것:
+  - `git diff --numstat origin/main...HEAD`: 여전히 모든 파일 추가만. 보호 경로 해당은 `.github/workflows/ci.yml` 하나(+44/-0). 1차 이후 ci.yml 변경은 `ui-e2e` 잡의 "Lab screens tests" 단계에 `env: AUTOTRADE_E2E_ALLOW_DURING_SESSION: 'true'`(ci.yml:175-177)와 주석 한 줄뿐, 기존 잡 무변경.
+  - 1차 원문 보존 확인: 8bb0606의 이 파일 본문이 내가 쓴 그대로다(`git diff 8bb0606 HEAD -- docs/reviews/pr-129/risk-ops.md` 빈 결과).
+  - `./gradlew build`: 이번에도 돌리지 못함(요청자 지시, 이 컨테이너 Gradle 캐시 모듈 3개뿐·Maven Central 429). GitHub Actions API로 직접 조회: run 38855609928, head_sha 49218db…, 잡 4개 모두 success. "Gradle build"(job 116826263749) "Build and test"(`./gradlew build --no-daemon`)·"Start each process once (ARC-03)" success. "Lab screens (Playwright)"(job 116826264026) 로그: 환경에 `AUTOTRADE_E2E_ALLOW_DURING_SESSION: true` 표시(로그 181줄), `✓ 1 tests/01-jobs-progress.spec.mjs`, `✓ 2 tests/02-experiment-flow.spec.mjs:17:1`, `2 passed (35.5s)`. 실행 시각 05:25Z = 14:25 KST(국내 장중)라 GitHub 러너 해제 경로가 실제로 동작했다.
+  - 새 보호 확인 `autotrade-ui/e2e/support/guard.mjs`를 node 22.22.0으로 직접 돌렸다(스크래치 스크립트, 저장소 파일 수정 없음):
+    - `insideSession`: 2026-10-15T22:59Z(KST 07:59) null, 23:00Z(08:00) KRX, 2026-10-16T06:59Z(15:59) KRX, 07:00Z(16:00) null, 12:30Z(뉴욕 08:30 EDT) US, 20:29Z(16:29) US, 20:30Z null, 2026-11-03T13:30Z(뉴욕 08:30 EST) US, 21:29Z US, 2026-10-17T01:00Z(토) null. 정규일 경계는 `SessionProtection`(60분 전, 30분 뒤)과 맞다.
+    - **2026-11-19T07:30Z(KST 16:30), 07:59Z(16:59): null.** 그러나 `krx.json` specialSessions에 2026-11-19 수능일 10:00~16:30(`verified: false`)이 있고, `ExchangeCalendar.protectionSession`(ExchangeCalendar.java:147-152)은 미확인 특별일을 정규장과 합쳐 09:00~16:30으로 보므로 Java 보호 구간은 08:00~17:00 KST다. guard.mjs는 16:00~17:00을 막지 못한다.
+    - `allowDuringSession`: (CI=true만) false, (GITHUB_ACTIONS=true만) false, (둘 다 true) true, (GITHUB_ACTIONS=false, 전용 변수 true) false, (CI=1, 전용 변수 true, GITHUB_ACTIONS 없음) false.
+    - `refuseReason`: 임시 `AUTOTRADE_CONFIG_DIR`에 `experiment-state/stop-request`가 없으면 해제 상태에서 null, 파일을 만들면 해제 상태여도 거절 문구 반환(정지 요청은 해제로 풀리지 않음).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | RealTradingGuard·설정 로딩 코드 변경 없음(`autotrade-risk/`·`autotrade-config/`·`autotrade-app-engine/` 변경 0). 시험 실험실 둘은 임시 설정 폴더(`ConfigPaths.java:27-29`, `DemoLabApplication.java:36-37`, `playwright.config.mjs` webServer env) |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음(`autotrade-architecture-test/` 변경 0). CI `./gradlew build` success(job 116826263749) |
+| A3 | 해당 없음 | 증권사 플러그인·라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 상태머신·타임아웃 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 실패 | 1차 M2·M3는 반영됐다: 해제는 `GITHUB_ACTIONS === 'true' && AUTOTRADE_E2E_ALLOW_DURING_SESSION === 'true'`일 때만(guard.mjs:10-12, 사용처 02-experiment-flow.spec.mjs:68, 워크플로 ci.yml:177), 무엇을 띄우기 전 주 프로세스에서 실제 설정 폴더 정지 요청·장 시간을 확인하고 거절 시 throw(playwright.config.mjs:21-22), 실행 명령 직전 재확인(02-experiment-flow.spec.mjs:65-66), 판단 못 하면 있는 쪽(guard.mjs:45-52). 그러나 장 시간 확인이 고정 시각(KRX 09:00~15:30, guard.mjs:33)이라 캘린더 특별 세션을 보지 않아 **실제 보호 구간보다 좁은 날이 있다**: 2026-11-19(수능일, `krx.json` specialSessions, 미확인 → `ExchangeCalendar.java:147-152`로 09:00~16:30 합침)의 16:00~17:00 KST에 guard는 null을 돌려 실험실 둘·Gradle `bootTestRun`·Chromium을 띄운다(node 실행 결과 위). 그 시각 실행 명령 자체는 `ExperimentGate`가 막지만(PC에서는 해제 안 됨) 그 전에 띄운 프로세스들이 실전 엔진과 자원을 다툰다. 문서는 반대로 "실제 규칙보다 넓게"(D-101:23, guard.mjs:29), "휴장일도 막는 넓은 쪽"(README:18)이라고 적어 보호 범위를 사실과 다르게 말한다(M4) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | diff에 키·계좌번호·토큰 없음(직접 검색). 새 잡 `secrets.*` 미사용, 전용 변수 값은 `'true'` 뿐, 워크플로 권한 `contents: read`(ci.yml:7-8). gitleaks 전체 이력 success(job 116826264567). 거절 문구에 들어가는 것은 정지 요청 파일 경로뿐(guard.mjs:58) |
+| A11 | 실패 | 보호 테스트 삭제·약화와 고정 값 변경은 없다(보호 경로 변경은 ci.yml 추가뿐). 그러나 이번에 더한 새 안전 동작 `support/guard.mjs`(정지 요청·장 시간 확인, 해제 조건)는 실패 경우를 포함한 자동 테스트가 없다. D-101 "검증"은 손으로 시각 네 개를 node로 봤다고만 적고, CI는 해제 경로(GITHUB_ACTIONS+전용 변수)만 지나므로 거절 경로·경계·특별 세션·`CI`만 있을 때의 비해제가 회귀해도 아무 잡도 실패하지 않는다. 위 수능일 누락이 바로 그런 경우다(M4) |
+| A12 | 통과 | 장애 대응표 17종·O1~O8·장애 테스트 8종의 감지·대응 코드 변경 없음. 5.2 정지 순서 0번(정지 요청 파일)의 경로·의미(`ExperimentGate.java:31,51-55`)는 그대로이고, 시험 쪽이 실제 설정 폴더의 같은 파일을 시작 전·실행 직전에 따르도록 더했다(guard.mjs:55-59). 실행 중 생긴 정지 요청은 보지 못한다는 한계는 D-101:24와 README:18에 적혔다 |
+| A13 | 해당 없음 | MarketRules·금액 계산 변경 없음. guard는 거래소 현지 시간대(Asia/Seoul, America/New_York)로 요일·분을 계산한다(guard.mjs:20-25, 33-34). 특별 세션 누락은 A8로 판정 |
+| A14 | 실패 | 1차 M1 반영: 결정 로그 표 D-101 행(`docs/decisions/README.md:106`), `docs/qa/pending.md:42` 요청 줄. 1차 M3의 US 시간 누락은 README:18·D-101:23에서 고쳤다. 다만 같은 두 곳과 guard.mjs:29가 "실제 규칙보다 넓게 / 휴장일도 막는 넓은 쪽"이라고 적은 것은 수능일 같은 늦은 폐장 특별 세션에서 사실이 아니다(A8과 같은 원인, M4) |
+
+### 1차 수정 요청 처리
+- M1: 해결(위 A14).
+- M2: 해결. 범용 `CI`로는 풀리지 않음을 node로 확인(위). 해제가 보호 경로 파일(ci.yml:177)에 드러나 사용자 머지 검토를 거친다.
+- M3: 해결(정지 요청을 시작 전·실행 직전 코드로 확인, 문서에 한계와 "운영 PC에서 돌리지 않음" 기재). 장 시간 범위 서술은 새로 M4로 남는다.
+
+## 점검표 밖 발견
+- [관찰, 막지 않음] guard는 실제 설정 폴더를 `AUTOTRADE_CONFIG_DIR` → `~/.autotrade`로만 찾는다(guard.mjs:15-17). 운영자가 감시를 `-Dautotrade.config-dir`(config-keys.md:6, `ConfigPaths` 1순위)로 띄우면 다른 폴더를 본다. Node에서 알 길이 없으므로 README:18에 "감시를 시스템 속성으로 다른 폴더에 띄웠다면 그 폴더를 `AUTOTRADE_CONFIG_DIR`로 주고 돌린다" 한 줄을 더하기를 권한다.
+- [관찰, 1차와 같음] CI 로그의 SSE 끊김 `ApiExceptionHandler` ERROR는 실험실 소관이다. 1차 관찰의 `.gitignore` 누락은 해결(`.gitignore:62`).
+- 로컬 `./gradlew build`는 이번에도 돌리지 못했다. 이 PR은 Java·Gradle 스크립트를 바꾸지 않아 A 항목 판정은 diff 대조, guard.mjs 직접 실행, API로 조회한 같은 head의 CI 결과로 했다.
+
+## 수정 요청
+- **M4**(A8·A11·A14): `support/guard.mjs`의 장 시간 확인이 실제 보호 구간을 항상 덮게 한다. 추천: 이미 `support/snapshot.mjs`가 읽는 `krx.json`·`us.json`을 읽어 그날 `specialSessions`(미확인이면 정규장과 합침, `ExchangeCalendar.protectionSession`과 같은 규칙)와 정규장 중 넓은 쪽으로 60분 전 ~ 30분 뒤를 계산한다. 대안: KRX 폐장을 16:30으로 고정해 넓힌다(간단하지만 새 특별 세션이 생기면 다시 어긋남). 그리고 의존성 없는 `node --test` 단위 시험을 더해 `ui-e2e` 잡에서 Playwright보다 먼저 돌린다. 최소 경우: KRX·US 경계(각 시작 1분 전/시작/끝 1분 전/끝), 주말, 2026-11-19 16:30 KST 거절, 정지 요청 파일이 있으면 해제 상태에서도 거절, `CI`만 있거나 `GITHUB_ACTIONS`만 있으면 비해제. D-101:23·README:18·guard.mjs:29의 "넓게" 서술은 고친 동작에 맞춘다.
+
+## 판정
+수정 필요(M4: A8·A11·A14)

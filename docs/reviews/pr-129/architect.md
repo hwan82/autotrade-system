@@ -49,3 +49,48 @@
 
 ## 판정
 수정 필요(F1 결정 로그 표 D-101 행과 QA 대기 목록 줄, F2 PC 실행 시 정지 요청 미도달 — 코드로 막거나(a) D-101·README를 사실대로 정정(b)). B7은 risk-ops 검토로 따로 판정한다.
+
+## 재검토 2026-10-16
+- 대상: PR #129 / 커밋 49218db(1차 검토 ade1d56 이후 커밋 8bb0606 검토 원문, 49218db 검토 반영) / `git diff origin/main...HEAD` 전체를 다시 봄. 1차 이후 바뀐 코드·문서는 `git diff ade1d56..49218db`(검토 원문 제외 10개 파일: `ci.yml`, `.gitignore`, `autotrade-ui/README.md`, `playwright.config.mjs`, 새 `support/guard.mjs`, `paths.mjs`, `02-experiment-flow.spec.mjs`, D-101, 결정 로그 표, `docs/qa/pending.md`)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build`는 요청자 지시(같은 작업 트리 동시 사용, Maven 429)로 돌리지 않았다. CI를 GitHub REST로 직접 확인: 실행 38855609928, `head_sha=49218db6b9938c25e7ed918ff63514a252202888`(HEAD와 같음), event `pull_request`, 잡 4개 success. `Gradle build` "Build and test" success(05:24:43~05:27:43Z). `Lab screens (Playwright)` "Lab screen tests" success(05:25:43~05:26:20Z, KST 14:25~14:26 = KRX 장 시간 보호 구간 안), "Upload Playwright report" skipped. 즉 러너에서 `GITHUB_ACTIONS`+전용 변수로 시작 전 장 시간 확인을 건너뛰고 실행 명령에 `-PallowDuringSession`이 붙는 경로가 실제로 돌았다 `[추론]`(구간 안에서 성공했으므로. 잡 로그 본문은 1차와 같이 403이라 못 읽음).
+  - node로 `support/guard.mjs`를 직접 돌림(스크래치 스크립트, 저장소 밖):
+    - `insideSession`: KST 10:00 → KRX, KST 08:00(22:59Z 전날 → null, 23:00Z → KRX) 경계 맞음, KST 15:59 → KRX, 16:00 → null, 뉴욕 10:00 EDT → US, 2026-03-09(DST 시작 다음 월요일) 08:40·09:30 EDT → US, 2026-11-02(DST 끝 다음 월요일) 16:29 EST → US, 16:30 → null, 토요일 → null. **2026-11-19 07:10Z(KST 16:10)·07:40Z(KST 16:40) → null**(아래 R1).
+    - `allowDuringSession`: `CI=true`+전용 변수만 → false, `GITHUB_ACTIONS=true`+전용 변수 → true.
+    - `refuseReason`: 임시 설정 폴더에 정지 요청 없음 → null, 빈 `experiment-state/stop-request` 만들면 → 거절 문구. 권한 오류 경로는 컨테이너가 root라 재현하지 못함(코드 읽기로만 확인: ENOENT·ENOTDIR 말고는 "있음", `guard.mjs:45-52`).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(CI로 대체) | 위 CI 실행 38855609928(헤드 49218db) `Gradle build` success. 이번 변경도 `.java`·`.kts` 파일 0개 |
+| B2 | 통과 | Java 모듈·ArchUnit·소유 표 무변경. 새 파일 `support/guard.mjs`는 시험 도구 폴더 안. D-101에 D-026·ADR-005와의 관계를 적음(D-101 위험과 한계) |
+| B3 | 통과 | 계약 변경 없음. 새 환경 변수 `AUTOTRADE_E2E_ALLOW_DURING_SESSION`은 시험 도구 전용이고 프로세스 설정 키(`config-keys.md`)가 아니다. 워크플로 한 단계의 `env`에만 있다(`ci.yml` "Lab screen tests") |
+| B4 | 통과 | 1차와 같음. `guard.mjs`의 `new Date()`는 시험 시작 판단용이고 시뮬레이션 결과에 들어가지 않는다 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 시험 삭제·건너뛰기 없음. 보호 확인이 걸리면 시험이 실패한다(통과로 숨기지 않음, `playwright.config.mjs` 주 프로세스 `throw`, `02-…spec.mjs` `expect(refused).toBeNull()`). `guard.mjs` 자체의 자동 시험은 없다(D-101 검증 절의 node 확인 네 경우뿐, 아래 N8) |
+| B7 | 실패(별도 검토 필요) | 보호 경로 `.github/workflows/ci.yml` 변경과 장 시간 보호 해제 조건 변경. **risk-ops 검토 필요**(`docs/reviews/pr-129/risk-ops.md` 재검토 판정은 이 검토와 독립이라 보지 않음). 사용자 머지·독립 QA 대상(`docs/qa/pending.md`에 줄 추가됨) |
+| B8 | 통과 | 비밀값 없음. 거절 문구는 정지 요청 파일 경로만 담는다(설정 폴더 경로, 비밀값 아님). 워크플로 권한·트리거 그대로 |
+
+### 1차 항목 처리
+- **F1 해결**: `docs/decisions/README.md`에 D-101 행(**추천안 채택(자율)**, 사용자 머지 표기), `docs/qa/pending.md`에 "PR #129 검토해줘" 줄이 있다.
+- **F2 해결(대안 a), 단 새 결함 R1**: 실험실을 띄우기 전 주 프로세스에서 실제 설정 폴더의 정지 요청과 장 시간을 확인하고(`playwright.config.mjs` `refuseReason()` → `throw`, `WORK` 삭제보다 앞), 실행 명령 직전에 다시 확인한다(`02-…spec.mjs`). 실행 중에 생긴 정지 요청은 못 본다는 한계와 "운영 PC에서 돌리지 않는다"를 D-101 결정 4·README에 사실대로 적었다. 정지 요청 확인은 해제 변수가 켜져도 한다(`refuseReason`이 해제 판단보다 먼저).
+- **N1 해결**: 해제는 `GITHUB_ACTIONS=true` 그리고 워크플로가 이 단계에만 둔 `AUTOTRADE_E2E_ALLOW_DURING_SESSION=true`일 때뿐(`guard.mjs:10-12`). 범용 `CI`로는 풀리지 않음을 node로 확인. 해제 조건이 보호 경로 파일에 드러난다.
+- **N2 해결**: `.gitignore`에 `experiments/EXP-20261016-E2E01/`.
+- **N3·N4·N6·N7**: D-101 위험과 한계에 적음(N4는 `[가정]`·확인 못 함으로 정직하게 표시). **N5**: `paths.mjs` 주석.
+
+### R1(수정 필요): PC 보호의 장 시간 구간이 특별 운영일에 실제 규칙보다 좁다. D-101·README는 "실제 규칙보다 넓게"라고 쓴다
+- `[사실]` `guard.mjs:31-42`는 KRX를 고정 09:00~15:30(구간 08:00~16:00 KST), 미국을 09:30~16:00 뉴욕 시각으로 본다. 실제 장 시간 보호(`SessionProtection`, `ExchangeCalendar.protectionSession`, `ExchangeCalendar.java:137-155`)는 캘린더의 특별 운영일을 쓰고, 미확인 특별 운영일은 정규장과 합친다. 저장소 `krx.json` `specialSessions`에 2026-11-19 대학수학능력시험일(10:00~16:30, verified false)과 2027-11-18(같음)이 있다. 그날 실제 보호 구간은 08:00~17:00 KST다.
+- `[사실]` node 실행: 2026-11-19 07:10Z(KST 16:10, **정규장이 아직 열려 있는 시각**)과 07:40Z(KST 16:40)에서 `insideSession` → null. 즉 그날 16:00~17:00에는 PC에서 실험실 JVM 둘·Gradle 데몬·Chromium이 실전 장중에 뜬다. 시험 안 실행 명령은 `ExperimentGate`(캘린더 기준)가 막으므로 실험 계산 자체는 돌지 않고 시험이 실패할 뿐이지만, 이 확인을 둔 목적(실전 엔진과 자원을 다투기 전에 멈춤, 절대 규칙 6)이 그 한 시간 동안 깨진다.
+- `[사실]` D-101 결정 4("휴장일은 보지 않아 실제 규칙보다 넓게 막는다")와 README "PC 보호"("휴장일도 막는 넓은 쪽"), `guard.mjs:29` 주석은 휴장일 쪽만 맞고 늦게 닫는 특별 운영일에는 틀리다.
+- 최소 수정(추천 a):
+  a. `support/snapshot.mjs`가 이미 읽는 저장소 `krx.json`의 `specialSessions`를 `guard.mjs`에서도 읽어, 그날이면 개장·폐장을 정규장과 합친(더 이른 개장, 더 늦은 폐장) 값으로 구간을 잡는다. 확인된 특별 운영일도 합쳐서 넓은 쪽을 유지하면 된다. 미국은 저장소 미국 캘린더에 늦게 닫는 특별 운영일이 있으면 같은 처리.
+  b. 더 단순하게 KRX 구간을 고정 08:00~17:00 KST로 넓히고 문서에 "특별 운영일(수능일 16:30 폐장)까지 덮는 고정 구간"이라고 적는다(캘린더가 더 늦은 폐장을 들이면 다시 맞춰야 함).
+  어느 쪽이든 `insideSession`에 KST 16:10(2026-11-19) → KRX 단언을 node 확인 목록(D-101 검증 절)에 더한다.
+
+### 권고(비차단)
+- **N8 보호 확인의 자동 시험**: `guard.mjs`는 안전 확인인데 자동 시험이 없다(D-101 검증 절에 손 확인 네 경우). 시각을 인자로 받으므로(`insideSession(now)`, `refuseReason(now)`) Playwright 없이 도는 `node --test` 파일 하나(경계 시각, DST 두 날, 수능일, `CI`만으로는 해제 안 됨, 정지 요청 있음)를 같은 잡 앞 단계에 두면 회귀를 잡는다.
+- **N9 설정 폴더 규칙의 한 단계 누락**: `realConfigDir()`(`guard.mjs:15-17`)는 `AUTOTRADE_CONFIG_DIR` → `~/.autotrade`만 본다. 실제 규칙(`ConfigPaths`)은 시스템 속성 `-Dautotrade.config-dir`이 먼저다. 운영 PC가 시스템 속성으로 설정 폴더를 바꿨다면 정지 요청을 못 본다. Node가 JVM 속성을 알 수 없으니 주석과 README에 "시스템 속성으로 설정 폴더를 바꾼 PC에서는 `AUTOTRADE_CONFIG_DIR`을 같은 값으로 주고 돌린다"를 적기를 권한다.
+- **N10 검증 절의 확인 못 한 주장**: D-101 검증 절의 "첫 실행(3e456a4)은 진행 상태 시험이 거래일 기대값 20 때문에 실패"는 이 검토에서 확인하지 않았다(판정과 무관).
+
+## 판정 (재검토 2026-10-16)
+수정 필요(R1: `guard.mjs` 장 시간 구간이 특별 운영일(2026-11-19 수능일 16:30 폐장)에 실제 보호 구간보다 좁아 장중 16:00~16:30을 통과시키고, D-101·README의 "실제 규칙보다 넓게" 기술과 어긋남). 1차 F1·F2와 N1·N2·N5는 해결. B7은 risk-ops 검토로 따로 판정한다.
