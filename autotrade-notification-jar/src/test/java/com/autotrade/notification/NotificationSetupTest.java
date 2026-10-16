@@ -181,6 +181,84 @@ class NotificationSetupTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void 외부_채널_이름은_slack_kakao뿐이고_꾸린_채널_이름과_같다() {
+        // PR #138 architect R2: 이름이 틀리면 큐가 Slack·카카오 자리를 잘못 고르거나 화면에 틀린 채널 이름이 나온다
+        Channel slack = SlackWebhookChannel.of(SLACK_URL, new FakeHttp());
+        assertThat(new NotificationSetup.ExternalChannel(NotificationSetup.SLACK, slack, null).channel()).isSameAs(slack);
+        assertThat(new NotificationSetup.ExternalChannel(NotificationSetup.KAKAO, null, NotificationSetup.SKIP_DISABLED)
+                .skipReason()).isEqualTo(NotificationSetup.SKIP_DISABLED);
+        assertThatThrownBy(() -> new NotificationSetup.ExternalChannel(NotificationSetup.KAKAO, slack, null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("kakao").hasMessageContaining("slack");
+        assertThatThrownBy(() -> new NotificationSetup.ExternalChannel("log", null, NotificationSetup.SKIP_DISABLED))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("log");
+        assertThatThrownBy(() -> new NotificationSetup.ExternalChannel("SLACK", null, NotificationSetup.SKIP_DISABLED))
+                .isInstanceOf(IllegalArgumentException.class);
+        // 이름이 맞아도 채널과 이유는 하나만
+        assertThatThrownBy(() -> new NotificationSetup.ExternalChannel(NotificationSetup.SLACK, slack,
+                NotificationSetup.SKIP_DISABLED)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new NotificationSetup.ExternalChannel(NotificationSetup.KAKAO, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 켰는데_못_꾸린_채널은_이유마다_로그를_남기고_꺼진_채널은_조용하다() {
+        // PR #138 QA Q2(변이 M7·M14): 엔진이 채널을 조용히 끄는 일은 운영자가 이 로그로만 안다
+        assertThat(skipLogs(minimal().build())).isEmpty();
+        assertThat(skipLogs(full().build())).isEmpty();
+        assertThat(skipLogs(full().slackWebhookUrl("https://example.com/hook").build())).containsExactly(
+                "SEVERE notification.slack.webhook-url 형식이 틀려 Slack 알림을 끕니다(https://hooks.slack.com/services/로 시작해야 함)");
+        assertThat(skipLogs(full().kakaoPaidMode(true).build())).containsExactly(
+                "WARNING notification.kakao.mode=BIZ(알림톡, 유료)는 지원하지 않아 카카오톡 알림을 끕니다(D-033). ME로 바꾸세요");
+        assertThat(skipLogs(full().kakaoRefreshToken("").build())).containsExactly(
+                "SEVERE 카카오톡 알림 설정(rest-api-key·refresh-token·link-url) 중 빈 값이 있어 카카오톡 알림을 끕니다");
+        assertThat(skipLogs(full().kakaoLinkUrl("localhost?x=1").build())).containsExactly(
+                "SEVERE 카카오톡 알림 설정(rest-api-key·refresh-token·link-url) 형식이 틀려 카카오톡 알림을 끕니다");
+        // 두 채널 다 못 꾸리면 둘 다 남긴다. 로그에 설정 값이 없다
+        List<String> both = skipLogs(full().slackWebhookUrl("https://example.com/SECRETPART").kakaoLinkUrl("x?REST-KEY-PH")
+                .build());
+        assertThat(both).hasSize(2);
+        assertThat(String.join("\n", both)).doesNotContain("SECRETPART").doesNotContain("REST-KEY-PH")
+                .doesNotContain("REFRESH-PH").doesNotContain("ACCESS-PH").doesNotContain("CLIENT-PH");
+    }
+
+    @Test
+    void 모르는_이유_코드는_다른_채널_문구로_떨어지지_않고_채널_이름과_코드를_적는다() {
+        // PR #138 QA R1: default 분기가 카카오 "형식이 틀림"으로 적으면 Slack 쪽 새 이유 코드가 틀린 채널 문구로 나온다
+        assertThat(skipLogs(() -> NotificationSetup.logSkip(NotificationSetup.ExternalChannel.skipped(NotificationSetup.SLACK,
+                "new-reason")))).containsExactly("SEVERE slack 알림을 끕니다(이유 코드 new-reason)");
+    }
+
+    /** {@link NotificationSetup#start}가 남긴 로그(등급과 문구). */
+    private List<String> skipLogs(NotificationSetup s) {
+        return skipLogs(() -> start(s).close());
+    }
+
+    private static List<String> skipLogs(Runnable action) {
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(NotificationSetup.class.getName());
+        List<String> records = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.logging.Formatter formatter = new java.util.logging.SimpleFormatter();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                records.add(r.getLevel() + " " + formatter.formatMessage(r));
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        jul.addHandler(handler);
+        try {
+            action.run();
+        } finally {
+            jul.removeHandler(handler);
+        }
+        return List.copyOf(records);
+    }
+
     private List<String> reasons(NotificationSetup s) {
         return s.externalChannels(dir, CLOCK, new FakeHttp()).stream().map(NotificationSetup.ExternalChannel::skipReason)
                 .collect(Collectors.toList());

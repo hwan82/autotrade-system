@@ -111,8 +111,13 @@ public class NotificationTester {
                 .build();
     }
 
-    private static String label(String channel) {
-        return NotificationSetup.KAKAO.equals(channel) ? "카카오톡" : "Slack";
+    /** 채널 화면 이름. 모르는 채널은 이름을 그대로 보인다(다른 채널 이름으로 적지 않는다, PR #138 architect R3). */
+    static String label(String channel) {
+        return switch (channel) {
+            case NotificationSetup.SLACK -> "Slack";
+            case NotificationSetup.KAKAO -> "카카오톡";
+            default -> channel;
+        };
     }
 
     /** 못 꾸린 이유 코드를 화면 설명으로. 코드는 {@link NotificationSetup}이 정한다. */

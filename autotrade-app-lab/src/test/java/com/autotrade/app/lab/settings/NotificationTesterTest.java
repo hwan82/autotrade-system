@@ -119,6 +119,18 @@ class NotificationTesterTest {
     }
 
     @Test
+    void 채널_화면_이름은_채널마다_정하고_모르는_채널을_Slack으로_적지_않는다() {
+        // PR #138 QA Q1·architect R3: 건너뛴 결과에도 채널 이름이 제자리에 간다
+        List<ChannelResult> results = tester().sendAll(config(slackOff(), kakaoOff()));
+        assertThat(results).extracting(ChannelResult::channel, ChannelResult::label)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("slack", "Slack"),
+                        org.assertj.core.groups.Tuple.tuple("kakao", "카카오톡"));
+        assertThat(NotificationTester.label(NotificationSetup.SLACK)).isEqualTo("Slack");
+        assertThat(NotificationTester.label(NotificationSetup.KAKAO)).isEqualTo("카카오톡");
+        assertThat(NotificationTester.label("email")).isEqualTo("email");
+    }
+
+    @Test
     void 꺼진_채널은_HTTP_없이_건너뛴다() {
         List<ChannelResult> results = tester().sendAll(config(slackOff(), kakaoOff()));
 
@@ -138,6 +150,10 @@ class NotificationTesterTest {
         List<ChannelResult> results = tester().sendAll(config(slackOn(WEBHOOK), kakaoMe(ACCESS, LINK)));
 
         assertThat(results).extracting(ChannelResult::status).containsExactly(Status.SENT, Status.SENT);
+        // 결과 화면 이름은 채널마다 다르다(PR #138 QA Q1, 변이 M6: 늘 "Slack")
+        assertThat(results).extracting(ChannelResult::label).containsExactly("Slack", "카카오톡");
+        assertThat(results).extracting(ChannelResult::message).containsExactly("보냈습니다. Slack에서 받았는지 확인하세요",
+                "보냈습니다. 카카오톡에서 받았는지 확인하세요");
         assertThat(http.calls).extracting(c -> c.uri().getHost()).containsExactly("hooks.slack.com", "kauth.kakao.com",
                 "kapi.kakao.com");
         // 시험 알림은 정보 등급이고 본문이 시험임을 밝힌다
