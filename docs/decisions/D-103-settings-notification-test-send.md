@@ -59,3 +59,10 @@
   - 대안 "채널별 시험 `testEach`를 알림 모듈에 둠"은 버렸다: 결과 화면 문구(한국어 설명, "실전 엔진·감시도 끕니다")와 중단 처리는 실험실 화면 몫이라 라이브러리에 둘 이유가 없고, 채널을 꾸리는 규칙만 같으면 "실험실 시험 성공 = 엔진 발송 가능"이 선다. 되돌릴 조건: 다른 화면·프로세스도 채널별 발송 결과가 필요해지면 그때 알림 모듈로 올린다.
   - 바뀐 점 하나: 카카오 빈 값(`rest-api-key`·`refresh-token`·`link-url`)을 채널 생성자 예외가 아니라 미리 검사해 `missing-values`로 가린다. 엔진·감시에서는 그 채널을 끄는 결과가 같고, 로그 문구만 "빈 값"과 "형식이 틀림"으로 나뉜다.
   - 시험: `NotificationSetupTest#외부_채널은_Slack_카카오_순서로_꾸리고_못_꾸린_채널은_이유_코드로_돌려준다`, `#큐와_외부_채널_목록은_같은_규칙으로_꾸린다`, `NotificationTesterTest#알림_설정_값을_실전_엔진과_같은_이름으로_옮긴다`, `#못_꾸린_이유_코드마다_화면_설명이_있다`. 기존 `NotificationTesterTest`는 고치지 않고 통과한다.
+- 2026-10-16, PR #138 검토 권고 반영(결정 내용은 바뀌지 않아 새 번호를 쓰지 않음, 추천안 채택(자율)). 사용자 문구·채널 구성 결과·API 응답은 그대로다.
+  - architect R2: `ExternalChannel`은 이름이 `slack`·`kakao` 둘 중 하나이고 꾸린 채널의 `Channel.name()`과 같아야 만든다(아니면 `IllegalArgumentException`).
+  - risk-ops R2: `NotificationSetup.start`가 Slack·카카오를 자리(`get(0)`·`get(1)`)가 아니라 이름으로 고른다. 목록 순서가 바뀌어도 긴급 1순위(Slack)가 뒤바뀌지 않는다.
+  - QA R1: 못 꾸린 채널 로그(`logSkip`)에 `invalid-values` 분기를 따로 두고, 모르는 이유 코드는 카카오 문구로 떨어지지 않고 채널 이름과 코드를 적는다.
+  - architect R3: 실험실 결과의 채널 화면 이름(`NotificationTester.label`)을 `slack`→"Slack", `kakao`→"카카오톡"으로 정하고, 모르는 채널은 이름을 그대로 보인다(예전에는 카카오가 아니면 모두 "Slack").
+  - architect R1: 같은 설정이면 실전 엔진·감시·실험실의 설정 옮기기(`EngineMain.setup`, `WatchdogMain.setup`, `NotificationTester.setup`)가 같은 `NotificationSetup`을 만드는지 `autotrade-architecture-test`의 `NotificationSetupMappingTest`가 설정 5가지로 직접 비교한다. 세 `setup`은 패키지 전용 그대로 두고, 시험 소스의 같은 패키지 다리 클래스(`EngineNotificationMapping`, `WatchdogNotificationMapping`, `LabNotificationMapping`)로 부른다. 대안 "세 `setup`을 public으로"는 운영 코드의 공개 범위를 시험 때문에 넓혀 버렸고, "리플렉션"은 실전 경로 리플렉션 금지(D-086) 취지와 맞지 않아 버렸다. 되돌릴 조건: 세 옮기기를 한 모듈로 모을 곳이 생기면 이 시험은 그 모듈 시험으로 바꾼다.
+  - QA Q1·Q2: `NotificationTesterTest`가 결과 `label`·보낸 뒤 설명을 단언(변이 M6), `NotificationSetupTest`가 `start`의 못 꾸린 채널 로그를 이유마다 등급·문구까지 단언하고 꺼진 채널·정상 채널은 로그가 없음을 본다(변이 M7·M14).

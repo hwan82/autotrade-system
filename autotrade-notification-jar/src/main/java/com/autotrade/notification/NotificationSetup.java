@@ -78,15 +78,26 @@ public final class NotificationSetup {
      * 외부 채널 하나를 꾸린 결과. 꾸렸으면 {@code channel}이 있고 {@code skipReason}이 null이다. 못 꾸렸으면 {@code channel}이 null이고
      * {@code skipReason}이 {@code SKIP_*} 코드다. 이유 코드에는 비밀값이 없다.
      *
+     * <p>{@link #externalChannels}가 만든다. 부르는 쪽이 만들 이유는 없지만, 만들더라도 이름은 {@link #SLACK}·{@link #KAKAO} 둘
+     * 중 하나여야 하고 꾸린 채널의 {@link Channel#name()}과 같아야 한다(PR #138 architect R2). 이름이 틀리면 큐가 Slack·카카오 자리를
+     * 잘못 고르거나 화면에 틀린 채널 이름이 나온다.
+     *
      * @param name {@link #SLACK} 또는 {@link #KAKAO}
      * @param channel 꾸린 채널(못 꾸렸으면 null)
      * @param skipReason 못 꾸린 이유 코드(꾸렸으면 null)
+     * @throws IllegalArgumentException 이름이 둘 중 하나가 아니거나, 채널 이름과 다르거나, 채널과 이유가 둘 다 있거나 둘 다 없을 때
      */
     public record ExternalChannel(String name, Channel channel, String skipReason) {
         public ExternalChannel {
             Objects.requireNonNull(name, "name");
+            if (!name.equals(SLACK) && !name.equals(KAKAO)) {
+                throw new IllegalArgumentException("외부 채널 이름은 slack 또는 kakao여야 한다: " + name);
+            }
             if ((channel == null) == (skipReason == null)) {
                 throw new IllegalArgumentException("channel과 skipReason 중 하나만 있어야 한다");
+            }
+            if (channel != null && !name.equals(channel.name())) {
+                throw new IllegalArgumentException("외부 채널 이름과 꾸린 채널 이름이 다르다: " + name + " / " + channel.name());
             }
         }
 
@@ -207,7 +218,8 @@ public final class NotificationSetup {
     NotificationQueue start(Path configDir, String process, Clock clock, HttpTransport http) {
         List<ExternalChannel> channels = externalChannels(configDir, clock, http);
         channels.forEach(NotificationSetup::logSkip);
-        Notifier notifier = Notifier.standard(channels.get(0).channel(), channels.get(1).channel(), new LogChannel());
+        // 자리(get(0)·get(1))가 아니라 이름으로 고른다. 순서가 바뀌어도 긴급 1순위(Slack)가 뒤바뀌지 않는다(PR #138 risk-ops R2)
+        Notifier notifier = Notifier.standard(named(channels, SLACK), named(channels, KAKAO), new LogChannel());
         return new NotificationQueue(notifier, EventRoutes.defaults(), clock, displayZone, process, kakaoReconsentHelp)
                 .start();
     }
@@ -268,8 +280,20 @@ public final class NotificationSetup {
         }
     }
 
-    /** 꺼진 채널은 조용히 넘기고, 켰는데 못 꾸린 채널만 로그에 남긴다(값은 넣지 않는다). */
-    private static void logSkip(ExternalChannel c) {
+    /** 이름이 같은 외부 채널의 꾸린 채널(못 꾸렸으면 null). 목록에 그 이름이 꼭 하나 있어야 한다. */
+    private static Channel named(List<ExternalChannel> channels, String name) {
+        List<ExternalChannel> found = channels.stream().filter(c -> c.name().equals(name)).toList();
+        if (found.size() != 1) {
+            throw new IllegalStateException("외부 채널 " + name + "이 " + found.size() + "개다");
+        }
+        return found.get(0).channel();
+    }
+
+    /**
+     * 꺼진 채널은 조용히 넘기고, 켰는데 못 꾸린 채널만 로그에 남긴다(값은 넣지 않는다). 이유 코드마다 분기를 두고, 모르는 코드는 채널 이름과
+     * 코드를 그대로 적는다(다른 채널 문구로 떨어지지 않게, PR #138 QA R1).
+     */
+    static void logSkip(ExternalChannel c) {
         String reason = c.skipReason();
         if (reason == null || reason.equals(SKIP_DISABLED)) {
             return;
@@ -281,7 +305,9 @@ public final class NotificationSetup {
                     "notification.kakao.mode=BIZ(알림톡, 유료)는 지원하지 않아 카카오톡 알림을 끕니다(D-033). ME로 바꾸세요");
             case SKIP_MISSING_VALUES -> LOG.log(Level.ERROR,
                     "카카오톡 알림 설정(rest-api-key·refresh-token·link-url) 중 빈 값이 있어 카카오톡 알림을 끕니다");
-            default -> LOG.log(Level.ERROR, "카카오톡 알림 설정(rest-api-key·refresh-token·link-url) 형식이 틀려 카카오톡 알림을 끕니다");
+            case SKIP_INVALID_VALUES -> LOG.log(Level.ERROR,
+                    "카카오톡 알림 설정(rest-api-key·refresh-token·link-url) 형식이 틀려 카카오톡 알림을 끕니다");
+            default -> LOG.log(Level.ERROR, "{0} 알림을 끕니다(이유 코드 {1})", c.name(), reason);
         }
     }
 
