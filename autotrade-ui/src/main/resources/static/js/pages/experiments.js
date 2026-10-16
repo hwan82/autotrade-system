@@ -3,7 +3,7 @@ import { h, table } from '../dom.js';
 import { get, post } from '../api.js';
 import { jobsSection } from './jobs.js';
 import { equityChart, colorSwatches } from '../chart.js';
-import { money, number, pct, ratio, signClass, time, shortHash, delta, combinationLabel, STATUS, MARKET, STYLE, REFRESH, VALIDITY, SIDE, INTENT } from '../format.js';
+import { money, number, pct, ratio, signClass, time, shortHash, delta, combinationLabel, clockModeLabel, STATUS, MARKET, STYLE, REFRESH, VALIDITY, SIDE, INTENT } from '../format.js';
 
 const enc = encodeURIComponent;
 
@@ -26,7 +26,7 @@ export async function experimentsPage() {
       { label: '시드머니', num: true, render: e => money(e.seedCapital, e.currency) },
       { label: '시드', num: true, render: e => e.randomSeed },
       { label: '계좌', num: true, render: e => `${e.completedRuns}/${e.runCount}${e.failedRuns ? ` (실패 ${e.failedRuns})` : ''}` },
-      { label: '방식', render: e => e.clockMode === 'REPLAY' ? '녹화 리플레이' : '실시간 모의' },
+      { label: '방식', render: clockModeLabel },
       { label: '데이터', render: e => e.dataSnapshotVersion },
     ], '실험이 없습니다.');
   return h('div', {}, head, jobsSection(), h('h2', {}, '실험 결과'), list, h('h2', {}, '실험 폴더'), folderSection(folders));
@@ -108,7 +108,7 @@ export async function experimentPage(id) {
     ['비용 표 해시', shortHash(e.costTableHash)],
     ['체결 모델', e.executionModelId],
     ['데이터 스냅샷', e.dataSnapshotVersion],
-    ['실행 방식', e.clockMode === 'REPLAY' ? '녹화 리플레이' : '실시간 모의'],
+    ['실행 방식', clockModeLabel(e)],
     ['코드', `${shortHash(e.codeCommit)}${e.codeDirty ? ' (커밋 안 된 변경 포함)' : ''}`],
   ].map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, String(v)))));
 
