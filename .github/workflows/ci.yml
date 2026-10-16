@@ -144,7 +144,7 @@ jobs:
 
   # 실험실 화면 브라우저 시험(D-101, 5단계 QA 권고 R3). 실험실 둘(배포본, 데모)을 띄워 실험 생성 → 화면이 알려 준 실행 명령 →
   # 불러오기 → 비교, 진행 상태 화면(진행 막대·워크포워드 전체 진행률·취소)을 headless Chromium으로 조작한다.
-  # 실전 엔진·증권사·시세 게이트웨이는 띄우지 않는다. 실행 명령의 장 시간 보호만 CI에서 푼다(실전 엔진이 없는 러너)
+  # 실전 엔진·증권사·시세 게이트웨이는 띄우지 않는다. 실행 명령의 장 시간 보호만 이 잡에서 푼다(실전 엔진이 없는 러너)
   ui-e2e:
     name: Lab screens (Playwright)
     runs-on: ubuntu-latest
@@ -172,6 +172,9 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
       - name: Lab screen tests
+        # 러너에는 실전 엔진이 없어 실행 명령의 장 시간 보호만 푼다(GITHUB_ACTIONS와 함께 볼 때만 유효, support/guard.mjs)
+        env:
+          AUTOTRADE_E2E_ALLOW_DURING_SESSION: 'true'
         run: npx playwright test
       - name: Upload Playwright report
         if: failure()

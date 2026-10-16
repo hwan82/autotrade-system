@@ -59,3 +59,4 @@ replay_pid*
 autotrade-ui/e2e/node_modules/
 autotrade-ui/e2e/playwright-report/
 autotrade-ui/e2e/test-results/
+experiments/EXP-20261016-E2E01/

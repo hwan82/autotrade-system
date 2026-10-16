@@ -1,6 +1,7 @@
 // 5단계 QA 권고 R3(D-101): 실험 생성 화면으로 등록 → 화면이 알려 준 실행 명령 → 실험 폴더에서 불러오기 → 계좌 비교표·교차표·자산 곡선.
-// 실행 명령은 화면에 나온 글을 그대로 돌린다. CI에는 실전 엔진이 없어 장 시간 보호(D-063)만 -PallowDuringSession으로 푼다.
-// PC에서 돌릴 때는 풀지 않는다(장 시간에는 실행 명령이 멈추고 이 시험이 실패한다).
+// 실행 명령은 화면에 나온 글을 그대로 돌린다. 장 시간 보호(D-063)는 GitHub Actions 러너에서 워크플로가 전용 변수를 켤 때만
+// -PallowDuringSession으로 푼다(support/guard.mjs). 실행 명령은 임시 설정 폴더를 쓰므로 실행 직전에 실제 설정 폴더의 정지 요청과
+// 장 시간을 다시 확인한다.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { expect, test } from '@playwright/test';
 import { CONFIG_DIR, EXPERIMENT_ID, FLOW_PORT, GRADLEW, REPO, SNAPSHOT } from '../support/paths.mjs';
 import { tradingDays } from '../support/snapshot.mjs';
 import { watchErrors } from '../support/errors.mjs';
+import { allowDuringSession, refuseReason } from '../support/guard.mjs';
 
 const BASE = `http://127.0.0.1:${FLOW_PORT}`;
 const DAYS = tradingDays('2026-01-02', 80);
@@ -60,8 +62,10 @@ test('화면으로 등록한 조합 실험을 실행 명령으로 돌리고 불�
   await expect(row).toContainText('아직 실행 안 함');
 
   // 4. 화면이 알려 준 실행 명령을 그대로 돌린다
+  const refused = refuseReason();
+  expect(refused, '실행 명령을 돌리기 전 보호 확인').toBeNull();
   const [, ...args] = command.split(/\s+/);
-  if (process.env.CI) args.push('-PallowDuringSession');
+  if (allowDuringSession()) args.push('-PallowDuringSession');
   args.push('--console=plain');
   const run = spawnSync(GRADLEW, args, {
     cwd: REPO, env: { ...process.env, AUTOTRADE_CONFIG_DIR: CONFIG_DIR }, encoding: 'utf8',

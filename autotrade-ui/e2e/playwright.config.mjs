@@ -6,6 +6,7 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { CONFIG_DIR, DEMO_PORT, EXPERIMENT_ID, FLOW_PORT, GRADLEW, REPO, SNAPSHOT, WORK } from './support/paths.mjs';
 import { writeSnapshot } from './support/snapshot.mjs';
+import { refuseReason } from './support/guard.mjs';
 
 function labJar() {
   const libs = path.join(REPO, 'autotrade-app-lab', 'build', 'libs');
@@ -16,6 +17,9 @@ function labJar() {
 
 // 설정 파일은 작업자 프로세스마다 다시 읽히므로 준비는 주 프로세스에서 한 번만 한다(실험실이 뜨기 전)
 if (!process.env.TEST_WORKER_INDEX) {
+  // 실전 엔진을 보호하는 확인을 무엇보다 먼저 한다(정지 요청, 장 시간 보호). 걸리면 아무것도 띄우지 않는다
+  const reason = refuseReason();
+  if (reason) throw new Error(`화면 시험을 시작하지 않습니다: ${reason}`);
   fs.rmSync(WORK, { recursive: true, force: true });
   writeSnapshot(CONFIG_DIR, SNAPSHOT);
   fs.rmSync(path.join(REPO, 'experiments', EXPERIMENT_ID), { recursive: true, force: true });
