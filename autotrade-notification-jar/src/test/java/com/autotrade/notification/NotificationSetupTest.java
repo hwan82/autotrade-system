@@ -103,5 +103,30 @@ class NotificationSetupTest {
         assertThat(a).isNotEqualTo(setup(true, SLACK_URL, true, false, "OTHER-PH", "http://localhost"))
                 .isNotEqualTo(setup(true, SLACK_URL, true, false, "REFRESH-PH", "http://other"))
                 .isNotEqualTo(setup(true, SLACK_URL, true, true, "REFRESH-PH", "http://localhost"));
+        // 값 하나씩만 다른 경우(PR #132 architect R1: 비교에서 빠진 값이 없게)
+        NotificationSetup base = full().build();
+        assertThat(base).isEqualTo(full().build());
+        assertThat(base).isNotEqualTo(full().slackEnabled(false).build())
+                .isNotEqualTo(full().slackWebhookUrl("https://hooks.slack.com/services/TOTHER/BOTHER/OTHER").build())
+                .isNotEqualTo(full().kakaoEnabled(false).build())
+                .isNotEqualTo(full().kakaoRestApiKey("OTHER-PH").build())
+                .isNotEqualTo(full().kakaoClientSecret("OTHER-PH").build())
+                .isNotEqualTo(full().kakaoAccessToken("OTHER-PH").build())
+                .isNotEqualTo(full().displayZone(ZoneId.of("Asia/Tokyo")).build())
+                .isNotEqualTo(full().kakaoReconsentHelp("다른 문구").build());
+    }
+
+    private static NotificationSetup.Builder full() {
+        return NotificationSetup.builder()
+                .slackEnabled(true)
+                .slackWebhookUrl(SLACK_URL)
+                .kakaoEnabled(true)
+                .kakaoRestApiKey("REST-KEY-PH")
+                .kakaoClientSecret("CLIENT-PH")
+                .kakaoAccessToken("ACCESS-PH")
+                .kakaoRefreshToken("REFRESH-PH")
+                .kakaoLinkUrl("http://localhost")
+                .displayZone(ZoneOffset.UTC)
+                .kakaoReconsentHelp("문구");
     }
 }
