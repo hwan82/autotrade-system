@@ -170,6 +170,7 @@ public class LiveLabService implements AutoCloseable {
     /** 되살리기 스레드: 세션을 열고(기록일마다 정지 확인) 끝나면 받는 쪽과 처리 스레드를 시작한다. */
     private void openAndConnect(Running r) {
         LiveSession session;
+        long restoreStart = System.nanoTime();
         try {
             session = LiveSession.open(r.plan, repoRoot, sessionsRoot, clock, m -> log.info("실시간 모의: {}", m), () -> {
                 Optional<String> stop = r.cancelled ? Optional.of("되살리는 중 멈춤") : stopReason();
@@ -203,7 +204,10 @@ public class LiveLabService implements AutoCloseable {
             r.pump = Thread.ofPlatform().name("live-pump").daemon(true).priority(Thread.MIN_PRIORITY).unstarted(r::pump);
             r.pump.start();
             r.client.start();
-            log.info("실시간 모의 세션 연결: {} (되살린 이벤트 {})", r.plan.id(), session.status().restored());
+            // 되살리기에 걸린 시간: 6단계 주간 점검이 재기동한 날 적는 값(절차서 stage-6-live-session.md). 앞 날 기록을 한 번 더
+            // 읽는 비용(architect PR #94 R2)을 고칠지 이 값으로 판단한다
+            log.info("실시간 모의 세션 연결: {} (되살린 이벤트 {}, 되살리기 {}초)", r.plan.id(), session.status().restored(),
+                    TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - restoreStart));
         }
     }
 
