@@ -2,12 +2,14 @@ package com.autotrade.notification;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.lang.reflect.Constructor;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -19,6 +21,15 @@ import org.junit.jupiter.api.Test;
 class NotificationQueueTest {
 
     private static final Instant T0 = Instant.parse("2026-10-16T00:00:00Z");
+
+    @Test
+    void 공개_생성자는_재동의_문구를_받는_6인자_하나뿐이다() {
+        // PR #134 QA Q1(변이 M7): 문구를 받지 않는 공개 생성자가 다시 생기면 부르는 쪽이 문구를 빠뜨려도 컴파일된다(D-100 반영 기록)
+        Constructor<?>[] publics = NotificationQueue.class.getConstructors();
+        assertThat(publics).hasSize(1);
+        assertThat(Arrays.asList(publics[0].getParameterTypes())).containsExactly(Notifier.class, EventRoutes.class,
+                Clock.class, ZoneId.class, String.class, String.class);
+    }
 
     /** 손으로 움직이는 시계. */
     static final class StepClock extends Clock {

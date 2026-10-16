@@ -10,6 +10,7 @@ import com.autotrade.config.Secret;
 import com.autotrade.notification.FileKakaoTokenStore;
 import com.autotrade.notification.HttpTransport;
 import com.autotrade.notification.KakaoToken;
+import com.autotrade.notification.NotificationSetup;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
@@ -17,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -72,6 +74,48 @@ class NotificationTesterTest {
     static RuntimeConfig.Kakao kakaoMe(String access, String link) {
         return new RuntimeConfig.Kakao(true, KakaoMode.ME, access == null ? Secret.empty() : Secret.of(access),
                 Secret.of(REST_KEY), Secret.of(REFRESH), Secret.of(CLIENT_SECRET), link);
+    }
+
+    @Test
+    void 알림_설정_값을_실전_엔진과_같은_이름으로_옮긴다() {
+        // D-103 반영 기록: 채널 구성 규칙은 NotificationSetup 하나다. 옮기기가 엔진·감시와 같아야 시험 성공 = 엔진 발송 가능
+        RuntimeConfig.Notification n = new RuntimeConfig.Notification(
+                new RuntimeConfig.Slack(true, Secret.of("SLACK-URL-PH")),
+                new RuntimeConfig.Kakao(true, KakaoMode.ME, Secret.of("ACCESS-PH"), Secret.of("REST-PH"),
+                        Secret.of("REFRESH-PH"), Secret.of("CLIENT-PH"), "http://link.example"));
+        NotificationSetup.Builder expected = NotificationSetup.builder()
+                .slackEnabled(true)
+                .slackWebhookUrl("SLACK-URL-PH")
+                .kakaoEnabled(true)
+                .kakaoPaidMode(false)
+                .kakaoRestApiKey("REST-PH")
+                .kakaoClientSecret("CLIENT-PH")
+                .kakaoAccessToken("ACCESS-PH")
+                .kakaoRefreshToken("REFRESH-PH")
+                .kakaoLinkUrl("http://link.example")
+                .displayZone(ZoneId.of("Asia/Seoul"))
+                .kakaoReconsentHelp(RuntimeConfig.Notification.KAKAO_RECONSENT_HELP);
+        assertThat(NotificationTester.setup(n)).isEqualTo(expected.build());
+        assertThat(NotificationTester.setup(n))
+                .isNotEqualTo(expected.kakaoRestApiKey("CLIENT-PH").kakaoClientSecret("REST-PH").build());
+
+        RuntimeConfig.Notification biz = new RuntimeConfig.Notification(new RuntimeConfig.Slack(false, null),
+                new RuntimeConfig.Kakao(true, KakaoMode.BIZ, null, null, null, null, null));
+        assertThat(NotificationTester.setup(biz)).isEqualTo(NotificationSetup.builder()
+                .kakaoEnabled(true)
+                .kakaoPaidMode(true)
+                .displayZone(ZoneId.of("Asia/Seoul"))
+                .kakaoReconsentHelp(RuntimeConfig.Notification.KAKAO_RECONSENT_HELP)
+                .build());
+    }
+
+    @Test
+    void 못_꾸린_이유_코드마다_화면_설명이_있다() {
+        for (String reason : List.of(NotificationSetup.SKIP_DISABLED, NotificationSetup.SKIP_INVALID_WEBHOOK_URL,
+                NotificationSetup.SKIP_PAID_MODE, NotificationSetup.SKIP_MISSING_VALUES,
+                NotificationSetup.SKIP_INVALID_VALUES)) {
+            assertThat(NotificationTester.skipMessage(reason)).doesNotStartWith("보내지 않았습니다(");
+        }
     }
 
     @Test

@@ -86,6 +86,7 @@ public final class NotificationQueue implements AutoCloseable {
      *
      * @param notifier 채널 순서(로그 채널 포함)
      * @param routes 종류 → 등급 표
+     * @param clock 알림 시각과 폭주 억제 창을 재는 시계
      * @param zone 알림에 보일 시간대
      * @param process 스레드 이름에 쓰는 프로세스 이름
      * @param kakaoReconsentHelp 카카오 재동의 알림 본문(비밀값을 넣지 않는다). 새 토큰을 넣을 곳과 다시 시작할 프로세스는 부르는 쪽이 안다
