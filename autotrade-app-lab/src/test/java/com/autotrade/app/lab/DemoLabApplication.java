@@ -54,10 +54,10 @@ public final class DemoLabApplication {
         Files.createDirectories(files.dir());
         Instant t = Instant.now();
         files.write(new ExperimentJobStatus("DEMO-20261013-DONE1", "combination", ExperimentJobStatus.State.COMPLETED, 4321,
-                t.minusSeconds(7200), t.minusSeconds(3600), 4, 1,
+                t.minusSeconds(7200), t.minusSeconds(3600), 4, 1, 0,
                 new ExperimentProgress("DEMO-20261013-DONE1", ExperimentProgress.Phase.FINISHED, 6, 6, 6, 0, 250, 1500), ""));
         files.write(new ExperimentJobStatus("DEMO-20261013-STOP1", "recording", ExperimentJobStatus.State.STOPPED, 4400,
-                t.minusSeconds(5400), t.minusSeconds(5000), 2, 1,
+                t.minusSeconds(5400), t.minusSeconds(5000), 2, 1, 0,
                 new ExperimentProgress("DEMO-20261013-STOP1", ExperimentProgress.Phase.RUNNING, 4, 2, 1, 0, 1, 1), "장 시간 보호 구간이라 멈췄습니다"));
         String job = "DEMO-20261015-RUN01";
         Instant started = t;
@@ -72,6 +72,7 @@ public final class DemoLabApplication {
                         return;
                     }
                     files.write(status(job, ExperimentJobStatus.State.RUNNING, started, days, runs, perRun, ""));
+                    files.write(walkForward(started, days / 3));
                     Thread.sleep(5000);
                     days += 3;
                 }
@@ -82,12 +83,27 @@ public final class DemoLabApplication {
         });
     }
 
+    /**
+     * 워크포워드 데모(D-097): 실험(실행기 호출) 24번을 미리 알리고 5초마다 지금 실험의 Run 하나씩 끝낸다. 화면에 명령 전체 진행률과
+     * 지금 실험 진행률이 함께 나온다.
+     */
+    private static ExperimentJobStatus walkForward(Instant started, int tick) {
+        String job = "DEMO-20261016-WF01";
+        int planned = 24;
+        int experiment = Math.min(planned, 1 + tick / 4);
+        int runsDone = tick % 4;
+        ExperimentProgress p = new ExperimentProgress(job + "-W1-N" + experiment, ExperimentProgress.Phase.RUNNING, 4,
+                Math.min(4, runsDone + 2), runsDone, 0, 250, runsDone * 250L);
+        return new ExperimentJobStatus(job, "walkforward", ExperimentJobStatus.State.RUNNING, ProcessHandle.current().pid(),
+                started, Instant.now(), 2, experiment, planned, p, "");
+    }
+
     private static ExperimentJobStatus status(String job, ExperimentJobStatus.State state, Instant started, int days, int runs,
             int perRun, String message) {
         int finished = Math.min(runs, days / perRun);
         int startedRuns = Math.min(runs, finished + 4);
         long done = Math.min((long) runs * perRun, days);
-        return new ExperimentJobStatus(job, "combination", state, ProcessHandle.current().pid(), started, Instant.now(), 4, 1,
+        return new ExperimentJobStatus(job, "combination", state, ProcessHandle.current().pid(), started, Instant.now(), 4, 1, 0,
                 new ExperimentProgress(job, ExperimentProgress.Phase.RUNNING, runs, startedRuns, finished, finished > 2 ? 1 : 0,
                         perRun, done), message);
     }

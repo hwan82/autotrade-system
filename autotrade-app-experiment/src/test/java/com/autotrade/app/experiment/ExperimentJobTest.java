@@ -253,6 +253,28 @@ class ExperimentJobTest {
     }
 
     @Test
+    void 명령_전체_실험_수는_바로_쓰고_끝난_뒤에는_바꾸지_않는다() throws Exception {
+        // D-097: 워크포워드가 미리 알린 실험 수로 실험실이 명령 전체 진행률을 계산한다
+        MovingClock clock = new MovingClock(WEEKEND);
+        ExperimentJob job = start(clock);
+        assertThat(status().experimentsPlanned()).isZero();
+        assertThat(status().commandPermille()).isEmpty();
+
+        clock.advance(Duration.ofMillis(10));
+        job.onExperimentsPlanned(8);
+        assertThat(status().experimentsPlanned()).isEqualTo(8);
+        assertThat(status().updatedAt()).isEqualTo(WEEKEND.plusMillis(10));
+        job.onProgress(new ExperimentProgress(JOB, ExperimentProgress.Phase.STARTED, 2, 0, 0, 0, 10, 0));
+        job.onProgress(new ExperimentProgress(JOB, ExperimentProgress.Phase.FINISHED, 2, 2, 2, 0, 10, 20));
+        assertThat(status().commandPermille()).hasValue(125);
+
+        job.finish(0);
+        job.onExperimentsPlanned(99);
+        assertThat(status().experimentsPlanned()).isEqualTo(8);
+        assertThat(status().state()).isEqualTo(ExperimentJobStatus.State.COMPLETED);
+    }
+
+    @Test
     void 실행_중에는_갱신_시각을_주기적으로_다시_쓴다() throws Exception {
         MovingClock clock = new MovingClock(WEEKEND);
         ExperimentJob job = ExperimentJob.start(JOB, "combination", ExperimentMain.gate(clock, config, false), 3,

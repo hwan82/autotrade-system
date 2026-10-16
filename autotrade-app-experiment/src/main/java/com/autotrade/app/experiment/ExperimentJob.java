@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li><b>정지 확인</b>: 먼저 {@link ExperimentGate}(감시의 정지 요청 파일, 장 시간 보호, D-063)를 묻고, 그다음 이 실험의 취소
  *       요청 파일({@link ExperimentJobFiles#cancelRequest})을 본다. 취소면 {@link ExperimentCancelledException}(종료 코드 3).</li>
- *   <li><b>진행 보고</b>: 실행기가 넘긴 진행 상태를 상태 파일에 쓴다. 단계가 바뀔 때는 바로, 진행 중에는 1초에 한 번까지만 쓰고,
+ *   <li><b>진행 보고</b>: 실행기가 넘긴 진행 상태와 명령이 미리 알린 전체 실험 수(D-097)를 상태 파일에 쓴다. 단계가 바뀔 때는 바로, 진행 중에는 1초에 한 번까지만 쓰고,
  *       따로 {@link ExperimentJobStatus#HEARTBEAT}마다 갱신 시각만 다시 써 실험실이 멈춘 명령을 알아보게 한다. 파일 쓰기
  *       실패는 실험을 멈추지 않는다(경고 한 번).</li>
  *   <li><b>병렬 상한</b>: 실행 명령 옵션 {@code --max-parallel-runs}(Gradle {@code -PmaxParallelRuns}) 값을 실행기에 준다.</li>
@@ -120,7 +120,7 @@ final class ExperimentJob implements RunGate, AutoCloseable {
             Files.deleteIfExists(files.cancelRequest(job));
             Instant now = clock.instant();
             ExperimentJobStatus first = new ExperimentJobStatus(job, command, ExperimentJobStatus.State.RUNNING, pid, now,
-                    now, maxParallelRuns, 0, null, "");
+                    now, maxParallelRuns, 0, 0, null, "");
             files.write(first);
             return new ExperimentJob(gate, files, clock, channel, lock, first, heartbeatEvery);
         } catch (IOException | RuntimeException e) {
@@ -178,6 +178,16 @@ final class ExperimentJob implements RunGate, AutoCloseable {
                 || !now.isBefore(lastWrite.plus(WRITE_INTERVAL))) {
             write();
         }
+    }
+
+    /** 명령 전체 실험 수(D-097)는 바로 쓴다. 한 명령에 한두 번이다. */
+    @Override
+    public synchronized void onExperimentsPlanned(int count) {
+        if (finished) {
+            return;
+        }
+        status = status.withExperimentsPlanned(count, clock.instant());
+        write();
     }
 
     @Override

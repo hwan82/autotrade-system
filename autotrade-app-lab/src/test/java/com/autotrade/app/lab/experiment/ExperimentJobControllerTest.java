@@ -59,7 +59,7 @@ class ExperimentJobControllerTest {
     }
 
     private ExperimentJobStatus jobStatus(String job, ExperimentJobStatus.State state, Instant updated) {
-        return new ExperimentJobStatus(job, "combination", state, 1234, updated, updated, 2, 1,
+        return new ExperimentJobStatus(job, "combination", state, 1234, updated, updated, 2, 1, 0,
                 new ExperimentProgress(job, ExperimentProgress.Phase.RUNNING, 4, 3, 1, 0, 10, 15), "");
     }
 
@@ -73,7 +73,7 @@ class ExperimentJobControllerTest {
                 Files.delete(p);
             }
         }
-        f.write(jobStatus(RUNNING, ExperimentJobStatus.State.RUNNING, now));
+        f.write(jobStatus(RUNNING, ExperimentJobStatus.State.RUNNING, now).withExperimentsPlanned(4, now)); // D-097
         f.write(jobStatus(DONE, ExperimentJobStatus.State.COMPLETED, now.minusSeconds(600)));
         f.write(jobStatus(STALE, ExperimentJobStatus.State.RUNNING, now.minusSeconds(3600)));
         Files.writeString(f.dir().resolve("EXP-20261015-BROKEN.status"), "깨진 파일");
@@ -90,7 +90,11 @@ class ExperimentJobControllerTest {
                 .andExpect(jsonPath("$.items[0].permille").value(375))
                 .andExpect(jsonPath("$.items[0].daysTotal").value(40))
                 .andExpect(jsonPath("$.items[0].maxParallelRuns").value(2))
+                .andExpect(jsonPath("$.items[0].experimentsPlanned").value(4))
+                .andExpect(jsonPath("$.items[0].commandPermille").value(93)) // (0 × 1000 + 375) / 4
                 .andExpect(jsonPath("$.items[1].job").value(DONE))
+                .andExpect(jsonPath("$.items[1].experimentsPlanned").value(0))
+                .andExpect(jsonPath("$.items[1].commandPermille").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.items[2].job").value(STALE))
                 .andExpect(jsonPath("$.items[2].state").value("UNRESPONSIVE"))
                 .andExpect(jsonPath("$.items[2].stale").value(true));
