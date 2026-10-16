@@ -51,7 +51,7 @@
   - CI를 직접 조회했다(run 38860726726, `head_sha=c7e8b7cbdc88b09d3101ab64dff2e52fefbb39ad`, event `pull_request`, conclusion success).
     - 잡 4개가 모두 success: `Gradle build`(job 116842159108; 단계 "Build and test" success, "Start each process once (ARC-03)" success, "Upload test reports" skipped), `Lab screens (Playwright)`, `DB schema (PostgreSQL 16)`, `Secret scan and collector boundary`.
     - c7e8b7c는 ed0727b에 검토 원문 1개만 더한 커밋이다(`git diff ed0727b..c7e8b7c --stat` → `docs/reviews/pr-131/risk-ops.md`만).
-  - `node --test support/guard.test.mjs`: 14건 통과, 실패 0. 시험 이름 수는 그대로이고, 기존 시험 3개에 단언 7개가 더해졌다.
+  - `node --test support/guard.test.mjs`: 14건 통과, 실패 0. 시험 이름 수는 그대로이고, 기존 시험 3개에 단언 5개가 더해졌다.
   - 1차 탐침 스크립트를 다시 돌렸다.
     - 설정 폴더 안 `<설정>/..foo` → 거절(1차 `null`, N1 해소).
     - 설정 폴더로 가는 링크 아래의 없는 `<링크>/sub` → 거절(1차 `null`, N2 해소).
