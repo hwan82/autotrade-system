@@ -25,7 +25,7 @@ test('진행 막대가 실시간 연결로 움직이고 끝난 작업을 펼치�
   const runBar = run.getByRole('progressbar');
   await expect(runBar).toHaveAttribute('aria-label', /^DEMO-20261015-RUN01 진행률 \d+\.\d%$/);
   await expect(run).toContainText(/Run \d+\/8 끝/);
-  await expect(run).toContainText(/거래일 \d+\/20/);
+  await expect(run).toContainText(/거래일 \d+\/160/);
   const runBefore = await valueNow(runBar);
   await expect.poll(() => valueNow(runBar), { timeout: 20_000 }).toBeGreaterThan(runBefore);
 
