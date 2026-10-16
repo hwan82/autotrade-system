@@ -25,3 +25,27 @@
 
 ## 판정
 수정 필요(A1: ADR-005에 새 REST API·오류 코드 등재). 머지 전 B7 risk-ops 검토 원문(`docs/reviews/pr-135/risk-ops.md`)도 있어야 한다.
+
+## 재검토 2026-10-16
+- 대상: PR #135 / 브랜치 `claude/project-thread-1ge5lz` 헤드 68d9e13(ef235ae 검토 반영 + 원문 되살림) / `git diff origin/main...HEAD` 전체(15개 파일, +973 −7)
+- 원문 보존 확인: `git diff d86ffde 68d9e13 -- docs/reviews/pr-135/architect.md` 차이 없음. ef235ae가 지운 이 파일은 내가 쓴 d86ffde 내용 그대로 되살아났다
+- 직접 실행한 것: `./gradlew build --init-script <미러>` → BUILD SUCCESSFUL, 종료 코드 0. `NotificationTesterTest` 13건(새 2건 `갱신이_시간_초과면_토큰_파일을_만들지_않는다`, `카카오가_새_리프레시_토큰을_주면_토큰_파일에_남겨_엔진이_이어_쓴다` 포함) 실패·건너뜀 0. 1차 이후 운영 코드(`autotrade-app-lab/src/main`, `autotrade-ui/src/main`)와 e2e 시험은 바뀌지 않아(`git diff d86ffde HEAD`에 시험 1개·문서 3개만 있음) 1차 e2e 결과(1 passed)가 그대로 유효하다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 직접 실행 성공 |
+| B2 | 통과 | 1차와 같음. 추가 변경은 시험·문서뿐이라 모듈 의존 변화 없음, ArchUnit 통과 |
+| B3 | 통과 | A1 반영: ADR-005 84행 공통 오류에 `TEST_RUNNING` 409·`TEST_TOO_SOON` 429, 5장 API 표에 `POST /api/settings/notification-test` 행(본문 없음, 응답 모양, 채널 순서, status 값, 사유 코드, 409·429·403, 최대 약 40초), 6장 설정 화면 표에 알림 시험 행. 코드와 대조: 응답 `TestView(sentAt, channels)`(NotificationTestController.java:80), `ChannelResult` 필드(NotificationTester.java:79), 사유 코드 `ok`(SendResult.java:18)·`kakao-reconsent-required`(KakaoMemoChannel.java:50) 일치 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음. 골든 테스트는 빌드에서 그대로 통과 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 1차 시험 그대로이고 risk-ops K1·K2 시험 2건과 거절 시 파일 없음 단언이 추가됨(NotificationTesterTest). 지운·건너뛴 시험 없음 |
+| B7 | 통과 | risk-ops 검토 원문 `docs/reviews/pr-135/risk-ops.md` 있음(판정 "승인", 1ba352b 대상). 그 뒤 변경은 risk-ops 권고 K1·K2를 반영한 시험과 문서뿐이고 운영 코드 변경이 없어 risk-ops 판정 범위를 벗어나지 않는다. 보호 경로 변경 없음 |
+| B8 | 통과 | 새 시험 값도 자리표시자(`PLACEHOLDER-KAKAO-REFRESH-0007`), 결과에 회전 토큰이 없음을 단언 |
+
+### 1차 지적 처리
+- A1(수정 필요): 해결(위 B3).
+- A2(권고, 채널 구성 규칙 중복): D-103 "반영 기록"에 다음 알림 모듈 PR의 변경 제안으로 넘긴다고 기록됨. 받아들인다.
+- A3(권고, 거절 상태 연타 시 토큰 엔드포인트 재호출): risk-ops가 검토했고 별도 지적 없음. 10초 간격·사람이 누를 때만이라 남은 위험으로 둔다.
+
+### 판정
+승인
