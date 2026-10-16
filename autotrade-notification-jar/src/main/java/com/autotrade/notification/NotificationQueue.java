@@ -80,16 +80,14 @@ public final class NotificationQueue implements AutoCloseable {
     private record Last(String kind, Instant at, int suppressed) {}
 
     /**
+     * 공개 생성자는 이것 하나다. 재동의 문구를 받지 않는 공개 생성자는 두지 않는다: 부르는 쪽이 문구를 빠뜨리면 새 토큰을 넣을 설정 키와
+     * 다시 시작할 프로세스가 빠진 일반 문구가 사용자에게 가기 때문이다(PR #132 QA R1). 일반 문구가 맞으면
+     * {@link #DEFAULT_KAKAO_RECONSENT_HELP}를 직접 넘긴다.
+     *
      * @param notifier 채널 순서(로그 채널 포함)
      * @param routes 종류 → 등급 표
      * @param zone 알림에 보일 시간대
      * @param process 스레드 이름에 쓰는 프로세스 이름
-     */
-    public NotificationQueue(Notifier notifier, EventRoutes routes, Clock clock, ZoneId zone, String process) {
-        this(notifier, routes, clock, zone, process, DEFAULT_KAKAO_RECONSENT_HELP);
-    }
-
-    /**
      * @param kakaoReconsentHelp 카카오 재동의 알림 본문(비밀값을 넣지 않는다). 새 토큰을 넣을 곳과 다시 시작할 프로세스는 부르는 쪽이 안다
      */
     public NotificationQueue(Notifier notifier, EventRoutes routes, Clock clock, ZoneId zone, String process,
