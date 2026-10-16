@@ -58,3 +58,45 @@
 
 ## 판정
 수정 필요(R1: 전체 상한이 긴급 알림, 특히 감시의 엔진 멈춤 알림을 버림. 긴급을 상한에서 빼거나 몫을 두고 실패해야 하는 시험 추가)
+
+## 재검토 2026-10-16
+- 대상: PR #128 / 브랜치 `claude/project-thread-vtmvk8` / 커밋 91e404a / main(5b46d17) 대비 diff `git diff origin/main...HEAD` 전체. 앞 검토(918f2e4) 뒤로 바뀐 것은 f085eac(architect F1·F2·F3, R3·R4 반영)와 91e404a(R5)다. 이 둘은 `git diff 918f2e4 HEAD`로 따로 다시 읽었다(코드 7개 파일, 문서 5개 파일).
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew clean build --continue`(Maven Central 대신 Google 미러를 쓰는 init 스크립트, 저장소 밖) → **BUILD SUCCESSFUL**(161 tasks). JUnit XML 집계(테스트/실패/오류/건너뜀): risk 55/0/0/0, architecture-test 44/0/0/0, app-engine 54/0/0/0, app-watchdog 51/0/0/0, notification-jar 69/0/0/0(`--rerun-tasks`로 다시 돌림), config 40/0/0/0, app-lab 214/0/0/0, app-gateway 50/0/0/0.
+  - CI: 91e404a의 `Secret scan and collector boundary`·`DB schema`는 success, `Gradle build`는 **cancelled**(이어진 푸시로 취소된 것으로 보임 `[추론]`). 판정은 위 로컬 빌드로 한다.
+  - R1 탐침을 다시 돌렸다(저장소에 남기지 않음, 실행 뒤 지움). 실험실 `process-stale`·`process-recovered`를 10초 간격으로 30번씩 번갈아 넣은 뒤 엔진 `process-stale`을 넣었다. 결과: `offer=true`, 외부 채널로 "engine 멈춤"이 나감. 외부로 나간 알림은 모두 `MAX_PER_WINDOW + 2`건 이하였다. 같은 시험이 918f2e4에서는 버려졌었다.
+
+### 앞 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| R1 전체 상한이 긴급을 버림 | 해결 | NotificationQueue.java:136 `windowCount >= MAX_PER_WINDOW && severityOf(kind) == INFO`일 때만 버린다. 긴급도 창 건수에는 더한다. 정보 알림이 상한으로 버려지면 `lastBySubject`가 바뀌지 않는다. 그래서 실험실이 멈춤↔회복을 오가도 회복이 버려진 뒤의 멈춤은 같은 대상·종류로 억제되고, 큐가 긴급으로 넘치지 않는다(탐침에서 외부 건수 상한 확인). 실패해야 하는 시험이 추가됐다: `NotificationQueueTest#긴급_알림은_전체_상한을_넘어도_받고_상한으로_버린_정보_건수를_붙인다`, `#정보_알림만_전체_상한으로_버리고_버린_건수는_다음에_받는_알림에_붙는다`. 큐가 차면 긴급도 버린다는 기존 시험은 기대가 `CAPACITY`까지로 바뀌었다(`#채널이_막혀도_넣는_쪽은_기다리지_않고_큐가_차면_버린다`). 넣는 쪽이 1초 안에 돌아온다는 단언은 그대로다. D-100 결정 1과 클래스 Javadoc 문구가 코드와 같다 |
+| R2 운영 배선 시험 | 미반영(권고 유지) | `EngineMain`의 `NotifyingCommandAuditLog` 연결과 `WatchdogMain`의 `notifications::offer` 연결을 보는 시험은 여전히 없다. 차단 사유는 아니다(아래 판정) |
+| R3 기존 설정 이행 | 해결(더 나은 방식) | `RuntimeConfig.Kakao`가 더는 거부하지 않는다. 대신 `meReady()`로 판정하므로(RuntimeConfig.java:104-107) 예전 파일도 실전 계좌 등 다른 설정과 함께 그대로 읽힌다(`ConfigLoaderTest#갱신_키_없이_카카오를_켠_예전_파일도_받아들인다`). 키가 모자라면 엔진·감시가 카카오 채널만 끈다. 근거: `KakaoMemoChannel` 생성자가 빈 REST 키·틀린 링크를 거부하고, `NotificationSetup.kakao`가 이를 잡아 ERROR 로그를 남긴다(NotificationSetup.java:94-111, `NotificationSetupTest#틀린_채널_설정은_던지지_않고_그_채널만_끈다`의 빈 refresh-token 경우). 설정 화면은 카카오 값을 고칠 때만 거부한다(SettingsController.java:203-210, `SettingsDiskGuardTest#갱신_키_없이_카카오를_켠_예전_파일이어도_다른_항목은_저장하고_카카오를_고칠_때만_거부한다`) |
+| R4 Windows 토큰 파일 권한 | 해결(문서) | D-100 "위험과 한계"에 한 줄 추가. 7단계 절차서 반영은 후속 |
+| R5 장애표 문구 | 해결 | broker-and-fault-design.md 6장 #8·#10에 D-100 알림이 추가됐다. 대응 동작은 바뀌지 않았다 |
+| 기타 f085eac | 확인 | `WatchdogMain.start`가 `watchdog.start()` 실패 때 감시를 닫아 알림 큐까지 닫는다(WatchdogMain.java:103-109). ADR-001·ADR-005·config-keys.md 문구가 코드와 일치한다 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 바뀐 부분이 Guard·`startGuard`(EngineMain.java:139-147)에 닿지 않는다. `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`·`#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `EngineMainTest#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 통과. F3 때문에 카카오 키가 모자란 파일이 받아들여져도 Guard 상태 키는 여전히 없다(CFG-02 그대로) |
+| A2 | 통과 | 주문 출구·ArchUnit 규칙 diff 없음. architecture-test 44건 통과, 고정 값 변경 없음 |
+| A3 | 통과 | 증권사 주문 연동 변경 없음. 알림 HTTP는 보내는 스레드에서만(앞 검토와 같음) |
+| A4 | 해당 없음 | 주문 타임아웃 코드 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 코드 변경 없음 |
+| A7 | 통과 | `offer`는 막지 않고 던지지 않는다(NotificationQueue.java:109-114). 상한 조건 변경으로 잠금 안 작업이 늘지 않았다(`routes.severityOf` 표 조회 하나). 엔진 명령 처리와 감사 로그 실패 처리는 그대로다(EngineCommandHandler.java:90-96). `NotifyingCommandAuditLogTest` 통과 |
+| A8 | 통과 | 앞 검토 근거 그대로이고, 감시의 엔진 멈춤 알림이 실험실·게이트웨이 소음에 밀리던 문제(R1)가 풀렸다(탐침, 위 시험) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 시험 값은 자리표시자다(`PLACEHOLDER-T`, `FAKE_SECRET`). `ConfigLoaderTest`의 새 시험은 경고가 비었는지 본다. 설정 화면 거부 문구에는 키 이름만 있다(SettingsController.java:209). gitleaks CI success |
+| A11 | 통과 | 보호 테스트 파일 diff 없음. `@Disabled` 없음. `NotificationQueueTest`에서 바뀐 기대 두 곳(상한 대상이 정보로 좁혀짐)은 동작 변경을 따른 것이고, 긴급이 상한을 넘어도 받는다는 반대쪽 시험이 추가됐다. `ConfigLoaderTest`의 비밀값 경로 고정 목록은 앞 검토 그대로다. R2 배선 시험이 없는 것은 남은 권고다 |
+| A12 | 통과 | 장애표 #8·#10 감지 칸에 알림이 추가됐을 뿐이고 대응·장애 테스트 8종의 전제는 바뀌지 않았다. O1(야간 긴급 알림) 전제를 약하게 만들던 R1이 풀렸다 |
+| A13 | 통과 | 시장 분기 없음. 시각 계산은 주입 `Clock`의 `Instant` |
+| A14 | 통과 | D-100 결정 1·5, "위험과 한계", "검증", ADR-001·ADR-005·config-keys.md, broker-and-fault-design.md 6장이 코드와 일치한다 |
+
+### 점검표 밖 발견(재검토)
+- R2(권고, 유지): 운영 배선 시험. 차단하지 않는 이유는 둘이다. 배선이 빠지면 알림이 덜 나갈 뿐 주문·Guard에는 닿지 않는다. 또 각 부품(`NotifyingCommandAuditLog`, `Watchdog`에 주입한 `Alerts`)은 시험으로 고정돼 있다. 7단계 주문 경로 알림을 이을 때 `EngineMainTest`에 넣기를 권한다.
+- R6(참고): 긴급은 이제 큐 크기(64)까지 받는다. 채널이 멈춰 한 건에 최대 약 40초(Slack 10초 + 카카오 갱신 포함 약 30초)가 걸리면, 뒤에 들어온 엔진 멈춤 알림이 앞 긴급들 뒤에서 늦게 나갈 수 있다. 감시의 긴급 원천은 대상·종류 억제로 묶여 있어 실제 대기열은 짧다고 본다(`[추론]`). 6단계 주간 점검에서 `pending()`·생략 건수를 보길 권한다(D-100 후속 4번과 같이).
+
+## 판정(재검토 2026-10-16)
+승인
