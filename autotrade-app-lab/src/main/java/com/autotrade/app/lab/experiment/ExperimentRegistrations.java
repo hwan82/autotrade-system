@@ -8,6 +8,7 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.strategy.TradingStyle;
 import com.autotrade.selection.calc.Metric;
 import com.autotrade.selection.calc.SelectionCriteria;
+import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.combo.CombinationPlan;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -49,11 +50,25 @@ public final class ExperimentRegistrations {
     private final Path root;
     private final StrategyProfileStore strategies;
     private final SelectionProfileStore selections;
+    private final FileWriter writer;
 
     public ExperimentRegistrations(Path root, StrategyProfileStore strategies, SelectionProfileStore selections) {
+        this(root, strategies, selections, (file, text) -> Files.writeString(file, text, StandardCharsets.UTF_8));
+    }
+
+    /** 시험용: 임시 파일 쓰기를 바꿔 쓰기 실패 정리 경로를 확인한다. */
+    ExperimentRegistrations(Path root, StrategyProfileStore strategies, SelectionProfileStore selections,
+            FileWriter writer) {
         this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
         this.strategies = Objects.requireNonNull(strategies, "strategies");
         this.selections = Objects.requireNonNull(selections, "selections");
+        this.writer = Objects.requireNonNull(writer, "writer");
+    }
+
+    /** 등록 파일 본문을 임시 파일에 쓴다. */
+    @FunctionalInterface
+    interface FileWriter {
+        void write(Path file, String text) throws IOException;
     }
 
     /**
@@ -102,19 +117,27 @@ public final class ExperimentRegistrations {
         }
         Path tmp = dir.resolve("experiment.yaml.tmp");
         try {
-            Files.writeString(tmp, yaml, StandardCharsets.UTF_8);
+            writer.write(tmp, yaml);
             Files.move(tmp, dir.resolve("experiment.yaml"), StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            // 빈 폴더를 남기면 목록에는 안 보이는데 같은 ID가 계속 409가 된다
-            try {
-                Files.deleteIfExists(tmp);
-                Files.deleteIfExists(dir);
-            } catch (IOException ignored) {
-                // 지우지 못하면 원래 오류만 알린다
-            }
+            cleanUp(tmp, dir);
             throw new UncheckedIOException("등록 파일을 쓸 수 없습니다: " + id, e);
+        } catch (RuntimeException e) {
+            // 보안 관리자·잘못된 경로 같은 비검사 예외도 같은 이유로 정리한다
+            cleanUp(tmp, dir);
+            throw e;
         }
         return new Registration(id, yaml, COMMAND.formatted(id), true);
+    }
+
+    /** 빈 폴더를 남기면 목록에는 안 보이는데 같은 ID가 계속 409가 된다. 지우지 못하면 원래 오류만 알린다. */
+    private static void cleanUp(Path tmp, Path dir) {
+        try {
+            Files.deleteIfExists(tmp);
+            Files.deleteIfExists(dir);
+        } catch (IOException | RuntimeException ignored) {
+            // 원래 오류를 가리지 않는다
+        }
     }
 
     private String render(Request r) {
@@ -125,6 +148,8 @@ public final class ExperimentRegistrations {
         if (!ID.matcher(id).matches()) {
             throw new IllegalArgumentException("실험 ID는 영문 대문자·숫자로 시작하고 영문 대문자·숫자·- 48자 이내여야 합니다(예: EXP-20261014-CMB01)");
         }
+        // Windows 예약 이름(D-097)은 폴더를 만들기 전에 거절한다. 거절 문구는 ExperimentId가 준다
+        new ExperimentId(id);
         String question = required(r.question(), "질문");
         if (question.length() > MAX_QUESTION || question.chars().anyMatch(c -> c == '\n' || c == '\r')) {
             throw new IllegalArgumentException("질문은 한 줄, " + MAX_QUESTION + "자 이내여야 합니다");

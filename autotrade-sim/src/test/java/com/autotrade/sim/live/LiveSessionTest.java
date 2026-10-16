@@ -4,11 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.market.DataGap;
+import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.OrderBookSnapshot;
 import com.autotrade.domain.market.PriceLevel;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
+import com.autotrade.marketdata.recording.JournalWriter;
+import com.autotrade.marketdata.recording.RecordedDay;
+import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunGate;
@@ -24,6 +28,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -179,7 +184,7 @@ class LiveSessionTest {
     void crashWithLostTailAndUnclosedMetaStillReplaysTheSame() throws Exception {
         List<MarketEvent> events = twoDays();
         int crashAt = events.size() / 3;
-        crashAndResume(events, crashAt, crashAt, false);
+        crashAndResume(events, crashAt, crashAt, DayTwo.NONE);
     }
 
     @Test
@@ -190,14 +195,27 @@ class LiveSessionTest {
         int dayTwoAt = (int) events.stream().filter(e -> e.receivedAt().atZone(SEOUL).toLocalDate().equals(dayOne))
                 .count();
         assertThat(dayTwoAt).isPositive().isLessThan(events.size());
-        crashAndResume(events, dayTwoAt / 2, dayTwoAt, false);
-        crashAndResume(events, dayTwoAt, dayTwoAt, false);
+        crashAndResume(events, dayTwoAt / 2, dayTwoAt, DayTwo.NONE);
+        crashAndResume(events, dayTwoAt, dayTwoAt, DayTwo.NONE);
         // 2일차 파일만 열고 첫 줄을 내리기 전에 다시 죽어 읽을 줄 없는 2일차 파일이 남아도 공백이 남는다(risk-ops PR #94 N1)
-        crashAndResume(events, dayTwoAt, dayTwoAt, true);
+        crashAndResume(events, dayTwoAt, dayTwoAt, DayTwo.ZERO_BYTES);
+        // 실제 비정상 종료에 가까운 모양: 기록기가 2일차를 열어 gzip 머리와 meta(complete=false, 끝 없는 구간)만 남긴 경우
+        // (risk-ops PR #94 F1)
+        crashAndResume(events, dayTwoAt, dayTwoAt, DayTwo.OPENED_UNFLUSHED);
+    }
+
+    /** 이어 받기 전 2일차 기록 폴더 모양. */
+    private enum DayTwo {
+        /** 2일차 폴더 없음. */
+        NONE,
+        /** 0바이트 {@code events.jsonl.gz}만, meta 없음. */
+        ZERO_BYTES,
+        /** 기록기가 2일차 파일을 열고 첫 줄을 내리기 전에 죽음: gzip 머리만 있는 파일과 미종료 meta. */
+        OPENED_UNFLUSHED
     }
 
     /** {@code crashAt}개를 받은 뒤 닫지 않고 꼬리를 잘라 남기고, {@code resumeFrom}번째부터 이어 받아 리플레이와 같은지 본다. */
-    private void crashAndResume(List<MarketEvent> events, int crashAt, int resumeFrom, boolean emptyDayTwo)
+    private void crashAndResume(List<MarketEvent> events, int crashAt, int resumeFrom, DayTwo dayTwoShape)
             throws Exception {
         LiveSession crashed = open();
         for (MarketEvent e : events.subList(0, crashAt)) {
@@ -224,10 +242,21 @@ class LiveSessionTest {
                 .resolve("events.jsonl.gz");
         byte[] bytes = Files.readAllBytes(day);
         Files.write(day, java.util.Arrays.copyOf(bytes, bytes.length - 20));
-        if (emptyDayTwo) {
-            Path dayTwo = day.getParent().resolveSibling("2026-10-15");
+        Path dayTwo = day.getParent().resolveSibling("2026-10-15");
+        if (dayTwoShape == DayTwo.ZERO_BYTES) {
             Files.createDirectories(dayTwo);
             Files.write(dayTwo.resolve("events.jsonl.gz"), new byte[0]);
+        } else if (dayTwoShape == DayTwo.OPENED_UNFLUSHED) {
+            // 실제 기록기로 2일차 첫 줄을 쓰고 flush·close 없이 버린다: 줄은 버퍼에 남고 디스크에는 gzip 머리와 meta만 남는다
+            MarketEvent firstOfDayTwo = events.get(resumeFrom);
+            JournalWriter dying = new JournalWriter(new RecordingLayout(copy.resolve(ID).resolve(LiveSession.JOURNAL_DIR)),
+                    Market.KRX, SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"), "시험");
+            dying.append("KIWOOM-WS", firstOfDayTwo, firstOfDayTwo.receivedAt());
+            assertThat(RecordedDay.open(dayTwo).lines()).isEmpty();
+            assertThat(RecordedDay.open(dayTwo).meta()).hasValueSatisfying(m -> {
+                assertThat(m.complete()).isFalse();
+                assertThat(m.segments()).last().satisfies(seg -> assertThat(seg.endedAt()).isEmpty());
+            });
         }
 
         LiveSession resumed = LiveSession.open(plan, REPO, copy, clock, m -> { });
