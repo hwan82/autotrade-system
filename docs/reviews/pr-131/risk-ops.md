@@ -38,3 +38,39 @@
 
 ## 판정
 수정 필요(A8: `workDirReason` 겹침 판정의 `..` 접두 우회 F1과 그 시험 추가, A11 연동)
+
+## 재검토 2026-10-16 (헤드 ed0727b)
+- 대상: PR #131 / 커밋 ed0727b / main 대비 diff 전체(앞 검토 6a4728c 대비 새 변경은 ed0727b 하나: `autotrade-ui/e2e/support/guard.mjs`, `guard.test.mjs`, `docs/decisions/D-102-lab-e2e-guard-followups.md`. 그 밖의 diff는 검토 원문 `docs/reviews/pr-131/architect.md`·`risk-ops.md` 추가뿐)
+- 점검표: A
+- 직접 실행한 것:
+  - `node --test support/guard.test.mjs`: 14건 통과, 실패 0.
+  - 앞 검토 탐침 다시 실행: P1(설정 폴더 `<X>/..cfg`, 작업 폴더 `<X>`) → 거절 문구 반환(앞 검토 null). P2(링크 아래 아직 없는 `link/sub`) → 거절 문구 반환(앞 검토 null). P3(기본 작업 폴더 `os.tmpdir()/autotrade-ui-e2e`) → null(정상 통과 유지).
+  - 변이 2개를 작업 트리에서 직접 넣고 시험 뒤 되돌림(`git status` 깨끗 확인): M1 `inside`를 원래 `!rel.startsWith('..')`로 되돌림 → 시험 13 "시험 작업 폴더가 실제 설정 폴더·저장소와 같거나 그 위·아래면 거절한다" 실패(1건). M2 `norm`의 위 폴더 올라가기 제거(없는 경로 그대로 비교) → 시험 14 "작업 폴더 확인은 링크를 따라가 실제 경로로 본다" 실패(1건). 두 수정 모두 시험이 고정한다.
+  - `./gradlew --no-daemon :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test`: 다시 BUILD FAILED. 원인은 같음(의존성 받기 실패, `kotlin-stdlib:2.0.21` "Could not find/resolve", 앞 시도에서 Maven Central 429). 사용자 허락이 없어 미러는 쓰지 않았다. 보조 근거(직접 실행 아님): 헤드 ed0727b CI 4개 잡 모두 success(Gradle build, Lab screens (Playwright), DB schema (PostgreSQL 16), Secret scan and collector boundary; actions run 38860195658).
+  - 보호 경로 대조: 바뀐 파일 12개 중 `scripts/ci/protected-paths.txt` 패턴에 걸리는 파일 0개. `*.java`·`*.kts`·`.github/**` 변경 0줄(앞 검토와 같음).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 앞 검토와 같음. ed0727b도 `autotrade-ui/e2e`와 D-102 문서만 바꿈, RealTradingGuard·설정 로딩 변경 없음 |
+| A2 | 해당 없음 | 주문 출구·Guard 팩토리·`autotrade-architecture-test` 변경 없음(보호 경로 대조 0건) |
+| A3 | 해당 없음 | 증권사 플러그인·주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | F1 해소: `guard.mjs` `inside`가 `rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)`로 바뀌어 `..cfg` 같은 안쪽 이름을 안쪽으로 본다(탐침 P1 거절, 변이 M1을 시험 13이 잡음). `norm`이 없는 경로를 있는 가장 가까운 위 폴더까지 실제 경로로 푼 뒤 나머지를 붙여, 링크 아래 새 폴더도 실제 설정 폴더 안으로 판정(탐침 P2 거절, 변이 M2를 시험 14가 잡음). 루프는 `path.dirname(head) === head`(루트)에서 끝나 무한 반복 없음. Windows 구분자는 `path.sep`을 써서 `path.relative`의 출력과 맞음. 앞 검토에서 통과로 본 장 시간 보호·수록 범위 밖 거절·정지 요청 오류 시 거절·`--no-daemon`·`--stop` 안내는 ed0727b가 건드리지 않음(diff 확인) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | ed0727b 추가 줄에 키·토큰·계좌번호 형태 없음, 시험 픽스처는 `mkdtemp` 빈 폴더와 `..cfg`·`..e2e` 하위 폴더뿐. CI Secret scan success(보조) |
+| A11 | 통과 | 보호 테스트·고정 값 변경 없음. `guard.test.mjs`는 기존 단정을 지우거나 고치지 않고 단정 5개 추가(`..e2e` 안쪽, F1 `..cfg` 위쪽, 링크 아래 없는 폴더, `coverageFrom` 경계 null, 미국만 범위 밖). 새 동작 두 곳 모두 변이로 시험이 실패함을 직접 확인(M1·M2). Gradle 보호 테스트는 로컬 직접 실행 실패(환경), diff에 그 대상 코드 변경 없음, CI Gradle build success(보조) |
+| A12 | 통과 | 장애 대응표 17종·O1~O8·장애 테스트 8종 대상 코드 변경 없음. 바뀐 것은 시험 하네스의 사전 확인뿐 |
+| A13 | 통과 | 실전 경로 시장 분기 변경 없음. 추가된 수록 범위 시험(`2026-01-02T03:00:00Z` → `{ market: 'US', date: '2025-12-31' }`)이 시장별 현지 날짜(Asia/Seoul 01-02, America/New_York 01-01)로 판단함을 고정 |
+| A14 | 통과 | D-102 결정 2가 "없는 경로는 있는 가장 가까운 위 폴더를 실제 경로로" 문구를 더해 코드와 일치, 검증 절에 추가 시험과 변이 3개를 적음. 앞 검토 A14의 단서("같거나 그 위·아래면 거절"이 F1 때문에 참이 아님)는 해소 |
+
+## 점검표 밖 발견(재검토)
+- 앞 검토 F1: 해소(위 A8).
+- 앞 검토 참고(링크 아래 없는 폴더): 이번 수정으로 거절된다. 해소.
+- 참고(남은 위험, 수정 요구 아님): D-102 문서 검증 절의 "14건 통과(이전 7건 + 7건)"은 시험 함수 수 기준으로 지금도 14건이다(이번 추가는 기존 시험 안의 단정). 국내 캘린더 수록 끝(2027-12-31) 관련 갱신 권고와 Windows 실기 미확인은 앞 검토와 같다.
+- 확인 못 한 것: 로컬 Gradle 시험(의존성 받기 실패, 환경 문제). 이 PR은 Gradle이 컴파일·시험하는 코드를 바꾸지 않아 점검 항목은 diff 대조와 node 시험·변이·탐침으로 판정했고, CI Gradle build success를 보조 근거로 적었다.
+
+## 판정(재검토)
+승인
