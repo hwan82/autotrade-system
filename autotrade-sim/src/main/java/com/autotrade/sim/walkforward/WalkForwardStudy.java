@@ -142,7 +142,7 @@ public final class WalkForwardStudy {
                 code, log, gate, spanFrom);
         // 실제 병렬 수: 등록 파일 parallelism과 실행 명령 상한 중 작은 쪽(D-089). 결정론 기록에도 이 값을 쓴다
         int parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
-        // 명령 전체 진행률(D-097): 실행기 호출 수를 미리 센다. 결정론 확인은 같은 계산을 한 번 더 돈다
+        // 명령 전체 진행률(D-098): 실행기 호출 수를 미리 센다. 결정론 확인은 같은 계산을 한 번 더 돈다
         // 세기나 알리기가 실패해도 실험은 계속한다(0 = 모름, PR #124 architect R1)
         int planned = 0;
         try {
@@ -261,7 +261,7 @@ public final class WalkForwardStudy {
     }
 
     /**
-     * 계산 한 번({@link #compute})이 실행기를 부르는 횟수(D-097). 구간마다 학습 1, 검증 1, 스트레스 1, 대조군 시드마다 1이고, 각각
+     * 계산 한 번({@link #compute})이 실행기를 부르는 횟수(D-098). 구간마다 학습 1, 검증 1, 스트레스 1, 대조군 시드마다 1이고, 각각
      * 조합이 {@link SimulationExperimentRunner#MAX_COMBINATIONS}개를 넘으면 나눠 부른 만큼({@link #runAll}과 같은 규칙).
      */
     static int experimentsPerCompute(int windows, ComboSets sets, int nullSeeds) {

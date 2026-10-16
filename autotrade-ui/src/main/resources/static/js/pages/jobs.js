@@ -50,7 +50,7 @@ function bar(permille, label) {
 const pct = permille => `${(permille / 10).toFixed(1)}%`;
 
 /**
- * 진행 막대와 숫자. 첫 실험 시작 전(진행 필드 null)이면 문구만. 명령이 전체 실험 수를 미리 알렸으면(워크포워드, D-097)
+ * 진행 막대와 숫자. 첫 실험 시작 전(진행 필드 null)이면 문구만. 명령이 전체 실험 수를 미리 알렸으면(워크포워드, D-098)
  * 막대는 명령 전체 진행률이고 지금 실험의 진행은 아래 줄에 붙인다.
  */
 function progress(j) {

@@ -254,7 +254,7 @@ class ExperimentJobTest {
 
     @Test
     void 명령_전체_실험_수는_바로_쓰고_끝난_뒤에는_바꾸지_않는다() throws Exception {
-        // D-097: 워크포워드가 미리 알린 실험 수로 실험실이 명령 전체 진행률을 계산한다
+        // D-098: 워크포워드가 미리 알린 실험 수로 실험실이 명령 전체 진행률을 계산한다
         MovingClock clock = new MovingClock(WEEKEND);
         ExperimentJob job = start(clock);
         assertThat(status().experimentsPlanned()).isZero();

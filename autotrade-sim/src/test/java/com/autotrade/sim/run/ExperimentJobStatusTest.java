@@ -72,7 +72,7 @@ class ExperimentJobStatusTest {
 
     @Test
     void 이전_형식_v1도_읽고_전체_실험_수는_모름이다() {
-        // D-097 전 실행 명령이 남긴 상태 파일(작업 폴더에 남은 끝난 작업)이 읽기 실패로 빠지지 않게 한다
+        // D-098 전 실행 명령이 남긴 상태 파일(작업 폴더에 남은 끝난 작업)이 읽기 실패로 빠지지 않게 한다
         String v2 = running().withExperimentsPlanned(9, T0).encode();
         String v1 = v2.replace("experiment-job-v2", "experiment-job-v1").replace("experiments-planned: 9\n", "");
 

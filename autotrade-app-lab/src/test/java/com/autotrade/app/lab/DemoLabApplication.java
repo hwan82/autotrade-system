@@ -84,7 +84,7 @@ public final class DemoLabApplication {
     }
 
     /**
-     * 워크포워드 데모(D-097): 실험(실행기 호출) 24번을 미리 알리고 5초마다 지금 실험의 Run 하나씩 끝낸다. 화면에 명령 전체 진행률과
+     * 워크포워드 데모(D-098): 실험(실행기 호출) 24번을 미리 알리고 5초마다 지금 실험의 Run 하나씩 끝낸다. 화면에 명령 전체 진행률과
      * 지금 실험 진행률이 함께 나온다.
      */
     private static ExperimentJobStatus walkForward(Instant started, int tick) {

@@ -211,7 +211,7 @@ class WalkForwardStudyTest {
                 .anySatisfy(l -> assertThat(l).startsWith("계산 시작: ").endsWith(", 병렬 1"));
     }
 
-    /** 미리 알린 실험 수와 실제로 시작한 실험 수를 센다(D-097). */
+    /** 미리 알린 실험 수와 실제로 시작한 실험 수를 센다(D-098). */
     private static final class Counting implements RunGate {
         final List<Integer> planned = new ArrayList<>();
         final java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();

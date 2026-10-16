@@ -73,7 +73,7 @@ class ExperimentJobControllerTest {
                 Files.delete(p);
             }
         }
-        f.write(jobStatus(RUNNING, ExperimentJobStatus.State.RUNNING, now).withExperimentsPlanned(4, now)); // D-097
+        f.write(jobStatus(RUNNING, ExperimentJobStatus.State.RUNNING, now).withExperimentsPlanned(4, now)); // D-098
         f.write(jobStatus(DONE, ExperimentJobStatus.State.COMPLETED, now.minusSeconds(600)));
         f.write(jobStatus(STALE, ExperimentJobStatus.State.RUNNING, now.minusSeconds(3600)));
         Files.writeString(f.dir().resolve("EXP-20261015-BROKEN.status"), "깨진 파일");

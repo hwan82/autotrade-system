@@ -15,7 +15,7 @@ import java.util.stream.Stream;
  * 실험 실행 명령 하나(작업)의 상태 파일 내용(SIM-14·UI-02 진행 보고, D-089). 실행 명령({@code autotrade-app-experiment})이
  * {@code <설정 폴더>/experiment-state/jobs/<실험ID>.status}에 쓰고 실험실이 읽기만 한다. 두 프로세스가 같은 코덱을 쓰도록
  * 여기 둔다. 형식은 UTF-8 {@code 키: 값} 줄이고 첫 줄이 {@value #FORMAT}이다. 모르는 키, 빠진 키, 범위 밖 값은 읽기 거부.
- * 이전 형식 {@value #FORMAT_V1}(명령 전체 실험 수 {@code experiments-planned} 없음)도 읽는다(D-097). 그때 전체 실험 수는 0(모름).
+ * 이전 형식 {@value #FORMAT_V1}(명령 전체 실험 수 {@code experiments-planned} 없음)도 읽는다(D-098). 그때 전체 실험 수는 0(모름).
  *
  * @param job 작업 ID = 실험 ID(결과 폴더 이름)
  * @param command 실행 명령 종류(combination, recording, study, walkforward, live-check, live-weekly)
@@ -25,7 +25,7 @@ import java.util.stream.Stream;
  * @param updatedAt 마지막으로 쓴 시각. 실행 중에는 {@link #HEARTBEAT}마다 갱신한다
  * @param maxParallelRuns 이 명령이 쓴 병렬 Run 상한(-PmaxParallelRuns)
  * @param experimentsStarted 이 명령이 시작한 실험(실행기 호출) 수. 결정론 확인·워크포워드는 여러 번 부른다
- * @param experimentsPlanned 이 명령이 부를 실험 수를 미리 알린 값({@link RunGate#onExperimentsPlanned}, D-097). 모르면 0
+ * @param experimentsPlanned 이 명령이 부를 실험 수를 미리 알린 값({@link RunGate#onExperimentsPlanned}, D-098). 모르면 0
  * @param progress 지금 실험의 마지막 진행 상태. 아직 없으면 null
  * @param message 끝난 이유나 알림 한 줄(줄바꿈 없음, {@value #MAX_MESSAGE}자 이하). 없으면 빈 문자열
  */
@@ -127,7 +127,7 @@ public record ExperimentJobStatus(
     }
 
     /**
-     * 명령 전체 진행률 천분율(0~1000, D-097). 전체 실험 수를 모르면(0) 비어 있다. 실험마다 같은 무게로 센다: 끝난 실험 수에 지금
+     * 명령 전체 진행률 천분율(0~1000, D-098). 전체 실험 수를 모르면(0) 비어 있다. 실험마다 같은 무게로 센다: 끝난 실험 수에 지금
      * 실험의 진행률({@link ExperimentProgress#permille})을 더해 전체 실험 수로 나눈다. 시작한 실험 수가 알린 수를 넘으면
      * 1000에서 멈춘다. 표시용이라 정수로 내림한다.
      */
@@ -154,7 +154,7 @@ public record ExperimentJobStatus(
                 experimentsPlanned, p, message);
     }
 
-    /** 명령이 부를 전체 실험 수를 알림(D-097). */
+    /** 명령이 부를 전체 실험 수를 알림(D-098). */
     public ExperimentJobStatus withExperimentsPlanned(int planned, Instant at) {
         return new ExperimentJobStatus(job, command, state, pid, startedAt, at, maxParallelRuns, experimentsStarted,
                 planned, progress, message);
