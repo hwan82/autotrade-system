@@ -100,7 +100,13 @@ public final class WatchdogMain {
         notifications.offer(EventRoutes.WATCHDOG_STARTED, PROCESS, "감시 시작",
                 "지키는 프로세스 " + settings.processes()
                         + (watchdog.stopRequests().active() ? ". 남아 있던 정지 요청 파일을 이어받음(자원이 정상이면 풀림)" : ""));
-        watchdog.start();
+        try {
+            watchdog.start();
+        } catch (RuntimeException e) {
+            // 감시를 닫으면 알림 큐도 닫힌다(PR #128 architect R3)
+            watchdog.close();
+            throw e;
+        }
         return watchdog;
     }
 

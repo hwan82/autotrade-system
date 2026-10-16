@@ -21,7 +21,7 @@
 | `lab.default-seed-capital-usd` | long(달러) | `10000` | 1 이상 | 즉시 | 실험 생성 화면(미국) | D-021 |
 | `notification.slack.enabled` | bool | `false` | true면 webhook-url 필수 | 실전 엔진·감시 재기동 | 알림(실전 엔진·감시, D-100) | 원본 기획 v2.0 |
 | `notification.slack.webhook-url` 🔒 | 문자열 | 빈 값 | Slack Incoming Webhook URL. `https://hooks.slack.com/services/`로 시작해야 쓴다(아니면 그 채널만 끄고 ERROR 로그) | 실전 엔진·감시 재기동 | 알림 | D-099 |
-| `notification.kakao.enabled` | bool | `false` | true이고 mode=ME면 rest-api-key·refresh-token·link-url 필수(D-100) | 실전 엔진·감시 재기동 | 알림 | |
+| `notification.kakao.enabled` | bool | `false` | true이고 mode=ME면 rest-api-key·refresh-token·link-url이 있어야 보낸다. 모자라면 파일은 받아들이고 실전 엔진·감시가 카카오만 끄고 ERROR 로그(설정 화면은 카카오 값을 고칠 때 거부, D-100) | 실전 엔진·감시 재기동 | 알림 | |
 | `notification.kakao.mode` | enum | `ME` | ME(나에게 보내기, 무료)·BIZ(알림톡, 유료: 켜기 전 사용자 확인). 알림 모듈은 BIZ 채널을 만들지 않는다(WARN 로그, D-100) | 실전 엔진·감시 재기동 | 알림 | 원본 기획 v4.0 |
 | `notification.kakao.rest-api-key` 🔒 | 문자열 | 빈 값 | 카카오 앱 REST API 키(토큰 갱신의 client_id) | 실전 엔진·감시 재기동 | 알림 | D-100 |
 | `notification.kakao.refresh-token` 🔒 | 문자열 | 빈 값 | `talk_message` 동의로 받은 리프레시 토큰. 갱신된 토큰은 `<설정 폴더>/notification-state/kakao-token.json`(비밀값, 엔진·감시 공유)에 남고, 이 키 값이 바뀌면(재동의) 그 파일을 쓰지 않는다 | 실전 엔진·감시 재기동 | 알림 | D-100 |

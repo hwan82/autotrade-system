@@ -118,9 +118,9 @@ class NotificationQueueTest {
             }
         }
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(1));
-        // 전체 상한(창 하나에 20건)이 먼저 걸린다
-        assertThat(accepted).isEqualTo(NotificationQueue.MAX_PER_WINDOW);
-        assertThat(q.droppedTotal()).isEqualTo(200 - NotificationQueue.MAX_PER_WINDOW);
+        // 긴급은 전체 상한에 걸리지 않고 큐 크기(보내는 스레드가 막혀 든 1건 포함)까지 받는다
+        assertThat(accepted).isBetween(NotificationQueue.CAPACITY, NotificationQueue.CAPACITY + 1);
+        assertThat(q.droppedTotal()).isEqualTo(200 - accepted);
         release.countDown();
     }
 
@@ -190,16 +190,33 @@ class NotificationQueueTest {
     }
 
     @Test
-    void 상한으로_버린_건수는_다음에_받는_알림에_붙는다() throws Exception {
+    void 정보_알림만_전체_상한으로_버리고_버린_건수는_다음에_받는_알림에_붙는다() throws Exception {
         NotificationQueue q = queue();
         for (int i = 0; i < NotificationQueue.MAX_PER_WINDOW + 3; i++) {
-            q.offer(EventRoutes.ERROR, "s" + i, "오류", "");
+            q.offer(EventRoutes.PROCESS_RECOVERED, "s" + i, "회복", "");
         }
         assertThat(q.droppedTotal()).isEqualTo(3);
         clock.now = T0.plus(NotificationQueue.QUIET);
-        assertThat(q.offer(EventRoutes.ERROR, "later", "오류", "")).isTrue();
+        assertThat(q.offer(EventRoutes.PROCESS_RECOVERED, "later", "회복", "")).isTrue();
         awaitGot(NotificationQueue.MAX_PER_WINDOW + 1);
         assertThat(sink.got.get(NotificationQueue.MAX_PER_WINDOW).body()).isEqualTo("(알림이 몰려 다른 알림 3건 생략(로그 확인))");
+    }
+
+    @Test
+    void 긴급_알림은_전체_상한을_넘어도_받고_상한으로_버린_정보_건수를_붙인다() throws Exception {
+        NotificationQueue q = queue();
+        // 서로 다른 대상의 긴급 알림이 상한을 채워도(예: 엔진 멈춤↔회복 반복) 다음 긴급 알림은 버리지 않는다(PR #128 architect F1)
+        for (int i = 0; i < NotificationQueue.MAX_PER_WINDOW; i++) {
+            assertThat(q.offer(EventRoutes.REAL_TRADING_COMMAND, "c" + i, "명령 " + i, "")).isTrue();
+        }
+        assertThat(q.offer(EventRoutes.PROCESS_RECOVERED, "engine", "엔진 회복", "")).isFalse();
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
+        awaitGot(NotificationQueue.MAX_PER_WINDOW + 1);
+        Notification last = sink.got.get(NotificationQueue.MAX_PER_WINDOW);
+        assertThat(last.kind()).isEqualTo(EventRoutes.PROCESS_STALE);
+        assertThat(last.severity()).isEqualTo(Severity.URGENT);
+        assertThat(last.body()).isEqualTo("(알림이 몰려 다른 알림 1건 생략(로그 확인))");
+        assertThat(q.droppedTotal()).isEqualTo(1);
     }
 
     @Test

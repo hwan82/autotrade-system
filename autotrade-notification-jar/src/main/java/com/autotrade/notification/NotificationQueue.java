@@ -25,8 +25,10 @@ import java.util.concurrent.TimeUnit;
  *       나도 그 알림만 버리고 다음 알림을 계속 보낸다. 그래서 채널의 {@code Error}가 주문·명령 스레드로 번지지 않는다.</li>
  *   <li><b>등급은 매핑표로만</b>: 부르는 쪽은 종류만 주고 등급은 {@link EventRoutes}가 정한다(PR #127 risk-ops R4).</li>
  *   <li><b>폭주 억제</b>: 같은 대상(subject)·같은 종류가 {@link #QUIET} 안에 다시 오면 보내지 않고 세었다가, 다음에 보내는 같은 대상·종류
- *       알림 본문에 생략 건수를 붙인다. 종류가 바뀌면(예: 멈춤 → 회복) 늘 보낸다. 전체로도 {@link #QUIET}마다 {@link #MAX_PER_WINDOW}건까지만
- *       받고, 넘친 건수와 큐가 차서 버린 건수는 다음에 받는 알림 본문에 붙인다.</li>
+ *       알림 본문에 생략 건수를 붙인다. 종류가 바뀌면(예: 멈춤 → 회복) 늘 보낸다. 정보 알림은 전체로도 {@link #QUIET}마다
+ *       {@link #MAX_PER_WINDOW}건(긴급 포함해 셈)까지만 받는다. 긴급 알림은 전체 상한으로 버리지 않는다(감시는 상태가 바뀔 때만 알리므로
+ *       버린 긴급 알림은 다시 오지 않는다, PR #128 architect F1). 긴급도 큐가 차면({@link #CAPACITY}건) 버린다. 넘친 건수와 큐가 차서 버린
+ *       건수는 다음에 받는 알림 본문에 붙인다.</li>
  *   <li><b>카카오 재동의</b>: 발송 결과에 {@link KakaoMemoChannel#REFRESH_REJECTED}가 보이면(거절된 첫 발송에만 나온다) "카카오톡 알림
  *       재동의 필요" 긴급 알림을 한 번 넣는다(PR #127 QA R1).</li>
  *   <li><b>닫기</b>: {@link #close}는 정해진 시간까지 남은 알림을 보내 보고, 그래도 남은 알림은 로그 채널에만 남긴다.</li>
@@ -36,7 +38,7 @@ public final class NotificationQueue implements AutoCloseable {
 
     /** 같은 대상·종류를 다시 보내지 않는 간격이자 전체 상한을 세는 창. */
     public static final Duration QUIET = Duration.ofMinutes(10);
-    /** {@link #QUIET} 창 하나에 받는 최대 건수. */
+    /** {@link #QUIET} 창 하나에 받는 최대 건수. 정보 알림에만 적용한다(긴급은 큐 크기까지 받음). */
     public static final int MAX_PER_WINDOW = 20;
     /** 큐 크기. */
     public static final int CAPACITY = 64;
@@ -131,7 +133,7 @@ public final class NotificationQueue implements AutoCloseable {
             windowStart = now;
             windowCount = 0;
         }
-        if (windowCount >= MAX_PER_WINDOW) {
+        if (windowCount >= MAX_PER_WINDOW && routes.severityOf(kind) == Severity.INFO) {
             dropped++;
             droppedTotal++;
             return false;

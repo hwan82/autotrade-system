@@ -200,10 +200,16 @@ public class SettingsController {
         Secret refresh = secret(KAKAO_REFRESH, kakao.refreshToken(), values, clear);
         Secret clientSecret = secret(KAKAO_CLIENT_SECRET, kakao.clientSecret(), values, clear);
 
+        RuntimeConfig.Kakao newKakao = new RuntimeConfig.Kakao(kakaoEnabled, mode, token, restKey, refresh, clientSecret,
+                kakao.linkUrl());
+        // 카카오 값을 고칠 때만 거부한다. 파일은 모자란 키를 받아들이므로(엔진·감시가 카카오만 끔) 다른 항목 저장은 막지 않는다
+        boolean touchesKakao = values.keySet().stream().anyMatch(k -> k.startsWith("notification.kakao."))
+                || clear.stream().anyMatch(k -> k.startsWith("notification.kakao."));
+        if (touchesKakao && !newKakao.meReady()) {
+            throw new IllegalArgumentException("notification.kakao.enabled=true(ME)면 rest-api-key·refresh-token·link-url이 필요합니다");
+        }
         return new RuntimeConfig(c.marketData(), new RuntimeConfig.Lab(parallel, seedKrw, seedUsd),
-                new RuntimeConfig.Notification(new RuntimeConfig.Slack(slackEnabled, webhook),
-                        new RuntimeConfig.Kakao(kakaoEnabled, mode, token, restKey, refresh, clientSecret,
-                                kakao.linkUrl())),
+                new RuntimeConfig.Notification(new RuntimeConfig.Slack(slackEnabled, webhook), newKakao),
                 c.brokers(), c.realTrading());
     }
 
