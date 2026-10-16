@@ -169,32 +169,62 @@ class WatchdogTest {
     }
 
     @Test
-    void 값이_빠지기_시작하면_한_번만_알리고_돌아오면_다시_알릴_수_있다() {
-        // PR #122 risk-ops R1: 값이 소리 없이 계속 빠지면 위험 판정이 꺼진 것을 아무도 모른다
+    void 값이_빠지면_바로_알리고_계속_빠지면_간격마다_다시_알린다() {
+        // PR #122 risk-ops R1·독립 QA R1: 값이 소리 없이 계속 빠지면 위험 판정이 꺼진 것을 아무도 모른다(D-096)
         TestClock clock = new TestClock("2026-10-15T00:00:00Z");
         Watchdog w = watchdog(clock);
         w.tick();
         assertThat(w.missingWarnings()).isZero();
 
         cpu = -1;
-        for (int i = 0; i < 5; i++) {
-            clock.advance(Duration.ofSeconds(5));
-            w.tick();
-        }
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
         assertThat(w.missingWarnings()).isEqualTo(1);
-
-        diskFails = true; // 빠진 값이 늘면 다시 알린다
+        clock.advance(Watchdog.MISSING_REPEAT.minusSeconds(5)); // 간격 직전
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(1);
         clock.advance(Duration.ofSeconds(5));
         w.tick();
         assertThat(w.missingWarnings()).isEqualTo(2);
+
+        diskFails = true; // 새 값이 빠지면 간격과 상관없이 바로
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(3);
 
         diskFails = false;
         cpu = 0.1;
         clock.advance(Duration.ofSeconds(5));
         w.tick();
-        cpu = -1;
-        clock.advance(Duration.ofSeconds(5));
+        assertThat(w.missingRecoveries()).isEqualTo(1);
+        w.close();
+    }
+
+    @Test
+    void 같은_값이_빠졌다_돌아오기를_되풀이해도_간격마다_한_번만_알린다() {
+        // PR #122 독립 QA R4: 점검마다 오가면 WARN·INFO가 5초마다 쌓였다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
         w.tick();
+        for (int i = 0; i < 60; i++) { // 5분 동안 한 점검씩 번갈아 빠짐
+            cpu = i % 2 == 0 ? -1 : 0.1;
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+        }
+        assertThat(w.missingWarnings()).isEqualTo(1);
+        assertThat(w.missingRecoveries()).isEqualTo(1);
+
+        clock.advance(Watchdog.MISSING_REPEAT);
+        cpu = -1;
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(2);
+
+        for (int i = 0; i < 20; i++) { // 두 값이 번갈아 빠짐: 둘 다 한 번씩 알린 뒤로는 간격 안에서 조용하다
+            cpu = i % 2 == 0 ? 0.1 : -1;
+            diskFails = i % 2 == 0;
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+        }
         assertThat(w.missingWarnings()).isEqualTo(3);
         w.close();
     }
