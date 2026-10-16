@@ -51,3 +51,38 @@
 
 ## 판정
 수정 필요(F1: 전체 상한이 긴급 알림을 버리지 않게 하고 시험 추가, F2: ADR-005·ADR-001 계약 문서 갱신, F3: 기존 설정 호환성 처리 또는 문서화, B1·B2: 검토자 빌드 미실행이라 재검토 때 `./gradlew build` 직접 통과 확인 필요). B7은 risk-ops 검토가 따로 있어야 한다(현재 없음). R1~R5는 권고.
+
+## 재검토 2026-10-16
+- 대상: PR #128 / 커밋 91e404a(30d22ae 뒤 f085eac·bf732af·91e404a) / `git diff origin/main...HEAD` 전체(main 5b46d17, 41개 파일). 30d22ae..91e404a 차분은 13개 파일
+- 점검표: B
+- 직접 실행한 것:
+  - 91e404a에서 `./gradlew build --no-daemon` → **BUILD FAILED(8초, 코드 단계 전)**. `:build-logic` 클래스패스에서 `kotlin-stdlib:2.0.21`을 찾지 못하고 `kotlin-gradle-plugin-2.0.21.pom`을 해석하지 못했다. 같은 POM URL을 `curl`로 받아도 404가 온다. 1차 때와 같은 세션 네트워크 문제다. 컴파일·테스트·ArchUnit은 이번에도 **실행하지 못했다**.
+  - 참고(판정 근거 아님): 91e404a의 GitHub check는 `Secret scan and collector boundary`·`DB schema` 성공, `Gradle build`(id 116806208812)는 이 글을 쓰는 시점에 진행 중이다.
+  - 코드 읽기: 차분 전체와 관련 코드(`NotificationQueue.accept`, `RuntimeConfig.Kakao`, `SettingsController.apply`, `NotificationSetup.kakao`, `KakaoMemoChannel` 생성자, `WatchdogMain.start`).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 확인 못 함 | 위 "직접 실행한 것". 의존성 해석 실패라 코드까지 가지 못했다 |
+| B2 | 확인 못 함 | 이번 차분에도 새 모듈 의존이나 패키지 이동은 없다(정적 확인). ArchUnit·`RealPathReflectionTest`는 실행하지 못했다 |
+| B3 | 통과 | F2 해소: ADR-005:139-141(반영 시점 "실전 엔진·감시 재기동", link-url 화면 편집 불가, 새 비밀값 4개 쓰기 전용), ADR-001:56(새 공개 타입과 공유 토큰 파일 계약). F3 해소: D-100 결정 5·config-keys.md `notification.kakao.enabled` 행이 새 동작(파일은 받아들이고 엔진·감시가 카카오만 끔)과 맞는다 |
+| B4 | 통과 | 바뀐 코드에 시스템 시계·난수 없음. 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | F1 `NotificationQueueTest#긴급_알림은_전체_상한을_넘어도_받고_상한으로_버린_정보_건수를_붙인다`, F3 `ConfigLoaderTest#갱신_키_없이_카카오를_켠_예전_파일도_받아들인다`·`SettingsDiskGuardTest#갱신_키_없이_카카오를_켠_예전_파일이어도_다른_항목은_저장하고_카카오를_고칠_때만_거부한다`. 바뀐 단언 2건 확인: `#채널이_막혀도_넣는_쪽은_기다리지_않고_큐가_차면_버린다`는 이제 실제 큐 가득(64건, 1차 R5)을 본다. `#정보_알림만_전체_상한으로_버리고…`는 상한 대상을 정보로 바꾼 동작 변경을 따른 것이다. 약화나 삭제는 없다. 시험 실행 확인은 B1과 같은 이유로 못 했다 |
+| B7 | 실패(별도 검토 필요) | 보호 경로 변경이 그대로 있다. **risk-ops 검토 필요**. `docs/reviews/pr-128/risk-ops.md` 1차 판정은 "수정 필요(R1)"이고, 이 수정을 본 risk-ops 재검토는 파일에 아직 없다. 사용자 머지·독립 QA 대상 |
+| B8 | 통과 | 새 오류 문구(`SettingsController`, `RuntimeConfig.meReady`)와 시험 값에 비밀값이 없다(자리표시자 `PLACEHOLDER-T`). gitleaks CI 성공 |
+
+### 1차 지적 처리
+- F1 해소: 전체 상한을 정보 등급에만 적용한다(NotificationQueue.java:136, `routes.severityOf(kind) == Severity.INFO`). 긴급도 상한 계산(`windowCount`)에는 들어가서 긴급 폭주 뒤 정보 알림은 버려진다. 버린 건수는 다음 알림에 붙는다. 긴급은 같은 대상·종류 억제와 큐 크기(64)로만 제한된다. 1차에서 추천한 ①과 같다.
+  - `[추론]` 남는 한계: 프로세스 상태가 흔들리면 긴급 `process-stale`은 다 나가지만, 사이의 정보 `process-recovered`는 상한에 걸려 빠질 수 있다. 사람이 "아직 멈춤"으로 오인하는 쪽이라 안전한 방향이다. 받아들인다.
+- F2 해소: 위 B3.
+- F3 해소: `Kakao` 생성자가 검증하지 않고(RuntimeConfig.java:94-102), `meReady()`로 판단을 옮겼다.
+  - 설정 화면은 카카오 키를 고치거나 지울 때만 거부한다(SettingsController.java:203-210). 그래서 예전 파일에서도 다른 항목 저장과 `enabled=false`는 막지 않는다(시험 있음).
+  - 엔진·감시는 `NotificationSetup.kakao()`에서 `KakaoMemoChannel` 생성자가 빈 REST 키를 거부하면 ERROR 로그를 남기고 카카오만 끈다. main에서 유효했던 파일이 다시 유효해졌다.
+- R3 반영: `watchdog.start()`가 실패하면 감시를 닫고(이때 큐도 닫힘) 다시 던진다(WatchdogMain.java:103-109). R4는 D-100 위험 절에 반영했다.
+- R1(엔진·감시 `setup` 중복과 위치 인자 순서 시험), R2(라이브러리 안 호스트 문구·시간대)는 반영하지 않았다. 권고였으므로 이번 판정에 넣지 않는다. 후속으로 남길 것을 권한다.
+
+### 새 발견
+- 없음. 이번 차분에서 계약·경계·안전 불변식에 새 문제를 찾지 못했다. `docs/team/broker-and-fault-design.md` 장애표 #8·#10 문구는 D-100 동작과 맞는다.
+
+## 판정
+수정 필요(코드·문서 지적은 모두 해소됐다. 남은 항목은 B1·B2 검토자 빌드 확인 하나다: 이 세션은 Maven Central 의존성을 받지 못해 `./gradlew build`를 직접 통과시키지 못했다. 빌드가 되는 환경에서 같은 커밋으로 `./gradlew build` 통과를 확인하면 승인할 수 있는 상태다). B7은 risk-ops 재검토가 따로 있어야 한다(현재 없음).
