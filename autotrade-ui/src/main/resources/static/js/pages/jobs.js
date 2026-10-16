@@ -40,22 +40,44 @@ window.addEventListener('hashchange', () => {
   if (location.hash !== '#/experiments') stopUpdates();
 });
 
-/** 진행 막대와 숫자. 첫 실험 시작 전(진행 필드 null)이면 문구만. */
+function bar(permille, label) {
+  const fill = h('span', {});
+  fill.style.width = `${Math.min(100, Math.max(0, permille / 10))}%`; // CSP 'self': style 속성 대신 CSSOM
+  return h('div', { class: 'job-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 1000, 'aria-valuenow': permille,
+    'aria-label': label }, fill);
+}
+
+const pct = permille => `${(permille / 10).toFixed(1)}%`;
+
+/**
+ * 진행 막대와 숫자. 첫 실험 시작 전(진행 필드 null)이면 문구만. 명령이 전체 실험 수를 미리 알렸으면(워크포워드, D-098)
+ * 막대는 명령 전체 진행률이고 지금 실험의 진행은 아래 줄에 붙인다.
+ */
 function progress(j) {
-  if (j.permille === null || j.permille === undefined) return h('span', { class: 'muted small' }, '첫 실험 시작 전');
-  const pctText = `${(j.permille / 10).toFixed(1)}%`;
+  const whole = j.commandPermille !== null && j.commandPermille !== undefined;
+  if (j.permille === null || j.permille === undefined) {
+    if (!whole) return h('span', { class: 'muted small' }, '첫 실험 시작 전');
+    return h('div', { class: 'job-progress' }, bar(j.commandPermille, `${j.job} 전체 진행률 ${pct(j.commandPermille)}`),
+      h('span', { class: 'small' }, `전체 ${pct(j.commandPermille)} · 실험 0/${number(j.experimentsPlanned)}`),
+      h('span', { class: 'sub muted small' }, '첫 실험 시작 전'));
+  }
   const runs = `Run ${number(j.runsFinished)}/${number(j.runsTotal)} 끝`
     + (j.runsFailed ? ` (실패 ${number(j.runsFailed)})` : '')
     + (j.state === 'RUNNING' && j.runsStarted > j.runsFinished ? `, ${number(j.runsStarted - j.runsFinished)}개 진행 중` : '');
   const days = j.daysTotal ? `거래일 ${number(j.daysDone)}/${number(j.daysTotal)}` : null;
-  const fill = h('span', {});
-  fill.style.width = `${Math.min(100, Math.max(0, j.permille / 10))}%`; // CSP 'self': style 속성 대신 CSSOM
+  const current = `${pct(j.permille)} · ${runs}${days ? ` · ${days}` : ''}`;
+  const phase = PHASE[j.phase] || j.phase;
+  if (whole) {
+    return h('div', { class: 'job-progress' },
+      bar(j.commandPermille, `${j.job} 전체 진행률 ${pct(j.commandPermille)}`),
+      h('span', { class: 'small' }, `전체 ${pct(j.commandPermille)} · 실험 ${number(j.experimentsStarted)}/${number(j.experimentsPlanned)}번째`),
+      h('span', { class: 'sub muted small' }, `지금 실험 ${j.experiment} (${phase}) ${current}`));
+  }
   return h('div', { class: 'job-progress' },
-    h('div', { class: 'job-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 1000, 'aria-valuenow': j.permille,
-      'aria-label': `${j.job} 진행률 ${pctText}` }, fill),
-    h('span', { class: 'small' }, `${pctText} · ${runs}${days ? ` · ${days}` : ''}`),
+    bar(j.permille, `${j.job} 진행률 ${pct(j.permille)}`),
+    h('span', { class: 'small' }, current),
     j.experiment && j.experiment !== j.job
-      ? h('span', { class: 'sub muted small' }, `지금 실험 ${j.experiment} (${PHASE[j.phase] || j.phase}, ${number(j.experimentsStarted)}번째)`)
+      ? h('span', { class: 'sub muted small' }, `지금 실험 ${j.experiment} (${phase}, ${number(j.experimentsStarted)}번째)`)
       : null);
 }
 

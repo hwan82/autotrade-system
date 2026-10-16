@@ -21,7 +21,7 @@ class ExperimentJobStatusTest {
 
     private static ExperimentJobStatus running() {
         return new ExperimentJobStatus("EXP-20261015-CMB01", "combination", ExperimentJobStatus.State.RUNNING, 4321, T0,
-                T0, 2, 0, null, "");
+                T0, 2, 0, 0, null, "");
     }
 
     @Test
@@ -33,7 +33,7 @@ class ExperimentJobStatusTest {
 
         assertThat(files.status("EXP-20261015-CMB01")).isEqualTo(dir.resolve("experiment-state/jobs/EXP-20261015-CMB01.status"));
         assertThat(files.read(files.status("EXP-20261015-CMB01"))).isEqualTo(s);
-        assertThat(Files.readString(files.status("EXP-20261015-CMB01"))).startsWith("experiment-job-v1\njob: EXP-20261015-CMB01\n");
+        assertThat(Files.readString(files.status("EXP-20261015-CMB01"))).startsWith("experiment-job-v2\njob: EXP-20261015-CMB01\n");
         try (var listing = Files.list(files.dir())) {
             assertThat(listing).noneMatch(p -> p.toString().endsWith(".tmp"));
         }
@@ -54,7 +54,7 @@ class ExperimentJobStatusTest {
     @Test
     void 형식이_틀리면_읽지_않는다() {
         String ok = running().encode();
-        assertThatThrownBy(() -> ExperimentJobStatus.decode(ok.replace("experiment-job-v1", "experiment-job-v2")))
+        assertThatThrownBy(() -> ExperimentJobStatus.decode(ok.replace("experiment-job-v2", "experiment-job-v3")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ExperimentJobStatus.decode(ok + "extra: 1\n"))
                 .hasMessageContaining("모르는 키");
@@ -68,6 +68,62 @@ class ExperimentJobStatusTest {
                 .hasMessageContaining("일부만");
         assertThatThrownBy(() -> ExperimentJobStatus.decode("x".repeat(ExperimentJobStatus.MAX_BYTES + 1)))
                 .hasMessageContaining("너무 큽니다");
+    }
+
+    @Test
+    void 이전_형식_v1도_읽고_전체_실험_수는_모름이다() {
+        // D-098 전 실행 명령이 남긴 상태 파일(작업 폴더에 남은 끝난 작업)이 읽기 실패로 빠지지 않게 한다
+        String v2 = running().withExperimentsPlanned(9, T0).encode();
+        String v1 = v2.replace("experiment-job-v2", "experiment-job-v1").replace("experiments-planned: 9\n", "");
+
+        ExperimentJobStatus s = ExperimentJobStatus.decode(v1);
+        assertThat(s.experimentsPlanned()).isZero();
+        assertThat(s.commandPermille()).isEmpty();
+        assertThat(s.encode()).startsWith("experiment-job-v2\n").contains("experiments-planned: 0\n");
+        // v1에 v2 키가 있거나 v2에 그 키가 빠지면 거부
+        assertThatThrownBy(() -> ExperimentJobStatus.decode(v1.replace("message: ", "experiments-planned: 9\nmessage: ")))
+                .hasMessageContaining("모르는 키");
+        assertThatThrownBy(() -> ExperimentJobStatus.decode(v2.replace("experiments-planned: 9\n", "")))
+                .hasMessageContaining("experiments-planned");
+        assertThatThrownBy(() -> ExperimentJobStatus.decode(v2.replace("experiments-planned: 9", "experiments-planned: -1")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 명령_전체_진행률은_끝난_실험과_지금_실험의_진행률로_센다() {
+        ExperimentJobStatus planned = running().withExperimentsPlanned(4, T0);
+        assertThat(planned.commandPermille()).hasValue(0);
+        assertThat(ExperimentJobStatus.decode(planned.encode())).isEqualTo(planned);
+
+        // 첫 실험 시작: 0, 첫 실험 절반: 1000/2/4 = 125
+        ExperimentJobStatus s = planned.withProgress(progress("A", ExperimentProgress.Phase.STARTED, 0), T0);
+        assertThat(s.commandPermille()).hasValue(0);
+        s = s.withProgress(progress("A", ExperimentProgress.Phase.RUNNING, 10), T0);
+        assertThat(s.commandPermille()).hasValue(125);
+        // 첫 실험 끝: 250, 둘째 시작: 그대로 250
+        s = s.withProgress(progress("A", ExperimentProgress.Phase.FINISHED, 20), T0);
+        assertThat(s.commandPermille()).hasValue(250);
+        s = s.withProgress(progress("B", ExperimentProgress.Phase.STARTED, 0), T0);
+        assertThat(s.commandPermille()).hasValue(250);
+        assertThat(s.experimentsStarted()).isEqualTo(2);
+        // 넷째까지 끝나면 1000, 알린 수를 넘겨 시작해도 1000에서 멈춤
+        s = s.withProgress(progress("B", ExperimentProgress.Phase.FINISHED, 20), T0)
+                .withProgress(progress("C", ExperimentProgress.Phase.STARTED, 0), T0)
+                .withProgress(progress("C", ExperimentProgress.Phase.FINISHED, 20), T0)
+                .withProgress(progress("D", ExperimentProgress.Phase.STARTED, 0), T0)
+                .withProgress(progress("D", ExperimentProgress.Phase.FINISHED, 20), T0);
+        assertThat(s.commandPermille()).hasValue(1000);
+        s = s.withProgress(progress("E", ExperimentProgress.Phase.STARTED, 0), T0)
+                .withProgress(progress("E", ExperimentProgress.Phase.RUNNING, 10), T0);
+        assertThat(s.commandPermille()).hasValue(1000);
+        // 알리지 않은 명령은 비어 있음(조합 실험처럼 한 번만 부르는 명령은 지금 실험 진행률이 곧 전체)
+        assertThat(running().withProgress(progress("A", ExperimentProgress.Phase.RUNNING, 10), T0).commandPermille()).isEmpty();
+    }
+
+    private static ExperimentProgress progress(String id, ExperimentProgress.Phase phase, long daysDone) {
+        int finished = phase == ExperimentProgress.Phase.FINISHED ? 2 : (int) (daysDone / 10);
+        return new ExperimentProgress("EXP-20261015-CMB01-" + id, phase, 2, phase == ExperimentProgress.Phase.STARTED ? 0 : 2,
+                finished, 0, 10, daysDone);
     }
 
     @Test

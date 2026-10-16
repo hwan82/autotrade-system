@@ -142,8 +142,18 @@ public final class WalkForwardStudy {
                 code, log, gate, spanFrom);
         // 실제 병렬 수: 등록 파일 parallelism과 실행 명령 상한 중 작은 쪽(D-089). 결정론 기록에도 이 값을 쓴다
         int parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
+        // 명령 전체 진행률(D-098): 실행기 호출 수를 미리 센다. 결정론 확인은 같은 계산을 한 번 더 돈다
+        // 세기나 알리기가 실패해도 실험은 계속한다(0 = 모름, PR #124 architect R1)
+        int planned = 0;
+        try {
+            planned = Math.multiplyExact(experimentsPerCompute(windows.size(), ComboSets.of(candidates), plan.nullSeeds()),
+                    verifyDeterminism && parallel > 1 ? 2 : 1);
+            gate.onExperimentsPlanned(planned);
+        } catch (RuntimeException e) {
+            log.accept("전체 실험 수를 알리지 못했습니다(실험은 계속): " + e.getClass().getSimpleName());
+        }
         log.accept("계산 시작: 구간 " + windows.size() + ", 후보 m=" + plan.m() + ", 대조군 시드 " + plan.nullSeeds()
-                + ", 병렬 " + parallel);
+                + ", 실험 " + planned + "회, 병렬 " + parallel);
         Computed first = compute(ctx, parallel);
         Boolean deterministic = null;
         if (verifyDeterminism && parallel == 1) {
@@ -223,6 +233,46 @@ public final class WalkForwardStudy {
     }
 
     private record Computed(Map<String, String> files, boolean anyRunFailed) {
+    }
+
+    /**
+     * 계산 한 번이 쓰는 조합 묶음: 후보, 학습(후보와 섭동 변형), 대조군(쌍마다 하나, 쌍 키 순서). 계산과 실험 수 세기가 이 하나를
+     * 원본으로 쓴다.
+     */
+    record ComboSets(List<Combination> candidates, List<Combination> train, Map<String, Combination> controlByPair) {
+
+        List<Combination> controls() {
+            return List.copyOf(controlByPair.values());
+        }
+
+        static ComboSets of(List<Candidate> cands) {
+            List<Combination> candidateCombos = cands.stream().map(Candidate::combination).toList();
+            List<Combination> trainCombos = new ArrayList<>(candidateCombos);
+            Map<String, Combination> controlByPair = new TreeMap<>();
+            for (Candidate cand : cands) {
+                if (cand.low() != null) {
+                    trainCombos.add(cand.low());
+                    trainCombos.add(cand.high());
+                }
+                controlByPair.putIfAbsent(cand.pairKey(), cand.control());
+            }
+            return new ComboSets(candidateCombos, List.copyOf(trainCombos), java.util.Collections.unmodifiableMap(controlByPair));
+        }
+    }
+
+    /**
+     * 계산 한 번({@link #compute})이 실행기를 부르는 횟수(D-098). 구간마다 학습 1, 검증 1, 스트레스 1, 대조군 시드마다 1이고, 각각
+     * 조합이 {@link SimulationExperimentRunner#MAX_COMBINATIONS}개를 넘으면 나눠 부른 만큼({@link #runAll}과 같은 규칙).
+     */
+    static int experimentsPerCompute(int windows, ComboSets sets, int nullSeeds) {
+        int perWindow = Math.addExact(Math.addExact(chunks(sets.train().size()), 2 * chunks(sets.candidates().size())),
+                Math.multiplyExact(nullSeeds, chunks(sets.controlByPair().size())));
+        return Math.multiplyExact(windows, perWindow);
+    }
+
+    private static int chunks(int combos) {
+        int max = SimulationExperimentRunner.MAX_COMBINATIONS;
+        return (combos + max - 1) / max;
     }
 
     private static Map<Symbol, InstrumentPeriod> periods(SnapshotInputs in, LocalDate from, LocalDate to) {
@@ -344,17 +394,11 @@ public final class WalkForwardStudy {
                 return l;
             });
         }
-        Map<String, Combination> controlByPair = new TreeMap<>();
-        c.candidates().forEach(cand -> controlByPair.putIfAbsent(cand.pairKey(), cand.control()));
-        List<Combination> candidateCombos = c.candidates().stream().map(Candidate::combination).toList();
-        List<Combination> trainCombos = new ArrayList<>(candidateCombos);
-        for (Candidate cand : c.candidates()) {
-            if (cand.low() != null) {
-                trainCombos.add(cand.low());
-                trainCombos.add(cand.high());
-            }
-        }
-        List<Combination> controlCombos = List.copyOf(controlByPair.values());
+        ComboSets sets = ComboSets.of(c.candidates());
+        Map<String, Combination> controlByPair = sets.controlByPair();
+        List<Combination> candidateCombos = sets.candidates();
+        List<Combination> trainCombos = sets.train();
+        List<Combination> controlCombos = sets.controls();
 
         StringBuilder runs = new StringBuilder("phase\twindow\tnull_seed\tselection\tstrategy\tstatus\tfinal_equity"
                 + "\ttotal_return\tmax_drawdown\tsharpe\tprofit_factor\tround_trips\ttrading_days\ttotal_costs"

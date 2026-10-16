@@ -211,6 +211,71 @@ class WalkForwardStudyTest {
                 .anySatisfy(l -> assertThat(l).startsWith("계산 시작: ").endsWith(", 병렬 1"));
     }
 
+    /** 미리 알린 실험 수와 실제로 시작한 실험 수를 센다(D-098). */
+    private static final class Counting implements RunGate {
+        final List<Integer> planned = new ArrayList<>();
+        final java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public java.util.Optional<String> stopReason() {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public void onExperimentsPlanned(int count) {
+            planned.add(count);
+        }
+
+        @Override
+        public void onProgress(com.autotrade.sim.run.ExperimentProgress p) {
+            if (p.phase() == com.autotrade.sim.run.ExperimentProgress.Phase.STARTED) {
+                started.incrementAndGet();
+            }
+        }
+    }
+
+    @Test
+    void 미리_알린_실험_수가_실제로_시작한_실험_수와_같다() throws IOException {
+        // 구간 3 × (학습 1 + 검증 1 + 스트레스 1 + 대조군 시드 20) = 69. 결정론 확인(병렬 3 vs 1)은 두 배
+        Counting once = new Counting();
+        run(false, once);
+        assertThat(once.planned).containsExactly(69);
+        assertThat(once.started).hasValue(69);
+
+        Counting twice = new Counting();
+        run(true, twice);
+        assertThat(twice.planned).containsExactly(138);
+        assertThat(twice.started).hasValue(138);
+    }
+
+    @Test
+    void 전체_실험_수를_알리다_실패해도_결과는_같다() throws IOException {
+        WalkForwardStudy.Outcome plain = run(false, RunGate.NONE);
+        RunGate failing = new RunGate() {
+            @Override
+            public java.util.Optional<String> stopReason() {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public void onExperimentsPlanned(int count) {
+                throw new IllegalStateException("상태 파일 고장");
+            }
+        };
+        assertThat(run(false, failing).files()).isEqualTo(plain.files());
+    }
+
+    @Test
+    void 실험_수는_조합이_128개를_넘으면_나눠_부른_만큼_센다() {
+        List<com.autotrade.selection.profile.Combination> none = List.of();
+        WalkForwardStudy.ComboSets sets = new WalkForwardStudy.ComboSets(
+                java.util.Collections.nCopies(129, null), java.util.Collections.nCopies(257, null),
+                java.util.Collections.singletonMap("pair", null));
+        // 구간마다 학습 3 + 검증·스트레스 2×2 + 대조군 10×1 = 17
+        assertThat(WalkForwardStudy.experimentsPerCompute(2, sets, 10)).isEqualTo(34);
+        assertThat(WalkForwardStudy.experimentsPerCompute(1, new WalkForwardStudy.ComboSets(none, none, java.util.Map.of()), 5)).isZero();
+    }
+
     @Test
     void 정지_확인이_걸리면_결과_파일을_쓰지_않는다() throws IOException {
         RunGate stop = () -> {

@@ -56,6 +56,8 @@ public final class ExperimentJobs {
             Instant updatedAt,
             int maxParallelRuns,
             int experimentsStarted,
+            int experimentsPlanned,
+            Integer commandPermille,
             String experiment,
             String phase,
             Integer runsTotal,
@@ -172,7 +174,8 @@ public final class ExperimentJobs {
         boolean stale = s.stale(clock.instant());
         ExperimentProgress p = s.progress();
         return new Job(s.job(), s.command(), stale ? "UNRESPONSIVE" : s.state().name(), stale, s.pid(), s.startedAt(),
-                s.updatedAt(), s.maxParallelRuns(), s.experimentsStarted(),
+                s.updatedAt(), s.maxParallelRuns(), s.experimentsStarted(), s.experimentsPlanned(),
+                s.commandPermille().isPresent() ? s.commandPermille().getAsInt() : null,
                 p == null ? null : p.experimentId(), p == null ? null : p.phase().name(),
                 p == null ? null : p.runsTotal(), p == null ? null : p.runsStarted(),
                 p == null ? null : p.runsFinished(), p == null ? null : p.runsFailed(),

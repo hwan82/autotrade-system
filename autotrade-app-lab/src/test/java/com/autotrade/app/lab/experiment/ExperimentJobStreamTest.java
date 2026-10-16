@@ -40,7 +40,7 @@ class ExperimentJobStreamTest {
     }
 
     private void write(ExperimentJobStatus.State state, Instant updated, int finished) throws IOException {
-        files.write(new ExperimentJobStatus(JOB, "combination", state, 1234, T0, updated, 4, 1,
+        files.write(new ExperimentJobStatus(JOB, "combination", state, 1234, T0, updated, 4, 1, 0,
                 new ExperimentProgress(JOB, ExperimentProgress.Phase.RUNNING, 4, 2, finished, 0, 10, finished * 10L),
                 ""));
     }
@@ -129,7 +129,7 @@ class ExperimentJobStreamTest {
     void 첫_페이지는_50개까지() throws IOException {
         for (int i = 0; i < ExperimentJobStream.PAGE_SIZE + 3; i++) {
             String job = String.format("EXP-20261015-J%04d", i);
-            files.write(new ExperimentJobStatus(job, "combination", ExperimentJobStatus.State.COMPLETED, 1, T0, T0, 4, 1,
+            files.write(new ExperimentJobStatus(job, "combination", ExperimentJobStatus.State.COMPLETED, 1, T0, T0, 4, 1, 0,
                     null, ""));
         }
         Capture a = new Capture();
