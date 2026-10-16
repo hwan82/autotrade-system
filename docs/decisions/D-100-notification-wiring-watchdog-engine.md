@@ -76,3 +76,11 @@
 | 2. 설정 화면 "알림 시험 보내기"와 마지막 채널 끄기 경고, link-url 편집(문자열 입력) | ui-dev | 다음 설정 화면 PR |
 | 3. 사용자 PC 카카오 앱 설정 절차(REST API 키, talk_message 동의, 등록 도메인, 리프레시 토큰 받기) | risk-ops | 7단계 시험 절차서 |
 | 4. 억제 값(10분·20건) 운영 점검 | risk-ops | 6단계 주간 점검 |
+
+## 반영 기록
+
+- 2026-10-16, PR #128 검토 권고 반영(결정 내용은 바뀌지 않아 새 번호를 쓰지 않음):
+  - architect R1: `NotificationSetup`을 위치 인자 생성자 대신 이름 있는 빌더(`NotificationSetup.builder()`)로만 만든다. 엔진·감시의 설정 옮기기(`EngineMain.setup`·`WatchdogMain.setup`)는 값마다 다른 설정으로 제자리에 갔는지 시험한다(`EngineMainTest`·`WatchdogMainTest#알림_설정_값을_이름대로_옮기고_시간대와_재동의_문구를_넘긴다`). 두 곳의 옮기는 코드는 그대로 둘이다(알림 모듈은 설정 모듈을 모르고, 둘이 함께 기대는 모듈을 새로 만들 만큼 크지 않음).
+  - architect R2: 알림 라이브러리에서 이 시스템의 설정 키·프로세스 이름이 든 재동의 문구와 `Asia/Seoul`을 뺐다. 부르는 쪽이 `displayZone`(필수)과 `kakaoReconsentHelp`를 넘기고, 값은 `RuntimeConfig.Notification.DISPLAY_ZONE`·`KAKAO_RECONSENT_HELP`에 둔다. 라이브러리에는 일반 문구(`NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP`)만 남는다. 사용자가 받는 알림 문구와 시각 표시는 바뀌지 않는다.
+  - QA 재검토 Q1(변이 M17): 버린 종류가 같은 대상으로 다시 오는 순서 시험 둘(`NotificationQueueTest#상한으로_버린_종류가_새_창에서_다시_오면_받는다`, `#큐가_차서_버린_긴급_알림도_같은_종류가_다시_오면_받는다`). 조건 `last.at() != null`을 지우면 둘 다 실패함을 확인했다.
+
