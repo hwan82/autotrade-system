@@ -29,7 +29,7 @@ class ExperimentJobsTest {
         for (int i = 0; i < n; i++) {
             String job = String.format("EXP-%04d", i);
             Instant t = T0.plusSeconds(i);
-            files.write(new ExperimentJobStatus(job, "combination", ExperimentJobStatus.State.COMPLETED, 1, t, t, 4, 1,
+            files.write(new ExperimentJobStatus(job, "combination", ExperimentJobStatus.State.COMPLETED, 1, t, t, 4, 1, 0,
                     null, ""));
             Files.setLastModifiedTime(files.status(job), FileTime.from(t));
         }
