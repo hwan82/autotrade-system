@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const REPO = path.resolve(here, '..', '..', '..');
-/** 시험 작업 폴더. 시험 앞뒤로 통째로 지운다(E2E_WORK_DIR로 바꿀 때 다른 것이 든 폴더를 주지 않는다). */
+/**
+ * 시험 작업 폴더. 시험 앞뒤로 통째로 지운다(E2E_WORK_DIR로 바꿀 때 다른 것이 든 폴더를 주지 않는다). 실제 설정 폴더·저장소와
+ * 같거나 그 위·아래 폴더면 guard.mjs workDirReason이 지우기 전에 거절한다.
+ */
 export const WORK = process.env.E2E_WORK_DIR || path.join(os.tmpdir(), 'autotrade-ui-e2e');
 export const CONFIG_DIR = path.join(WORK, 'config');
 export const FLOW_PORT = Number(process.env.E2E_FLOW_PORT || 18481);
