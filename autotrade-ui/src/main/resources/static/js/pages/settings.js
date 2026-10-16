@@ -1,6 +1,6 @@
-// 설정 화면(UI-04): default 값 표시, 즉시 반영 키 편집, 비밀값 마스킹 입력(쓰기 전용).
+// 설정 화면(UI-04): default 값 표시, 즉시 반영 키 편집, 비밀값 마스킹 입력(쓰기 전용), 알림 시험 보내기(D-103).
 import { h, toast } from '../dom.js';
-import { get, put } from '../api.js';
+import { get, post, put } from '../api.js';
 
 export async function settingsPage() {
   const host = h('div', {});
@@ -18,7 +18,8 @@ function form(view, redraw) {
     h('h2', { id: `g-${g.id}` }, g.title),
     g.id === 'brokers' ? h('p', { class: 'muted small' }, '증권사 키는 미체결·보유 확인, 세션 종료, 재연결 절차가 필요해 이 화면에서 바꾸지 않습니다. secrets.json에서 바꾸고 해당 프로세스를 다시 띄웁니다.') : null,
     g.id === 'real-trading' ? h('p', { class: 'muted small' }, '실전 계좌 설정은 읽기만 합니다. 실전 활성화는 설정이 아니며 실전 엔진 운영 화면에서 2차 확인으로만 켭니다.') : null,
-    g.items.map(item => row(item, controls))));
+    g.items.map(item => row(item, controls)),
+    g.id === 'notification' ? notificationTest() : null));
   const save = h('button', { class: 'btn', type: 'button' }, '변경 저장');
   save.addEventListener('click', async () => {
     const values = {};
@@ -87,4 +88,45 @@ function secretControl(item, id, controls) {
   });
   return h('div', {}, h('div', { class: 'secret-state' }, state,
     clear ? h('label', { for: `${id}-clear`, class: 'small' }, clear, ' 지우기') : null), input);
+}
+
+const STATUS = { SENT: '보냄', FAILED: '실패', SKIPPED: '보내지 않음' };
+
+/**
+ * 알림 시험 보내기(D-103): 버튼을 누를 때만 저장된 설정으로 켜진 채널마다 시험 알림 한 건을 보낸다. 입력만 하고 저장하지 않은 값은
+ * 쓰지 않는다(요청 본문 없음). 결과는 채널별 상태와 설명뿐이고 비밀값은 오가지 않는다.
+ */
+function notificationTest() {
+  const results = h('div', { 'aria-live': 'polite' });
+  const button = h('button', { class: 'btn secondary', type: 'button' }, '알림 시험 보내기');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = '보내는 중…';
+    try {
+      const view = await post('/api/settings/notification-test');
+      results.replaceChildren(resultTable(view.channels));
+      const sent = view.channels.filter(c => c.status === 'SENT').length;
+      toast(sent > 0 ? `시험 알림을 ${sent}개 채널로 보냈습니다` : '보낸 채널이 없습니다. 아래 결과를 확인하세요', sent === 0);
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = '알림 시험 보내기';
+    }
+  });
+  return h('div', { class: 'notification-test' },
+    h('h3', {}, '알림 시험'),
+    h('p', { class: 'hint' }, '저장된 설정으로 켜진 채널(Slack, 카카오톡)마다 시험 알림 한 건을 보냅니다. 입력만 하고 저장하지 않은 값은 쓰지 않으니 먼저 저장하세요. 실전 엔진·감시는 다시 띄워야 바뀐 값을 씁니다.'),
+    h('div', { class: 'actions' }, button),
+    results);
+}
+
+function resultTable(channels) {
+  return h('div', { class: 'table-wrap' },
+    h('table', { 'aria-label': '알림 시험 결과' },
+      h('thead', {}, h('tr', {}, ['채널', '결과', '설명'].map(t => h('th', { scope: 'col' }, t)))),
+      h('tbody', {}, channels.map(c => h('tr', { class: `test-${c.status.toLowerCase()}` },
+        h('td', {}, c.label),
+        h('td', {}, h('span', { class: `chip${c.status === 'SENT' ? '' : ' off'}` }, STATUS[c.status] || c.status)),
+        h('td', {}, c.message))))));
 }

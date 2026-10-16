@@ -161,6 +161,10 @@ input[readonly] { background: var(--grid); }
 .setting .meta { font-size: .8rem; color: var(--ink-soft); }
 .setting .changed-from-default { color: var(--warn); }
 .secret-state { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+/* 알림 시험 보내기(D-103): 실패는 색과 글자(실패) 둘 다로 구분한다 */
+.notification-test { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--rule); }
+.notification-test h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.notification-test .test-failed td { color: var(--danger); }
 
 /* 실전 운영 화면 */
 .side a.nav-real { margin-top: .6rem; border-top: 1px solid var(--rule); border-radius: 0; padding-top: .7rem; }

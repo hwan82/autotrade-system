@@ -11,6 +11,7 @@ import com.autotrade.app.lab.live.LiveLabService;
 import com.autotrade.app.lab.profile.SelectionProfileStore;
 import com.autotrade.app.lab.profile.StrategyProfileStore;
 import com.autotrade.app.lab.settings.ExperimentLimitsPublisher;
+import com.autotrade.app.lab.settings.NotificationTester;
 import com.autotrade.config.LoadedConfig;
 import com.autotrade.config.RuntimeConfigHolder;
 import com.autotrade.config.RuntimeConfigStore;
@@ -18,6 +19,7 @@ import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlSocket;
 import com.autotrade.marketdata.feed.FeedSocket;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
+import com.autotrade.notification.JdkHttpTransport;
 import com.autotrade.sim.live.LiveCheckMain;
 import com.autotrade.sim.run.CodeVersion;
 import java.nio.file.Path;
@@ -63,6 +65,14 @@ public class LabWebConfiguration {
             @Value("${autotrade.lab.experiments-dir:experiments}") String dir, StrategyProfileStore strategies,
             SelectionProfileStore selections) {
         return new ExperimentRegistrations(Path.of(dir), strategies, selections);
+    }
+
+    /**
+     * 설정 화면 알림 시험(D-103). 카카오 토큰은 실전 엔진·감시와 같은 설정 폴더의 토큰 파일로 이어 쓴다(D-100 6번).
+     */
+    @Bean
+    NotificationTester notificationTester(RuntimeConfigStore store, Clock clock) {
+        return new NotificationTester(store.paths().runtimeFile().getParent(), new JdkHttpTransport(), clock);
     }
 
     /** 실험 실행 명령의 진행 상태·취소 요청(D-089). 실행 명령과 같은 설정 폴더의 {@code experiment-state/jobs}를 본다. */
