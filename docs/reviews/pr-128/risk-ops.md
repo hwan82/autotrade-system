@@ -100,3 +100,45 @@
 
 ## 판정(재검토 2026-10-16)
 승인
+
+## 재검토 2026-10-16 (2차)
+- 대상: PR #128 / 브랜치 `claude/project-thread-vtmvk8` / 커밋 90497aa / main 대비 diff `git diff origin/main...HEAD` 전체. 앞 재검토(91e404a, 원문 커밋 aab2ca6) 뒤로 바뀐 것은 세 커밋이다: 95163d5(QA 대기 목록), 49a0d2e(독립 QA 보고서 `docs/reviews/pr-128/qa.md`, 수정 필요 F1·권고 Q1), 90497aa(F1·Q1 반영: NotificationQueue.java, Watchdog.java, NotificationQueueTest·EngineMainTest·WatchdogMainTest, D-100). `git diff aab2ca6 HEAD`로 따로 다시 읽었다.
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew clean build --continue`(Maven Central 대신 Google 미러를 쓰는 init 스크립트, 저장소 밖) → **BUILD SUCCESSFUL**(161 tasks). 이어서 `:autotrade-notification-jar:test :autotrade-app-engine:test :autotrade-app-watchdog:test --rerun-tasks` → BUILD SUCCESSFUL.
+  - JUnit XML 집계(테스트/실패/오류/건너뜀): risk 55/0/0/0, architecture-test 44/0/0/0, app-engine 54/0/0/0, app-watchdog 52/0/0/0, notification-jar 71/0/0/0, config 40/0/0/0, app-lab 214/0/0/0, app-gateway 50/0/0/0.
+  - 변이 시험(실행 뒤 원복, 커밋하지 않음): `NotificationQueue.drop`에서 `lastBySubject.put(key, new Last(kind, null, 0))` 한 줄을 지웠다. 그러자 `NotificationQueueTest#상한으로_회복_알림을_버려도_다시_멈춤은_억제하지_않는다`와 `#큐가_차서_회복_알림을_버려도_다시_멈춤은_억제하지_않는다`가 실패했다(71건 중 2건). 새 시험이 F1을 실제로 잡는다.
+  - CI: 90497aa의 `Secret scan and collector boundary`·`DB schema`는 success, `Gradle build`는 **cancelled**(앞 재검토 때와 같다). 판정은 로컬 빌드로 하되, 머지 전에 CI `Gradle build` 성공을 다시 확인해야 한다.
+
+### 앞 재검토 정정(검토자 오류)
+- 앞 재검토의 R1 근거에서 이렇게 적었다: "정보 알림이 상한으로 버려지면 `lastBySubject`가 바뀌지 않으므로 … 멈춤은 같은 대상·종류로 억제되고, 큐가 긴급으로 넘치지 않는다." 이것은 **장점이 아니라 결함**이었다. 같은 동작 때문에 엔진 멈춤(보냄) → 회복(버림) → 10분 안 다시 멈춤에서 두 번째 엔진 멈춤 긴급 알림도 억제된다. 독립 QA가 F1(탐침 P1·P2)로 잡았다. 앞 재검토의 승인은 이 점에서 틀렸다.
+
+### 앞 지적과 QA 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| QA F1(버린 알림 뒤 같은 대상의 긴급 알림 억제) | 해결 | 버릴 때(전체 상한·큐 가득 모두) `drop`이 그 대상의 마지막 종류를 시각 없이(`at=null`) 기록한다(NotificationQueue.java:165-170). 억제는 `at`이 있을 때만 건다(:133). 그래서 멈춤 → 회복(버림) → 멈춤에서 두 번째 멈춤은 억제되지 않는다. P1·P2 시험이 추가됐고 변이로 효과를 확인했다(위). D-100 결정 1번 문구가 코드와 일치한다 |
+| QA Q1 / risk-ops R2(운영 배선 시험) | 해결 | `EngineMainTest#실제_배선으로_활성화하면_증권사_연동_전이라_첫_단계에서_OFF로_돌아간다`가 실제 기동한 엔진 큐의 `engine-started` 1건과 `real-trading-command` 1건 이상을 본다(EngineMainTest.java:231-232). `WatchdogMainTest#운영_배선으로_감시가_본_엔진_멈춤을_알림_큐에_넣는다`가 실제 기동한 감시가 멈춘 엔진 하트비트로 `process-stale`을 넣는지 본다(WatchdogMainTest.java:62-77). 셈은 `NotificationQueue.acceptedCount`(:233-235)로 한다. 운영 코드에 더해진 것은 읽기 전용 셈 하나와 감시의 패키지 내부 접근자(Watchdog.java:287-290)뿐이고, 동작은 바뀌지 않는다 |
+| R6(긴급이 큐 크기까지 받음) | 참고 유지, 재평가 | F1 수정 뒤에는 실험실이 멈춤↔회복을 오가면 회복이 상한으로 버려져도 다음 멈춤(긴급)이 매번 받아진다. 다만 그 빈도는 하트비트 기준(멈춤 판정 15초, 점검 5초)으로 약 20초에 한 번이 상한이다. 채널이 정상이면 보내는 속도가 이보다 빠르다. 큐(64)가 이 소음으로 차려면 외부 채널이 오래 멈춰 있어야 하는데, 그때는 엔진 멈춤 알림도 어차피 밖으로 못 나간다 `[추론]`. 큐가 차서 버린 긴급도 이제 억제 상태를 남기지 않으므로, 다음 상태 변화는 다시 받는다. 6단계 주간 점검에서 `pending()`·`droppedTotal()`을 보라는 권고는 그대로 둔다 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 바뀐 부분이 Guard에 닿지 않는다. `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`·`#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `EngineMainTest#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 통과. 새 배선 시험도 활성화 시도 뒤 Guard가 OFF로 돌아오는지 함께 본다(EngineMainTest.java:229) |
+| A2 | 통과 | 주문 출구·ArchUnit 규칙·보호 테스트 diff 없음. architecture-test 44건 통과. 새 공개 메서드 `acceptedCount`는 허용 목록 안 타입(`HashMap`)만 쓴다 |
+| A3 | 통과 | 증권사 주문 연동 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 코드 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 코드 변경 없음 |
+| A7 | 통과 | `offer`는 여전히 막지 않고 던지지 않는다(NotificationQueue.java:109-114). `drop`·`acceptedByKind.merge`는 같은 잠금 안의 맵 갱신 하나씩이다. `NotificationQueueTest#채널이_막혀도_넣는_쪽은_기다리지_않고_큐가_차면_버린다`(1초 안에 돌아옴) 통과 |
+| A8 | 통과 | 감시의 엔진 멈춤 알림이 실험실 소음(전체 상한)과 버려진 회복(F1) 어느 쪽으로도 묻히지 않는다(P1·P2 시험, 앞 재검토 탐침). 엔진 매매 동작에는 영향 없음 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 시험은 가짜 값과 하트비트 파일만 쓴다. 비밀값 관련 코드 변경 없음. gitleaks CI success |
+| A11 | 통과 | 보호 테스트 diff 없음, `@Disabled` 없음, 기존 시험 기대값 변경 없음(추가만). 새 동작(F1 수정)에 실패해야 하는 시험 2건이 있고 변이로 확인했다. 배선 시험 2건이 추가됐다 |
+| A12 | 통과 | 장애표 #8 문구 "멈춤·재기동은 긴급 알림"이 F1 경로에서도 지켜진다(P1·P2). 장애 테스트 8종의 전제에 닿는 코드 없음. O1 전제가 강해졌다 |
+| A13 | 통과 | 시장 분기 없음. 억제 판정은 주입 `Clock`의 `Instant` |
+| A14 | 통과 | D-100 결정 1번(버린 알림도 마지막 종류로 남김)과 "검증"(P1·P2, 운영 배선)이 코드·시험과 일치한다. QA 보고서 F1이 지적한 문서·코드 불일치가 풀렸다 |
+
+### 점검표 밖 발견(2차 재검토)
+- 없음(차단). 참고 하나: `drop`은 그 대상의 이전 생략 건수(`suppressed`)를 0으로 되돌린다. 그래서 같은 대상·종류로 억제된 건수가 버림 한 번 뒤에는 다음 알림 본문에 붙지 않는다. 버린 건수는 `dropped`로 따로 붙으므로 사람이 "생략이 있었다"는 사실은 본다. 조치 불요.
+
+## 판정(재검토 2026-10-16, 2차)
+승인
