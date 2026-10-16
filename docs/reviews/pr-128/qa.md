@@ -68,3 +68,63 @@
 
 ## 판정
 수정 필요(A14: F1 버려진 정보 알림 뒤 같은 대상의 긴급 알림 억제, D-100 결정 1번·장애표 #8 문구와 코드 불일치. 고친 뒤 P1·P2 시험 추가)
+
+## 재검토 2026-10-16
+- 대상: PR #128 / 헤드 bbd6dfa (브랜치 claude/project-thread-vtmvk8) / main 0e1a6d7 대비 전체 diff(`git diff origin/main...bbd6dfa`, 45개 파일). 헤드는 main 0e1a6d7을 포함한다(`git merge-base --is-ancestor` 참, 병합 커밋 02d779f).
+- 1차(49a0d2e) 뒤 PR 고유 변경: 90497aa(F1 수정·Q1 배선 시험·D-100 문구), e83df63(기획서 이력 문구), 개발 쪽 검토 원문(architect 2·3차, risk-ops 2차), `docs/qa/pending.md` 한 줄. 나머지 차이는 main 병합으로 들어온 PR #124(D-098) 변경이다.
+- 직접 실행한 것:
+  - `./gradlew build -I <검토자 임시 폴더>/mirror.init.gradle` → `BUILD SUCCESSFUL in 2m 18s`. 캐시를 믿지 않으려고 `--offline build --rerun-tasks`로 한 번 더 → `BUILD SUCCESSFUL in 2m 45s`, 138개 작업 모두 실행, 종료 코드 0. 시험 XML 집계 1,437건 / 실패 0 / 오류 0 / 건너뜀 0(`autotrade-notification-jar` 71, `autotrade-app-watchdog` 52, `autotrade-app-engine` 54, `autotrade-architecture-test` 44). 미러 사용은 1차와 같은 사용자 허락, 저장소 파일 변경 없음.
+  - PR CI(헤드 bbd6dfa): `Gradle build`, `DB schema (PostgreSQL 16)`, `Secret scan and collector boundary` 모두 success.
+  - 1차 탐침 P1~P5를 같은 임시 시험으로 다시 실행하고 지움.
+  - 변이 M1~M15를 다시, 새 코드에 M16~M18을 더해 실행하고 매번 되돌림. 끝난 뒤 `git status --short` 출력 없음.
+
+    | 변이 | 결과 |
+    |---|---|
+    | M1~M9, M11~M13, M15(1차와 같음) | 모두 잡힘 |
+    | M10 엔진이 `NotifyingCommandAuditLog` 대신 기본 감사 로그 연결 | 잡힘(1차 살아남음 → `EngineMainTest`) |
+    | M14 감시가 `Alerts.NONE` 연결 | 잡힘(1차 살아남음 → `WatchdogMainTest#운영_배선으로_감시가_본_엔진_멈춤을_알림_큐에_넣는다`) |
+    | M16 `drop`이 대상의 마지막 종류를 남기지 않음(F1 되돌림) | 잡힘 |
+    | M17 억제 조건의 `last.at() != null` 삭제 | **살아남음** |
+    | M18 `acceptedByKind` 갱신 삭제 | 잡힘 |
+
+## 1차 지적 처리
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| F1 버린 알림 뒤 같은 대상 긴급 알림 억제 | 해결 | 버릴 때 `drop`이 대상의 마지막 종류를 시각 없이 남기고(NotificationQueue.java:165-170), 억제는 시각이 있을 때만 한다(:133-134). 탐침 재실행: P1(상한) `stale#2=true suppressed=0`, P2(큐 가득) `stale#2=true suppressed=0`. 시험 `NotificationQueueTest#상한으로_회복_알림을_버려도_다시_멈춤은_억제하지_않는다`(:184)·`#큐가_차서_회복_알림을_버려도_다시_멈춤은_억제하지_않는다`(:200) 통과, 변이 M16 잡힘. D-100 결정 1번 문구도 버린 알림 처리를 적도록 고쳐졌다 |
+| Q1 운영 배선 시험 | 해결 | `NotificationQueue.acceptedCount`(:233)로 `EngineMainTest`가 엔진 시작·실전 제어 명령 알림을, `WatchdogMainTest`가 멈춘 엔진 알림을 실제 기동한 프로세스의 큐에서 확인. 변이 M10·M14 이제 잡힘 |
+| R1 개발 쪽 architect 판정 미해결 | 해결 | `docs/reviews/pr-128/architect.md` "재검토 2026-10-16 (3)" 판정 "승인"(직접 빌드 통과 기록). risk-ops 2차 재검토 판정 "승인" |
+| R2·R3(참고) | 그대로 | 같은 대상·종류 10분 억제(P3 재기동 반복 두 번째 억제)와 Windows 토큰 파일 ACL은 D-100 "위험과 한계"에 적힌 그대로다 |
+
+## 점검표(재검토, 헤드 bbd6dfa)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `autotrade-risk` diff 없음(main 대비). 1차 근거 그대로, 전체 빌드 통과 |
+| A2 | 통과 | 주문 출구·Guard 코드 diff 없음, `ArchitectureTest` 19건 통과·규칙 변경 없음 |
+| A3 | 해당 없음 | 증권사 주문 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음(명령 알림 억제 대상은 계좌 별칭 포함, 1차 근거) |
+| A8 | 통과 | 새 코드(`drop`, `acceptedByKind`)는 `synchronized accept` 안의 맵 갱신뿐이라 막는 호출이 늘지 않음. 탐침 P4 재실행: 막힌 채널·`OutOfMemoryError` 주입 상태에서 1,000건 `offer` 12ms, 넣는 쪽 예외 0 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 1차 근거 그대로. 새 시험은 자리표시자만, P5 재실행 파일 권한 `rw-------`·설정 토큰 원문 없음, CI 비밀값 스캔 success |
+| A11 | 통과 | 보호 테스트(`autotrade-architecture-test`, `RealTradingGuardTest`, `GuardedOrderGatewayTest`) main 대비 diff 없음. 새 시험 4개(F1 2, 배선 2)는 실패해야 하는 경우를 고정(변이 M10·M14·M16 잡힘). M17 생존은 아래 Q1 |
+| A12 | 통과 | 장애표 #8 "엔진 멈춤·재기동은 긴급 알림"이 F1 경로에서도 지켜짐(P1·P2). 감지 로직 변경 없음 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 통과 | D-100 결정 1번("버린 알림도 대상의 마지막 종류로 남겨 종류가 바뀐 뒤 돌아온 알림을 억제하지 않음")과 검증 목록이 코드(NotificationQueue.java:133-134·165-170)·시험과 일치. 기획서 v14.44 이력, 결정 로그 표 D-100 행 일치. 과금: 기본 꺼짐, 무료 채널뿐, BIZ 미생성(변이 M15 잡힘) 그대로 |
+| B1 | 통과 | 직접 빌드(`--rerun-tasks`) `BUILD SUCCESSFUL`, 1,437/0/0/0 |
+| B6 | 통과 | 새 동작(F1 처리, 배선)에 시험 있음, 건너뜀 0, 시험 삭제 없음 |
+
+## 시나리오(재검토)
+- P1 상한으로 회복을 버린 뒤 4분 뒤 엔진 재멈춤 → 받음(1차: 억제).
+- P2 큐 가득으로 회복을 버린 뒤 엔진 재멈춤 → 받음(1차: 억제).
+- P3 점검 사이 재기동 2분 간격 두 번 → 두 번째 억제(설계대로, 참고 R2 그대로).
+- P4 막힌 채널·`Error` 주입 → 넣는 쪽 1,000건 12ms.
+- P5 엔진·감시 토큰 파일 공유 → 감시는 엔진이 회전 받은 토큰으로 갱신 없이 발송.
+- (코드 읽기, `[추론]`) 새 `drop`은 같은 대상에 쌓여 있던 생략 건수(`suppressed`)를 0으로 덮는다. 그 대상의 이전 생략 건수가 다음 알림 본문에서 빠질 수 있으나 넘친 건수는 `dropped`로 따로 붙으므로 알림 누락은 아니다.
+
+## 점검표 밖 발견(재검토)
+- Q1(권고, 시험 공백): 변이 M17(`last.at() != null` 삭제)이 살아남는다. 이 조건이 없으면 버린 뒤 **같은 종류**가 다시 올 때 `now.isBefore(null)`이 `NullPointerException`을 내고, `offer`가 이를 삼켜 `false`(조용히 버림)를 돌려준다. 지금 시험은 버린 뒤 **다른 종류**가 오는 순서만 본다. "회복(버림) → 회복"이나 "멈춤(큐 가득으로 버림) → 멈춤"이 받아지는지 보는 시험을 권한다. 지금 코드는 맞게 동작한다(조건이 있음).
+
+## 판정(재검토 2026-10-16)
+승인
