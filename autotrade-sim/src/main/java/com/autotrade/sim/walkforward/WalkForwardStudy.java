@@ -143,9 +143,11 @@ public final class WalkForwardStudy {
         // 실제 병렬 수: 등록 파일 parallelism과 실행 명령 상한 중 작은 쪽(D-089). 결정론 기록에도 이 값을 쓴다
         int parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
         // 명령 전체 진행률(D-097): 실행기 호출 수를 미리 센다. 결정론 확인은 같은 계산을 한 번 더 돈다
-        int planned = Math.multiplyExact(experimentsPerCompute(windows.size(), ComboSets.of(candidates), plan.nullSeeds()),
-                verifyDeterminism && parallel > 1 ? 2 : 1);
+        // 세기나 알리기가 실패해도 실험은 계속한다(0 = 모름, PR #124 architect R1)
+        int planned = 0;
         try {
+            planned = Math.multiplyExact(experimentsPerCompute(windows.size(), ComboSets.of(candidates), plan.nullSeeds()),
+                    verifyDeterminism && parallel > 1 ? 2 : 1);
             gate.onExperimentsPlanned(planned);
         } catch (RuntimeException e) {
             log.accept("전체 실험 수를 알리지 못했습니다(실험은 계속): " + e.getClass().getSimpleName());
@@ -233,8 +235,15 @@ public final class WalkForwardStudy {
     private record Computed(Map<String, String> files, boolean anyRunFailed) {
     }
 
-    /** 계산 한 번이 쓰는 조합 묶음: 후보, 학습(후보와 섭동 변형), 대조군(쌍마다 하나). */
-    record ComboSets(List<Combination> candidates, List<Combination> train, List<Combination> controls) {
+    /**
+     * 계산 한 번이 쓰는 조합 묶음: 후보, 학습(후보와 섭동 변형), 대조군(쌍마다 하나, 쌍 키 순서). 계산과 실험 수 세기가 이 하나를
+     * 원본으로 쓴다.
+     */
+    record ComboSets(List<Combination> candidates, List<Combination> train, Map<String, Combination> controlByPair) {
+
+        List<Combination> controls() {
+            return List.copyOf(controlByPair.values());
+        }
 
         static ComboSets of(List<Candidate> cands) {
             List<Combination> candidateCombos = cands.stream().map(Candidate::combination).toList();
@@ -247,7 +256,7 @@ public final class WalkForwardStudy {
                 }
                 controlByPair.putIfAbsent(cand.pairKey(), cand.control());
             }
-            return new ComboSets(candidateCombos, List.copyOf(trainCombos), List.copyOf(controlByPair.values()));
+            return new ComboSets(candidateCombos, List.copyOf(trainCombos), java.util.Collections.unmodifiableMap(controlByPair));
         }
     }
 
@@ -385,9 +394,8 @@ public final class WalkForwardStudy {
                 return l;
             });
         }
-        Map<String, Combination> controlByPair = new TreeMap<>();
-        c.candidates().forEach(cand -> controlByPair.putIfAbsent(cand.pairKey(), cand.control()));
         ComboSets sets = ComboSets.of(c.candidates());
+        Map<String, Combination> controlByPair = sets.controlByPair();
         List<Combination> candidateCombos = sets.candidates();
         List<Combination> trainCombos = sets.train();
         List<Combination> controlCombos = sets.controls();

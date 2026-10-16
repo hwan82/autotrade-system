@@ -269,10 +269,11 @@ class WalkForwardStudyTest {
     void 실험_수는_조합이_128개를_넘으면_나눠_부른_만큼_센다() {
         List<com.autotrade.selection.profile.Combination> none = List.of();
         WalkForwardStudy.ComboSets sets = new WalkForwardStudy.ComboSets(
-                java.util.Collections.nCopies(129, null), java.util.Collections.nCopies(257, null), java.util.Collections.nCopies(1, null));
+                java.util.Collections.nCopies(129, null), java.util.Collections.nCopies(257, null),
+                java.util.Collections.singletonMap("pair", null));
         // 구간마다 학습 3 + 검증·스트레스 2×2 + 대조군 10×1 = 17
         assertThat(WalkForwardStudy.experimentsPerCompute(2, sets, 10)).isEqualTo(34);
-        assertThat(WalkForwardStudy.experimentsPerCompute(1, new WalkForwardStudy.ComboSets(none, none, none), 5)).isZero();
+        assertThat(WalkForwardStudy.experimentsPerCompute(1, new WalkForwardStudy.ComboSets(none, none, java.util.Map.of()), 5)).isZero();
     }
 
     @Test
