@@ -248,12 +248,17 @@ class NotificationQueueTest {
     @Test
     void 큐가_차서_버린_긴급_알림도_같은_종류가_다시_오면_받는다() throws Exception {
         // PR #128 QA 재검토 Q1(변이 M17): 멈춤(큐 가득으로 버림) → 큐가 빈 뒤 같은 대상 멈춤
+        CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         sink.behavior.set(n -> {
+            entered.countDown();
             release.await();
             return SendResult.ok();
         });
         NotificationQueue q = queue();
+        // 보내는 스레드가 첫 알림에서 막힌 뒤 채운다(채운 직후 한 건을 꺼내 가는 경쟁을 없앰, PR #132 risk-ops R1)
+        assertThat(q.offer(EventRoutes.ERROR, "first", "첫 오류", "")).isTrue();
+        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
         int i = 0;
         while (q.pending() < NotificationQueue.CAPACITY && i < 1000) {
             q.offer(EventRoutes.ERROR, "e" + i, "오류 " + i, "");
