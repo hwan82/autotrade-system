@@ -125,12 +125,22 @@ public final class EngineMain {
         return queue;
     }
 
-    /** 설정 값을 알림 모듈 값으로 옮긴다(알림 모듈은 설정 모듈을 모른다). */
+    /** 설정 값을 알림 모듈 값으로 이름을 붙여 옮긴다(알림 모듈은 설정 모듈을 모른다, PR #128 architect R1·R2). */
     static NotificationSetup setup(RuntimeConfig.Notification n) {
         RuntimeConfig.Kakao k = n.kakao();
-        return new NotificationSetup(n.slack().enabled(), n.slack().webhookUrl().reveal(), k.enabled(),
-                k.mode() == KakaoMode.BIZ, k.restApiKey().reveal(), k.clientSecret().reveal(), k.accessToken().reveal(),
-                k.refreshToken().reveal(), k.linkUrl());
+        return NotificationSetup.builder()
+                .slackEnabled(n.slack().enabled())
+                .slackWebhookUrl(n.slack().webhookUrl().reveal())
+                .kakaoEnabled(k.enabled())
+                .kakaoPaidMode(k.mode() == KakaoMode.BIZ)
+                .kakaoRestApiKey(k.restApiKey().reveal())
+                .kakaoClientSecret(k.clientSecret().reveal())
+                .kakaoAccessToken(k.accessToken().reveal())
+                .kakaoRefreshToken(k.refreshToken().reveal())
+                .kakaoLinkUrl(k.linkUrl())
+                .displayZone(RuntimeConfig.Notification.DISPLAY_ZONE)
+                .kakaoReconsentHelp(RuntimeConfig.Notification.KAKAO_RECONSENT_HELP)
+                .build();
     }
 
     /**

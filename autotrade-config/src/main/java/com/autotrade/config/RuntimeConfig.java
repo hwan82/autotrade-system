@@ -5,6 +5,7 @@ import com.autotrade.domain.account.AccountRef;
 import com.autotrade.domain.account.BrokerId;
 import com.autotrade.domain.market.Market;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -65,6 +66,17 @@ public record RuntimeConfig(
     }
 
     public record Notification(Slack slack, Kakao kakao) {
+        /**
+         * 알림에 보일 시각의 시간대. 설정 키가 아닌 고정값이다(사용자 PC가 한국에 있음, PR #127 architect R3). 계산에는 쓰지 않는다. 알림
+         * 라이브러리는 이 시스템을 모르므로 실전 엔진·감시가 이 값을 넘긴다(PR #128 architect R2).
+         */
+        public static final ZoneId DISPLAY_ZONE = ZoneId.of("Asia/Seoul");
+
+        /** 카카오 리프레시 토큰이 거절됐을 때 재동의 알림 본문. 새 토큰을 넣을 설정 키는 이 모듈이 안다(PR #128 architect R2). */
+        public static final String KAKAO_RECONSENT_HELP = "카카오 리프레시 토큰이 거절돼 카카오톡으로 알림을 보내지 못합니다."
+                + " 카카오 로그인으로 다시 동의해 받은 리프레시 토큰을 secrets.json의 notification.kakao.refresh-token에 넣고"
+                + " 실전 엔진·감시를 다시 시작하세요. 그때까지 알림은 Slack·로그로만 갑니다";
+
         public Notification {
             Objects.requireNonNull(slack, "notification.slack");
             Objects.requireNonNull(kakao, "notification.kakao");

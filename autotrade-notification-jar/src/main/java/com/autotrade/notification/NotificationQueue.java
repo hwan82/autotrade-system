@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  *       버린 긴급 알림은 다시 오지 않는다, PR #128 architect F1). 긴급도 큐가 차면({@link #CAPACITY}건) 버린다. 넘친 건수와 큐가 차서 버린
  *       건수는 다음에 받는 알림 본문에 붙인다.</li>
  *   <li><b>카카오 재동의</b>: 발송 결과에 {@link KakaoMemoChannel#REFRESH_REJECTED}가 보이면(거절된 첫 발송에만 나온다) "카카오톡 알림
- *       재동의 필요" 긴급 알림을 한 번 넣는다(PR #127 QA R1).</li>
+ *       재동의 필요" 긴급 알림을 한 번 넣는다(PR #127 QA R1). 본문은 부르는 쪽이 준다(PR #128 architect R2).</li>
  *   <li><b>닫기</b>: {@link #close}는 정해진 시간까지 남은 알림을 보내 보고, 그래도 남은 알림은 로그 채널에만 남긴다.</li>
  * </ul>
  */
@@ -42,6 +42,12 @@ public final class NotificationQueue implements AutoCloseable {
     public static final int MAX_PER_WINDOW = 20;
     /** 큐 크기. */
     public static final int CAPACITY = 64;
+    /**
+     * 부르는 쪽이 재동의 안내 문구를 주지 않을 때 쓰는 본문. 새 토큰을 어디에 넣고 무엇을 다시 시작할지는 이 모듈이 모르므로(자동매매
+     * 시스템을 모르는 라이브러리) 일반 문구만 둔다(PR #128 architect R2).
+     */
+    public static final String DEFAULT_KAKAO_RECONSENT_HELP = "카카오 리프레시 토큰이 거절돼 카카오톡으로 알림을 보내지 못합니다."
+            + " 카카오 로그인으로 다시 동의해 받은 리프레시 토큰을 설정에 넣고 다시 시작하세요. 그때까지 알림은 다른 채널로만 갑니다";
 
     private static final Logger LOG = System.getLogger(NotificationQueue.class.getName());
 
@@ -51,6 +57,7 @@ public final class NotificationQueue implements AutoCloseable {
     private final ZoneId zone;
     private final LogChannel log;
     private final String threadName;
+    private final String kakaoReconsentHelp;
     private final BlockingQueue<Notification> queue = new ArrayBlockingQueue<>(CAPACITY);
 
     /**
@@ -79,16 +86,30 @@ public final class NotificationQueue implements AutoCloseable {
      * @param process 스레드 이름에 쓰는 프로세스 이름
      */
     public NotificationQueue(Notifier notifier, EventRoutes routes, Clock clock, ZoneId zone, String process) {
-        this(notifier, routes, clock, zone, process, new LogChannel());
+        this(notifier, routes, clock, zone, process, DEFAULT_KAKAO_RECONSENT_HELP);
+    }
+
+    /**
+     * @param kakaoReconsentHelp 카카오 재동의 알림 본문(비밀값을 넣지 않는다). 새 토큰을 넣을 곳과 다시 시작할 프로세스는 부르는 쪽이 안다
+     */
+    public NotificationQueue(Notifier notifier, EventRoutes routes, Clock clock, ZoneId zone, String process,
+            String kakaoReconsentHelp) {
+        this(notifier, routes, clock, zone, process, kakaoReconsentHelp, new LogChannel());
     }
 
     NotificationQueue(Notifier notifier, EventRoutes routes, Clock clock, ZoneId zone, String process, LogChannel log) {
+        this(notifier, routes, clock, zone, process, DEFAULT_KAKAO_RECONSENT_HELP, log);
+    }
+
+    NotificationQueue(Notifier notifier, EventRoutes routes, Clock clock, ZoneId zone, String process,
+            String kakaoReconsentHelp, LogChannel log) {
         this.notifier = Objects.requireNonNull(notifier, "notifier");
         this.routes = Objects.requireNonNull(routes, "routes");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.zone = Objects.requireNonNull(zone, "zone");
         this.log = Objects.requireNonNull(log, "log");
         this.threadName = "notification-" + Objects.requireNonNull(process, "process");
+        this.kakaoReconsentHelp = Objects.requireNonNull(kakaoReconsentHelp, "kakaoReconsentHelp");
     }
 
     /** 보내는 스레드를 띄운다(데몬, 한 번만). */
@@ -203,10 +224,7 @@ public final class NotificationQueue implements AutoCloseable {
             DispatchReport report = notifier.dispatch(n);
             for (DispatchReport.Attempt a : report.attempts()) {
                 if (KakaoMemoChannel.REFRESH_REJECTED.equals(a.result().detail())) {
-                    offer(EventRoutes.NOTIFICATION_CHANNEL, "kakao", "카카오톡 알림 재동의 필요",
-                            "카카오 리프레시 토큰이 거절돼 카카오톡으로 알림을 보내지 못합니다. 카카오 로그인으로 다시 동의해 받은 리프레시 토큰을"
-                                    + " secrets.json의 notification.kakao.refresh-token에 넣고 실전 엔진·감시를 다시 시작하세요."
-                                    + " 그때까지 알림은 Slack·로그로만 갑니다");
+                    offer(EventRoutes.NOTIFICATION_CHANNEL, "kakao", "카카오톡 알림 재동의 필요", kakaoReconsentHelp);
                 }
             }
         } catch (Throwable e) {
@@ -232,6 +250,16 @@ public final class NotificationQueue implements AutoCloseable {
     /** 이 종류로 받은(큐에 넣은) 건수. 엔진·감시가 실제 큐에 넣는지 보는 배선 시험용(PR #128 QA Q1). */
     public synchronized int acceptedCount(String kind) {
         return acceptedByKind.getOrDefault(kind, 0);
+    }
+
+    /** 알림 시각을 보일 시간대(시험용). */
+    ZoneId zone() {
+        return zone;
+    }
+
+    /** 카카오 재동의 알림 본문(시험용). */
+    String kakaoReconsentHelp() {
+        return kakaoReconsentHelp;
     }
 
     /** 큐에 남은 건수. */

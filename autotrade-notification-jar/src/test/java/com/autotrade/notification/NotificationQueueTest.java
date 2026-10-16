@@ -230,6 +230,51 @@ class NotificationQueueTest {
     }
 
     @Test
+    void 상한으로_버린_종류가_새_창에서_다시_오면_받는다() throws Exception {
+        // PR #128 QA 재검토 Q1(변이 M17): 회복(상한으로 버림) → 같은 대상 회복. 버린 기록(시각 없음)을 억제 근거로 쓰면 안 된다
+        NotificationQueue q = queue();
+        for (int i = 0; i < NotificationQueue.MAX_PER_WINDOW; i++) {
+            assertThat(q.offer(EventRoutes.REAL_TRADING_COMMAND, "c" + i, "명령 " + i, "")).isTrue();
+        }
+        assertThat(q.offer(EventRoutes.PROCESS_RECOVERED, "lab", "실험실 회복", "")).isFalse();
+        clock.now = T0.plus(NotificationQueue.QUIET);
+        assertThat(q.offer(EventRoutes.PROCESS_RECOVERED, "lab", "실험실 회복", "")).isTrue();
+        assertThat(q.suppressedTotal()).isZero();
+        assertThat(q.acceptedCount(EventRoutes.PROCESS_RECOVERED)).isEqualTo(1);
+        awaitGot(NotificationQueue.MAX_PER_WINDOW + 1);
+        assertThat(sink.got.get(NotificationQueue.MAX_PER_WINDOW).title()).isEqualTo("실험실 회복");
+    }
+
+    @Test
+    void 큐가_차서_버린_긴급_알림도_같은_종류가_다시_오면_받는다() throws Exception {
+        // PR #128 QA 재검토 Q1(변이 M17): 멈춤(큐 가득으로 버림) → 큐가 빈 뒤 같은 대상 멈춤
+        CountDownLatch release = new CountDownLatch(1);
+        sink.behavior.set(n -> {
+            release.await();
+            return SendResult.ok();
+        });
+        NotificationQueue q = queue();
+        int i = 0;
+        while (q.pending() < NotificationQueue.CAPACITY && i < 1000) {
+            q.offer(EventRoutes.ERROR, "e" + i, "오류 " + i, "");
+            i++;
+        }
+        assertThat(q.pending()).isEqualTo(NotificationQueue.CAPACITY);
+        int droppedBefore = q.droppedTotal();
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isFalse();
+        assertThat(q.droppedTotal()).isEqualTo(droppedBefore + 1);
+        release.countDown();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (q.pending() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        clock.now = T0.plusSeconds(20);
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
+        assertThat(q.suppressedTotal()).isZero();
+        assertThat(q.acceptedCount(EventRoutes.PROCESS_STALE)).isEqualTo(1);
+    }
+
+    @Test
     void 시계가_뒤로_가면_억제_간격이_찬_것으로_본다() {
         NotificationQueue q = queue();
         clock.now = T0.plusSeconds(600);
@@ -288,6 +333,20 @@ class NotificationQueueTest {
                     assertThat(n.body()).doesNotContain("REFRESH-OLD");
                 });
         assertThat(kakaoHttp.requests).hasSize(1);
+    }
+
+    @Test
+    void 재동의_알림_본문은_부르는_쪽이_넘긴_문구다() throws Exception {
+        // PR #128 architect R2: 새 토큰을 넣을 곳은 부르는 시스템만 안다
+        FakeHttp kakaoHttp = new FakeHttp().reply(400, "{\"error\":\"invalid_grant\"}");
+        KakaoMemoChannel kakao = new KakaoMemoChannel("REST-KEY-PH", "", "http://localhost",
+                new KakaoToken("ACCESS-OLD", "REFRESH-OLD", T0), KakaoTokenStore.none(), kakaoHttp, clock);
+        queue = new NotificationQueue(Notifier.of(List.of(sink, log), List.of(kakao, sink, log)), EventRoutes.defaults(),
+                clock, ZoneOffset.UTC, "test", "새 토큰을 host.json에 넣고 다시 시작하세요", log).start();
+        queue.offer(EventRoutes.TAKE_PROFIT, "a", "익절", "");
+        awaitGot(2);
+        assertThat(sink.got).filteredOn(n -> n.kind().equals(EventRoutes.NOTIFICATION_CHANNEL)).singleElement()
+                .satisfies(n -> assertThat(n.body()).isEqualTo("새 토큰을 host.json에 넣고 다시 시작하세요"));
     }
 
     @Test
