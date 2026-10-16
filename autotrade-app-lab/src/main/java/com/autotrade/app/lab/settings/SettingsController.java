@@ -61,11 +61,17 @@ public class SettingsController {
     static final String KAKAO_ENABLED = "notification.kakao.enabled";
     static final String KAKAO_MODE = "notification.kakao.mode";
     static final String KAKAO_TOKEN = "notification.kakao.access-token";
+    private static final String NOTIFY_LIVE = "실전 엔진·감시 재기동";
+    static final String KAKAO_REST_KEY = "notification.kakao.rest-api-key";
+    static final String KAKAO_REFRESH = "notification.kakao.refresh-token";
+    static final String KAKAO_CLIENT_SECRET = "notification.kakao.client-secret";
+    static final String KAKAO_LINK = "notification.kakao.link-url";
 
     private static final Set<String> EDITABLE = Set.of(
             LAB_PARALLEL, LAB_SEED_KRW, LAB_SEED_USD, SLACK_ENABLED, SLACK_WEBHOOK, KAKAO_ENABLED, KAKAO_MODE,
-            KAKAO_TOKEN);
-    private static final Set<String> SECRETS = Set.of(SLACK_WEBHOOK, KAKAO_TOKEN);
+            KAKAO_TOKEN, KAKAO_REST_KEY, KAKAO_REFRESH, KAKAO_CLIENT_SECRET);
+    private static final Set<String> SECRETS = Set.of(SLACK_WEBHOOK, KAKAO_TOKEN, KAKAO_REST_KEY, KAKAO_REFRESH,
+            KAKAO_CLIENT_SECRET);
 
     private final RuntimeConfigHolder holder;
     private final RuntimeConfigStore store;
@@ -190,10 +196,14 @@ public class SettingsController {
                 ? parseBool(KAKAO_ENABLED, values.get(KAKAO_ENABLED)) : kakao.enabled();
         KakaoMode mode = values.containsKey(KAKAO_MODE) ? parseMode(values.get(KAKAO_MODE)) : kakao.mode();
         Secret token = secret(KAKAO_TOKEN, kakao.accessToken(), values, clear);
+        Secret restKey = secret(KAKAO_REST_KEY, kakao.restApiKey(), values, clear);
+        Secret refresh = secret(KAKAO_REFRESH, kakao.refreshToken(), values, clear);
+        Secret clientSecret = secret(KAKAO_CLIENT_SECRET, kakao.clientSecret(), values, clear);
 
         return new RuntimeConfig(c.marketData(), new RuntimeConfig.Lab(parallel, seedKrw, seedUsd),
                 new RuntimeConfig.Notification(new RuntimeConfig.Slack(slackEnabled, webhook),
-                        new RuntimeConfig.Kakao(kakaoEnabled, mode, token)),
+                        new RuntimeConfig.Kakao(kakaoEnabled, mode, token, restKey, refresh, clientSecret,
+                                kakao.linkUrl())),
                 c.brokers(), c.realTrading());
     }
 
@@ -270,15 +280,22 @@ public class SettingsController {
         RuntimeConfig.Slack slack = c.notification().slack();
         RuntimeConfig.Kakao kakao = c.notification().kakao();
         groups.add(new Group("notification", "알림", List.of(
-                plain(SLACK_ENABLED, "bool", slack.enabled(), d.notification().slack().enabled(), true, "즉시",
+                // 실전 엔진·감시는 기동 때 알림 설정을 읽는다(D-100). 바꾼 값은 두 프로세스를 다시 띄워야 반영된다
+                plain(SLACK_ENABLED, "bool", slack.enabled(), d.notification().slack().enabled(), true, NOTIFY_LIVE,
                         List.of(), "켜려면 webhook-url이 필요합니다"),
-                secretItem(SLACK_WEBHOOK, slack.webhookUrl(), true, "즉시", "Slack Incoming Webhook URL"),
-                plain(KAKAO_ENABLED, "bool", kakao.enabled(), d.notification().kakao().enabled(), true, "즉시",
-                        List.of(), "켜려면 access-token이 필요합니다"),
-                plain(KAKAO_MODE, "enum", kakao.mode(), d.notification().kakao().mode(), true, "즉시",
+                secretItem(SLACK_WEBHOOK, slack.webhookUrl(), true, NOTIFY_LIVE, "Slack Incoming Webhook URL"),
+                plain(KAKAO_ENABLED, "bool", kakao.enabled(), d.notification().kakao().enabled(), true, NOTIFY_LIVE,
+                        List.of(), "ME로 켜려면 rest-api-key·refresh-token·link-url이 필요합니다"),
+                plain(KAKAO_MODE, "enum", kakao.mode(), d.notification().kakao().mode(), true, NOTIFY_LIVE,
                         Arrays.stream(KakaoMode.values()).map(Enum::name).toList(),
-                        "ME = 나에게 보내기(무료), BIZ = 알림톡(유료, 바꾸기 전 비용 확인 필요)"),
-                secretItem(KAKAO_TOKEN, kakao.accessToken(), true, "즉시", "카카오 access token"))));
+                        "ME = 나에게 보내기(무료), BIZ = 알림톡(유료, 바꾸기 전 비용 확인 필요, 알림 라이브러리는 보내지 않음)"),
+                secretItem(KAKAO_REST_KEY, kakao.restApiKey(), true, NOTIFY_LIVE, "카카오 앱 REST API 키(토큰 갱신용)"),
+                secretItem(KAKAO_REFRESH, kakao.refreshToken(), true, NOTIFY_LIVE,
+                        "카카오 refresh token(talk_message 동의로 받음). 갱신된 토큰은 notification-state 폴더에 따로 남는다"),
+                secretItem(KAKAO_CLIENT_SECRET, kakao.clientSecret(), true, NOTIFY_LIVE, "클라이언트 시크릿(앱에서 켠 경우만)"),
+                secretItem(KAKAO_TOKEN, kakao.accessToken(), true, NOTIFY_LIVE, "카카오 access token(선택, 없으면 첫 발송 전 갱신)"),
+                plain(KAKAO_LINK, "string", kakao.linkUrl(), d.notification().kakao().linkUrl(), false, NOTIFY_LIVE,
+                        List.of(), "메시지 링크. 카카오 앱에 등록한 웹 도메인의 http(s) URL이어야 해 runtime-config.json에서 바꿉니다"))));
 
         RuntimeConfig.MarketData md = c.marketData();
         groups.add(new Group("market-data", "시세 소스", List.of(

@@ -179,6 +179,21 @@ class SettingsControllerTest {
     }
 
     @Test
+    void 카카오_나에게_보내기는_갱신_키와_링크가_있어야_켤_수_있고_새_키는_쓰기_전용이다() throws Exception {
+        // access-token만으로는 켤 수 없다(D-100: rest-api-key·refresh-token·link-url 필요)
+        putJson("{\"values\":{\"notification.kakao.enabled\":\"true\"}}").andExpect(status().isBadRequest());
+        assertThat(holder.current().notification().kakao().enabled()).isFalse();
+        String body = putJson("{\"values\":{\"notification.kakao.refresh-token\":\"" + NEW_WEBHOOK
+                + "\",\"notification.kakao.rest-api-key\":\"" + NEW_WEBHOOK + "\"}}")
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertNoPlaintext(body);
+        assertThat(holder.current().notification().kakao().refreshToken().reveal()).isEqualTo(NEW_WEBHOOK);
+        assertThat(Files.readString(dir.resolve("config/runtime-config.json"))).doesNotContain(NEW_WEBHOOK);
+        // 링크 URL은 이 화면에서 바꾸지 않는다(등록 도메인과 맞춰 runtime-config.json에서)
+        putJson("{\"values\":{\"notification.kakao.link-url\":\"http://localhost\"}}").andExpect(status().isBadRequest());
+    }
+
+    @Test
     void 빈_변경은_거절한다() throws Exception {
         putJson("{}").andExpect(status().isBadRequest());
         putJson("not json").andExpect(status().isBadRequest())

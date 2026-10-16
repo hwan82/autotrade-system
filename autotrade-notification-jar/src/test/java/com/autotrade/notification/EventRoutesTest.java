@@ -23,6 +23,23 @@ class EventRoutesTest {
     }
 
     @Test
+    void 감시_엔진_운영_이벤트는_멈춤_정지요청_결측_설정경고_실전명령_채널문제가_긴급이다() {
+        EventRoutes r = EventRoutes.defaults();
+        for (String urgent : new String[] {EventRoutes.PROCESS_STALE, EventRoutes.HEARTBEAT_UNREADABLE,
+                EventRoutes.PROCESS_RESTARTED, EventRoutes.STOP_REQUEST_ON, EventRoutes.READING_MISSING,
+                EventRoutes.CONFIG_WARNING, EventRoutes.REAL_TRADING_COMMAND, EventRoutes.NOTIFICATION_CHANNEL}) {
+            assertThat(r.known(urgent)).as(urgent).isTrue();
+            assertThat(r.severityOf(urgent)).as(urgent).isEqualTo(Severity.URGENT);
+        }
+        for (String info : new String[] {EventRoutes.PROCESS_RECOVERED, EventRoutes.PROCESS_STOPPED,
+                EventRoutes.STOP_REQUEST_OFF, EventRoutes.READING_RECOVERED, EventRoutes.WATCHDOG_STARTED,
+                EventRoutes.ENGINE_STARTED}) {
+            assertThat(r.known(info)).as(info).isTrue();
+            assertThat(r.severityOf(info)).as(info).isEqualTo(Severity.INFO);
+        }
+    }
+
+    @Test
     void 표에_없는_종류는_긴급으로_보낸다() {
         assertThat(EventRoutes.defaults().known("watchdog-stale")).isFalse();
         assertThat(EventRoutes.defaults().notification("watchdog-stale", "엔진 멈춤", "", T).severity())

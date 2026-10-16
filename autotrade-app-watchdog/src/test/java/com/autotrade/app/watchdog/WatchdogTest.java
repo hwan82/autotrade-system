@@ -5,12 +5,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.autotrade.app.watchdog.HeartbeatWatch.State;
 import com.autotrade.monitor.Heartbeat;
 import com.autotrade.monitor.HeartbeatWriter;
+import com.autotrade.notification.EventRoutes;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -45,6 +50,11 @@ class WatchdogTest {
         }
     };
 
+    /** 넣은 알림 한 건. */
+    record Sent(String kind, String subject, String title, String body) {}
+
+    private final List<Sent> sent = new ArrayList<>();
+
     private Watchdog watchdog(TestClock clock) {
         WatchdogSettings settings = WatchdogSettings.parse("release-hold-seconds=60\ncpu.system=85:95:2\nmemory.used=85:95:1", dir);
         return new Watchdog(dir, settings, clock, path -> {
@@ -52,7 +62,11 @@ class WatchdogTest {
                 throw new IOException("읽기 실패 주입");
             }
             return free.get();
-        }, os);
+        }, os, (kind, subject, title, body) -> sent.add(new Sent(kind, subject, title, body)), null);
+    }
+
+    private List<String> kinds() {
+        return sent.stream().map(Sent::kind).toList();
     }
 
     @Test
@@ -279,5 +293,216 @@ class WatchdogTest {
         } finally {
             w.close();
         }
+    }
+
+    @Test
+    void 엔진_하트비트가_멈추면_긴급_알림을_넣고_회복과_정상_종료는_정보_알림을_넣는다() throws Exception {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        HeartbeatWriter engine = new HeartbeatWriter(dir, "engine", clock);
+        engine.beat();
+        w.tick();
+        // 처음 본 살아 있음·꺼짐은 알리지 않는다
+        assertThat(kinds()).isEmpty();
+
+        clock.advance(Duration.ofSeconds(20));
+        w.tick();
+        assertThat(sent).singleElement().satisfies(a -> {
+            assertThat(a.kind()).isEqualTo(EventRoutes.PROCESS_STALE);
+            assertThat(a.subject()).isEqualTo("engine");
+            assertThat(a.body()).contains("장애표 #8");
+        });
+        assertThat(EventRoutes.defaults().severityOf(sent.get(0).kind()))
+                .isEqualTo(com.autotrade.notification.Severity.URGENT);
+
+        engine.beat();
+        clock.advance(Duration.ofSeconds(1));
+        w.tick();
+        assertThat(kinds()).containsExactly(EventRoutes.PROCESS_STALE, EventRoutes.PROCESS_RECOVERED);
+
+        engine.close(); // 정상 종료는 파일을 지운다
+        clock.advance(Duration.ofSeconds(1));
+        w.tick();
+        assertThat(kinds()).containsExactly(EventRoutes.PROCESS_STALE, EventRoutes.PROCESS_RECOVERED,
+                EventRoutes.PROCESS_STOPPED);
+        w.close();
+    }
+
+    @Test
+    void 기동_때_이미_멈춘_엔진은_첫_점검에_바로_알린다() throws Exception {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        new HeartbeatWriter(dir, "engine", clock).beat();
+        clock.advance(Duration.ofMinutes(5));
+        Watchdog w = watchdog(clock);
+        w.tick();
+        assertThat(sent).filteredOn(a -> a.subject().equals("engine")).extracting(Sent::kind)
+                .containsExactly(EventRoutes.PROCESS_STALE);
+        w.close();
+    }
+
+    @Test
+    void 점검_사이에_엔진이_다시_뜨면_재기동_알림을_넣는다() throws Exception {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        new HeartbeatWriter(dir, "engine", clock).beat();
+        w.tick();
+        clock.advance(Duration.ofSeconds(3));
+        new HeartbeatWriter(dir, "engine", clock).beat(); // 새 시작 시각
+        w.tick();
+        assertThat(sent).singleElement().satisfies(a -> {
+            assertThat(a.kind()).isEqualTo(EventRoutes.PROCESS_RESTARTED);
+            assertThat(a.subject()).isEqualTo("engine");
+        });
+        w.close();
+    }
+
+    @Test
+    void 정지_요청이_켜지면_긴급_꺼지면_정보_알림을_넣는다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        free.set(10 * GIB);
+        w.tick();
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 켜진 채 유지: 다시 알리지 않는다
+        assertThat(kinds()).containsExactly(EventRoutes.STOP_REQUEST_ON);
+        assertThat(sent.get(0).body()).contains("실전 엔진은 멈추지 않습니다");
+
+        free.set(100 * GIB);
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        clock.advance(Duration.ofSeconds(60));
+        w.tick();
+        assertThat(w.stopRequests().active()).isFalse();
+        assertThat(kinds()).containsExactly(EventRoutes.STOP_REQUEST_ON, EventRoutes.STOP_REQUEST_OFF);
+        w.close();
+    }
+
+    @Test
+    void 자원_값은_새로_빠질_때와_돌아올_때만_알리고_10분_반복은_로그로만_남긴다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        clock.advance(Watchdog.MISSING_REPEAT);
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(2);
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING);
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED);
+        w.close();
+    }
+
+    @Test
+    void 알림이_던져도_점검은_계속한다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        WatchdogSettings settings = WatchdogSettings.parse("release-hold-seconds=60", dir);
+        Watchdog w = new Watchdog(dir, settings, clock, path -> 10 * GIB, os, (kind, subject, title, body) -> {
+            throw new IllegalStateException("알림 실패 주입");
+        }, null);
+        w.tick();
+        assertThat(w.stopRequests().active()).isTrue();
+        assertThat(dir.resolve(StopRequests.EXPERIMENT_STOP_REQUEST)).exists();
+        w.close();
+    }
+
+    @Test
+    void 반복_간격은_10분이다() {
+        // D-096·ADR-011·runbook이 운영자에게 약속한 값(PR #123 QA Q2)
+        assertThat(Watchdog.MISSING_REPEAT).isEqualTo(Duration.ofMinutes(10));
+        assertThat(HeartbeatWatch.ALL_ABSENT_REPEAT).isEqualTo(Duration.ofMinutes(10));
+    }
+
+    @Test
+    void 간격이_찬_경고_뒤에_다시_빠진_값은_바로_알린다() {
+        // PR #123 QA Q1(변이 W5): 0분 {CPU, 드라이브} 경고 → 10분 {CPU}만 반복 경고 → 11분 드라이브가 다시 빠지면 바로 WARN
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        diskFails = true;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(1);
+        diskFails = false;
+        clock.advance(Watchdog.MISSING_REPEAT);
+        w.tick(); // CPU만 빠진 채 간격이 차서 반복 경고. 경고 값 집합은 {CPU}로 줄어야 한다
+        assertThat(w.missingWarnings()).isEqualTo(2);
+        diskFails = true;
+        clock.advance(Duration.ofMinutes(1));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(3);
+        w.close();
+    }
+
+    @Test
+    void 시계가_뒤로_가도_반복_경고가_밀리지_않는다() {
+        // PR #123 QA R4: 역행 폭만큼 반복 경고가 늦어지지 않게 역행이면 간격이 찬 것으로 본다
+        TestClock clock = new TestClock("2026-10-15T01:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(1);
+        clock.advance(Duration.ofMinutes(-30));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(2);
+        w.close();
+    }
+
+    @Test
+    void 빠진_값_경고는_WARNING_회복은_INFO로_남긴다() {
+        // PR #123 QA Q2(변이 W1·W10): 운영자가 보는 것은 로그 수준이다
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(Watchdog.class.getName());
+        List<LogRecord> records = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                records.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        jul.addHandler(handler);
+        try {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            Watchdog w = watchdog(clock);
+            w.tick();
+            cpu = -1;
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+            cpu = 0.1;
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+            w.close();
+            assertThat(records).filteredOn(r -> r.getMessage().startsWith("자원 값을 읽지 못함"))
+                    .singleElement().extracting(LogRecord::getLevel).isEqualTo(java.util.logging.Level.WARNING);
+            assertThat(records).filteredOn(r -> r.getMessage().startsWith("자원 값을 다시 읽음"))
+                    .singleElement().extracting(LogRecord::getLevel).isEqualTo(java.util.logging.Level.INFO);
+        } finally {
+            jul.removeHandler(handler);
+        }
+    }
+
+    @Test
+    void 하트비트를_하나도_못_본_경고도_시계가_뒤로_가면_바로_되풀이한다() {
+        TestClock clock = new TestClock("2026-10-15T01:00:00Z");
+        HeartbeatWatch watch = new HeartbeatWatch(dir, List.of("engine"), Duration.ofSeconds(15));
+        watch.check(clock.instant());
+        assertThat(watch.allAbsentWarnings()).isEqualTo(1);
+        clock.advance(Duration.ofMinutes(1));
+        watch.check(clock.instant());
+        assertThat(watch.allAbsentWarnings()).isEqualTo(1);
+        clock.advance(Duration.ofMinutes(-30));
+        watch.check(clock.instant());
+        assertThat(watch.allAbsentWarnings()).isEqualTo(2);
     }
 }

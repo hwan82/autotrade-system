@@ -12,8 +12,12 @@ import java.util.Objects;
  * <p>표준 순서({@link #standard}): 긴급은 Slack → 카카오톡 → 로그, 정보는 카카오톡 → Slack → 로그. 설정되지 않은 채널은 빠진다.
  * 로그는 늘 마지막에 있다.
  *
- * <p>{@link #dispatch}는 예외를 던지지 않는다(채널의 런타임 예외도 실패로 친다). 보내는 동안 막히므로(HTTP 한 번 최대 약 10초, 카카오는
- * 갱신 한 번과 발송 두 번까지라 최대 약 30초) 주문·시세 스레드에서 직접 부르지 않는다. 비동기 큐·폭주 억제는 엔진·감시 연결 PR에서 정한다.
+ * <p>{@link #dispatch}는 런타임 예외를 던지지 않는다(채널의 런타임 예외도 실패로 친다). {@code Error}는 잡지 않는다(PR #127 QA R3):
+ * 보내는 동안 막히고(HTTP 한 번 최대 약 10초, 카카오는 갱신 한 번과 발송 두 번까지라 최대 약 30초) {@code Error}도 나올 수 있으므로
+ * 주문·시세 스레드에서 직접 부르지 않고 {@link NotificationQueue}를 거친다(D-100).
+ *
+ * <p>이름 {@code log}는 {@link LogChannel}만 쓸 수 있다. 결과 보고({@link DispatchReport#delivered})가 이 이름으로 외부 채널과
+ * 로그를 가르므로, 다른 채널이 이 이름을 쓰면 거부한다(PR #127 architect R2).
  */
 public final class Notifier {
 
@@ -61,6 +65,9 @@ public final class Notifier {
         if (copy.isEmpty()) {
             throw new IllegalArgumentException(severity.label() + " 알림 채널이 없습니다");
         }
+        if (copy.stream().anyMatch(c -> LogChannel.NAME.equals(c.name()) && !(c instanceof LogChannel))) {
+            throw new IllegalArgumentException("알림 채널 이름 log는 로그 채널만 쓸 수 있습니다");
+        }
         if (copy.stream().map(Channel::name).distinct().count() != copy.size()) {
             throw new IllegalArgumentException(severity.label() + " 알림 채널 이름이 겹칩니다");
         }
@@ -74,7 +81,7 @@ public final class Notifier {
 
     /** 외부 채널(로그 말고)이 하나라도 있는지. 실전 계좌가 있는데 false면 연결하는 쪽이 이상으로 보고한다(ADR-005 표). */
     public boolean hasExternalChannel(Severity severity) {
-        return order.get(severity).stream().anyMatch(c -> !c.name().equals("log"));
+        return order.get(severity).stream().anyMatch(c -> !(c instanceof LogChannel));
     }
 
     /** 보낸다. 중단되면 인터럽트 표시를 되살리고 남은 외부 채널을 건너뛴다(로그 채널은 막지 않으므로 그대로 남긴다). */

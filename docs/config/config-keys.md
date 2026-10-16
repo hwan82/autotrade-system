@@ -19,11 +19,15 @@
 | `lab.max-parallel-runs` | int | `4` | 1~64 | 다음 실험 실행부터 | 실험실이 기동 때와 설정 화면 저장 때 `<설정 폴더>/experiment-state/limits`(experiment-limits-v1)로 내보내고, 실험 실행 명령은 `-PmaxParallelRuns`가 없을 때 그 파일 값을 병렬 Run 상한으로 쓴다(D-094, 실행 명령은 설정 로더를 읽지 않음 D-063). 실행 중인 실험은 그대로 | ADR-001 3장 예산 `[가정]` |
 | `lab.default-seed-capital-krw` | long(원) | `10000000` | 1 이상 | 즉시 | 실험 생성 화면(국내) | D-021 |
 | `lab.default-seed-capital-usd` | long(달러) | `10000` | 1 이상 | 즉시 | 실험 생성 화면(미국) | D-021 |
-| `notification.slack.enabled` | bool | `false` | true면 webhook-url 필수 | 즉시 | 알림 | 원본 기획 v2.0 |
-| `notification.slack.webhook-url` 🔒 | 문자열 | 빈 값 | Slack Incoming Webhook URL | 즉시 | 알림 | |
-| `notification.kakao.enabled` | bool | `false` | true면 access-token 필수 | 즉시 | 알림 | |
-| `notification.kakao.mode` | enum | `ME` | ME(나에게 보내기, 무료)·BIZ(알림톡, 유료: 켜기 전 사용자 확인) | 즉시 | 알림 | 원본 기획 v4.0 |
-| `notification.kakao.access-token` 🔒 | 문자열 | 빈 값 | | 즉시 | 알림 | |
+| `notification.slack.enabled` | bool | `false` | true면 webhook-url 필수 | 실전 엔진·감시 재기동 | 알림(실전 엔진·감시, D-100) | 원본 기획 v2.0 |
+| `notification.slack.webhook-url` 🔒 | 문자열 | 빈 값 | Slack Incoming Webhook URL. `https://hooks.slack.com/services/`로 시작해야 쓴다(아니면 그 채널만 끄고 ERROR 로그) | 실전 엔진·감시 재기동 | 알림 | D-099 |
+| `notification.kakao.enabled` | bool | `false` | true이고 mode=ME면 rest-api-key·refresh-token·link-url 필수(D-100) | 실전 엔진·감시 재기동 | 알림 | |
+| `notification.kakao.mode` | enum | `ME` | ME(나에게 보내기, 무료)·BIZ(알림톡, 유료: 켜기 전 사용자 확인). 알림 모듈은 BIZ 채널을 만들지 않는다(WARN 로그, D-100) | 실전 엔진·감시 재기동 | 알림 | 원본 기획 v4.0 |
+| `notification.kakao.rest-api-key` 🔒 | 문자열 | 빈 값 | 카카오 앱 REST API 키(토큰 갱신의 client_id) | 실전 엔진·감시 재기동 | 알림 | D-100 |
+| `notification.kakao.refresh-token` 🔒 | 문자열 | 빈 값 | `talk_message` 동의로 받은 리프레시 토큰. 갱신된 토큰은 `<설정 폴더>/notification-state/kakao-token.json`(비밀값, 엔진·감시 공유)에 남고, 이 키 값이 바뀌면(재동의) 그 파일을 쓰지 않는다 | 실전 엔진·감시 재기동 | 알림 | D-100 |
+| `notification.kakao.client-secret` 🔒 | 문자열 | 빈 값 | 카카오 앱에서 클라이언트 시크릿을 켠 경우만 | 실전 엔진·감시 재기동 | 알림 | D-100 |
+| `notification.kakao.access-token` 🔒 | 문자열 | 빈 값 | 선택. 없으면 첫 발송 전에 갱신해 받는다 | 실전 엔진·감시 재기동 | 알림 | D-100 |
+| `notification.kakao.link-url` | 문자열 | 빈 값 | 메시지 링크. 카카오 앱에 등록한 웹 도메인의 http(s) URL, 쿼리 없음. 설정 화면에서 바꾸지 않고 `runtime-config.json`에서 | 실전 엔진·감시 재기동 | 알림 | D-100 |
 | `brokers.{kis,kiwoom,toss}.app-key` 🔒 | 문자열 | 빈 값 | 비어 있으면 그 증권사는 NOT_CONFIGURED | 재연결 절차 | 증권사 플러그인 | broker-and-fault-design.md 3장 |
 | `brokers.{kis,kiwoom,toss}.app-secret` 🔒 | 문자열 | 빈 값 | 키움은 secret-key, 토스는 secret을 여기에 넣는다 | 재연결 절차 | 증권사 플러그인 | |
 | `real-trading.accounts` | 배열 | `[]` | 항목은 `id`(영문·숫자·`_`·`-` 1~64자, 중복 불가)·`broker`(KIS·KIWOOM·TOSS)·`market`(KRX·US)만. **활성화 키(`enabled` 등)는 없다**: 넣으면 그 파일 전체를 쓰지 않는다(CFG-02). RealTradingGuard는 기동 시 모든 계좌 OFF | 계좌 교체 절차(CFG-05, 구현 전까지 UI 변경 불가) | 실전 엔진 | [ADR-002](../adr/ADR-002-real-trading-guard.md), D-010, D-016 |
@@ -77,7 +81,6 @@ memory.used=85:95:3
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
-- 카카오 토큰 자동 갱신 키(D-099 변경 제안, architect 결정): `notification.kakao.rest-api-key` 🔒, `notification.kakao.refresh-token` 🔒, `notification.kakao.client-secret` 🔒(선택), `notification.kakao.link-url`. 알림 라이브러리(D-099)는 이 값을 생성자로 받으며, 감시·엔진 연결 PR에서 설정 키와 갱신 토큰 저장 위치를 함께 정한다. 그 전에는 알림이 실제로 나가지 않는다.
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정). 감시 프로세스의 드라이브·CPU·메모리 임계는 위 `watchdog.properties`로 먼저 정했다(D-092, D-095). 실험실 모니터링 화면은 위 `autotrade.lab.monitor.*` 기동 속성으로 먼저 정했다(D-090). 감시 프로세스가 같은 에이전트를 쓸 때 공통 키 `monitor.interval-seconds`, `monitor.thresholds.<지표>.{direction,warn,critical,sustain}`(재기동, 감시·실험실)을 두자는 변경 제안이 D-090에 있다(architect 결정).
 - 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
 - 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.

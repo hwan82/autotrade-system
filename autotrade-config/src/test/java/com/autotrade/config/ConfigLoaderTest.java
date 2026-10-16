@@ -438,6 +438,8 @@ class ConfigLoaderTest {
                         "brokers/kiwoom/app-key", "brokers/kiwoom/app-secret",
                         "brokers/toss/app-key", "brokers/toss/app-secret",
                         "notification/slack/webhook-url", "notification/kakao/access-token",
+                        "notification/kakao/rest-api-key", "notification/kakao/refresh-token",
+                        "notification/kakao/client-secret",
                         "real-trading/account-numbers/*", "real-trading/operator-password-hash");
     }
 

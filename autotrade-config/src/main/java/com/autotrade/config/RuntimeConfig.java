@@ -80,12 +80,24 @@ public record RuntimeConfig(
         }
     }
 
-    public record Kakao(boolean enabled, KakaoMode mode, Secret accessToken) {
+    /**
+     * 카카오톡 알림(D-100). 나에게 보내기(ME)는 액세스 토큰이 약 12시간이면 만료되므로 REST API 키와 리프레시 토큰으로 갱신한다.
+     * 액세스 토큰은 선택이다(없으면 첫 발송 전에 갱신해 받는다). 링크 URL은 카카오 앱에 등록한 웹 도메인이어야 한다(카카오 템플릿 규칙).
+     * 알림톡(BIZ)은 알림 라이브러리가 만들지 않으므로 이 키들을 요구하지 않는다.
+     */
+    public record Kakao(boolean enabled, KakaoMode mode, Secret accessToken, Secret restApiKey, Secret refreshToken,
+            Secret clientSecret, String linkUrl) {
         public Kakao {
             Objects.requireNonNull(mode, "notification.kakao.mode");
             accessToken = accessToken == null ? Secret.empty() : accessToken;
-            if (enabled && !accessToken.isPresent()) {
-                throw new IllegalArgumentException("notification.kakao.enabled=true면 access-token이 필요합니다");
+            restApiKey = restApiKey == null ? Secret.empty() : restApiKey;
+            refreshToken = refreshToken == null ? Secret.empty() : refreshToken;
+            clientSecret = clientSecret == null ? Secret.empty() : clientSecret;
+            linkUrl = linkUrl == null ? "" : linkUrl.strip();
+            if (enabled && mode == KakaoMode.ME
+                    && (!restApiKey.isPresent() || !refreshToken.isPresent() || linkUrl.isEmpty())) {
+                throw new IllegalArgumentException(
+                        "notification.kakao.enabled=true(ME)면 rest-api-key·refresh-token·link-url이 필요합니다");
             }
         }
     }

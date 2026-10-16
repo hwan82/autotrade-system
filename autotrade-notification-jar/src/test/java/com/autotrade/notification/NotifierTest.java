@@ -45,7 +45,33 @@ class NotifierTest {
         }
     }
 
-    private final Recording log = new Recording("log", SendResult.ok());
+    /** 받은 줄을 "수준 문구"로 모으는 로거. */
+    static System.Logger recordingLogger(List<String> lines) {
+        return new System.Logger() {
+            @Override
+            public String getName() {
+                return "t";
+            }
+
+            @Override
+            public boolean isLoggable(Level level) {
+                return true;
+            }
+
+            @Override
+            public void log(Level level, java.util.ResourceBundle bundle, String msg, Throwable thrown) {
+                lines.add(level + " " + msg);
+            }
+
+            @Override
+            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+                lines.add(level + " " + format);
+            }
+        };
+    }
+
+    private final List<String> logLines = new ArrayList<>();
+    private final LogChannel log = new LogChannel(recordingLogger(logLines));
 
     @Test
     void Slack_발송이_실패하면_긴급_알림은_카카오톡으로_넘어간다() {
@@ -75,7 +101,7 @@ class NotifierTest {
 
         assertThat(r.attempts().get(0).result()).isEqualTo(SendResult.failed("error-IllegalStateException"));
         assertThat(kakao.got).containsExactly(URGENT);
-        assertThat(log.got).isEmpty();
+        assertThat(logLines).isEmpty();
     }
 
     @Test
@@ -86,7 +112,7 @@ class NotifierTest {
         DispatchReport r = Notifier.of(List.of(slack, kakao, log), List.of(kakao, slack, log)).dispatch(URGENT);
 
         assertThat(r.attempts()).extracting(DispatchReport.Attempt::channel).containsExactly("slack", "kakao", "log");
-        assertThat(log.got).containsExactly(URGENT);
+        assertThat(logLines).singleElement().asString().startsWith("ERROR 알림(forced-shutdown)");
         assertThat(r.delivered()).isFalse();
     }
 
@@ -125,7 +151,7 @@ class NotifierTest {
             assertThat(r.interrupted()).isTrue();
             assertThat(r.attempts()).singleElement().extracting(DispatchReport.Attempt::result)
                     .isEqualTo(SendResult.failed("interrupted"));
-            assertThat(log.got).isEmpty();
+            assertThat(logLines).isEmpty();
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
             Thread.interrupted();
@@ -137,41 +163,44 @@ class NotifierTest {
         Recording broken = new Recording("slack", null);
         DispatchReport r = Notifier.of(List.of(broken, log), List.of(log)).dispatch(URGENT);
         assertThat(r.attempts().get(0).result()).isEqualTo(SendResult.failed("no-result"));
-        assertThat(log.got).containsExactly(URGENT);
+        assertThat(logLines).hasSize(1);
     }
 
     @Test
     void 빈_순서와_겹치는_이름을_거부한다() {
         assertThatThrownBy(() -> Notifier.of(List.of(), List.of(log))).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Notifier.of(List.of(log, new Recording("log", SendResult.ok())), List.of(log)))
+        assertThatThrownBy(() -> Notifier.of(List.of(log, new LogChannel()), List.of(log)))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 로그_채널이_아닌_채널은_이름_log를_쓸_수_없다() {
+        // 결과 보고가 이름 log로 외부 채널과 로그를 가르므로, 다른 채널이 이 이름이면 성공해도 전달 안 됨으로 보인다(PR #127 architect R2)
+        Recording fake = new Recording(LogChannel.NAME, SendResult.ok());
+        assertThatThrownBy(() -> Notifier.of(List.of(fake), List.of(log)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("log");
+        assertThatThrownBy(() -> Notifier.of(List.of(log), List.of(fake, log)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 외부_채널_유무는_로그_채널_타입으로_가린다() {
+        assertThat(Notifier.of(List.of(log), List.of(log)).hasExternalChannel(Severity.URGENT)).isFalse();
+        assertThat(Notifier.of(List.of(new Recording("x", SendResult.ok()), log), List.of(log))
+                .hasExternalChannel(Severity.URGENT)).isTrue();
+    }
+
+    @Test
+    void 시간대를_준_알림은_그_시간대로_시각을_보인다() {
+        Notification seoul = EventRoutes.defaults().notification(EventRoutes.ENGINE_STARTED, "엔진 시작", "",
+                NOW.plusMillis(1500), java.time.ZoneId.of("Asia/Seoul"));
+        assertThat(seoul.plainText()).isEqualTo("[정보] 엔진 시작 (2026-10-16T09:00:01+09:00)");
     }
 
     @Test
     void 로그_채널은_긴급을_ERROR_정보를_INFO로_남긴다() throws IOException {
         List<String> lines = new ArrayList<>();
-        System.Logger logger = new System.Logger() {
-            @Override
-            public String getName() {
-                return "t";
-            }
-
-            @Override
-            public boolean isLoggable(Level level) {
-                return true;
-            }
-
-            @Override
-            public void log(Level level, java.util.ResourceBundle bundle, String msg, Throwable thrown) {
-                lines.add(level + " " + msg);
-            }
-
-            @Override
-            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
-                lines.add(level + " " + format);
-            }
-        };
-        LogChannel channel = new LogChannel(logger);
+        LogChannel channel = new LogChannel(recordingLogger(lines));
         channel.send(URGENT);
         channel.send(INFO);
         assertThat(lines).containsExactly(
@@ -182,27 +211,7 @@ class NotifierTest {
     @Test
     void 중단돼도_로그_채널에는_남긴다() {
         List<String> lines = new ArrayList<>();
-        LogChannel realLog = new LogChannel(new System.Logger() {
-            @Override
-            public String getName() {
-                return "t";
-            }
-
-            @Override
-            public boolean isLoggable(Level level) {
-                return true;
-            }
-
-            @Override
-            public void log(Level level, java.util.ResourceBundle bundle, String msg, Throwable thrown) {
-                lines.add(level + " " + msg);
-            }
-
-            @Override
-            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
-                lines.add(level + " " + format);
-            }
-        });
+        LogChannel realLog = new LogChannel(recordingLogger(lines));
         Channel slack = SlackWebhookChannel.of(SLACK_URL, new FakeHttp().interrupt());
         Recording kakao = new Recording("kakao", SendResult.ok());
         try {
