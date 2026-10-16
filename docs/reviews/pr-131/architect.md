@@ -37,3 +37,51 @@
 
 ## 판정
 수정 필요(B1: 검토자 `./gradlew build`를 이 세션에서 직접 통과시키지 못함 — Maven Central 429. 코드·문서에 막는 지적은 없다. 빌드가 되는 환경에서 같은 커밋으로 `./gradlew build` 통과를 확인하면 승인할 수 있는 상태다). B7은 risk-ops 검토가 따로 있어야 한다(현재 없음). N1~N4는 권고.
+
+## 재검토 2026-10-16 (헤드 c7e8b7c)
+- 대상: PR #131 / 커밋 c7e8b7c(1차 검토 6a4728c 이후 6abe0ad risk-ops 원문, ed0727b 코드·문서 수정, c7e8b7c risk-ops 재검토 원문) / main 갈래점 81b5285(현재 origin/main과 같음). `git diff origin/main...HEAD` 전체를 다시 봤다. 1차 이후 바뀐 코드·문서는 `git diff 2ebc0d4..c7e8b7c`에서 검토 원문을 뺀 3개 파일(`guard.mjs` +16 −6, `guard.test.mjs` +11, D-102 2줄)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --console=plain`: 다시 `BUILD FAILED`(17s). 의존성 받기 단계에서 실패했고 원인은 1차와 같다(Maven Central 429).
+  - **사용자 댓글 확인**(GitHub REST `GET /repos/hwan82/autotrade-system/issues/comments/6209727263`): 작성자 `hwan82`(type User, author_association OWNER), 작성 2026-10-16T06:42:16Z, `performed_via_github_app` 없음, 본문 "CI 결과를 B1 근거로 인정", PR #131의 댓글. 이 PR의 댓글은 이것 하나다. 작성 시각은 1차 검토 커밋(2ebc0d4)보다 뒤다.
+  - **한계(기록)**: 이 컨테이너의 `gh` 인증 계정도 `hwan82`다(`gh api user` → `hwan82`). 그래서 API 응답만으로는 에이전트가 같은 토큰으로 쓴 댓글과 사용자가 직접 쓴 댓글을 가를 수 없다. 정황은 이렇다 `[추론]`.
+    - 저장소 최근 댓글 15건을 보면 에이전트 댓글은 모두 "Claude Code" 서명이 있고, 서명 없는 짧은 결정 댓글("D-079 결정 확인", "A안 결정확인" 등)은 사용자 문체다. 이 댓글은 서명이 없다.
+    - PR #124의 같은 문구 댓글(6208359636)을 architect가 같은 방식으로 받아들인 선례가 있다(`docs/reviews/pr-124/architect.md` 4차 재검토).
+    - 이 검토는 저장소 소유자 계정의 PR 댓글을 사용자 결정으로 보고 진행한다. **사용자가 이 댓글을 직접 쓰지 않았다면 아래 B1 판단과 승인은 무효다.** 요청자(메인)가 이 댓글을 전한 메시지 자체는 근거로 쓰지 않았다.
+  - CI를 직접 조회했다(run 38860726726, `head_sha=c7e8b7cbdc88b09d3101ab64dff2e52fefbb39ad`, event `pull_request`, conclusion success).
+    - 잡 4개가 모두 success: `Gradle build`(job 116842159108; 단계 "Build and test" success, "Start each process once (ARC-03)" success, "Upload test reports" skipped), `Lab screens (Playwright)`, `DB schema (PostgreSQL 16)`, `Secret scan and collector boundary`.
+    - c7e8b7c는 ed0727b에 검토 원문 1개만 더한 커밋이다(`git diff ed0727b..c7e8b7c --stat` → `docs/reviews/pr-131/risk-ops.md`만).
+  - `node --test support/guard.test.mjs`: 14건 통과, 실패 0. 시험 이름 수는 그대로이고, 기존 시험 3개에 단언 7개가 더해졌다.
+  - 1차 탐침 스크립트를 다시 돌렸다.
+    - 설정 폴더 안 `<설정>/..foo` → 거절(1차 `null`, N1 해소).
+    - 설정 폴더로 가는 링크 아래의 없는 `<링크>/sub` → 거절(1차 `null`, N2 해소).
+    - 상대 경로 `AUTOTRADE_CONFIG_DIR`, `/`, 수록 범위 판단은 1차와 같은 결과다.
+    - 추가 탐침 두 개: 위 폴더까지 모두 없는 경로 `/nonexistent/a/b`와 없는 설정 폴더 `/nonexistent2/cfg` → `null`(겹침 아님, 맞음). 없는 설정 폴더의 위 폴더 `/nonexistent2` → 거절(맞음). `/`까지 올라가는 반복이 끝나는 것도 확인했다(`guard.mjs` `up === head`에서 멈춤).
+  - 1차에서 산 변이를 새 헤드에 다시 넣었다. 모두 잡힌다.
+    - `coverageFrom` `<`→`<=`: 1건 실패.
+    - 미국 캘린더 확인 빼기(KRX만): 1건 실패.
+    - 예전 `startsWith('..')`로 되돌리기: 1건 실패.
+    - 위 폴더 거슬러 오르기 빼기: 1건 실패.
+    - 새 변이 `rel !== '..'` 조건 빼기는 산다. `overlaps`가 두 방향을 모두 보므로 `rel === '..'`인 경우는 반대쪽 `inside`가 참이 되어 결과가 같다. 같은 동작이라 문제없다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(사용자 결정에 따라 CI로) | 검토자 직접 실행은 의존성 받기 실패(위). 사용자 댓글 6209727263에 따라 CI 결과를 근거로 인정했다: 헤드 c7e8b7c run 38860726726 `Gradle build` job 116842159108의 "Build and test"(`./gradlew build --no-daemon`) success. 이 PR은 `.java`·`.kts`·Gradle 파일을 바꾸지 않는다(`git diff origin/main...HEAD --name-only` 11개 중 0개). 위 "한계"의 조건이 붙는다 |
+| B2 | 통과 | 1차와 같다. 1차 이후 변경은 `autotrade-ui/e2e/support/` 두 파일과 D-102뿐이고 새 import가 없다. 보호 경로 항목과 겹치지 않는다 |
+| B3 | 통과 | 계약 변경 없음. `workDirReason`·`uncoveredDate`의 서명은 그대로다. D-102 결정 2번에 없는 경로 처리를 적었다(`D-102-lab-e2e-guard-followups.md:11`) |
+| B4 | 통과 | 1차와 같다. 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 새 동작마다 시험이 있다: N1 `..e2e` 안쪽 이름, risk-ops F1 `..cfg` 설정 폴더의 위 폴더(`guard.test.mjs` "시험 작업 폴더가 실제 설정 폴더·저장소와 같거나 그 위·아래면 거절한다"), N2 없는 링크 아래 폴더("작업 폴더 확인은 링크를 따라가 실제 경로로 본다"), N3 수록 첫날 경계와 미국 캘린더만 범위 밖("캘린더 수록 범위 밖 날짜는…"). 직접 실행 14건 통과, CI "PC protection guard unit tests" success. 지우거나 약화한 단언 없음(차분이 모두 추가). 1차에서 산 변이 4개가 이제 잡힌다 |
+| B7 | 통과(risk-ops 검토 있음) | 실전 엔진 자원 보호 확인을 바꾸는 PR이라 risk-ops 검토가 필요하다. `docs/reviews/pr-131/risk-ops.md`가 있고 마지막 판정은 "## 판정(재검토)" 승인(헤드 ed0727b, 이후 코드 변경 없음). 이 검토는 그 원문을 내 판정의 근거로 쓰지 않았고, 원문이 있는지만 확인했다. 실전 주문 경로·보호 경로·보호 테스트는 바꾸지 않는다 |
+| B8 | 통과 | 비밀값 없음. CI gitleaks success(run 38860726726) |
+
+### 점검표 밖 발견
+- 1차 N1~N4는 모두 해소됐다.
+  - N1: `guard.mjs` `inside`가 `rel !== '..' && !rel.startsWith('..' + sep)`로 바뀌었다.
+  - N2: `norm`이 있는 가장 가까운 위 폴더를 실제 경로로 푼다.
+  - N3: 시험 두 경우가 더해졌다.
+  - N4: D-102 검증 절을 "변이 8개"로 고쳤다.
+- 권고(비차단): D-102 검증 절의 "14건 통과(이전 7건 + 7건)"는 시험 이름 수로는 지금도 맞다. 다만 이번에 단언을 더했으므로 "단언 추가"를 함께 적으면 기록이 더 정확해진다. 판정에는 영향 없다.
+
+### 판정
+승인(B1은 사용자 댓글 6209727263에 따라 CI `Gradle build` success로 인정. 그 댓글이 사용자 본인 것이 아니면 이 승인은 무효)
