@@ -1,0 +1,60 @@
+# risk-ops 검토: 알림을 감시·실전 엔진에 연결(MON-06 2차, D-100)
+- 대상: PR #128 / 브랜치 `claude/project-thread-vtmvk8` / 커밋 918f2e4(PR head, `gh api repos/hwan82/autotrade-system/pulls/128`로 확인) / main(5b46d17) 대비 diff `git diff origin/main...HEAD` 전체(커밋 2개 7536be0·918f2e4, 35개 파일)
+- 점검표: A
+- 직접 실행한 것:
+  - 이 컨테이너에서 Maven Central(`repo.maven.apache.org`)이 404·429를 돌려줘 의존성을 받지 못했다. 저장소 밖 스크래치의 Gradle init 스크립트로 같은 Maven Central 내용의 Google 미러(`maven-central.storage-download.googleapis.com/maven2/`)를 앞에 두고 실행했다(저장소 파일 변경 없음).
+  - 7536be0(첫 커밋)에서 `./gradlew build --continue` → **BUILD FAILED**. `NotifierTest > 중단되면_인터럽트_표시를_되살리고_남은_채널을_건너뛴다()` 실패(`Expected size: 1 but was: 2`). 시험의 `log`를 실제 `LogChannel`로 바꾸면서 중단 때도 로그 채널을 부르는 기존 동작(Notifier.java:97-104, PR #127 risk-ops R2)과 기대값이 어긋난 것이다. D-100 "위험과 한계"의 "로컬 빌드를 하지 못했다"가 사실이었고, 첫 커밋 CI도 `Gradle build` failure(`gh api .../commits/7536be0/check-runs`).
+  - 918f2e4(PR head, 위 시험만 고침)에서 `./gradlew clean build --continue` → **BUILD SUCCESSFUL**(161 tasks). 이어서 `:autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-watchdog:test :autotrade-notification-jar:test :autotrade-config:test --rerun-tasks` → BUILD SUCCESSFUL(68 tasks 모두 실행). JUnit XML 집계(테스트/실패/오류/건너뜀): risk 55/0/0/0, architecture-test 44/0/0/0, app-engine 54/0/0/0, app-watchdog 51/0/0/0, notification-jar 68/0/0/0, config 39/0/0/0, app-lab 213/0/0/0, app-gateway 50/0/0/0. 918f2e4의 CI도 `Gradle build`·`Secret scan and collector boundary`·`DB schema` 모두 success.
+  - 918f2e4의 시험 수정은 기대를 좁히지 않고 넓혔다: 중단 뒤 외부 채널(kakao)은 건너뛰고(`kakao.got` 비어 있음) 로그는 한 줄 남는지까지 본다(NotifierTest.java:147-162). 약화 아님.
+  - 탐침 시험(저장소에 남기지 않음, 실행 뒤 지움): `NotificationQueue`에 `lab`의 `process-stale`·`process-recovered`를 20초 간격으로 10번씩 번갈아 넣은 뒤 `engine`의 `process-stale`을 넣었다. 결과 `offer`가 false, `droppedTotal()==1`, 외부 채널에 "engine 멈춤"이 가지 않음(시험 통과 = 아래 R1 재현).
+
+## 이 PR의 실전 경로 영향 범위(판정의 전제)
+- [사실] 실전 엔진이 새로 하는 일: 기동 때 알림 큐와 보내는 데몬 스레드 하나를 띄움(EngineMain.java:94, NotificationQueue.java:91), 시작·설정 경고 알림을 넣음(EngineMain.java:103-108), 실전 제어 명령 감사 로그를 `NotifyingCommandAuditLog`로 감쌈(EngineMain.java:96-97), 닫을 때 최대 3초+1초 남은 알림을 보냄(EngineMain.java:206-216, NotificationQueue.java:233-261). 실전 엔진 프로세스가 처음으로 Slack·카카오로 HTTP를 낸다(보내는 스레드에서만).
+- [사실] 주문 출구·Guard·블랙리스트·주문 큐·시세 게이트웨이 코드는 diff에 없다(`git diff origin/main...HEAD --stat`).
+- [사실] 보호 경로 `autotrade-app-engine/*`·`autotrade-app-watchdog/*`·`autotrade-config/*`·`autotrade-notification-jar/*`(scripts/ci/protected-paths.txt)를 바꾸므로 실전 관련 PR이다. 보호 테스트(`autotrade-architecture-test` 전체, RealTradingGuard·GuardedOrderGateway 테스트) 파일은 diff에 없다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `startGuard`는 그대로 `new RealTradingGuard(accountRefs, clock, ...)`이고 알림 큐는 Guard 다음에 만든다(EngineMain.java:92-94, 139-147). 알림 설정 값은 Guard에 닿지 않는다(`setup`은 `notification.*`만 옮김, EngineMain.java:129-134). 엔진 시작 알림 문구 "RealTradingGuard 모두 OFF"는 기동 직후 사실과 같다. `RealTradingGuardTest#생성_직후_모든_계좌는_OFF다`·`#재기동하면_열려_있던_계좌도_OFF로_시작한다`, `EngineMainTest#실전_계좌가_설정돼_있어도_기동_직후_모두_OFF다`·`#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 재실행 통과 |
+| A2 | 통과 | 주문 출구·ArchUnit 규칙 diff 없음. `NotifyingCommandAuditLog`는 감사 기록 뒤 큐에 넣기만 하고 Guard·주문 타입을 참조하지 않는다(NotifyingCommandAuditLog.java:1-33). `:autotrade-architecture-test:test` 44건(ArchitectureTest·ModuleOwnershipTest·RealPathReflectionTest 포함) `--rerun-tasks` 통과. 새 운영 코드의 JDK 타입(`Thread$Builder$OfPlatform`, `java.util.concurrent`, `java.nio.file.attribute`, `MessageDigest`)은 기존 허용 목록 안이다(RealPathReflectionTest.java:271-303, 고정 값 변경 없음) |
+| A3 | 통과 | 증권사 주문 연동 코드 변경 없음. 새 HTTP 대상은 Slack Webhook과 카카오 상수 URL뿐이고 보내는 스레드에서만 부른다(NotificationSetup.java:72-80, NotificationQueue.java:187-205) |
+| A4 | 해당 없음 | 주문 타임아웃 처리 코드 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 생성·저장 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 코드 변경 없음. 알림 경로는 주문을 만들 수 없다(ArchitectureTest `REUSABLE_JARS_ARE_DOMAIN_FREE` 통과) |
+| A7 | 통과 | 주문 큐·토큰 버킷·킬스위치 코드 변경 없음. 엔진 명령 스레드가 알림 때문에 막히지 않는다: `offer`는 `synchronized accept` 안에서 `ArrayBlockingQueue.offer`(막지 않음)만 하고 HTTP는 그 잠금 밖 보내는 스레드에서 돈다(NotificationQueue.java:109-155, 187-205). `offer`는 `Throwable`을 삼킨다(:109-114). 시험 `NotificationQueueTest#채널이_막혀도_넣는_쪽은_기다리지_않고_큐가_차면_버린다`·`#채널이_Error를_던져도_넣는_쪽으로_번지지_않고_다음_알림은_보낸다`·`NotifyingCommandAuditLogTest#감사_로그가_실패해도_알림은_넣고_실패는_그대로_올린다` 통과. 기존 감사 로그 실패 처리(EngineCommandHandler.java:90-96)는 그대로다 |
+| A8 | 통과 | 실전 엔진은 알림 채널의 지연·`Error`에 묶이지 않는다(A7 근거). 알림 설정이 틀려도 그 채널만 끄고 기동한다(NotificationSetup.java:82-111, `NotificationSetupTest` 통과). 실험실·게이트웨이 코드와의 새 의존 없음(엔진 `forbiddenProjects` 그대로, autotrade-app-engine/build.gradle.kts:14). 감시는 알림을 넣기만 하고 실패를 삼켜 점검이 계속된다(Watchdog.java:161-167, `WatchdogTest#알림이_던져도_점검은_계속한다`). 5.2 정지 순서 코드(정지 요청 파일 만들기·풀기)는 바뀌지 않았고 알림만 덧붙었다(Watchdog.java:121-135, `WatchdogTest#정지_요청이_켜지면_긴급_꺼지면_정보_알림을_넣는다`). 단, 실험실·게이트웨이의 장애가 **감시의 엔진 멈춤 알림**을 밀어낼 수 있는 문제는 R1로 따로 적는다(엔진의 매매 동작 자체에는 영향 없음) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 코드 변경 없음 |
+| A10 | 통과 | 시험 값은 가짜(`NEW_WEBHOOK` 자리표시자, `KIS-KR-1` 별칭 등). 새 비밀값 키 3개는 `Secret` 타입이고 비밀값 경로 고정 시험에 추가됐다(RuntimeConfig.java:91-103, ConfigLoaderTest.java:438-442). 설정 화면은 쓰기 전용으로 받고 응답·`runtime-config.json`에 평문이 없다(`SettingsControllerTest#카카오_나에게_보내기는_갱신_키와_링크가_있어야_켤_수_있고_새_키는_쓰기_전용이다`). 토큰 파일은 출처를 SHA-256으로만 적고, 값은 로그·`toString`에 없다(FileKakaoTokenStore.java:55, 68, 129-131, `FileKakaoTokenStoreTest`). 설정 오류 로그에 값이 없다(NotificationSetup.java:89, 109). 명령 알림 대상은 계좌 별칭 또는 고정 문구(EngineCommandHandler.java:339-344)이고 비밀번호·확인 문구를 받지 않는다. 설정 경고 알림 문구는 `ConfigJson.describe`로 값 없이 만든 경고다(ConfigLoader.java:180-182, 195-201). gitleaks CI success. 참고: 토큰 파일 권한 제한은 POSIX에서만이다(FileKakaoTokenStore.java:78-80, R4) |
+| A11 | 통과 | 보호 테스트 파일 diff 없음(`autotrade-architecture-test`, `RealTradingGuardTest`, `GuardedOrderGatewayTest`), `@Disabled` 추가 없음. 고정 값 변경은 비밀값 경로 목록(ConfigLoaderTest.java:438-442)뿐이고 대상 코드(`RuntimeConfig.Kakao`에 `Secret` 필드 3개)를 검토했다. `RealPathReflectionTest.RECORD_READER_FINGERPRINTS`는 바뀌지 않았고 시험 통과(D-100 5번 주장과 일치). 바뀐 시험 `NotifierTest` 중단 시험은 기대를 넓혔다(위 "직접 실행한 것"). 새 동작마다 실패 경우를 포함한 시험이 있다(D-100 "검증" 목록의 시험 이름 모두 존재·통과 확인). 다만 R1의 실패 경우(전체 상한이 긴급 알림을 버림)와 R2의 운영 배선에는 시험이 없다 |
+| A12 | 통과 | 장애표 #8(엔진 크래시)·#9·#10의 감지(하트비트 판정·ERROR 로그·정지 요청 파일)는 바뀌지 않고 알림이 더해졌다(HeartbeatWatch.java:92-126, Watchdog.java:105-167). 시계 역행 처리 변경(HeartbeatWatch.java:115-116, Watchdog.java:215-216)은 경고를 늦추지 않는 쪽이다(`WatchdogTest#시계가_뒤로_가도_반복_경고가_밀리지_않는다`·`#하트비트를_하나도_못_본_경고도_시계가_뒤로_가면_바로_되풀이한다`). 장애 테스트 8종의 전제(주문·대사·계좌 격리)에 닿는 코드 없음. O1(야간 긴급 Slack)은 이 큐가 첫 구현이며 R1이 그 전제를 약하게 만든다. 장애표 #10 문구 "감시 상태를 화면·알림으로 내는 일은 후속"이 이제 일부 낡았다(R5, 권고) |
+| A13 | 통과 | 시장 분기 없음. 알림 시각은 표시용 Asia/Seoul이고 계산은 주입 `Clock`의 `Instant`(NotificationSetup.java:28, Notification.java:46-50(표시만), NotificationQueue.java:121). 억제 창도 `Instant` 비교다 |
+| A14 | 통과 | D-100 결정 1~9가 코드와 일치한다(큐 64·창 20·10분·닫기 3초: NotificationQueue.java:38-44, 233-261; 매핑 14종: EventRoutes.java; 카카오 키 검증: RuntimeConfig.java:97-103; 거절 기억: KakaoMemoChannel.java:114-117, 143-162, 193-195; `expires_in` 상한: KakaoMemoChannel.java:55, 203-206). 결정 로그 README 행, 기획서 MON-02·MON-06 행과 v14.44 이력, config-keys.md 표가 갱신됐다. D-100 "위험과 한계"의 "로컬 빌드 못 함"은 사실이었고 그 결과 첫 커밋 시험 실패가 있었으나 918f2e4에서 고쳐졌다 |
+
+## 점검표 밖 발견
+
+### R1(수정 필요): 전체 상한(10분 20건)이 감시의 엔진 멈춤 긴급 알림을 버린다
+- [사실] `NotificationQueue.accept`는 등급과 상관없이 창 안 20건이 차면 새 알림을 버리고 세기만 한다(NotificationQueue.java:130-138). 버린 건수는 "다음에 받는 알림" 본문에 붙을 뿐이다(:143-145).
+- [사실] 같은 대상의 억제는 "마지막 종류" 하나만 기억하므로(:54-55, 65, 124-128) 멈춤 → 회복 → 멈춤이 오가면 매번 받는다. 감시는 실험실·게이트웨이 하트비트가 멈춤·회복을 오갈 때마다 알림을 넣는다(Watchdog.java:139-158).
+- [사실] 감시는 상태가 **바뀔 때만** 알린다. 엔진이 멈춘 채로 있으면 `process-stale`은 다시 나오지 않는다(HeartbeatWatch `Change`, Watchdog.java:110-113).
+- [사실·재현] 위 탐침: 실험실 멈춤·회복 10번(20건) 뒤 엔진 `process-stale`이 `offer=false`로 버려지고 외부 채널로 가지 않았다.
+- 영향: 자원 부족(5.2) 때 가장 먼저 흔들리는 프로세스가 실험실·게이트웨이인데, 그 소음이 10분 창을 채우면 장애표 #8(실전 엔진 크래시)의 알림이 Slack·카카오로 나가지 않는다. 버린 건수도 다음 알림이 올 때까지(최대 10분 이상, 안 올 수도 있음) 안 보인다. 남는 것은 감시 로그뿐이다. 이는 절대 규칙 6("실전은 다른 기능에 영향받지 않는다")의 취지와 O1(야간 무인 긴급 알림)의 전제를 약하게 만든다. D-100 후속 1번대로 7단계에 손절·한도 알림이 같은 엔진 큐로 들어오면, 로컬 명령 채널의 반복 실패(명령·대상·결과 조합마다 1건) 같은 소음이 손절 알림을 같은 방식으로 밀어낼 수 있다.
+- 고칠 것(추천): 긴급 등급은 전체 상한에서 빼거나(같은 대상·종류 10분 억제만 적용), 최소한 긴급 몫을 따로 둔다. 그리고 "실험실 멈춤·회복이 창을 채운 뒤에도 엔진 `process-stale`(긴급)은 받는다"는 실패해야 하는 시험을 `NotificationQueueTest`(또는 `WatchdogTest`에 실제 큐를 붙여)로 추가한다. D-100 결정 1의 상한 문구와 "위험과 한계"를 함께 고친다. 대안: 정보 등급만 상한을 두는 안(추천, 단순), 긴급 몫 예약(복잡, 긴급 폭주 자체는 대상·종류 억제가 막음)
+
+### R2(권고): 운영 배선 시험
+- `EngineMain.start`가 `NotifyingCommandAuditLog`로 감싸는지(EngineMain.java:96-97), `WatchdogMain.start`가 `notifications::offer`를 넘기는지(WatchdogMain.java:95)를 보는 시험이 없다. 두 줄을 `CommandAuditLog.LOGGING`·`Alerts.NONE`으로 되돌려도 지금 시험은 모두 통과한다고 본다([추론], 해당 시험 검색 결과 없음). `EngineMainTest`에 명령 하나를 보내 알림 채널(시험용 주입)로 `real-trading-command`가 나오는지 보는 시험을 권한다.
+
+### R3(권고): 기존 설정의 이행 위험
+- [사실] `notification.kakao.enabled=true`·`mode=ME`이고 새 키가 없는 기존 설정은 이제 결합 검증에 실패하고, 로더는 `runtime-config.json` 전체를 빼고 기동한다(ConfigLoader.java:101-106, RuntimeConfig.java:97-103). 그 파일의 `real-trading.accounts`·`market-data.*`·`notification.slack.*`도 함께 빠진다. 실전 쪽으로는 계좌 0개로 뜨는 안전한 쪽 실패이고 경고가 상태 조회에 실리지만, Slack 설정까지 빠져 설정 경고 알림이 로그로만 간다. config-keys.md나 D-100에 "업그레이드 전 카카오를 끄거나 새 키를 넣는다" 한 줄을 권한다.
+
+### R4(권고): Windows에서 토큰 파일 권한
+- 사용자 PC는 Windows다. `kakao-token.json`의 소유자 전용 권한은 POSIX에서만 걸린다(FileKakaoTokenStore.java:78-80). Windows에서는 설정 폴더 ACL을 따르므로 `secrets.json`과 같은 수준이다. D-100 "위험과 한계"에 명시하고 7단계 시험 절차서의 사용자 PC 점검(설정 폴더 ACL)에 넣기를 권한다.
+
+### R5(권고): 장애 대응표 문구
+- broker-and-fault-design.md 6장 #8 감지 칸은 "ERROR 로그"까지만, #10 칸은 "감시 상태를 화면·알림으로 내는 일은 후속"이다. 이 PR로 #8·#9·#10에 긴급 알림이 붙었으므로 표에 D-100 링크를 더하길 권한다(대응 동작 변경은 없음).
+
+### 참고(조치 불요)
+- 엔진 재기동 알림은 같은 대상·종류라 10분 안 두 번째는 억제된다(D-100이 받아들인 억제 규칙). 생략 건수는 다음 같은 알림에 붙는다.
+- 보내는 스레드 생성 실패(`OutOfMemoryError: unable to create native thread`)는 엔진 기동 실패로 이어진다(NotificationQueue.java:91, EngineMain.java:94). Guard는 OFF이고 주문 경로가 아직 없어 계좌 위험은 없다. 7단계에서 기동 순서를 정할 때 알림 실패가 보유 종목 보호 기동을 막지 않게 하는지 다시 본다.
+
+## 판정
+수정 필요(R1: 전체 상한이 긴급 알림, 특히 감시의 엔진 멈춤 알림을 버림. 긴급을 상한에서 빼거나 몫을 두고 실패해야 하는 시험 추가)
