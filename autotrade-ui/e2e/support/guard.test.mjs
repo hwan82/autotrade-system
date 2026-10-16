@@ -56,6 +56,9 @@ test('캘린더 수록 범위 밖 날짜는 전날·당일·다음날 중 하나
   assert.deepEqual(uncoveredDate(at('2027-12-31T01:00:00Z')), { market: 'KRX', date: '2028-01-01' }); // 다음날이 범위 밖
   assert.deepEqual(uncoveredDate(at('2030-01-05T01:00:00Z')), { market: 'KRX', date: '2030-01-04' }); // 토 10:00 KST
   assert.deepEqual(uncoveredDate(at('2026-01-01T00:00:00Z')), { market: 'KRX', date: '2025-12-31' }); // 수록 시작 전날
+  assert.equal(uncoveredDate(at('2026-01-02T12:00:00Z')), null); // 국내 01-02 21:00, 뉴욕 01-02 07:00: 전날이 수록 첫날
+  // 국내는 01-02(전날 01-01 수록)인데 뉴욕은 아직 01-01이라 전날이 범위 밖: 미국 캘린더만 걸린다(architect PR #131 N3)
+  assert.deepEqual(uncoveredDate(at('2026-01-02T03:00:00Z')), { market: 'US', date: '2025-12-31' });
 });
 
 test('수록 범위 밖이면 주말이어도 거절하고, 장 시간 보호를 풀 때만 통과한다', () => {
@@ -123,6 +126,12 @@ test('시험 작업 폴더가 실제 설정 폴더·저장소와 같거나 그 �
   assert.match(workDirReason(os.homedir(), opts), /같거나 그 위·아래/);
   assert.equal(workDirReason(path.join(os.tmpdir(), 'autotrade-ui-e2e'), opts), null); // 기본 작업 폴더
   assert.equal(workDirReason(`${real}-e2e`, opts), null); // 이름만 비슷한 옆 폴더
+  assert.match(workDirReason(path.join(real, '..e2e'), opts), /같거나 그 위·아래/); // '..'로 시작하는 안쪽 이름(N1)
+  // 설정 폴더 이름이 '..'로 시작하고 작업 폴더가 그 위인 경우(risk-ops PR #131 F1)
+  const parent = emptyConfig();
+  const dotted = path.join(parent, '..cfg');
+  fs.mkdirSync(dotted);
+  assert.match(workDirReason(parent, { env: { AUTOTRADE_CONFIG_DIR: dotted } }), /같거나 그 위·아래/);
 });
 
 test('작업 폴더 확인은 링크를 따라가 실제 경로로 본다', () => {
@@ -130,4 +139,6 @@ test('작업 폴더 확인은 링크를 따라가 실제 경로로 본다', () =
   const link = path.join(emptyConfig(), 'link');
   fs.symlinkSync(real, link, 'junction'); // Windows는 관리자 권한 없이 되는 디렉터리 정션, 다른 OS는 종류를 무시한다
   assert.match(workDirReason(link, { env: { AUTOTRADE_CONFIG_DIR: real } }), /같거나 그 위·아래/);
+  // 아직 없는 링크 아래 폴더도 실제 경로로 본다(architect PR #131 N2)
+  assert.match(workDirReason(path.join(link, 'new', 'e2e'), { env: { AUTOTRADE_CONFIG_DIR: real } }), /같거나 그 위·아래/);
 });

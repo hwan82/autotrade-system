@@ -8,7 +8,7 @@
 ## 결정
 
 1. **시험 보강(Q1).** `guard.test.mjs`에 특별 운영일 합침의 개장 쪽(수능일 2026-11-19 08:00·08:30 KST 거절, 07:59 통과), 폐장 쪽(미국 조기 폐장일 2026-11-27 14:00·16:29 뉴욕 거절, 16:30 통과), 정지 요청 파일 확인 오류(EACCES·EPERM·EIO·ENAMETOOLONG이면 거절, ENOENT·ENOTDIR이면 통과)를 더한다. 파일 오류는 `refuseReason`에 `lstat` 인자를 두어 흉내 낸다(관리자 권한·OS에 따라 실제 권한 오류를 만들 수 없음). 거절 문구는 "정지 요청이 있거나 있는지 확인할 수 없습니다"로 바꿔 판단 불가도 말한다.
-2. **작업 폴더 거절(R1).** `workDirReason(work, { env, repo })`: 작업 폴더가 실제 설정 폴더(`AUTOTRADE_CONFIG_DIR`)·기본 설정 폴더(`~/.autotrade`)·저장소와 같거나 그 위·아래면 거절한다. 있는 경로는 실제 경로(링크 따라감)로, Windows는 대소문자 없이 비교한다. `playwright.config.mjs`가 지우기 전에 거절하고, `teardown.mjs`도 지우기 직전에 다시 보고 겹치면 작업 폴더를 지우지 않는다.
+2. **작업 폴더 거절(R1).** `workDirReason(work, { env, repo })`: 작업 폴더가 실제 설정 폴더(`AUTOTRADE_CONFIG_DIR`)·기본 설정 폴더(`~/.autotrade`)·저장소와 같거나 그 위·아래면 거절한다. 있는 경로는 실제 경로(링크 따라감)로, 없는 경로는 있는 가장 가까운 위 폴더를 실제 경로로 풀어, Windows는 대소문자 없이 비교한다. `playwright.config.mjs`가 지우기 전에 거절하고, `teardown.mjs`도 지우기 직전에 다시 보고 겹치면 작업 폴더를 지우지 않는다.
 3. **수록 범위 밖 날짜(R2).** `uncoveredDate`: 거래소 현지 날짜의 전날·당일·다음날 중 하나라도 캘린더 `coverageFrom~coverageTo` 밖이면 판단할 수 없음으로 거절한다(`SessionProtection.check`가 `CalendarCoverageException`에서 `Unknown`으로 멈추는 것과 같음). Java처럼 장 시간 보호 해제(GitHub Actions 전용 변수)일 때만 통과한다. 이로써 "실제 보호보다 넓거나 같음"이 수록 범위 밖에서도 참이 된다(README 문구 정리).
 4. **Gradle 데몬(R3).** 시험 안의 두 Gradle 호출(데모 실험실 `bootTestRun`, 흐름 시험의 실행 명령)에 `--no-daemon`을 붙인다. README의 PC 빌드 명령에도 붙이고, 남은 데몬은 `./gradlew --stop`으로 끄되 실전 엔진·게이트웨이·감시를 Gradle `run`으로 띄운 PC에서는 쓰지 말라고 적는다(`--stop`은 같은 버전 데몬을 모두 끔).
 
@@ -33,5 +33,5 @@
 ## 검증
 
 - `node --test support/guard.test.mjs`: 14건 통과(이전 7건 + 7건).
-- 변이 9개를 손으로 넣어 모두 잡힘: G5(`Math.max` → `sp.close`), G6(`Math.min` → `sp.open`), G7(오류면 모두 없음), 범위 밖 확인 끄기, 전날·다음날 빼기, 겹침 한쪽 방향만, 실제 경로 안 따라감, 기본 `~/.autotrade` 빼기. `rel === ''` 조건은 같은 동작이라 지웠다.
+- 변이 8개를 손으로 넣어 모두 잡힘: G5(`Math.max` → `sp.close`), G6(`Math.min` → `sp.open`), G7(오류면 모두 없음), 범위 밖 확인 끄기, 전날·다음날 빼기, 겹침 한쪽 방향만, 실제 경로 안 따라감, 기본 `~/.autotrade` 빼기. `rel === ''` 조건은 같은 동작이라 지웠다. architect 검토 N1~N3·risk-ops F1 뒤 `..`로 시작하는 안쪽 이름(작업 폴더가 그 안·위 두 방향), 없는 링크 아래 폴더, `coverageFrom` 경계, 미국 캘린더만 범위 밖인 시험을 더했고 N1·N2를 고쳤다(변이 3개 더 잡힘).
 - Playwright 시험 두 개와 `--no-daemon` 동작은 CI 잡 "Lab screens (Playwright)" 결과로 확인한다.

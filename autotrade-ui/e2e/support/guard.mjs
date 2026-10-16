@@ -122,20 +122,30 @@ export function refuseReason({ now = new Date(), env = process.env, lstat = fs.l
 
 /** 같은 폴더이거나 한쪽이 다른 쪽 안에 있으면 true. 있는 경로는 실제 경로로, Windows는 대소문자 구분 없이 본다. */
 function overlaps(a, b) {
+  // 없는 경로는 있는 가장 가까운 위 폴더까지 실제 경로로 풀고 나머지를 붙인다(링크 아래 새 폴더, architect PR #131 N2)
   const norm = p => {
-    let r = path.resolve(p);
-    try {
-      r = fs.realpathSync.native(r);
-    } catch {
-      // 없는 경로는 그대로 비교한다
+    let head = path.resolve(p);
+    const rest = [];
+    for (;;) {
+      try {
+        head = fs.realpathSync.native(head);
+        break;
+      } catch {
+        const up = path.dirname(head);
+        if (up === head) break;
+        rest.unshift(path.basename(head));
+        head = up;
+      }
     }
+    const r = path.join(head, ...rest);
     return process.platform === 'win32' ? r.toLowerCase() : r;
   };
   const x = norm(a);
   const y = norm(b);
   const inside = (child, parent) => {
     const rel = path.relative(parent, child);
-    return !rel.startsWith('..') && !path.isAbsolute(rel);
+    // '..foo' 같은 이름은 안쪽이다(architect PR #131 N1)
+    return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
   };
   return inside(x, y) || inside(y, x);
 }
