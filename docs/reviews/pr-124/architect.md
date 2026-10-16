@@ -105,3 +105,31 @@
 
 ### 판정
 수정 필요(B1·B2·B6 확인 못 함: 직접 돌린 `./gradlew build`가 `oshi-core` 의존성 해석 실패로 `autotrade-app-lab` 테스트와 `autotrade-architecture-test`(ArchUnit)를 돌리지 못함. sim·app-experiment 테스트와 워크포워드 골든은 직접 통과를 확인했고 코드 결함으로 인한 수정 요구는 없음. CI `Gradle build` success(805ffc4)를 B1 근거로 인정한다는 사용자 결정이 사용자 본인에게서 확인되면 B1·B2·B6은 통과로 보고 승인할 수 있다)
+
+## 재검토 2026-10-16 (4차)
+- 대상: PR #124 / 커밋 `281b8c7e47656754bb1e7d3e249288210722a036`(GitHub PR head와 일치, base main, open) / main(`5b46d17`) 대비 diff. 3차 이후 변경은 `281b8c7` 한 커밋으로 이 파일(3차 원문 33줄 덧붙임)뿐이다(`git diff --stat 805ffc4 281b8c7`). 커밋된 3차 원문은 이 검토자가 쓴 내용과 같다(덧붙이기 전 작업 트리 변경 없음).
+- 점검표: B
+- 직접 실행·확인한 것:
+  - **사용자 댓글 확인(GitHub REST `GET /repos/hwan82/autotrade-system/issues/comments/6208359636`)**: 작성자 `hwan82`(type User, author_association OWNER), 2026-10-16T04:52:41Z, 수정 없음, `performed_via_github_app` 없음, 본문 "CI 결과를 B1 근거로 인정", PR #124 댓글(`#issuecomment-6208359636`). PR #124의 댓글은 이것 하나다.
+  - **한계(기록)**: 이 컨테이너의 `gh` 인증 계정도 `hwan82`다(`gh api user` → `hwan82`). 같은 토큰을 쓰는 에이전트가 쓴 댓글과 사용자가 직접 쓴 댓글을 API 응답만으로는 구별할 수 없다. 이 검토는 저장소 소유자 계정의 PR 댓글을 사용자 결정으로 보고 진행한다. 사용자가 이 댓글을 직접 쓰지 않았다면 아래 B1·B2·B6 판단과 승인은 무효다.
+  - CI(직접 조회): `281b8c7`의 `Gradle build` success(job 116814494182, head_sha 일치, `Build and test` = `./gradlew build --no-daemon` success, `Start each process once (ARC-03)` success), `DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` success. `805ffc4`도 같은 세 개 success(3차 기록).
+  - 직접 실행 빌드는 3차 기록(04:36~04:38Z, `oshi-core` 해석 실패로 BUILD FAILED, sim 278건·app-experiment 40건 실패 0, 워크포워드 골든 통과, app-lab·architecture-test 미실행)을 그대로 쓴다. 3차 이후 코드 변경이 없어 다시 돌리지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(사용자 결정에 따라 CI로) | 사용자 댓글 6208359636에 따라 CI `./gradlew build` 결과를 근거로 인정. `281b8c7` CI `Build and test` success. 직접 실행으로도 의존성 해석이 된 모듈은 실패 0(3차) |
+| B2 | 통과 | 코드 읽기 통과(1·2·3차). ArchUnit·`ModuleOwnershipTest`·`RealPathReflectionTest`는 CI `./gradlew build`의 `autotrade-architecture-test`로 통과(B1과 같은 근거). 보호 경로 변경 없음 |
+| B3 | 통과 | 3차와 같음 |
+| B4 | 통과 | 3차와 같음(워크포워드 골든 직접 통과) |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 새 테스트는 sim·app-experiment 분을 직접 통과 확인(3차), app-lab 분(`ExperimentJobControllerTest`·`ExperimentJobStreamTest`·`ExperimentJobsTest`)은 CI로 통과(B1과 같은 근거). 지우거나 끈 테스트 없음 |
+| B7 | 해당 없음 | 3차와 같음 |
+| B8 | 통과 | 3차와 같음. 이번 덧붙임에도 비밀값 없음(토큰 값은 적지 않음) |
+
+### 점검표 밖 발견
+- 수정 필요: 없음.
+- 권고(3차와 같음): 기획서 이력의 v14.40 결번을 다음 기획서 변경 때 한 줄로 남긴다.
+- 운영 메모: 에이전트가 사용자 계정 토큰으로 GitHub에 쓸 수 있는 환경에서는 "사용자 댓글"이 사용자 결정의 독립 증거가 되지 못한다. 앞으로 검토 규칙 예외(예: CI로 B1 대체)는 결정 로그에 사용자 결정으로 남기거나 사용자가 검토 규칙(`docs/qa/checklists.md` B1)을 고쳐 두는 편이 낫다.
+
+### 판정
+승인(사용자 hwan82의 PR #124 댓글 6208359636 "CI 결과를 B1 근거로 인정"에 따라 B1·B2·B6을 CI `Gradle build` success(281b8c7)로 판단함. 그 댓글이 사용자 본인 것이 아니면 이 승인은 무효)
