@@ -63,9 +63,21 @@ public final class KrxDailyCollector {
                 try {
                     empty = KrxOpenApiClient.parse(b, d, body).isEmpty(); // 모양이 틀린 응답은 캐시에 넣지 않는다
                 } catch (IOException first) {
-                    // 200인데 목록이 빠진 응답이 일시적으로 오는 경우가 있어(2026-10-16 실측) 한 번만 다시 부른다. 두 번째도 틀리면 멈춘다.
-                    body = client.fetchRaw(b, d);
-                    empty = KrxOpenApiClient.parse(b, d, body).isEmpty();
+                    // 200인데 목록이 빠진 응답이 일시적으로 오는 경우가 있어(2026-10-16 KOSDAQ 2024-03-04, 직후 같은 요청은 1,715건)
+                    // 한 번만 다시 부른다. 두 번째도 틀리면 멈춘다. 불안정 직후의 빈 목록은 휴장일 증거로 믿지 않고 멈춘다
+                    // (거래일이 휴장일로 캐시되면 다음 거래일에 가짜 수정 이벤트가 생긴다). 휴장일이면 다음 실행 첫 호출이 캐시한다.
+                    try {
+                        body = client.fetchRaw(b, d);
+                        empty = KrxOpenApiClient.parse(b, d, body).isEmpty();
+                    } catch (IOException second) {
+                        second.addSuppressed(first);
+                        throw second;
+                    }
+                    if (empty) {
+                        IOException e = new IOException("KRX 재호출 응답이 빈 목록이라 휴장일로 받지 않습니다: " + b + " " + d);
+                        e.addSuppressed(first);
+                        throw e;
+                    }
                 }
                 fetched++;
                 // 최근 평일 빈 응답은 자료 게시 전일 수 있어 캐시하지 않고 다음 실행에서 다시 부른다(오래된 빈 날은 휴장일)

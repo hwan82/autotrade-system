@@ -91,4 +91,15 @@ class KrxDailyCollectorTest {
                 .hasMessageContaining("OutBlock_1").hasMessageContaining("respMsg=x");
         assertThat(broken.calls).hasSize(2);
     }
+
+    @Test
+    void 재호출_응답이_빈_목록이면_휴장일로_캐시하지_않고_멈춘다() {
+        LocalDate d = LocalDate.of(2026, 9, 23); // 7일보다 오래된 평일
+        FakeHttp flaky = new FakeHttp((u, n) -> n == 1 ? FakeHttp.ok("{}") : FakeHttp.ok(KrxFixtures.body(d, List.of())));
+        assertThatThrownBy(() -> collector(flaky, 100).collect(d, d, EnumSet.of(KrxBoard.KOSPI)))
+                .hasMessageContaining("휴장일로 받지 않습니다")
+                .satisfies(e -> assertThat(e.getSuppressed()).hasSize(1));
+        assertThat(flaky.calls).hasSize(2);
+        assertThat(cache.resolve("krx/KOSPI/2026/20260923.json")).doesNotExist();
+    }
 }
