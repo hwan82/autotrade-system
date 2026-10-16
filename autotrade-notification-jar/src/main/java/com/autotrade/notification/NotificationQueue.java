@@ -53,8 +53,13 @@ public final class NotificationQueue implements AutoCloseable {
     private final String threadName;
     private final BlockingQueue<Notification> queue = new ArrayBlockingQueue<>(CAPACITY);
 
-    /** 대상·종류별 마지막으로 받은 시각과 그 뒤 생략한 건수. 대상 하나에 마지막 종류만 둔다(종류가 바뀌면 늘 받음). */
+    /**
+     * 대상별 마지막으로 들어온 종류와 받은 시각, 그 뒤 생략한 건수. 대상 하나에 마지막 종류만 둔다(종류가 바뀌면 늘 받음). 상한·큐 가득으로
+     * 버린 알림도 종류는 남기고 시각은 비운다(null). 그래야 멈춤 → 회복(버림) → 멈춤에서 두 번째 멈춤을 억제하지 않는다(PR #128 QA F1).
+     */
     private final Map<String, Last> lastBySubject = new HashMap<>();
+    /** 종류별로 받은 건수(운영 배선 시험용). */
+    private final Map<String, Integer> acceptedByKind = new HashMap<>();
     private Instant windowStart;
     private int windowCount;
     /** 전체 상한·큐 가득으로 버린 건수(다음에 받는 알림에 붙인 뒤 0). */
@@ -64,6 +69,7 @@ public final class NotificationQueue implements AutoCloseable {
     private volatile boolean closed;
     private Thread worker;
 
+    /** {@code at}이 null이면 그 종류를 받지 못하고 버렸다는 뜻이다(다음 같은 종류는 억제하지 않음). */
     private record Last(String kind, Instant at, int suppressed) {}
 
     /**
@@ -124,7 +130,8 @@ public final class NotificationQueue implements AutoCloseable {
         String key = subject == null ? "" : subject;
         Last last = lastBySubject.get(key);
         // 시계가 뒤로 가면(now가 마지막보다 이르면) 간격이 찬 것으로 본다(억제가 길어지지 않게)
-        if (last != null && last.kind().equals(kind) && !now.isBefore(last.at()) && now.isBefore(last.at().plus(QUIET))) {
+        if (last != null && last.kind().equals(kind) && last.at() != null && !now.isBefore(last.at())
+                && now.isBefore(last.at().plus(QUIET))) {
             lastBySubject.put(key, new Last(kind, last.at(), last.suppressed() + 1));
             suppressedTotal++;
             return false;
@@ -134,9 +141,7 @@ public final class NotificationQueue implements AutoCloseable {
             windowCount = 0;
         }
         if (windowCount >= MAX_PER_WINDOW && routes.severityOf(kind) == Severity.INFO) {
-            dropped++;
-            droppedTotal++;
-            return false;
+            return drop(key, kind);
         }
         StringBuilder text = new StringBuilder(body == null ? "" : body);
         if (last != null && last.kind().equals(kind) && last.suppressed() > 0) {
@@ -147,14 +152,21 @@ public final class NotificationQueue implements AutoCloseable {
         }
         Notification n = routes.notification(kind, title, text.toString(), now, zone);
         if (!queue.offer(n)) {
-            dropped++;
-            droppedTotal++;
-            return false;
+            return drop(key, kind);
         }
         dropped = 0;
         windowCount++;
         lastBySubject.put(key, new Last(kind, now, 0));
+        acceptedByKind.merge(kind, 1, Integer::sum);
         return true;
+    }
+
+    /** 상한·큐 가득으로 버린다. 대상의 마지막 종류는 바꿔 두어, 종류가 바뀐 뒤 돌아온 알림을 억제하지 않게 한다(PR #128 QA F1). */
+    private boolean drop(String key, String kind) {
+        dropped++;
+        droppedTotal++;
+        lastBySubject.put(key, new Last(kind, null, 0));
+        return false;
     }
 
     private static void note(StringBuilder text, String line) {
@@ -215,6 +227,11 @@ public final class NotificationQueue implements AutoCloseable {
 
     public synchronized int droppedTotal() {
         return droppedTotal;
+    }
+
+    /** 이 종류로 받은(큐에 넣은) 건수. 엔진·감시가 실제 큐에 넣는지 보는 배선 시험용(PR #128 QA Q1). */
+    public synchronized int acceptedCount(String kind) {
+        return acceptedByKind.getOrDefault(kind, 0);
     }
 
     /** 큐에 남은 건수. */

@@ -10,7 +10,7 @@
 1. **알림 큐**(`NotificationQueue`, 알림 모듈). 실전 엔진·감시는 알림을 이 큐에 넣기만 한다. HTTP는 프로세스마다 데몬 스레드 하나(`notification-<프로세스>`)에서만 돈다.
    - `offer`는 막지 않고(큐 64건, 차면 버리고 센다) 어떤 `Throwable`도 던지지 않는다. 보내는 스레드는 발송 중 `Error`가 나도 그 알림을 로그에만 남기고 다음 알림을 보낸다(PR #127 QA R3). 그래서 채널의 지연·`Error`가 엔진의 명령·주문 스레드로 번지지 않는다.
    - 부르는 쪽은 종류만 준다. 등급은 `EventRoutes` 표가 정한다(PR #127 risk-ops R4).
-   - **폭주 억제**: 같은 대상·같은 종류는 10분에 한 번. 생략 건수는 다음에 보내는 같은 대상·종류 알림에 붙인다. 종류가 바뀌면(멈춤 → 회복 → 멈춤) 늘 보낸다. 정보 알림은 전체로 10분에 20건(긴급 포함해 셈)까지만 받는다. 긴급 알림은 전체 상한으로 버리지 않고 큐 크기(64건)까지 받는다. 감시는 상태가 바뀔 때만 알리므로 버린 긴급 알림은 다시 오지 않기 때문이다(PR #128 architect F1). 넘친 건수·큐가 차서 버린 건수는 다음에 받는 알림에 붙인다. 시계가 뒤로 가면 간격이 찬 것으로 본다.
+   - **폭주 억제**: 같은 대상·같은 종류는 10분에 한 번. 생략 건수는 다음에 보내는 같은 대상·종류 알림에 붙인다. 종류가 바뀌면(멈춤 → 회복 → 멈춤) 늘 보낸다. 정보 알림은 전체로 10분에 20건(긴급 포함해 셈)까지만 받는다. 긴급 알림은 전체 상한으로 버리지 않고 큐 크기(64건)까지 받는다. 감시는 상태가 바뀔 때만 알리므로 버린 긴급 알림은 다시 오지 않기 때문이다(PR #128 architect F1). 넘친 건수·큐가 차서 버린 건수는 다음에 받는 알림에 붙인다. 버린 알림도 그 대상의 마지막 종류로 남긴다. 그래서 멈춤(보냄) → 회복(버림) → 다시 멈춤에서 두 번째 멈춤을 억제하지 않는다(PR #128 독립 QA F1). 시계가 뒤로 가면 간격이 찬 것으로 본다.
    - **닫기**: 프로세스 종료 때 남은 알림을 최대 3초 보내 보고, 그래도 남은 알림은 로그 채널에만 남긴다.
 2. **매핑표에 운영 이벤트 추가**(`EventRoutes`). 긴급: `process-stale`·`heartbeat-unreadable`·`process-restarted`·`stop-request-on`·`reading-missing`·`config-warning`·`real-trading-command`·`notification-channel`. 정보: `process-recovered`·`process-stopped`·`stop-request-off`·`reading-recovered`·`watchdog-started`·`engine-started`. 기존 7종(D-099 2번)과 "표에 없으면 긴급"은 그대로다.
 3. **감시 연결**: 감시는 상태가 바뀔 때만 알린다.
@@ -58,12 +58,13 @@
 
 ## 검증
 
-- `NotificationQueueTest`: 등급은 표로만·보내는 스레드에서 보냄, 채널이 막혀도 넣는 쪽은 1초 안에 돌아오고 큐 가득(64건)은 버림, 전체 상한은 정보 알림에만(긴급은 상한을 넘어도 받고 버린 정보 건수를 붙임), 채널 `StackOverflowError`가 넣는 쪽으로 번지지 않고 다음 알림 발송, 형식 오류 거절, 같은 대상·종류 10분 억제와 생략 건수, 종류가 바뀌면 억제 안 함, 시계 역행, 상한 생략 건수, 카카오 거절 시 재동의 알림 한 번, 닫기 때 남은 알림 로그.
+- `NotificationQueueTest`: 등급은 표로만·보내는 스레드에서 보냄, 채널이 막혀도 넣는 쪽은 1초 안에 돌아오고 큐 가득(64건)은 버림, 전체 상한은 정보 알림에만(긴급은 상한을 넘어도 받고 버린 정보 건수를 붙임), 상한·큐 가득으로 회복을 버려도 다시 멈춤은 받음(QA 탐침 P1·P2), 채널 `StackOverflowError`가 넣는 쪽으로 번지지 않고 다음 알림 발송, 형식 오류 거절, 같은 대상·종류 10분 억제와 생략 건수, 종류가 바뀌면 억제 안 함, 시계 역행, 상한 생략 건수, 카카오 거절 시 재동의 알림 한 번, 닫기 때 남은 알림 로그.
 - `KakaoMemoChannelTest`: 거절 기억(갱신 요청 한 번), 401 뒤 거절도 기억, 저장소의 다른 리프레시 토큰으로 갈아타 거절 해제, 더 늦게 만료되는 저장소 토큰 사용, 저장소 예외 무시, `expires_in` 상한.
 - `FileKakaoTokenStoreTest`: 같은 출처 공유, 새 동의는 옛 파일 무시, 없음·깨짐·4KB 초과(상한을 빼면 정상으로 읽힐 내용), 문자열에 값 없음.
 - `NotificationSetupTest`: 켜진 채널만 표준 순서, BIZ는 안 만듦, 틀린 설정은 그 채널만 끔, 문자열에 값 없음.
 - `JdkHttpTransportTest`: 기한 초과 때 서버 쪽 쓰기가 끊김(M2), 8KB 뒤 64MB 본문을 끝까지 받지 않음(M8).
 - `WatchdogTest`: 엔진 멈춤·회복·정상 종료, 기동 때 이미 멈춘 엔진, 재기동, 정지 요청 켜짐·꺼짐, 자원 결측·회복(10분 반복은 알림 없음), 알림이 던져도 점검 계속, 10분 값, W5 순서, 시계 역행(감시·하트비트), 로그 수준.
+- 운영 배선(PR #128 QA Q1): `EngineMainTest`가 실제 기동한 엔진의 큐에 시작·실전 제어 명령 알림이 들어가는지, `WatchdogMainTest`가 실제 기동한 감시가 멈춘 엔진 하트비트를 큐에 넣는지 본다(`NotificationQueue.acceptedCount`).
 - `NotifyingCommandAuditLogTest`, `SettingsControllerTest`(카카오 ME 켜기 조건, 새 비밀값 쓰기 전용, link-url은 화면에서 못 바꿈), `ConfigLoaderTest`(비밀값 경로).
 - 보호 테스트(`RealPathReflectionTest`·`ArchitectureTest`·`ModuleOwnershipTest`)는 고치지 않았다. 새 운영 코드는 D-086 허용 목록 안 타입만 쓴다(`java.util.concurrent`, `java.nio.file(.attribute)`, `java.security.MessageDigest`, `java.util.HexFormat`, `java.time.format`, 허용된 Jackson 타입).
 

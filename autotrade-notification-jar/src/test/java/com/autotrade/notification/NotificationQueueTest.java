@@ -181,6 +181,55 @@ class NotificationQueueTest {
     }
 
     @Test
+    void 상한으로_회복_알림을_버려도_다시_멈춤은_억제하지_않는다() throws Exception {
+        // PR #128 QA 탐침 P1: 멈춤(받음) → 다른 긴급 20건으로 창 상한 → 회복(정보, 버림) → 4분 뒤 다시 멈춤은 받아야 한다
+        NotificationQueue q = queue();
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
+        for (int i = 0; i < NotificationQueue.MAX_PER_WINDOW; i++) {
+            assertThat(q.offer(EventRoutes.REAL_TRADING_COMMAND, "c" + i, "명령 " + i, "")).isTrue();
+        }
+        assertThat(q.offer(EventRoutes.PROCESS_RECOVERED, "engine", "엔진 회복", "")).isFalse();
+        clock.now = T0.plus(Duration.ofMinutes(4));
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
+        assertThat(q.suppressedTotal()).isZero();
+        assertThat(q.acceptedCount(EventRoutes.PROCESS_STALE)).isEqualTo(2);
+        awaitGot(NotificationQueue.MAX_PER_WINDOW + 2);
+    }
+
+    @Test
+    void 큐가_차서_회복_알림을_버려도_다시_멈춤은_억제하지_않는다() throws Exception {
+        // PR #128 QA 탐침 P2: 채널이 막혀 큐가 찬 동안 회복을 버리고, 큐가 비면 다시 멈춤은 받아야 한다
+        CountDownLatch release = new CountDownLatch(1);
+        sink.behavior.set(n -> {
+            release.await();
+            return SendResult.ok();
+        });
+        NotificationQueue q = queue();
+        // 전체 상한 창은 T0에 시작한다. 엔진 멈춤은 T0+9분이라, T0+10분 새 창에서 회복은 상한이 아니라 큐 가득으로만 버려진다
+        assertThat(q.offer(EventRoutes.WATCHDOG_STARTED, "watchdog", "감시 시작", "")).isTrue();
+        clock.now = T0.plus(Duration.ofMinutes(9));
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
+        int i = 0;
+        while (q.pending() < NotificationQueue.CAPACITY && i < 1000) {
+            q.offer(EventRoutes.REAL_TRADING_COMMAND, "c" + i, "명령 " + i, "");
+            i++;
+        }
+        assertThat(q.pending()).isEqualTo(NotificationQueue.CAPACITY);
+        clock.now = T0.plus(Duration.ofMinutes(10));
+        int droppedBefore = q.droppedTotal();
+        assertThat(q.offer(EventRoutes.PROCESS_RECOVERED, "engine", "엔진 회복", "")).isFalse();
+        assertThat(q.droppedTotal()).isEqualTo(droppedBefore + 1);
+        release.countDown();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (q.pending() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        clock.now = T0.plus(Duration.ofMinutes(13));
+        assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
+        assertThat(q.suppressedTotal()).isZero();
+    }
+
+    @Test
     void 시계가_뒤로_가면_억제_간격이_찬_것으로_본다() {
         NotificationQueue q = queue();
         clock.now = T0.plusSeconds(600);

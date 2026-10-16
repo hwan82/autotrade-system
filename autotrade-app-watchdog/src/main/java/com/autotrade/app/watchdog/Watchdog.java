@@ -284,6 +284,11 @@ final class Watchdog implements AutoCloseable {
         return heartbeat;
     }
 
+    /** 운영 배선 시험용(PR #128 QA Q1). 알림 큐 없이 만든 감시는 null. */
+    NotificationQueue notifications() {
+        return notifications;
+    }
+
     /** 점검을 멈추고 자기 하트비트 파일을 지운다. 정지 요청 파일은 그대로 둔다(다음 감시가 이어받음). */
     @Override
     public synchronized void close() {

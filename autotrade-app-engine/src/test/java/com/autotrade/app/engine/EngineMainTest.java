@@ -17,6 +17,7 @@ import com.autotrade.domain.order.OrderIntent;
 import com.autotrade.domain.order.OrderRequest;
 import com.autotrade.domain.order.OrderType;
 import com.autotrade.domain.order.Side;
+import com.autotrade.notification.EventRoutes;
 import com.autotrade.risk.guard.GuardState;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.io.IOException;
@@ -226,6 +227,9 @@ class EngineMainTest {
                 assertThat(a.accountNumberConfigured()).isTrue();
             });
             assertThat(engine.guard().state(new AccountId("KIS-US-1"))).isEqualTo(GuardState.OFF);
+            // 운영 배선: 시작 알림과 실전 제어 명령 알림이 엔진의 알림 큐에 들어간다(PR #128 QA Q1, 변이 M10)
+            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED)).isEqualTo(1);
+            assertThat(engine.notifications().acceptedCount(EventRoutes.REAL_TRADING_COMMAND)).isPositive();
         }
     }
 
