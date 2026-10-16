@@ -41,9 +41,48 @@ public final class KrxDailySnapshotBuilder {
         void write(List<String> row) throws IOException;
     }
 
-    /** 수집 요약(품질 리포트 "수집 요약" 칸). */
+    /**
+     * 수집 요약(품질 리포트 "수집 요약" 칸).
+     *
+     * @param emptyWeekdays 모든 시장이 빈 목록인 평일(휴장일이거나, 거래일이 휴장일로 캐시된 것)
+     * @param boardGaps 다른 시장엔 자료가 있는데 한 시장만 빈 날(그 시장이 앞뒤 날짜엔 나올 때). 다음 거래일에 가짜 수정 이벤트를 만든다
+     * @param massAdjustmentDays 수정 이벤트가 {@link #MASS_ADJUSTMENT_MIN}개 종목 이상인 날
+     */
     public record Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose,
-            long adjustmentEvents, long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate) {}
+            long adjustmentEvents, long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate,
+            List<LocalDate> emptyWeekdays, List<BoardGap> boardGaps, List<AdjustmentDay> massAdjustmentDays) {
+
+        public Stats {
+            emptyWeekdays = List.copyOf(emptyWeekdays);
+            boardGaps = List.copyOf(boardGaps);
+            massAdjustmentDays = List.copyOf(massAdjustmentDays);
+        }
+
+        /** 공백 목록 없이(합성 통계용). */
+        public Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose, long adjustmentEvents,
+                long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate) {
+            this(rows, bars, haltedBars, filledMissingPrice, droppedNoClose, adjustmentEvents, missingChange, reappeared,
+                    firstDate, lastTradingDate, List.of(), List.of(), List.of());
+        }
+    }
+
+    /** 한 시장만 빈 날. */
+    public record BoardGap(LocalDate date, KrxBoard board) {}
+
+    /**
+     * 수정 이벤트가 몰린 날.
+     *
+     * @param symbols 그날 나온 종목 수
+     * @param gapBefore 직전 거래일과 이 날 사이(직전 거래일 포함)의 빈 평일 또는 시장 공백 날짜. 없으면 {@code null}.
+     *     빈 평일이 실제 휴장일이 아니거나 시장 공백이면 가짜 이벤트일 가능성이 크다
+     */
+    public record AdjustmentDay(LocalDate date, int events, int symbols, LocalDate gapBefore) {}
+
+    /**
+     * 같은 날 이 수 이상 종목에 수정 이벤트가 나오면 경고한다 `[가정]`. 실제 권리락은 하루 수 건~수십 건이고, 시장 하나가 하루
+     * 빠지면 다음 날 그 시장 종목 거의 전부(코스닥 약 1,700)에 이벤트가 생긴다(PR #137 strategy-researcher R1 (c)).
+     */
+    static final int MASS_ADJUSTMENT_MIN = 30;
 
     /** 코드가 이 거래일 수보다 오래 비었다가 다시 나오면 다른 회사로 보고 전일 종가를 잇지 않는다(코드 재사용, `[가정]`). */
     static final int REAPPEAR_GAP_DAYS = 20;
@@ -58,16 +97,25 @@ public final class KrxDailySnapshotBuilder {
         int dayIndex = -1;
         LocalDate first = null;
         LocalDate last = null;
+        List<LocalDate> emptyWeekdays = new ArrayList<>();
+        List<LocalDate> tradingDates = new ArrayList<>();
+        Map<KrxBoard, java.util.NavigableSet<Integer>> boardDays = new java.util.EnumMap<>(KrxBoard.class);
+        Map<LocalDate, int[]> dayEvents = new TreeMap<>(); // 날짜 → {이벤트 수, 종목 수}
         // 1차: 이벤트·주식수·구간
         for (LocalDate d : source.dates()) {
             List<KrxDailyRow> day = sorted(source.rows(d));
             if (day.isEmpty()) {
-                continue; // 휴장일
+                emptyWeekdays.add(d); // 휴장일(또는 휴장일로 캐시된 거래일)
+                continue;
             }
             first = first == null ? d : first;
             last = d;
             dayIndex++;
+            tradingDates.add(d);
+            int eventsToday = 0;
             for (KrxDailyRow r : day) {
+                int idx = dayIndex;
+                boardDays.computeIfAbsent(r.board(), x -> new java.util.TreeSet<>()).add(idx);
                 rows++;
                 SymbolState s = states.computeIfAbsent(r.code(), c -> new SymbolState());
                 if (s.lastDayIndex >= 0 && dayIndex - s.lastDayIndex > REAPPEAR_GAP_DAYS) {
@@ -84,6 +132,7 @@ public final class KrxDailySnapshotBuilder {
                         BigDecimal base = close.subtract(r.change());
                         if (base.signum() > 0 && base.compareTo(s.lastClose) != 0) {
                             s.events.put(d, base.divide(s.lastClose, MC));
+                            eventsToday++;
                         }
                     }
                 }
@@ -102,6 +151,27 @@ public final class KrxDailySnapshotBuilder {
                     s.open = new Period(board, r.name(), d);
                 }
                 s.open.lastSeen = d;
+            }
+            dayEvents.put(d, new int[] {eventsToday, day.size()});
+        }
+        List<BoardGap> boardGaps = new ArrayList<>();
+        java.util.Set<LocalDate> gapDays = new java.util.HashSet<>(emptyWeekdays);
+        for (Map.Entry<KrxBoard, java.util.NavigableSet<Integer>> e : boardDays.entrySet()) {
+            java.util.NavigableSet<Integer> seen = e.getValue();
+            for (int i = seen.first(); i <= seen.last(); i++) {
+                if (!seen.contains(i)) {
+                    boardGaps.add(new BoardGap(tradingDates.get(i), e.getKey()));
+                    gapDays.add(tradingDates.get(i));
+                }
+            }
+        }
+        boardGaps.sort(Comparator.comparing(BoardGap::date).thenComparing(BoardGap::board));
+        List<AdjustmentDay> massDays = new ArrayList<>();
+        List<LocalDate> allDates = source.dates();
+        for (int i = 0; i < allDates.size(); i++) {
+            int[] c = dayEvents.get(allDates.get(i));
+            if (c != null && c[0] >= MASS_ADJUSTMENT_MIN) {
+                massDays.add(new AdjustmentDay(allDates.get(i), c[0], c[1], gapBefore(allDates, i, gapDays, dayEvents)));
             }
         }
         // 구간 쓰기(종목 코드, 시작일 순)
@@ -160,7 +230,23 @@ public final class KrxDailySnapshotBuilder {
                 barCount++;
             }
         }
-        return new Stats(rows, barCount, halted, filled, dropped, events, missingChange, reappeared, first, last);
+        return new Stats(rows, barCount, halted, filled, dropped, events, missingChange, reappeared, first, last,
+                emptyWeekdays, boardGaps, massDays);
+    }
+
+    /** 바로 앞 거래일까지 거슬러 가며 처음 만나는 빈 평일이나 시장 공백 날짜(가장 가까운 것). */
+    private static LocalDate gapBefore(List<LocalDate> dates, int i, java.util.Set<LocalDate> gapDays,
+            Map<LocalDate, int[]> dayEvents) {
+        for (int j = i - 1; j >= 0; j--) {
+            LocalDate d = dates.get(j);
+            if (gapDays.contains(d)) {
+                return d;
+            }
+            if (dayEvents.containsKey(d)) {
+                return null; // 공백 없는 거래일
+            }
+        }
+        return null;
     }
 
     /** 이벤트 날짜 E → E 이후(E 포함) 이벤트 비율의 곱. 날짜 D의 계수는 D보다 뒤 첫 이벤트 날짜의 값이다. */

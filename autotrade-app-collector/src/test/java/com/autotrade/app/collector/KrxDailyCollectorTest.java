@@ -102,4 +102,49 @@ class KrxDailyCollectorTest {
         assertThat(flaky.calls).hasSize(2);
         assertThat(cache.resolve("krx/KOSPI/2026/20260923.json")).doesNotExist();
     }
+
+    private static FakeHttp emptyOn(LocalDate... emptyDays) {
+        List<LocalDate> empty = List.of(emptyDays);
+        return new FakeHttp((u, n) -> {
+            LocalDate d = LocalDate.parse(FakeHttp.query(u, "basDd"), KrxOpenApiClient.BAS_DD);
+            return FakeHttp.ok(KrxFixtures.body(d, empty.contains(d) ? List.of() : List.of("005930;삼성전자;;1;1;1;1;0;1;10")));
+        });
+    }
+
+    @Test
+    void 캘린더상_거래일의_오래된_빈_목록은_휴장일로_캐시하지_않고_멈춘다() {
+        LocalDate d = LocalDate.of(2026, 9, 22); // 화, 캘린더 거래일
+        FakeHttp http = emptyOn(d);
+        assertThatThrownBy(() -> collector(http, 100).collect(d, d, EnumSet.of(KrxBoard.KOSPI)))
+                .hasMessageContaining("캘린더상 거래일에 빈 목록").hasMessageContaining("krx.json");
+        assertThat(http.calls).hasSize(1);
+        assertThat(cache.resolve("krx/KOSPI/2026/20260922.json")).doesNotExist();
+    }
+
+    @Test
+    void 캘린더_휴장일과_캘린더_범위_밖의_빈_목록은_휴장일로_캐시한다() throws IOException {
+        LocalDate chuseok = LocalDate.of(2026, 9, 24);
+        LocalDate old = LocalDate.of(2025, 10, 7); // 범위 밖(2025 추석), 품질 리포트 빈 평일 목록으로 대조
+        collector(emptyOn(chuseok, old), 100).collect(chuseok, chuseok, EnumSet.of(KrxBoard.KOSPI));
+        collector(emptyOn(chuseok, old), 100).collect(old, old, EnumSet.of(KrxBoard.KOSPI));
+        assertThat(cache.resolve("krx/KOSPI/2026/20260924.json")).exists();
+        assertThat(cache.resolve("krx/KOSPI/2025/20251007.json")).exists();
+    }
+
+    @Test
+    void 최근_거래일_빈_목록은_게시_전으로_보되_뒤_거래일에_자료가_있으면_멈춘다() throws IOException {
+        LocalDate tue = LocalDate.of(2026, 10, 6);
+        LocalDate wed = LocalDate.of(2026, 10, 7);
+        // 뒤 날짜도 비면 게시 전으로 보고 캐시 없이 넘긴다
+        var r = collector(emptyOn(tue, wed), 100).collect(tue, wed, EnumSet.of(KrxBoard.KOSPI));
+        assertThat(r.uncached()).containsOnlyKeys("KOSPI|2026-10-06", "KOSPI|2026-10-07");
+        // 앞 날만 비고 뒤 날에 자료가 있으면 멈춘다(빈 날이 휴장일처럼 다뤄지면 다음 날 가짜 수정 이벤트)
+        assertThatThrownBy(() -> collector(emptyOn(tue), 100).collect(tue, wed, EnumSet.of(KrxBoard.KOSPI)))
+                .hasMessageContaining("2026-10-06").hasMessageContaining("2026-10-07");
+        assertThat(cache.resolve("krx/KOSPI/2026/20261006.json")).doesNotExist();
+        // 뒤 날이 이미 캐시에 있어도 잡는다
+        assertThat(cache.resolve("krx/KOSPI/2026/20261007.json")).exists();
+        assertThatThrownBy(() -> collector(emptyOn(tue), 100).collect(tue, wed, EnumSet.of(KrxBoard.KOSPI)))
+                .hasMessageContaining("뒤 거래일 2026-10-07");
+    }
 }

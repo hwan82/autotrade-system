@@ -95,7 +95,8 @@ class CollectorMainTest {
         assertThat(shares.asOf(s, LocalDate.of(2026, 10, 4))).isEmpty();
 
         Path report = reports.resolve(m.snapshotId() + ".md");
-        assertThat(Files.readString(report)).contains("## 수집 요약", "| 수정 이벤트(기준가 ≠ 전일 종가) | 1 |");
+        assertThat(Files.readString(report)).contains("## 수집 요약", "| 수정 이벤트(기준가 ≠ 전일 종가) | 1 |",
+                "## 빈 평일(모든 시장 빈 목록)", "## 시장 하나만 빈 날", "## 같은 날 여러 종목 수정 이벤트(경고)");
 
         // 같은 날 다시 돌리면 오늘(10-08)과 최근 평일 빈 응답(코스닥·코넥스 10-05~10-07, 게시 전일 수 있음)만 다시 받고
         // 같은 스냅샷 ID가 나온다

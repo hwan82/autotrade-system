@@ -115,7 +115,7 @@ public final class CollectorMain {
         KrxOpenApiClient client = new KrxOpenApiClient(
                 new ApiCaller(http, budget, redaction, sleeper, o.intervalMs, guard::checkSession), o.krxBase,
                 secrets.krxAuthKey().reveal());
-        KrxDailyCollector collector = new KrxDailyCollector(client, o.cacheDir, clock);
+        KrxDailyCollector collector = new KrxDailyCollector(client, o.cacheDir, clock, ExchangeCalendar.bundled(Market.KRX));
         KrxDailyCollector.Result r = collector.collect(from, to, o.boards);
         System.out.println("KRX 일별매매정보: 새로 받은 응답 " + r.fetched() + "건, 오늘 누적 호출 " + budget.usedToday());
         if (o.noSnapshot) {
@@ -156,8 +156,13 @@ public final class CollectorMain {
         prune(o, root, "krx-daily", dir);
         QualityReport report = DailyBarQualityCheck.checkSnapshot(dir, guard::checkSession);
         Path reportFile = report.writeTo(o.reportDir);
-        CollectorReports.appendDailySummary(reportFile, stats, fetched, usedToday);
+        ExchangeCalendar cal = ExchangeCalendar.bundled(Market.KRX);
+        CollectorReports.appendDailySummary(reportFile, stats, fetched, usedToday, cal);
         System.out.println("품질 리포트: " + reportFile + " (오류 " + report.errorCount() + "건)");
+        CollectorReports.DailyWarnings w = CollectorReports.warnings(stats, cal);
+        System.out.println("빈 평일 " + stats.emptyWeekdays().size() + "일(캘린더상 거래일 " + w.emptyTradingDays() + "), 시장 하나만 빈 날 "
+                + w.boardGaps() + "건, 같은 날 여러 종목 수정 이벤트 " + w.massAdjustmentDays() + "일"
+                + (w.any() ? ". 품질 리포트의 해당 칸을 확인해 주세요" : ""));
         return reportFile;
     }
 
