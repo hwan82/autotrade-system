@@ -81,3 +81,33 @@
 
 ## 판정
 수정 필요(F2: 미리 갱신 실패 뒤 401 경로의 갱신 횟수를 문서와 맞추고 시험 추가). F1은 해소. B7은 risk-ops 재검토가 따로 있어야 한다.
+
+## 재검토 2026-10-16 (2)
+- 대상: PR #127 / 커밋 c3277da(이전 재검토 8ee12d1 뒤 507ed22 검토 원문, c3277da 수정) / `git diff origin/main...HEAD` 전체를 다시 봤고, 수정분은 `git diff 8ee12d1 c3277da`(KakaoMemoChannel, KakaoMemoChannelTest, D-099 결정 6. 나머지는 검토 원문 파일)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew --max-workers=2 --offline build` 첫 실행은 `:autotrade-app-lab:test`의 "Could not write XML test results"로 실패했다. 같은 작업 트리에서 risk-ops의 Gradle(`--rerun-tasks`)이 동시에 돌고 있었다(`pgrep`로 확인). 테스트 실패가 아니라 결과 파일 쓰기 충돌이다. 다시 실행 → BUILD SUCCESSFUL(`:autotrade-app-lab:test`는 같은 입력으로 이미 통과한 결과라 UP-TO-DATE. 이 PR은 app-lab을 바꾸지 않는다)
+  - `:autotrade-notification-jar:test --rerun` → 통과(EventRoutesTest 5, JdkHttpTransportTest 5, KakaoMemoChannelTest 15, NotifierTest 10, SlackWebhookChannelTest 3, 실패·건너뜀 0)
+  - `:autotrade-architecture-test:test --rerun` → 통과(ArchitectureTest 19, ModuleOwnershipTest 13, RealPathReflectionTest 10, StopRequestPathTest 2)
+  - 이전 재검토의 F2 재현(만료 60초 전, 503 → 401 → 갱신 200 → 발송 200)을 새 클래스로 다시 실행 → **HTTP 2회(kauth, kapi)**, 결과 `http-401`. 다시 갱신하지 않는다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드(재실행 성공)와 강제 재실행 결과 |
+| B2 | 통과 | 의존·패키지 변화 없음. ArchUnit·RealPathReflectionTest 강제 재실행 통과 |
+| B3 | 통과 | 공개 계약 변화 없음. D-099 결정 6 문구를 동작에 맞춰 고침 |
+| B4 | 통과 | `Clock` 주입 그대로(KakaoMemoChannel.java:97) |
+| B5 | 해당 없음 | 금액 없음 |
+| B6 | 통과 | `KakaoMemoChannelTest#미리_갱신이_일시_장애로_실패한_뒤_발송이_401이면_다시_갱신하지_않는다` 추가(HTTP 2회 고정). 기존 시험 변경·삭제 없음 |
+| B7 | 실패(별도 검토 필요) | 보호 경로 변경 그대로. **risk-ops 검토 필요**. 이 수정에 대한 risk-ops 판정은 risk-ops.md에서 따로 확인할 것. 사용자 머지·독립 QA 대상 |
+| B8 | 통과 | 새 문자열·로그 없음 |
+
+### 이전 지적 처리
+- F2 해소. `refreshTried`가 미리 갱신을 시도하면 성공·실패와 무관하게 참이 되고(KakaoMemoChannel.java:98-101), 401 재갱신 조건이 이를 본다(:111). 경로별 HTTP 횟수는 다음과 같다. 미리 갱신 + 발송 = 2회, 미리 갱신 없음 + 발송 401 + 갱신 + 재발송 = 3회. 따라서 최대 3회, 요청 10초 기준 약 30초다. D-099 결정 6("한 발송에 갱신 시도는 최대 한 번, HTTP는 최대 세 번"), 위험 표와 Notifier.java:15-16("최대 약 30초")가 동작과 일치한다.
+- F1(이전 해소), R1(반영)은 바뀐 것이 없다. R2·R3는 D-099 후속 5번(권고).
+
+## 점검표 밖 발견
+- 없음. 참고로 같은 작업 트리에서 검토자 둘이 Gradle을 동시에 돌리면 테스트 결과 파일 충돌로 빌드가 거짓으로 실패할 수 있다. 다음부터는 검토 빌드를 차례로 돌리거나 작업 트리를 나누는 것을 권한다(PR 결함 아님).
+
+## 판정
+승인. 단 B7: 실전 관련 PR이므로 risk-ops 승인, 독립 QA, 사용자 머지가 따로 필요하다.

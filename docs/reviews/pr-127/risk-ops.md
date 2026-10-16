@@ -106,3 +106,44 @@
 
 ### 판정
 수정 필요(A14 — R5: 미리 갱신이 일시 장애로 실패한 뒤 401이면 한 발송에서 갱신을 두 번 시도해 D-099 결정 6 "최대 한 번"·위험과 한계 "최대 약 30초"와 다름. 코드(권장) 또는 문서를 맞추고 그 순서의 시험을 추가할 것. 1차 R1·R2는 해결, R4는 후속 기록으로 받아들임)
+
+## 재검토 2026-10-16 (2)
+- 대상: PR #127 / 커밋 c3277da / main(f724dee) 대비 diff 전체. 직전 재검토(8ee12d1) 뒤 바뀐 것: `git diff 8ee12d1 c3277da`(KakaoMemoChannel, KakaoMemoChannelTest, D-099 결정 6, 검토 원문 2개). 커밋 507ed22에 들어간 이 파일의 앞 절은 내가 쓴 원문과 같다(`git diff 8ee12d1 c3277da -- docs/reviews/pr-127/risk-ops.md`에 지운 줄 0)
+- 점검표: A
+- 직접 실행한 것:
+  - 처음 돌린 `./gradlew --max-workers=2 --offline build`와 `--rerun-tasks` 시험 실행은 `:autotrade-architecture-test:test`와 `:autotrade-notification-jar:test`가 FAILED로 끝났다. 같은 작업 트리에서 architect 검토자가 동시에 Gradle을 돌리던 때였다. 실패 시험 이름이 나오기 전에 출력이 끝났다. 바로 다시 돌린 `:autotrade-notification-jar:test --rerun-tasks`는 성공했다. [추론] 같은 `build/` 출력 폴더를 두 Gradle 실행이 함께 써서 생긴 충돌로 보며, 코드 결함이 아니라고 판단한 근거는 아래 단독 재실행이다
+  - 단독 재실행: `./gradlew --max-workers=2 --offline :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-watchdog:test --rerun-tasks` → BUILD SUCCESSFUL. 이어서 `./gradlew --max-workers=2 --offline build --rerun-tasks`(모든 작업 다시 실행) → **BUILD SUCCESSFUL in 3m 5s**
+  - JUnit XML 집계(테스트/실패/오류/건너뜀): notification-jar 38/0/0/0(직전 37에서 1건 늘어남), risk 55/0/0/0, architecture-test 44/0/0/0, app-engine 52/0/0/0, app-watchdog 40/0/0/0
+  - 직전 R5 재현을 c3277da에 다시 돌림(만료 60초 전, 503(갱신) → 401(발송)): 결과 `http-401`, 요청 2건(`oauth/token`, `memo/default/send`). 갱신 재시도와 두 번째 발송이 없다
+
+### 직전 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| R5 미리 갱신 실패 뒤 401이면 다시 갱신 | 해결 | KakaoMemoChannel.java `send`: 미리 갱신을 부르면 성공·실패와 상관없이 `refreshTried = true`이고, 401 분기는 `refreshTried`면 첫 결과를 그대로 돌려준다. 시험 `KakaoMemoChannelTest#미리_갱신이_일시_장애로_실패한_뒤_발송이_401이면_다시_갱신하지_않는다`(요청 2건, `http-401`) 통과, 위 재현 같음. 경우를 나눠 보면 한 발송의 HTTP는 (갱신 없음) 발송 1~2번 + 401 갱신 1번 = 최대 3번, (미리 갱신) 갱신 1번 + 발송 1번 = 2번이다. 그래서 D-099 결정 6 "갱신 시도 최대 한 번, HTTP 최대 세 번"과 위험과 한계(D-099 :43) "갱신 한 번과 발송 두 번까지라 최대 약 30초"가 코드와 맞다 |
+| R4 | 후속 기록 그대로 | D-099 후속 표 5번 |
+
+### 점검표 A 재판정
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | Guard·설정 로딩 변경 없음(`git diff origin/main...HEAD --stat`에 해당 파일 없음). `:autotrade-risk:test` 55건 통과 |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음. `ArchitectureTest#REUSABLE_JARS_ARE_DOMAIN_FREE`(ArchitectureTest.java:114-120) 통과 |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음. HTTP 대상은 Slack 고정 호스트(SlackWebhookChannel.java:20,44-46)와 카카오 상수 URL(KakaoMemoChannel.java:36-37)뿐 |
+| A4 | 해당 없음 | 주문 타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음. 알림 모듈은 도메인·브로커에 의존할 수 없다(위 ArchUnit 규칙) |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷·킬스위치 변경 없음. `:autotrade-app-engine:test` 52건 통과 |
+| A8 | 통과 | 엔진·감시는 여전히 알림을 부르지 않는다(모듈 밖 `com.autotrade.notification` 참조는 architecture-test 시험뿐). HTTP 한 번은 전체 기한 안에 끝난다(JdkHttpTransport.java:56-72, 직전 재현 10.03초, 시간 초과 시험 3건 통과). 카카오 한 발송은 이제 HTTP 최대 3번이다. `RealPathReflectionTest` 통과, 새 외부 jar 없음 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 시험도 가짜 응답만 쓴다. 1차 근거(toString 가림, 고정 사유 코드, 자리표시자 픽스처) 그대로 |
+| A11 | 통과 | 보호 테스트 변경은 `ModuleOwnershipTest` 2곳(검사를 넓히는 변경)뿐이다. `@Disabled` 없음. 새 동작마다 실패 경우를 포함한 시험이 있다: 시간 초과 3건, 중단 시 로그, 미리 갱신 실패 후 만료 전 발송, 미리 갱신 성공 후 401, 미리 갱신 실패 후 401 |
+| A12 | 통과 | 장애표 #1~#17, O1~O8, 장애 테스트 8종의 감지·조치는 바뀌지 않는다(알림 미연결). 대체 발송의 전제(시간 초과면 다음 채널)가 성립한다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음. 카카오 만료 판단은 주입 `Clock` |
+| A14 | 통과 | D-099 결정 4~7과 위험과 한계, ADR-001 표, 기획서 MON-06 행, Notifier·KakaoMemoChannel·JdkHttpTransport Javadoc이 c3277da 코드 동작과 맞다(위 R5 경우 나눔). config-keys 변경 제안 문구도 그대로 맞다 |
+
+### 점검표 밖 발견
+- 새 수정 필요 항목은 없다.
+- 남은 일(이번 PR 범위 밖, D-099 후속 표에 기록): 연결 PR에서 알림을 실전 엔진·감시의 주문·시세·하트비트 스레드와 다른 스레드 큐로 돌릴 것(절대 규칙 6). `Notification` 등급을 `EventRoutes`로만 만들게 할 것(R4). 그 PR은 실전 관련이라 risk-ops가 다시 검토한다.
+- 검토 환경 메모: 같은 작업 트리에서 두 검토자가 Gradle을 동시에 돌리면 시험 작업이 서로 출력 폴더를 지워 FAILED가 날 수 있다. 이번 판정은 단독 재실행 결과에 근거한다.
+
+### 판정
+승인
