@@ -6,7 +6,7 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { CONFIG_DIR, DEMO_PORT, EXPERIMENT_ID, FLOW_PORT, GRADLEW, REPO, SNAPSHOT, WORK } from './support/paths.mjs';
 import { writeSnapshot } from './support/snapshot.mjs';
-import { refuseReason } from './support/guard.mjs';
+import { refuseReason, workDirReason } from './support/guard.mjs';
 
 function labJar() {
   const libs = path.join(REPO, 'autotrade-app-lab', 'build', 'libs');
@@ -20,6 +20,9 @@ if (!process.env.TEST_WORKER_INDEX) {
   // 실전 엔진을 보호하는 확인을 무엇보다 먼저 한다(정지 요청, 장 시간 보호). 걸리면 아무것도 띄우지 않는다
   const reason = refuseReason();
   if (reason) throw new Error(`화면 시험을 시작하지 않습니다: ${reason}`);
+  // 작업 폴더는 통째로 지우므로 실제 설정 폴더·저장소와 겹치면 지우기 전에 멈춘다(PR #129 QA R1)
+  const workReason = workDirReason(WORK, { repo: REPO });
+  if (workReason) throw new Error(`화면 시험을 시작하지 않습니다: ${workReason}`);
   fs.rmSync(WORK, { recursive: true, force: true });
   writeSnapshot(CONFIG_DIR, SNAPSHOT);
   fs.rmSync(path.join(REPO, 'experiments', EXPERIMENT_ID), { recursive: true, force: true });
@@ -61,7 +64,8 @@ export default defineConfig({
     },
     {
       // 데모 실험실(DemoLabApplication): 진행 상태 데모 작업이 5초마다 진행한다
-      command: `"${GRADLEW}" --console=plain :autotrade-app-lab:bootTestRun --args=--server.port=${DEMO_PORT}`,
+      // --no-daemon: 시험 뒤 유휴 Gradle 데몬이 남아 메모리를 잡지 않게 한다(PR #129 QA R3)
+      command: `"${GRADLEW}" --no-daemon --console=plain :autotrade-app-lab:bootTestRun --args=--server.port=${DEMO_PORT}`,
       cwd: REPO,
       url: `http://127.0.0.1:${DEMO_PORT}/api/session`,
       timeout: 300_000,

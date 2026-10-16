@@ -66,7 +66,7 @@ test('화면으로 등록한 조합 실험을 실행 명령으로 돌리고 불�
   expect(refused, '실행 명령을 돌리기 전 보호 확인').toBeNull();
   const [, ...args] = command.split(/\s+/);
   if (allowDuringSession()) args.push('-PallowDuringSession');
-  args.push('--console=plain');
+  args.push('--no-daemon', '--console=plain'); // 시험 뒤 유휴 데몬을 남기지 않는다(PR #129 QA R3)
   const run = spawnSync(GRADLEW, args, {
     cwd: REPO, env: { ...process.env, AUTOTRADE_CONFIG_DIR: CONFIG_DIR }, encoding: 'utf8',
     shell: process.platform === 'win32', timeout: 300_000,
