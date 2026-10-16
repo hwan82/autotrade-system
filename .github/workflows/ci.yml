@@ -171,6 +171,8 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
+      - name: PC protection guard unit tests
+        run: node --test support/guard.test.mjs
       - name: Lab screen tests
         # 러너에는 실전 엔진이 없어 실행 명령의 장 시간 보호만 푼다(GITHUB_ACTIONS와 함께 볼 때만 유효, support/guard.mjs)
         env:

@@ -20,7 +20,7 @@
    - `02-experiment-flow`(R3): 새 실험 등록 화면에서 스윙 조합 2개(`kr-vol-surge-quiet@1 x kr-ma-trend@1`, `none x kr-ma-trend@1`) 고르기 → 미리 보기(파일 안 씀) → 등록 파일 쓰기 → 같은 ID 다시 쓰기 409 → **화면이 알려 준 실행 명령 글을 그대로** Gradle로 돌림 → 실험 폴더 "불러올 수 있음" → 끝난 작업에 이 실행이 "완료" → 불러오기 → 계좌 비교표 2행, 교차표, 자산 곡선.
    - 두 시험 모두 화면 예외(pageerror)와 콘솔 오류가 없어야 통과한다(시험이 일부러 만든 409 한 건만 허용).
 4. **PC 보호와 장 시간 보호 해제(PR #129 risk-ops M2·M3, architect F2).**
-   - 시험은 무엇을 띄우기 전에(`playwright.config.mjs` 주 프로세스) 실제 설정 폴더(`AUTOTRADE_CONFIG_DIR`, 없으면 `~/.autotrade`)의 감시 정지 요청 `experiment-state/stop-request`와 장 시간 보호 구간을 확인하고, 걸리면 실험실·Gradle·Chromium을 띄우지 않고 멈춘다(`support/guard.mjs`). 장 시간 구간은 `SessionProtection`과 같은 개장 60분 전 ~ 폐장 30분 뒤를 국내(Asia/Seoul 09:00~15:30)·미국(America/New_York 09:30~16:00) 평일에 적용하고, 휴장일은 보지 않아 실제 규칙보다 넓게 막는다. 정지 요청은 있는지 판단할 수 없으면 있는 쪽으로 본다(`ExperimentGate`와 같음).
+   - 시험은 무엇을 띄우기 전에(`playwright.config.mjs` 주 프로세스) 실제 설정 폴더(`AUTOTRADE_CONFIG_DIR`, 없으면 `~/.autotrade`)의 감시 정지 요청 `experiment-state/stop-request`와 장 시간 보호 구간을 확인하고, 걸리면 실험실·Gradle·Chromium을 띄우지 않고 멈춘다(`support/guard.mjs`). 장 시간 구간은 `ExchangeCalendar.protectionSession`보다 넓거나 같게 본다: 국내·미국 캘린더(`krx.json`·`us.json`)의 정규장에 그날 특별 운영 구간이 있으면 확인 여부와 관계없이 합치고(예: 2026-11-19 수능일 10:00~16:30 → 08:00~17:00 KST 막음), 그 구간의 개장 60분 전 ~ 폐장 30분 뒤를 평일에 막으며, 휴장일도 막는다(PR #129 architect R1, risk-ops M4). 정지 요청은 있는지 판단할 수 없으면 있는 쪽으로 본다(`ExperimentGate`와 같음).
    - 시험 안의 실행 명령은 임시 설정 폴더를 써서 감시가 실제 설정 폴더에 만드는 정지 요청을 직접 보지 못한다 `[사실]`(`ExperimentGate.STOP_REQUEST`는 실행 명령의 설정 폴더 기준). 그래서 실행 명령 직전에 같은 확인을 한 번 더 한다. 실행 중에 생긴 정지 요청은 보지 못하므로 실전 엔진이 켜진 운영 PC에서는 이 시험을 돌리지 않는다(README).
    - 실행 명령에 `-PallowDuringSession`을 붙이고 시작 전 장 시간 확인을 건너뛰는 것은 `GITHUB_ACTIONS=true`이고 워크플로가 이 잡에만 둔 전용 변수 `AUTOTRADE_E2E_ALLOW_DURING_SESSION=true`일 때뿐이다(범용 `CI` 변수로는 풀지 않음). GitHub 러너에는 실전 엔진이 없다. 정지 요청 확인은 이때도 한다.
 5. **시험이 저장소에 쓰는 것은 `experiments/EXP-20261016-E2E01/` 하나**다. 시험 앞뒤로 이 폴더와 임시 작업 폴더(`E2E_WORK_DIR`, 통째로 지움)만 지운다. 시험이 끝나지 못해 남아도 커밋되지 않게 `.gitignore`에 넣었다.
@@ -52,5 +52,5 @@
 ## 검증
 
 - CI 잡 "Lab screens (Playwright)"이 이 PR에서 통과해야 한다(이 PR의 근거). 첫 실행(3e456a4)은 흐름 시험 통과, 진행 상태 시험이 데모 작업 거래일 합계 기대값(20 → 실제 160)을 잘못 적어 실패했고, 고친 ade1d56에서 시험 2개 모두 통과했다.
-- 보호 확인(`support/guard.mjs`)은 node로 시각 네 개를 확인했다: 2026-10-16 01:00Z(KST 10:00) KRX, 14:00Z(뉴욕 10:00 EDT) US, 09:00Z(KST 18:00·뉴욕 05:00) 통과, 토요일 01:00Z 통과. 클라우드 작업 컨테이너는 Maven Central 429로 빌드할 수 없어 로컬 실행은 못 했다 `[사실]`(2026-10-16).
+- 보호 확인(`support/guard.mjs`)은 단위 시험 `support/guard.test.mjs` 7건(`node --test`, CI가 Playwright보다 먼저 돌림): 국내·미국 경계, 서머타임 끝난 뒤, 주말, 수능일 16:10·16:59 KST 거절과 17:00 통과, 해제 변수 조합(`CI`만·`GITHUB_ACTIONS`만은 안 풀림), 장중 거절, 정지 요청은 해제 때도 거절. CI 러너의 해제 경로는 KST 14:25 장중 실행(run 38855609928)으로 확인했다. 클라우드 작업 컨테이너는 Maven Central 429로 빌드할 수 없어 로컬 실행은 못 했다 `[사실]`(2026-10-16).
 - 합성 스냅샷 거래일 계산: 2026-01-02부터 80거래일 = 2026-01-02 ~ 2026-04-29, 설 연휴(02-16~18)·삼일절 대체(03-02) 제외를 node로 확인했다.
