@@ -178,4 +178,42 @@ class NotifierTest {
                 "ERROR 알림(forced-shutdown) [긴급] 엔진 멈춤 (2026-10-16T00:00:00Z)",
                 "INFO 알림(market-close-summary) [정보] 결산 (2026-10-16T00:00:00Z)");
     }
+
+    @Test
+    void 중단돼도_로그_채널에는_남긴다() {
+        List<String> lines = new ArrayList<>();
+        LogChannel realLog = new LogChannel(new System.Logger() {
+            @Override
+            public String getName() {
+                return "t";
+            }
+
+            @Override
+            public boolean isLoggable(Level level) {
+                return true;
+            }
+
+            @Override
+            public void log(Level level, java.util.ResourceBundle bundle, String msg, Throwable thrown) {
+                lines.add(level + " " + msg);
+            }
+
+            @Override
+            public void log(Level level, java.util.ResourceBundle bundle, String format, Object... params) {
+                lines.add(level + " " + format);
+            }
+        });
+        Channel slack = SlackWebhookChannel.of(SLACK_URL, new FakeHttp().interrupt());
+        Recording kakao = new Recording("kakao", SendResult.ok());
+        try {
+            DispatchReport r = Notifier.standard(slack, kakao, realLog).dispatch(URGENT);
+            assertThat(r.interrupted()).isTrue();
+            assertThat(r.attempts()).extracting(DispatchReport.Attempt::channel).containsExactly("slack", "log");
+            assertThat(kakao.got).isEmpty();
+            assertThat(lines).singleElement().asString().startsWith("ERROR 알림(forced-shutdown)");
+            assertThat(r.delivered()).isFalse();
+        } finally {
+            Thread.interrupted();
+        }
+    }
 }

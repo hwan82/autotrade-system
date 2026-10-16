@@ -201,4 +201,25 @@ class KakaoMemoChannelTest {
         FakeHttp http = new FakeHttp().interrupt();
         assertThatThrownBy(() -> channel(http, NOW.plusSeconds(3600), "").send(N)).isInstanceOf(InterruptedException.class);
     }
+
+    @Test
+    void 미리_갱신이_일시_장애로_실패해도_만료_전이면_지금_토큰으로_보낸다() throws Exception {
+        FakeHttp http = new FakeHttp().reply(503, "").reply(200, OK);
+        KakaoMemoChannel kakao = channel(http, NOW.plusSeconds(60), "");
+        assertThat(kakao.send(N)).isEqualTo(SendResult.ok());
+        assertThat(http.requests.get(1).headers()).containsEntry("Authorization", "Bearer ACCESS-OLD");
+
+        FakeHttp rejected = new FakeHttp().reply(401, "{\"error\":\"invalid_grant\"}");
+        assertThat(channel(rejected, NOW.plusSeconds(60), "").send(N)).isEqualTo(SendResult.failed("kakao-refresh-rejected"));
+        assertThat(rejected.requests).hasSize(1);
+    }
+
+    @Test
+    void 미리_갱신한_토큰이_401이면_다시_갱신하지_않는다() throws Exception {
+        FakeHttp http = new FakeHttp()
+                .reply(200, "{\"access_token\":\"ACCESS-NEW\",\"expires_in\":43199}")
+                .reply(401, "{\"code\":-401}");
+        assertThat(channel(http, NOW, "").send(N)).isEqualTo(SendResult.failed("http-401"));
+        assertThat(http.requests).hasSize(2);
+    }
 }

@@ -25,8 +25,9 @@ import java.util.Objects;
  * 응답 {@code access_token}·{@code expires_in}, 리프레시 토큰은 남은 기간 1개월 미만일 때만 새로 옴), "토큰 정보 보기"
  * (-401, HTTP 401 = 토큰이 잘못됐거나 만료, 갱신 필요). 2026-10-16 확인.
  *
- * <p>토큰 자동 갱신: 액세스 토큰 만료 {@value #REFRESH_MARGIN_MINUTES}분 전부터는 보내기 전에 갱신한다. 그래도 발송이 HTTP 401이면
- * 한 번 갱신하고 한 번 더 보낸다. 갱신이 400·401이면 리프레시 토큰이 만료·폐기된 것이라 사용자가 다시 동의해 토큰을 받아야 한다
+ * <p>토큰 자동 갱신: 액세스 토큰 만료 {@value #REFRESH_MARGIN_MINUTES}분 전부터는 보내기 전에 갱신한다. 이 미리 갱신이 일시
+ * 장애로 실패해도 아직 만료 전이면 지금 토큰으로 보낸다. 그래도 발송이 HTTP 401이면
+ * (이번 발송에서 아직 갱신하지 않았을 때만) 한 번 갱신하고 한 번 더 보낸다. 갱신이 400·401이면 리프레시 토큰이 만료·폐기된 것이라 사용자가 다시 동의해 토큰을 받아야 한다
  * ({@code kakao-refresh-rejected}). 그 밖의 실패는 그 알림만 실패로 돌려주고 {@link Notifier}가 다음 채널로 넘긴다.
  *
  * <p>여러 스레드가 같이 불러도 토큰 상태가 꼬이지 않게 {@link #send}는 직렬로 돈다.
@@ -93,15 +94,20 @@ public final class KakaoMemoChannel implements Channel {
 
     @Override
     public synchronized SendResult send(Notification notification) throws InterruptedException {
-        if (!clock.instant().isBefore(token.accessExpiresAt().minus(REFRESH_MARGIN))) {
+        Instant now = clock.instant();
+        boolean refreshedNow = false;
+        if (!now.isBefore(token.accessExpiresAt().minus(REFRESH_MARGIN))) {
             String refreshed = refresh();
-            if (refreshed != null) {
+            refreshedNow = refreshed == null;
+            // 미리 갱신이 일시 장애로 실패해도 아직 만료 전이면 지금 토큰으로 보낸다(PR #127 architect R1). 거절이면 멈춘다
+            if (refreshed != null && (refreshed.equals("kakao-refresh-rejected") || !now.isBefore(token.accessExpiresAt()))) {
                 return SendResult.failed(refreshed);
             }
         }
         String form = "template_object=" + URLEncoder.encode(template(notification), StandardCharsets.UTF_8);
         SendResult first = post(form);
-        if (first.sent() || !first.detail().equals("http-401")) {
+        // 한 발송에서 갱신은 한 번뿐이다: 방금 갱신한 토큰이 401이면 다시 갱신하지 않는다(PR #127 risk-ops R3)
+        if (first.sent() || !first.detail().equals("http-401") || refreshedNow) {
             return first;
         }
         String refreshed = refresh();

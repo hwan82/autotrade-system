@@ -12,8 +12,8 @@ import java.util.Objects;
  * <p>표준 순서({@link #standard}): 긴급은 Slack → 카카오톡 → 로그, 정보는 카카오톡 → Slack → 로그. 설정되지 않은 채널은 빠진다.
  * 로그는 늘 마지막에 있다.
  *
- * <p>{@link #dispatch}는 예외를 던지지 않는다(채널의 런타임 예외도 실패로 친다). 보내는 동안 막히므로(채널당 최대 약 10초, 카카오
- * 갱신 포함 최대 약 30초) 주문·시세 스레드에서 직접 부르지 않는다. 비동기 큐·폭주 억제는 엔진·감시 연결 PR에서 정한다.
+ * <p>{@link #dispatch}는 예외를 던지지 않는다(채널의 런타임 예외도 실패로 친다). 보내는 동안 막히므로(HTTP 한 번 최대 약 10초, 카카오는
+ * 갱신 한 번과 발송 두 번까지라 최대 약 30초) 주문·시세 스레드에서 직접 부르지 않는다. 비동기 큐·폭주 억제는 엔진·감시 연결 PR에서 정한다.
  */
 public final class Notifier {
 
@@ -77,7 +77,7 @@ public final class Notifier {
         return order.get(severity).stream().anyMatch(c -> !c.name().equals("log"));
     }
 
-    /** 보낸다. 중단되면 인터럽트 표시를 되살리고 남은 채널을 건너뛴다. */
+    /** 보낸다. 중단되면 인터럽트 표시를 되살리고 남은 외부 채널을 건너뛴다(로그 채널은 막지 않으므로 그대로 남긴다). */
     public DispatchReport dispatch(Notification notification) {
         Objects.requireNonNull(notification, "notification");
         List<DispatchReport.Attempt> attempts = new ArrayList<>();
@@ -91,6 +91,12 @@ public final class Notifier {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 attempts.add(new DispatchReport.Attempt(channel.name(), SendResult.failed("interrupted")));
+                // 종료 중에 생긴 긴급 알림도 어딘가 남게 막지 않는 로그 채널은 그대로 부른다(PR #127 risk-ops R2)
+                for (Channel rest : order.get(notification.severity())) {
+                    if (rest instanceof LogChannel log && attempts.stream().noneMatch(a -> a.channel().equals(rest.name()))) {
+                        attempts.add(new DispatchReport.Attempt(log.name(), log.send(notification)));
+                    }
+                }
                 return new DispatchReport(notification, attempts, true);
             } catch (RuntimeException e) {
                 result = SendResult.failed("error-" + e.getClass().getSimpleName());
