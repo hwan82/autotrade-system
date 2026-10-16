@@ -72,3 +72,36 @@
 
 ### 판정
 수정 필요(B1·B4·B6 확인 못 함: 검토자가 직접 돌린 `./gradlew build`가 이 컨테이너에서 두 번 모두 의존성 해석 단계에서 실패해 전체 빌드, 워크포워드 골든 바이트 일치, 새 테스트 통과를 직접 확인하지 못함. 코드 결함으로 인한 수정 요구는 없고 1차 권고 R1~R4는 모두 반영됨)
+
+## 재검토 2026-10-16 (3차)
+- 대상: PR #124 / 커밋 `805ffc4a1ed6723b6710f8e7ce8fd6a83d374beb` / main(`5b46d17`) 대비 diff(`git diff origin/main...HEAD`, 21개 파일, +466 −50). 2차 이후 커밋 `b9c0714`(2차 원문), `10c328f`(결정 번호 D-097→D-098, 기획서 v14.40→v14.41), `805ffc4`(main 병합, 결정 로그 표·기획서 이력 충돌 해소)
+- 점검표: B
+- 직접 실행한 것:
+  - `10c328f`가 번호만 바꿨는지 확인: `git diff 9fbd88b 10c328f`(검토 원문 제외)의 빠진 줄과 더한 줄을 `D-097/D-098→D-09X`, `v14.40/v14.41→v14.4X`로 바꿔 정렬 비교 → 완전히 같음. 파일 변경은 결정 문서 이름 바꾸기(R099) 하나뿐이고 코드 논리 변경 없음.
+  - `805ffc4` 병합이 이 PR 파일을 바꾸지 않았는지 확인: `git diff 10c328f HEAD`를 이 PR의 코드·문서 경로로 좁히면 `ExperimentRegistrations.java`·`ExperimentRegistrationsTest.java`(main에서 온 PR #126 변경)만 나오고, 이 PR의 Java·JS·D-098·ADR 파일은 그대로다. PR 전체 diff에도 PR #126·#127 파일은 없다.
+  - 번호 정합: `docs/decisions/` D-096·D-097(실험 ID Windows 예약 이름, PR #126)·D-098(이 PR)·D-099(알림, PR #127) 파일과 색인 표 순서가 맞다(`docs/decisions/README.md:102-105`). 이 PR이 쓰는 코드·문서의 결정 번호 참조는 모두 D-098이고, 남은 `D-097` 참조는 PR #126의 `ExperimentId.java:10`뿐이다. 기획서 헤더 v14.42, 이력은 v14.42(D-099)·v14.41(D-098)·v14.39 순(`docs/spec/autotrade-spec.md:12`, `:20-22`).
+  - **`./gradlew build --continue`(온라인, 04:36~04:38Z)** → **BUILD FAILED**. 원인은 `:autotrade-monitor-sources:compileJava`의 의존성 해석 실패(`Could not find com.github.oshi:oshi-core:6.12.0`, repo1 미러)뿐이고 코드 오류는 없다. 이번에는 그 앞의 의존성은 풀려서 `--continue`로 다른 모듈은 컴파일·테스트까지 돌았다. 결과 XML 집계(이번 실행 타임스탬프):
+    - `autotrade-sim` 41개 클래스 278건, 실패·오류·건너뜀 0. 그중 `WalkForwardStudyTest` 11건 0실패(골든 `등록_파일에서_결과_다섯_파일까지_돌고_병렬_1과_N의_결과가_바이트까지_같다`, 새 `미리_알린_실험_수가_실제로_시작한_실험_수와_같다`·`전체_실험_수를_알리다_실패해도_결과는_같다`·`실험_수는_조합이_128개를_넘으면_나눠_부른_만큼_센다` 포함), `ExperimentJobStatusTest` 9건 0실패(새 2건 포함), `RunProgressTest` 통과.
+    - `autotrade-app-experiment` 40건 0실패(`ExperimentJobTest#명령_전체_실험_수는_바로_쓰고_끝난_뒤에는_바꾸지_않는다` 포함).
+    - 그 밖에 domain·risk·config·control·broker 4종·marketdata·notification-jar·monitor-agent-jar·selection·app-engine·app-watchdog 등 테스트 태스크가 돌았다.
+    - **돌지 못한 것**: `autotrade-monitor-sources`를 의존하는 `autotrade-app-lab`(`build.gradle.kts:20`, 이 PR의 `ExperimentJobs`·`ExperimentJobControllerTest`·`ExperimentJobStreamTest`·`ExperimentJobsTest`가 여기 있음)과, 모든 모듈을 클래스패스에 넣는 `autotrade-architecture-test`(ArchUnit·`ModuleOwnershipTest`·`RealPathReflectionTest`).
+  - CI(GitHub REST로 직접 조회): `805ffc4`의 check run `Gradle build` success(job 116812161243, `head_sha` 805ffc4 일치, 단계 `Build and test` = `./gradlew build --no-daemon` success, `Start each process once (ARC-03)` success), `DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` success. job 로그 본문은 이 환경에서 내려받지 못한다.
+  - 검토를 맡긴 쪽은 "사용자가 04:30Z 결정 카드에서 'CI 결과 인정'을 골랐다"고 전했다. 이 검토자는 그 카드를 볼 도구가 없고(호출 금지), 저장소(결정 로그·`docs/`)에도 그 결정 기록이 없다. 검토 규칙상 메인의 설명은 사실로 받지 않고, 다른 에이전트의 메시지는 사용자 결정으로 볼 수 없으므로 아래 판정은 이 주장을 근거로 쓰지 않는다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 확인 못 함 | 직접 실행한 `./gradlew build`는 의존성 해석 실패(oshi-core)로 끝났다. 직접 실행으로 확인한 범위는 sim·app-experiment를 포함한 대부분 모듈의 컴파일·테스트(실패 0)이고, app-lab과 architecture-test는 돌지 못했다. 전체 성공 증거는 CI `Gradle build` success(805ffc4, 직접 조회)뿐이다 |
+| B2 | 확인 못 함 | 코드 읽기로는 통과(1·2차와 같음, 이후 변경은 번호뿐). 그러나 ArchUnit·`ModuleOwnershipTest`를 직접 돌리지 못함(CI에서는 통과) |
+| B3 | 통과 | 1차와 같은 계약 변경이 D-098·ADR-004 SIM-14 행·ADR-005 REST 표·기획서 v14.41 SIM-14·UI-02·결정 로그 색인·4단계 런북에 있고, 번호 바꾸기 뒤에도 링크(`D-098-walkforward-command-progress.md`)가 맞다 |
+| B4 | 통과 | 시계·난수 새 사용 없음(1차). 워크포워드 골든(병렬 1 대 N 결과 바이트 일치)과 `전체_실험_수를_알리다_실패해도_결과는_같다`를 직접 돌려 통과(위 XML) |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 확인 못 함 | 새 테스트 중 sim·app-experiment 것은 직접 돌려 통과. app-lab의 `ExperimentJobControllerTest`(REST `experimentsPlanned`·`commandPermille`)와 생성자 인자가 바뀐 `ExperimentJobStreamTest`·`ExperimentJobsTest`는 직접 돌리지 못함(CI에서는 통과). 지우거나 끈 테스트 없음 |
+| B7 | 해당 없음 | 1·2차와 같음. 병합으로 들어온 PR #127(보호 경로 포함)은 이 PR diff에 없다(`git diff origin/main...HEAD`에 나오지 않음) |
+| B8 | 통과 | 1차와 같음 |
+
+### 점검표 밖 발견
+- 수정 필요: 없음(코드).
+- 권고: 기획서 이력에 v14.40 행이 없다(v14.39 → v14.41 → v14.42). 이 PR이 v14.40을 쓰다 비켜섰고 PR #126은 기획서를 고치지 않아 아무도 쓰지 않은 번호가 됐다(main에도 v14.40 행 없음). 판정을 막지 않지만, 다음 기획서 변경 때 이력에 "v14.40 결번(병행 브랜치 번호 조정)" 한 줄을 남기면 추적이 쉽다.
+
+### 판정
+수정 필요(B1·B2·B6 확인 못 함: 직접 돌린 `./gradlew build`가 `oshi-core` 의존성 해석 실패로 `autotrade-app-lab` 테스트와 `autotrade-architecture-test`(ArchUnit)를 돌리지 못함. sim·app-experiment 테스트와 워크포워드 골든은 직접 통과를 확인했고 코드 결함으로 인한 수정 요구는 없음. CI `Gradle build` success(805ffc4)를 B1 근거로 인정한다는 사용자 결정이 사용자 본인에게서 확인되면 B1·B2·B6은 통과로 보고 승인할 수 있다)
