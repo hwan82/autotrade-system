@@ -144,14 +144,18 @@ class NotifierTest {
     }
 
     @Test
-    void 중단되면_인터럽트_표시를_되살리고_남은_채널을_건너뛴다() {
+    void 중단되면_인터럽트_표시를_되살리고_남은_외부_채널은_건너뛰되_로그는_남긴다() {
         Channel slack = SlackWebhookChannel.of(SLACK_URL, new FakeHttp().interrupt());
+        Recording kakao = new Recording("kakao", SendResult.ok());
         try {
-            DispatchReport r = Notifier.of(List.of(slack, log), List.of(log)).dispatch(URGENT);
+            DispatchReport r = Notifier.of(List.of(slack, kakao, log), List.of(log)).dispatch(URGENT);
             assertThat(r.interrupted()).isTrue();
-            assertThat(r.attempts()).singleElement().extracting(DispatchReport.Attempt::result)
-                    .isEqualTo(SendResult.failed("interrupted"));
-            assertThat(logLines).isEmpty();
+            // 로그 채널은 막지 않으므로 중단돼도 남긴다(PR #127 risk-ops R2), 외부 채널(kakao)은 건너뛴다
+            assertThat(r.attempts()).extracting(DispatchReport.Attempt::channel).containsExactly("slack", "log");
+            assertThat(r.attempts().get(0).result()).isEqualTo(SendResult.failed("interrupted"));
+            assertThat(r.attempts().get(1).result().sent()).isTrue();
+            assertThat(kakao.got).isEmpty();
+            assertThat(logLines).hasSize(1);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
             Thread.interrupted();
