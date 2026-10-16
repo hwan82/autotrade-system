@@ -115,7 +115,7 @@ public final class CollectorMain {
         KrxOpenApiClient client = new KrxOpenApiClient(
                 new ApiCaller(http, budget, redaction, sleeper, o.intervalMs, guard::checkSession), o.krxBase,
                 secrets.krxAuthKey().reveal());
-        KrxDailyCollector collector = new KrxDailyCollector(client, o.cacheDir, clock);
+        KrxDailyCollector collector = new KrxDailyCollector(client, o.cacheDir, clock, ExchangeCalendar.bundled(Market.KRX));
         KrxDailyCollector.Result r = collector.collect(from, to, o.boards);
         System.out.println("KRX 일별매매정보: 새로 받은 응답 " + r.fetched() + "건, 오늘 누적 호출 " + budget.usedToday());
         if (o.noSnapshot) {
@@ -142,7 +142,7 @@ public final class CollectorMain {
                     List.of(new SnapshotManifest.Source(KRX_SOURCE, "https://openapi.krx.co.kr", KRX_LICENSE, created)),
                     new SnapshotManifest.Coverage(stats.firstDate().toString(), last, last, created));
         }
-        finishKrxSnapshot(o, root, dir, guard, stats, r.fetched(), budget.usedToday());
+        finishKrxSnapshot(o, root, dir, guard, stats, r.fetched(), budget.usedToday(), uncachedDates(r));
         return 0;
     }
 
@@ -151,13 +151,18 @@ public final class CollectorMain {
      * 품질 리포트는 일봉을 메모리에 다 올리지 않는 날짜 순 검사로 만든다(전 기간 약 1,100만 행도 2GB 힙 안에서).
      */
     static Path finishKrxSnapshot(Options o, Path root, Path dir, RunGuard guard, KrxDailySnapshotBuilder.Stats stats,
-            int fetched, int usedToday) throws IOException {
+            int fetched, int usedToday, Set<LocalDate> pending) throws IOException {
         System.out.println("스냅샷: " + dir);
         prune(o, root, "krx-daily", dir);
         QualityReport report = DailyBarQualityCheck.checkSnapshot(dir, guard::checkSession);
         Path reportFile = report.writeTo(o.reportDir);
-        CollectorReports.appendDailySummary(reportFile, stats, fetched, usedToday);
+        ExchangeCalendar cal = ExchangeCalendar.bundled(Market.KRX);
+        CollectorReports.appendDailySummary(reportFile, stats, fetched, usedToday, cal, pending);
         System.out.println("품질 리포트: " + reportFile + " (오류 " + report.errorCount() + "건)");
+        CollectorReports.DailyWarnings w = CollectorReports.warnings(stats, cal, pending);
+        System.out.println("빈 평일 " + stats.emptyWeekdays().size() + "일(캘린더상 거래일 " + w.emptyTradingDays() + "), 시장 하나만 빈 날 "
+                + w.boardGaps() + "건, 같은 날 여러 종목 수정 이벤트 " + w.massAdjustmentDays() + "일"
+                + (w.any() ? ". 품질 리포트의 해당 칸을 확인해 주세요" : ""));
         return reportFile;
     }
 
@@ -208,6 +213,15 @@ public final class CollectorMain {
             System.out.println("재무 스냅샷은 지우면 재현할 수 없어 --keep-snapshots로 정리하지 않습니다");
         }
         return 0;
+    }
+
+    /** 이번 실행에서 캐시하지 않은 응답의 날짜(오늘, 최근 게시 전 빈 날). */
+    static Set<LocalDate> uncachedDates(KrxDailyCollector.Result r) {
+        Set<LocalDate> out = new java.util.TreeSet<>();
+        for (String k : r.uncached().keySet()) {
+            out.add(LocalDate.parse(k.substring(k.indexOf('|') + 1)));
+        }
+        return out;
     }
 
     /** 스냅샷을 쓰는 동안에도 하루 읽을 때마다 장 시간 보호 구간을 본다(들어서면 쓰던 임시 폴더를 지우고 멈춤). */

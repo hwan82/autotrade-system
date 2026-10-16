@@ -95,7 +95,8 @@ class CollectorMainTest {
         assertThat(shares.asOf(s, LocalDate.of(2026, 10, 4))).isEmpty();
 
         Path report = reports.resolve(m.snapshotId() + ".md");
-        assertThat(Files.readString(report)).contains("## 수집 요약", "| 수정 이벤트(기준가 ≠ 전일 종가) | 1 |");
+        assertThat(Files.readString(report)).contains("## 수집 요약", "| 수정 이벤트(기준가 ≠ 전일 종가) | 1 |",
+                "## 빈 평일(모든 시장 빈 목록)", "## 시장 하나만 빈 날", "## 같은 날 여러 종목 수정 이벤트(경고)");
 
         // 같은 날 다시 돌리면 오늘(10-08)과 최근 평일 빈 응답(코스닥·코넥스 10-05~10-07, 게시 전일 수 있음)만 다시 받고
         // 같은 스냅샷 ID가 나온다
@@ -130,6 +131,46 @@ class CollectorMainTest {
         String report = Files.readString(reports.resolve(f.manifest().snapshotId() + ".md"));
         assertThat(report).contains("대체 규칙 대상 묶음", "| 계정 응답 대기(반영 지연, 스냅샷에서 뺌) | 1 |");
         assertNoKeyAnywhere();
+    }
+
+    @Test
+    void 캘린더상_거래일에_KRX가_빈_목록을_주면_종료_코드_1로_멈추고_그날을_캐시하지_않는다() throws IOException {
+        writeKeys();
+        // 서울 2026-10-08 19:00. 2026-09-22(화)는 번들 캘린더상 거래일이고 7일보다 오래됐다
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp http = new FakeHttp((u, n) -> FakeHttp.ok("{\"OutBlock_1\":[]}"));
+        java.io.ByteArrayOutputStream err = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream old = System.err;
+        int code;
+        System.setErr(new java.io.PrintStream(err, true, StandardCharsets.UTF_8));
+        try {
+            code = CollectorMain.run(args("krx-daily", "--from", "2026-09-22", "--to", "2026-09-22", "--boards", "KOSPI"), clock,
+                    http, ms -> {}, PLENTY);
+        } finally {
+            System.setErr(old);
+        }
+        assertThat(code).isEqualTo(1);
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("캘린더상 거래일에 빈 목록").doesNotContain(KRX_KEY);
+        assertThat(config.resolve("collector-cache/krx/KOSPI/2026/20260922.json")).doesNotExist();
+        assertNoKeyAnywhere();
+    }
+
+    @Test
+    void 오늘_자료가_아직_없으면_게시_전으로_적고_오류로_세지_않는다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        LocalDate today = LocalDate.of(2026, 10, 8);
+        FakeHttp http = new FakeHttp((u, n) -> {
+            LocalDate d = LocalDate.parse(FakeHttp.query(u, "basDd"), KrxOpenApiClient.BAS_DD);
+            return FakeHttp.ok(KrxFixtures.body(d, d.equals(today) ? List.of() : List.of("111111;가;;100;100;100;100;0;1;10")));
+        });
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-06", "--to", "2026-10-08", "--boards", "KOSPI"), clock,
+                http, ms -> {}, PLENTY)).isZero();
+        Path report;
+        try (Stream<Path> st = Files.list(reports)) {
+            report = st.filter(p -> p.getFileName().toString().startsWith("krx-daily-")).findFirst().orElseThrow();
+        }
+        assertThat(Files.readString(report)).contains("10-08[-](게시 전)").doesNotContain("(거래일!)");
     }
 
     @Test

@@ -168,4 +168,69 @@ class KrxDailySnapshotBuilderTest {
         assertThat(b.history()).isEqualTo(a.history());
         assertThat(b.shares()).isEqualTo(a.shares());
     }
+
+    @Test
+    void 빈_평일과_시장_하나만_빈_날과_수정_이벤트가_몰린_날을_모은다() throws IOException {
+        // 2024-03-04 코스닥 목록만 빠진 채 캐시된 경우(PR #137 사고와 같은 모양): 03-05에 코스닥 40종목 전부 가짜 수정 이벤트
+        LocalDate thu = LocalDate.of(2024, 2, 29);
+        LocalDate fri = LocalDate.of(2024, 3, 1); // 삼일절
+        LocalDate mon = LocalDate.of(2024, 3, 4);
+        LocalDate tue = LocalDate.of(2024, 3, 5);
+        LocalDate wed = LocalDate.of(2024, 3, 6);
+        Map<LocalDate, List<KrxDailyRow>> m = new TreeMap<>();
+        for (LocalDate d : List.of(thu, mon, tue, wed)) {
+            List<KrxDailyRow> rows = new ArrayList<>();
+            rows.add(row(d, KrxBoard.KOSPI, "005930", "가", "", "100", "100", "100", "100", "0", 1, 10));
+            if (!d.equals(mon)) {
+                for (int i = 0; i < 40; i++) {
+                    // 실제 03-04 종가 1050, 03-05 종가 1100(전일 대비 +50 → 기준가 1050 ≠ 캐시상 전일 종가 1000)
+                    String close = d.equals(thu) ? "1000" : "1100";
+                    String chg = d.equals(tue) ? "50" : "0";
+                    rows.add(row(d, KrxBoard.KOSDAQ, String.format("%06d", 100000 + i), "k" + i, "", close, close, close, close,
+                            chg, 1, 10));
+                }
+            }
+            m.put(d, rows);
+        }
+        m.put(fri, List.of());
+        KrxDailySnapshotBuilder.Stats s = build(m).stats();
+        assertThat(s.emptyWeekdays()).containsExactly(fri);
+        assertThat(s.boardGaps()).containsExactly(new KrxDailySnapshotBuilder.BoardGap(mon, KrxBoard.KOSDAQ));
+        assertThat(s.massAdjustmentDays()).containsExactly(new KrxDailySnapshotBuilder.AdjustmentDay(tue, 40, 41, List.of(mon)));
+        assertThat(s.eventsAfterEmpty()).containsExactly(Map.entry(fri, 0)); // 실제 휴장일 다음 날은 이벤트 없음
+        assertThat(s.adjustmentEvents()).isEqualTo(40);
+    }
+
+    @Test
+    void 공백_없는_자료에는_경고가_없다() throws IOException {
+        KrxDailySnapshotBuilder.Stats s = build(fixture()).stats();
+        assertThat(s.emptyWeekdays()).containsExactly(LocalDate.of(2026, 10, 3));
+        assertThat(s.boardGaps()).isEmpty(); // 333333이 D4에 코스피로 옮겨 코스닥이 비어도 코스닥의 마지막 날 뒤라 공백 아님
+        assertThat(s.massAdjustmentDays()).isEmpty();
+    }
+
+    @Test
+    void 직전_공백은_가장_가까운_하나가_아니라_직전_거래일까지_전부다() throws IOException {
+        // 가짜 빈 거래일(02-29) 바로 뒤에 실제 휴장일(03-01)이 오면, 가장 가까운 공백만 적을 때 원인 02-29가 빠진다(PR #141 M1)
+        LocalDate wed = LocalDate.of(2024, 2, 28);
+        LocalDate thu = LocalDate.of(2024, 2, 29);
+        LocalDate fri = LocalDate.of(2024, 3, 1);
+        LocalDate mon = LocalDate.of(2024, 3, 4);
+        Map<LocalDate, List<KrxDailyRow>> m = new TreeMap<>();
+        for (LocalDate d : List.of(wed, mon)) {
+            List<KrxDailyRow> rows = new ArrayList<>();
+            for (int i = 0; i < 40; i++) {
+                // 실제 02-29 종가 1010, 03-04 종가 1020(전일 대비 +10 → 기준가 1010 ≠ 캐시상 전일 종가 1000)
+                String close = d.equals(wed) ? "1000" : "1020";
+                rows.add(row(d, KrxBoard.KOSPI, String.format("%06d", 100000 + i), "k" + i, "", close, close, close, close,
+                        d.equals(wed) ? "0" : "10", 1, 10));
+            }
+            m.put(d, rows);
+        }
+        m.put(thu, List.of());
+        m.put(fri, List.of());
+        KrxDailySnapshotBuilder.Stats s = build(m).stats();
+        assertThat(s.massAdjustmentDays()).containsExactly(new KrxDailySnapshotBuilder.AdjustmentDay(mon, 40, 40, List.of(thu, fri)));
+        assertThat(s.eventsAfterEmpty()).containsOnly(Map.entry(thu, 40), Map.entry(fri, 40));
+    }
 }

@@ -1,5 +1,6 @@
 package com.autotrade.app.collector;
 
+import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,14 +26,16 @@ public final class KrxDailyCollector {
     private final KrxOpenApiClient client;
     private final Path cacheDir;
     private final Clock clock;
+    private final ExchangeCalendar calendar;
 
-    public KrxDailyCollector(KrxOpenApiClient client, Path cacheDir, Clock clock) {
+    public KrxDailyCollector(KrxOpenApiClient client, Path cacheDir, Clock clock, ExchangeCalendar calendar) {
         this.client = client;
         this.cacheDir = cacheDir.resolve("krx");
         this.clock = clock;
+        this.calendar = calendar;
     }
 
-    /** 결과: 새로 부른 횟수와, 캐시에 두지 않은 오늘 응답. */
+    /** 결과: 새로 부른 횟수와, 캐시에 두지 않은 응답(오늘, 최근 게시 전 빈 날. 키는 {@code 시장|날짜}). */
     public record Result(int fetched, Map<String, String> uncached) {}
 
     /** 이 날수 안의 평일 빈 응답은 캐시하지 않는다 `[가정]`. */
@@ -49,6 +52,8 @@ public final class KrxDailyCollector {
         }
         int fetched = 0;
         Map<String, String> uncached = new HashMap<>();
+        List<String> emptyTradingDays = new ArrayList<>(); // 캘린더상 거래일인데 최근이라 게시 전으로 본 빈 응답
+
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
             if (isWeekend(d)) {
                 continue;
@@ -80,6 +85,16 @@ public final class KrxDailyCollector {
                     }
                 }
                 fetched++;
+                if (empty && calendarSaysTrading(d)) {
+                    // 캘린더 범위 안 거래일의 빈 목록은 휴장일로 캐시하지 않는다(PR #137 strategy-researcher R1 (a)).
+                    // 최근 날이면 게시 전일 수 있어 아래에서 캐시 없이 넘기고, 뒤 거래일에 자료가 있으면 끝에서 멈춘다
+                    if (!d.isAfter(today.minusDays(RECENT_EMPTY_DAYS))) {
+                        throw new IOException("KRX가 캘린더상 거래일에 빈 목록을 줬습니다: " + b + " " + d
+                                + ". 일시 오류면 나중에 같은 명령을 다시 돌리고, 그날이 실제 휴장일이면 거래소 캘린더(krx.json)를 고쳐야"
+                                + " 합니다(수집기 runbook 3.6)");
+                    }
+                    emptyTradingDays.add(key(b, d));
+                }
                 // 최근 평일 빈 응답은 자료 게시 전일 수 있어 캐시하지 않고 다음 실행에서 다시 부른다(오래된 빈 날은 휴장일)
                 boolean maybeNotPublished = empty && d.isAfter(today.minusDays(RECENT_EMPTY_DAYS));
                 if (d.isBefore(today) && !maybeNotPublished) {
@@ -89,7 +104,39 @@ public final class KrxDailyCollector {
                 }
             }
         }
+        for (String k : emptyTradingDays) {
+            String[] p = k.split("\\|");
+            KrxBoard b = KrxBoard.valueOf(p[0]);
+            LocalDate d = LocalDate.parse(p[1]);
+            LocalDate later = laterDayWithRows(b, d, to, uncached);
+            if (later != null) {
+                // 게시 전이면 뒤 날짜도 비어 있어야 한다. 뒤에 자료가 있으면 그 빈 날은 휴장일처럼 다뤄져 가짜 수정 이벤트가 생긴다
+                throw new IOException("KRX가 캘린더상 거래일 " + b + " " + d + "에 빈 목록을 줬는데 뒤 거래일 " + later
+                        + "에는 자료가 있습니다. 나중에 같은 명령을 다시 돌려 주세요(그날이 실제 휴장일이면 krx.json을 고쳐야 합니다)");
+            }
+        }
         return new Result(fetched, Map.copyOf(uncached));
+    }
+
+    /** 캘린더 수록 범위 안이고 거래일이면 참. 범위 밖(2025년 이전 등)은 판단하지 않는다(품질 리포트의 빈 평일 목록으로 대조). */
+    boolean calendarSaysTrading(LocalDate d) {
+        return !d.isBefore(calendar.coverageFrom()) && !d.isAfter(calendar.coverageTo()) && calendar.isTradingDay(d);
+    }
+
+    private LocalDate laterDayWithRows(KrxBoard b, LocalDate d, LocalDate to, Map<String, String> uncached) throws IOException {
+        for (LocalDate x = d.plusDays(1); !x.isAfter(to); x = x.plusDays(1)) {
+            if (isWeekend(x)) {
+                continue;
+            }
+            String body = uncached.get(key(b, x));
+            if (body == null && Files.exists(file(b, x))) {
+                body = Files.readString(file(b, x), StandardCharsets.UTF_8);
+            }
+            if (body != null && !KrxOpenApiClient.parse(b, x, body).isEmpty()) {
+                return x;
+            }
+        }
+        return null;
     }
 
     /** 캐시와 오늘 응답을 합친 날짜 소스. 범위 안에서 요청 시장이 모두 있는 날만 담는다(빠진 날이 있으면 예외). */
