@@ -71,5 +71,16 @@ export function delta(value, isRatio, digits = 2) {
   const n = Number(value) * (isRatio ? 100 : 1);
   return `${n > 0 ? '+' : ''}${n.toFixed(digits)}${isRatio ? '%p' : ''}`;
 }
+// 실험 실행 방식(PR #82 QA R2). 리플레이는 데이터 버전 앞뒤 표지로 어떤 시세를 다시 돌렸는지 가른다:
+// 일봉 스냅샷 경로(DailyBarMarketDataSet "<스냅샷>#DAILY-PATH-V1#기간"), 녹화(RecordedMarketDataSet "REC-…"), 합성(SyntheticMarket "SYNTH-…").
+export function clockModeLabel(e) {
+  if (e.clockMode !== 'REPLAY') return '실시간 모의';
+  const v = e.dataSnapshotVersion || '';
+  if (v.includes('#DAILY-PATH-')) return '리플레이(일봉 경로)';
+  if (v.startsWith('REC-')) return '녹화 리플레이';
+  if (v.startsWith('SYNTH-')) return '리플레이(합성 시세)';
+  return '리플레이';
+}
+
 export const SIDE = { BUY: '매수', SELL: '매도' };
 export const INTENT = { ENTRY: '진입', EXIT: '청산', STOP_LOSS: '손절' };
