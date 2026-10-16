@@ -81,7 +81,7 @@ parameters:
 
 ## 5. REST 계약 (`/api`, JSON)
 
-공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절·실험 폴더)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403). 실전 운영 API(`/api/real/*`, ADR-006 2.3)는 여기에 `UNKNOWN_ACCOUNT` 404, `CONFIRMATION_FAILED` 403, `LOCKED` 423, `PASSWORD_NOT_CONFIGURED`·`INVALID_STATE`·`STALE` 409, `BUSY`·`ENGINE_UNREACHABLE` 503, `INTERNAL` 502를 더한다).
+공통: 금액·비율은 문자열(BigDecimal plain), 비율은 소수(0.05 = 5%), 시각은 UTC ISO-8601, 날짜는 거래소 현지 `YYYY-MM-DD`. 목록(실험·프로필·체결·왕복·거절·실험 폴더)은 모두 `{items, page, size, total}` 페이징(`page` 0부터, `size` 1~200, 기본 50). 오류는 `{code, message}`(`INVALID` 400, `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `UNSUPPORTED_MEDIA_TYPE` 415, `CONFLICT`·`CONFIG_FILE_PROBLEM`·`CONFIG_CHANGED_ON_DISK` 409, `PAID_CONFIRMATION_REQUIRED` 400, `HOST`·`ORIGIN`·`CSRF` 403, 알림 시험의 `TEST_RUNNING` 409·`TEST_TOO_SOON` 429). 실전 운영 API(`/api/real/*`, ADR-006 2.3)는 여기에 `UNKNOWN_ACCOUNT` 404, `CONFIRMATION_FAILED` 403, `LOCKED` 423, `PASSWORD_NOT_CONFIGURED`·`INVALID_STATE`·`STALE` 409, `BUSY`·`ENGINE_UNREACHABLE` 503, `INTERNAL` 502를 더한다).
 
 | 메서드·경로 | 설명 |
 |---|---|
@@ -124,6 +124,7 @@ parameters:
 | `GET /api/monitor/stream` | 새 표본 SSE. 이벤트 이름 `sample`, 본문 `{latest, point, events}`(`latest`·`events`는 위와 같은 모양, `point`는 `history` 한 칸). 연결은 동시에 8개까지, 한 연결의 수명은 30분(끝나면 브라우저 `EventSource`가 다시 붙음). 꺼져 있거나 8개가 이미 열려 있으면 **본문 없는 409**다: 공통 오류 형식 `{code, message}`의 예외로, 요청이 `Accept: text/event-stream`이라 JSON 오류 본문을 쓸 수 없고 `EventSource`는 응답 본문을 읽지 않는다. 409를 받으면 화면은 `GET /api/monitor` 주기 조회로 바꾼다. 보내기는 전용 스레드 하나이고 밀린 표본이 2개를 넘으면 가장 오래된 것을 버리므로 화면 그래프에 빈 칸이 생길 수 있다(architect PR #114 A5). 실험실 종료 때는 웹 서버 graceful shutdown보다 먼저 연결을 닫는다 |
 | `GET /api/settings` | 그룹별 키: 현재 값, 내장 default 값, 비밀값 여부·설정 여부, 편집 가능 여부, 반영 시점 |
 | `PUT /api/settings` | `{values, clearSecrets, acknowledgePaid}` |
+| `POST /api/settings/notification-test` | 알림 시험 보내기([D-103](../decisions/D-103-settings-notification-test-send.md)). 본문 없음, 실험실 메모리의 저장된 `notification.*`로 켜진 Slack·카카오톡에 시험 알림 한 건씩 따로 보낸다(대체 발송 안 함, 로그 채널 제외). 응답 `{sentAt, channels[{channel, label, status, detail, message}]}`: `channel`은 `slack`·`kakao` 순서, `status`는 `SENT`·`FAILED`·`SKIPPED`, `detail`은 짧은 사유 코드(`ok`, `disabled`, `invalid-webhook-url`, `paid-mode`, `missing-values`, `invalid-values`, `http-<상태>`, `timeout`, `io-error`, `kakao-refresh-*`, `kakao-reconsent-required`, `kakao-result-code`, `interrupted` 등, 비밀값 없음), `message`는 화면용 한국어 설명. 보내는 중이면 409 `TEST_RUNNING`, 끝난 뒤 10초 안이면 429 `TEST_TOO_SOON`, CSRF 토큰이 없으면 403. 최대 약 40초 걸린다(HTTP 기한 10초 × Slack 1번·카카오 3번) |
 
 같은 실험의 계좌만 한 화면에서 비교한다(같은 기간·시드·비용 모델·체결 모델, 지침 5장). 실험 사이 비교 화면은 만들지 않았다.
 
@@ -140,6 +141,7 @@ parameters:
 | `notification.*` | 편집 가능. 저장은 `lab.*`와 같지만 반영은 "실전 엔진·감시 재기동"(두 프로세스가 기동 때 읽음, [D-100](../decisions/D-100-notification-wiring-watchdog-engine.md)). `notification.kakao.link-url`은 카카오 앱 등록 도메인과 맞춰야 해서 화면에서 바꾸지 않고 `runtime-config.json`에서 고친다. 카카오 ME를 켜거나 카카오 값을 고칠 때 `rest-api-key`·`refresh-token`·`link-url`이 모자라면 거부한다(파일은 받아들이고 엔진·감시가 카카오만 끔) |
 | `notification.slack.webhook-url`, `notification.kakao.{access-token,rest-api-key,refresh-token,client-secret}` 🔒 | 쓰기 전용 입력(`type=password`). 빈 입력은 그대로 두기, 지우기는 `clearSecrets`로 명시. 응답에는 `****`와 설정 여부만 |
 | `notification.kakao.mode=BIZ` | 유료라서 BIZ로 바꾸거나 BIZ 상태에서 켤 때 `acknowledgePaid=true`가 필요(서버가 판단, 화면은 확인 대화상자 후 재전송, 지침 8장 1번) |
+| 알림 시험 보내기 | "알림" 묶음 아래 버튼([D-103](../decisions/D-103-settings-notification-test-send.md)). 누를 때만 저장된 값으로 보낸다(입력만 하고 저장하지 않은 값은 쓰지 않음). 채널별 결과 표(채널, 결과, 설명). 카카오 갱신 토큰은 엔진·감시와 같은 `notification-state/kakao-token.json`에 남긴다 |
 | `market-data.*` | 읽기 전용(재기동 필요) |
 | `brokers.*` 🔒 | 설정 여부만, 읽기 전용(재연결 절차 구현 전, `RuntimeConfigHolder`도 막음) |
 | `real-trading.accounts`, `account-numbers.*` 🔒 | 읽기 전용. 실전 활성화는 설정이 아니며 이 화면에 없다 |

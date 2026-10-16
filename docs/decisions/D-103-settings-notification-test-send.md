@@ -49,3 +49,9 @@
 - `SettingsControllerTest`: CSRF 토큰 없으면 403, 꺼진 채널 SKIPPED, 응답·로그에 비밀값 없음, 바로 다시 누르면 429.
 - 화면 시험 `autotrade-ui/e2e/tests/03-settings-notification-test.spec.mjs`: 버튼 → 채널별 "보내지 않음" 표, 바로 다시 누르면 거절 안내(외부로 보내지 않음, 시험용 설정 폴더는 알림이 꺼져 있음).
 - 실제 Slack·카카오로 보내는 확인은 사용자 PC에서 키를 넣은 뒤 한다(이 컨테이너에는 키가 없다).
+
+## 반영 기록
+
+- PR #135 architect A1: 새 API와 오류 코드(`TEST_RUNNING` 409, `TEST_TOO_SOON` 429)를 ADR-005 5장(공통 오류·API 표)과 6장(설정 화면 표)에 올림.
+- PR #135 risk-ops K1·K2: 갱신 거절·시간 초과 때 토큰 파일을 만들지 않음, 카카오가 새 리프레시 토큰을 주면 파일에 남겨 엔진·감시가 같은 출처로 읽음을 실험실 시험으로 단언(`NotificationTesterTest`).
+- architect A2·risk-ops K4(채널 구성 규칙 중복)는 위 "변경 제안"을 다음 알림 모듈 PR에서 다룬다. risk-ops K3(리프레시 토큰 회전 뒤 옛 토큰 무효 여부 `[가정]`)는 7단계 실전 활성화 전 운영 점검에 "카카오 재동의 알림 수신 확인"으로 넘긴다.

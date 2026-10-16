@@ -194,7 +194,37 @@ class NotificationTesterTest {
         assertThat(results.get(1).detail()).isEqualTo("kakao-refresh-rejected");
         assertThat(results.get(1).message()).isEqualTo(RuntimeConfig.Notification.KAKAO_RECONSENT_HELP);
         assertThat(http.calls).hasSize(1);
+        // 거절이면 엔진·감시가 읽는 토큰 파일을 만들지 않는다(PR #135 risk-ops K1)
+        assertThat(dir.resolve(FileKakaoTokenStore.DEFAULT_FILE)).doesNotExist();
         assertNoSecrets(results);
+    }
+
+    @Test
+    void 갱신이_시간_초과면_토큰_파일을_만들지_않는다() {
+        http.fail(new HttpTimeoutException("timed out"));
+
+        List<ChannelResult> results = tester().sendAll(config(slackOff(), kakaoMe(null, LINK)));
+
+        assertThat(results.get(1).detail()).isEqualTo("kakao-refresh-timeout");
+        assertThat(dir.resolve(FileKakaoTokenStore.DEFAULT_FILE)).doesNotExist();
+    }
+
+    @Test
+    void 카카오가_새_리프레시_토큰을_주면_토큰_파일에_남겨_엔진이_이어_쓴다() throws IOException {
+        String rotated = "PLACEHOLDER-KAKAO-REFRESH-0007";
+        http.reply(200, "{\"access_token\":\"" + NEW_ACCESS + "\",\"expires_in\":21599,\"refresh_token\":\"" + rotated
+                + "\",\"refresh_token_expires_in\":5184000}");
+        http.reply(200, "{\"result_code\":0}");
+
+        List<ChannelResult> results = tester().sendAll(config(slackOff(), kakaoMe(null, LINK)));
+
+        assertThat(results.get(1).status()).isEqualTo(Status.SENT);
+        // 엔진·감시는 secrets.json의 옛 리프레시 토큰을 출처로 이 파일을 읽어 새 토큰으로 갈아탄다(PR #135 risk-ops K2)
+        KakaoToken saved = new FileKakaoTokenStore(dir.resolve(FileKakaoTokenStore.DEFAULT_FILE), REFRESH).latest()
+                .orElseThrow();
+        assertThat(saved.refreshToken()).isEqualTo(rotated);
+        assertThat(saved.accessToken()).isEqualTo(NEW_ACCESS);
+        assertThat(results.toString()).doesNotContain(rotated);
     }
 
     @Test
