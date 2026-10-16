@@ -11,3 +11,7 @@
 - 실험실: `./gradlew :autotrade-app-lab:bootRun` 후 http://127.0.0.1:8480 (포트는 `AUTOTRADE_UI_PORT`)
 - 실전 운영 화면: 실전 엔진 `./gradlew :autotrade-app-engine:run`을 같은 `AUTOTRADE_CONFIG_DIR`로 띄웁니다. 운영자 비밀번호 해시는 터미널에서 `autotrade-engine hash-password`(installDist 산출물)로 만들어 secrets.json에 넣습니다.
 - 샘플 데이터로 화면 미리 보기: `./gradlew :autotrade-app-lab:bootTestRun` (테스트 소스의 손으로 만든 `DEMO-` 실험, 임시 폴더 사용)
+
+## 브라우저 시험(D-101)
+- `e2e/`: 실험 생성 → 실행 명령 → 불러오기 → 비교 흐름과 진행 상태 화면을 Playwright(Chromium)로 조작합니다. CI 잡 "Lab screens (Playwright)"이 돌립니다.
+- PC에서: 저장소 루트에서 `./gradlew :autotrade-app-lab:bootJar :autotrade-app-lab:testClasses :autotrade-app-experiment:classes` 뒤 `cd autotrade-ui/e2e && npm ci && npx playwright install chromium && npx playwright test`. 포트 18481·18482를 씁니다. 장 시간 보호는 CI에서만 풀므로 PC에서는 장 시간(08:00~16:00 KST)을 피해 돌립니다.

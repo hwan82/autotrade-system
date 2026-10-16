@@ -142,6 +142,47 @@ jobs:
           path: '**/build/reports/tests/'
           retention-days: 7
 
+  # 실험실 화면 브라우저 시험(D-101, 5단계 QA 권고 R3). 실험실 둘(배포본, 데모)을 띄워 실험 생성 → 화면이 알려 준 실행 명령 →
+  # 불러오기 → 비교, 진행 상태 화면(진행 막대·워크포워드 전체 진행률·취소)을 headless Chromium으로 조작한다.
+  # 실전 엔진·증권사·시세 게이트웨이는 띄우지 않는다. 실행 명령의 장 시간 보호만 CI에서 푼다(실전 엔진이 없는 러너)
+  ui-e2e:
+    name: Lab screens (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: autotrade-ui/e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: autotrade-ui/e2e/package-lock.json
+      - name: Build lab jar, demo lab and experiment command
+        working-directory: .
+        run: ./gradlew --console=plain :autotrade-app-lab:bootJar :autotrade-app-lab:testClasses :autotrade-app-experiment:classes
+      - name: Install Playwright (lockfile pinned) and Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Lab screen tests
+        run: npx playwright test
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            autotrade-ui/e2e/playwright-report/
+            autotrade-ui/e2e/test-results/
+          retention-days: 7
+
   schema:
     name: DB schema (PostgreSQL 16)
     runs-on: ubuntu-latest
