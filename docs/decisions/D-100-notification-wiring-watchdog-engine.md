@@ -86,4 +86,8 @@
 - 2026-10-16, PR #132 독립 QA 권고 반영(결정 내용은 바뀌지 않아 새 번호를 쓰지 않음):
   - Q1(변이 M15): 재동의 안내 문구 전체를 시험으로 고정했다(`RuntimeConfigNotificationTest#재동의_안내는_토큰을_넣을_곳과_다시_시작할_프로세스와_그동안의_채널을_모두_알린다`). "실전 엔진·감시를 다시 시작하세요"가 빠지면 실패한다.
   - R1: 재동의 문구를 받지 않는 공개 5인자 `NotificationQueue` 생성자를 지웠다(추천안 채택(자율)). 공개 생성자는 문구를 받는 6인자 하나이고, 일반 문구가 맞으면 `NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP`를 직접 넘긴다. 대안 "남기고 문서에 적기"는 버렸다: 운영 호출부는 `NotificationSetup.start` 한 곳뿐이고 5인자를 쓰던 곳은 엔진 시험 하나라 지우는 비용이 작은 반면, 남기면 앞으로 부르는 쪽이 문구를 빠뜨려도 컴파일이 막지 못한다. 되돌릴 조건: 이 시스템 밖에서 라이브러리를 쓰는 곳이 생겨 일반 문구 기본값이 필요할 때.
-
+- 2026-10-16, PR #134 남은 권고 반영(결정 내용은 바뀌지 않아 새 번호를 쓰지 않음):
+  - architect R1·QA R1(추천안 채택(자율)): `NotificationSetup.Builder`의 `kakaoReconsentHelp`도 `displayZone`처럼 필수다. 빠지거나 비면 `build()`가 `NullPointerException("kakaoReconsentHelp")`을 던진다(전에는 일반 문구로 조용히 채움). 위 R1 삭제와 같은 이유: 운영 경로에서 문구를 빠뜨려도 시험 전에는 알 수 없었다. 일반 문구가 맞으면 `NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP`를 직접 넘긴다. 대안 "기본값 유지"는 버렸다(기본값을 쓰던 곳은 알림 모듈 시험뿐). 운영 호출부(엔진·감시)는 이미 문구를 넘기므로 바뀌는 동작은 없다.
+  - QA Q1(변이 M7): `NotificationQueueTest#공개_생성자는_재동의_문구를_받는_6인자_하나뿐이다`가 공개 생성자 수와 인자 모양을 고정한다. 공개 5인자 생성자를 되살리면 실패함을 확인했다.
+  - architect R3: 공개 생성자 Javadoc에 `@param clock`을 더했다.
+  - risk-ops R2: `NotifyingCommandAuditLogTest`가 운영 엔진과 같은 `RuntimeConfig.Notification.KAKAO_RECONSENT_HELP`를 넘긴다.

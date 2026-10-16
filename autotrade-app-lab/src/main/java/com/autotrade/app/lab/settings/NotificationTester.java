@@ -7,11 +7,10 @@ import com.autotrade.notification.EventRoutes;
 import com.autotrade.notification.FileKakaoTokenStore;
 import com.autotrade.notification.HttpTransport;
 import com.autotrade.notification.KakaoMemoChannel;
-import com.autotrade.notification.KakaoToken;
 import com.autotrade.notification.Notification;
+import com.autotrade.notification.NotificationSetup;
 import com.autotrade.notification.SendResult;
 import com.autotrade.notification.Severity;
-import com.autotrade.notification.SlackWebhookChannel;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -28,8 +27,9 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>실전 엔진·감시의 {@code Notifier}는 첫 성공에서 멈추므로(대체 발송) 채널마다 확인할 수 없다. 그래서 채널을 하나씩 직접 부른다.
  *       로그 채널은 시험하지 않는다.</li>
- *   <li>채널 구성은 {@code NotificationSetup}과 같은 규칙을 따른다(Slack Webhook 접두사, 카카오 ME만, BIZ는 보내지 않음, 액세스 토큰이
- *       없으면 첫 발송 전 갱신). 알림 모듈은 고치지 않는다(D-103 변경 제안).</li>
+ *   <li>채널은 실전 엔진·감시와 같은 {@link NotificationSetup#externalChannels}로 꾸린다. 구성 규칙(Slack Webhook 접두사, 카카오 ME만,
+ *       BIZ는 보내지 않음, 빈 값, 액세스 토큰이 없으면 첫 발송 전 갱신)은 알림 모듈 한 곳에만 있다(D-103 반영 기록, PR #135 architect
+ *       A2·risk-ops K4). 이 클래스는 못 꾸린 이유 코드를 화면 설명으로 바꾸기만 한다.</li>
  *   <li>카카오 토큰은 실전 엔진·감시와 같은 파일({@value FileKakaoTokenStore#DEFAULT_FILE})로 이어 쓴다. 시험 중 갱신으로 리프레시 토큰이
  *       바뀌어도 두 프로세스가 새 토큰을 받는다(D-100 6번과 같은 공유 방식).</li>
  *   <li>결과에는 짧은 사유 코드와 한국어 설명만 넣는다. 비밀값·응답 본문·예외 문구는 넣지 않는다({@link SendResult} 규칙).</li>
@@ -41,8 +41,6 @@ public class NotificationTester {
     static final String KIND = "notification-test";
     static final String TITLE = "알림 시험";
     static final String BODY = "실험실 설정 화면에서 보낸 시험 알림입니다. 조치할 것은 없습니다.";
-    /** 액세스 토큰이 없을 때 자리 값. 만료를 {@link Instant#EPOCH}로 두어 보내기 전에 갱신한다({@code NotificationSetup}과 같음). */
-    private static final String NO_ACCESS_TOKEN = "unset";
     private static final EventRoutes ROUTES = EventRoutes.defaults().with(KIND, Severity.INFO);
     private static final Pattern HTTP = Pattern.compile("(kakao-refresh-)?http-(\\d{3})");
 
@@ -84,52 +82,53 @@ public class NotificationTester {
         Instant now = clock.instant();
         Notification notification = ROUTES.notification(KIND, TITLE, BODY, now, RuntimeConfig.Notification.DISPLAY_ZONE);
         List<ChannelResult> results = new ArrayList<>();
-        results.add(slack(config.slack(), notification));
-        results.add(kakao(config.kakao(), notification));
+        for (NotificationSetup.ExternalChannel c : setup(config).externalChannels(configDir, clock, http)) {
+            String label = label(c.name());
+            results.add(c.channel() == null ? skipped(c.name(), label, c.skipReason())
+                    : send(c.name(), label, c.channel(), notification));
+        }
         return List.copyOf(results);
     }
 
-    private ChannelResult slack(RuntimeConfig.Slack s, Notification notification) {
-        String label = "Slack";
-        if (!s.enabled()) {
-            return skipped("slack", label, "disabled", "꺼져 있어 보내지 않았습니다");
-        }
-        Channel channel;
-        try {
-            channel = SlackWebhookChannel.of(s.webhookUrl().reveal(), http);
-        } catch (RuntimeException e) {
-            return skipped("slack", label, "invalid-webhook-url",
-                    "webhook-url 형식이 틀려 보내지 않았습니다(https://hooks.slack.com/services/로 시작해야 함). 실전 엔진·감시도 Slack을 끕니다");
-        }
-        return send("slack", label, channel, notification);
+    /**
+     * 설정 값을 알림 모듈 값으로 이름을 붙여 옮긴다. 실전 엔진({@code EngineMain.setup})·감시({@code WatchdogMain.setup})와 같은 옮기기다
+     * (알림 모듈은 설정 모듈을 모른다, PR #128 architect R1). 값마다 제자리에 가는지는 시험이 본다.
+     */
+    static NotificationSetup setup(RuntimeConfig.Notification n) {
+        RuntimeConfig.Kakao k = n.kakao();
+        return NotificationSetup.builder()
+                .slackEnabled(n.slack().enabled())
+                .slackWebhookUrl(n.slack().webhookUrl().reveal())
+                .kakaoEnabled(k.enabled())
+                .kakaoPaidMode(k.mode() == KakaoMode.BIZ)
+                .kakaoRestApiKey(k.restApiKey().reveal())
+                .kakaoClientSecret(k.clientSecret().reveal())
+                .kakaoAccessToken(k.accessToken().reveal())
+                .kakaoRefreshToken(k.refreshToken().reveal())
+                .kakaoLinkUrl(k.linkUrl())
+                .displayZone(RuntimeConfig.Notification.DISPLAY_ZONE)
+                .kakaoReconsentHelp(RuntimeConfig.Notification.KAKAO_RECONSENT_HELP)
+                .build();
     }
 
-    private ChannelResult kakao(RuntimeConfig.Kakao k, Notification notification) {
-        String label = "카카오톡";
-        if (!k.enabled()) {
-            return skipped("kakao", label, "disabled", "꺼져 있어 보내지 않았습니다");
-        }
-        if (k.mode() != KakaoMode.ME) {
-            return skipped("kakao", label, "paid-mode",
-                    "알림톡(BIZ)은 유료라 알림 모듈이 보내지 않습니다(D-033). 나에게 보내기(ME)로 바꾸세요");
-        }
-        if (!k.meReady()) {
-            return skipped("kakao", label, "missing-values",
-                    "rest-api-key·refresh-token·link-url 중 빈 값이 있어 보내지 않았습니다. 실전 엔진·감시도 카카오톡을 끕니다");
-        }
-        Channel channel;
-        try {
-            String refresh = k.refreshToken().reveal();
-            FileKakaoTokenStore store = new FileKakaoTokenStore(configDir.resolve(FileKakaoTokenStore.DEFAULT_FILE), refresh);
-            String access = k.accessToken().isPresent() ? k.accessToken().reveal() : NO_ACCESS_TOKEN;
-            KakaoToken token = store.initial(new KakaoToken(access, refresh, Instant.EPOCH));
-            channel = new KakaoMemoChannel(k.restApiKey().reveal(), k.clientSecret().reveal(), k.linkUrl(), token, store,
-                    http, clock);
-        } catch (RuntimeException e) {
-            return skipped("kakao", label, "invalid-values",
-                    "카카오톡 설정 값 형식이 틀려 보내지 않았습니다(link-url은 등록한 웹 도메인의 http(s) URL, 쿼리 없음). 실전 엔진·감시도 카카오톡을 끕니다");
-        }
-        return send("kakao", label, channel, notification);
+    private static String label(String channel) {
+        return NotificationSetup.KAKAO.equals(channel) ? "카카오톡" : "Slack";
+    }
+
+    /** 못 꾸린 이유 코드를 화면 설명으로. 코드는 {@link NotificationSetup}이 정한다. */
+    static String skipMessage(String reason) {
+        return switch (reason) {
+            case NotificationSetup.SKIP_DISABLED -> "꺼져 있어 보내지 않았습니다";
+            case NotificationSetup.SKIP_INVALID_WEBHOOK_URL ->
+                "webhook-url 형식이 틀려 보내지 않았습니다(https://hooks.slack.com/services/로 시작해야 함). 실전 엔진·감시도 Slack을 끕니다";
+            case NotificationSetup.SKIP_PAID_MODE ->
+                "알림톡(BIZ)은 유료라 알림 모듈이 보내지 않습니다(D-033). 나에게 보내기(ME)로 바꾸세요";
+            case NotificationSetup.SKIP_MISSING_VALUES ->
+                "rest-api-key·refresh-token·link-url 중 빈 값이 있어 보내지 않았습니다. 실전 엔진·감시도 카카오톡을 끕니다";
+            case NotificationSetup.SKIP_INVALID_VALUES ->
+                "카카오톡 설정 값 형식이 틀려 보내지 않았습니다(link-url은 등록한 웹 도메인의 http(s) URL, 쿼리 없음). 실전 엔진·감시도 카카오톡을 끕니다";
+            default -> "보내지 않았습니다(" + reason + ")";
+        };
     }
 
     private static ChannelResult send(String name, String label, Channel channel, Notification notification) {
@@ -154,8 +153,8 @@ public class NotificationTester {
         return failed(name, label, result.detail());
     }
 
-    private static ChannelResult skipped(String name, String label, String detail, String message) {
-        return new ChannelResult(name, label, Status.SKIPPED, detail, message);
+    private static ChannelResult skipped(String name, String label, String reason) {
+        return new ChannelResult(name, label, Status.SKIPPED, reason, skipMessage(reason));
     }
 
     private static ChannelResult failed(String name, String label, String detail) {

@@ -3,6 +3,7 @@ package com.autotrade.app.engine.command;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.autotrade.config.RuntimeConfig;
 import com.autotrade.control.ControlCommand;
 import com.autotrade.notification.Channel;
 import com.autotrade.notification.EventRoutes;
@@ -37,10 +38,11 @@ class NotifyingCommandAuditLogTest {
             return SendResult.ok();
         }
     };
+    /** 운영 엔진과 같은 재동의 문구를 넘긴다(PR #134 risk-ops R2). */
     private final NotificationQueue queue = new NotificationQueue(
             Notifier.of(List.of(sink, new LogChannel()), List.of(sink, new LogChannel())), EventRoutes.defaults(),
             Clock.fixed(Instant.parse("2026-10-16T00:00:00Z"), ZoneOffset.UTC), ZoneOffset.UTC, "engine-test",
-            NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP).start();
+            RuntimeConfig.Notification.KAKAO_RECONSENT_HELP).start();
     private final List<String> audited = new ArrayList<>();
 
     @AfterEach
