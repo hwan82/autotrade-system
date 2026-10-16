@@ -46,3 +46,38 @@
 
 ## 판정
 수정 필요(F1: `JdkHttpTransport` 응답 본문 읽기에 시간 제한을 걸고 멈춘 본문 시험 추가, D-099·Notifier Javadoc의 최대 시간 문구 정정). B7은 risk-ops 검토가 따로 있어야 한다(현재 없음). R1~R3은 권고.
+
+## 재검토 2026-10-16
+- 대상: PR #127 / 커밋 8ee12d1(1차 검토 895b98a 뒤 6513988 검토 원문, 8ee12d1 수정) / `git diff origin/main...HEAD` 전체를 다시 봤고, 수정분은 `git diff 6513988 8ee12d1`(JdkHttpTransport, KakaoMemoChannel, Notifier, 시험 3개, D-099)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew --max-workers=2 --offline build` → BUILD SUCCESSFUL(138 tasks)
+  - `:autotrade-notification-jar:test --rerun` → 통과(EventRoutesTest 5, JdkHttpTransportTest 5, KakaoMemoChannelTest 14, NotifierTest 10, SlackWebhookChannelTest 3, 실패·건너뜀 0)
+  - `:autotrade-architecture-test:test --rerun` → 통과(ArchitectureTest 19, ModuleOwnershipTest 13, RealPathReflectionTest 10, StopRequestPathTest 2)
+  - 1차의 멈춘 본문 재현을 새 jar로 다시 실행 → **10.4초에 `HttpTimeoutException`**(1차는 26.1초 뒤 서버가 닫아서야 끝남). F1 해소 확인
+  - 카카오 경로 재현(저장소 밖 스크래치, 시험용 `FakeHttp` 사용): 만료 60초 전 토큰, 응답 순서 503 → 401 → 갱신 200 → 발송 200 → **HTTP 4회(kauth, kapi, kauth, kapi)**, 결과 ok. 아래 F2
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드·강제 재실행 결과 |
+| B2 | 통과 | 새 의존 없음. `JdkHttpTransport`는 `java.net.http`·`java.util.concurrent`(`CompletableFuture`, `Flow`)만 추가(JdkHttpTransport.java:1-20). `RealPathReflectionTest` 강제 재실행 통과 |
+| B3 | 통과 | 공개 계약 변화 없음(`JdkHttpTransport(Duration)`은 패키지 전용, JdkHttpTransport.java:41). D-099 결정 5·6·7·위험 표 갱신 |
+| B4 | 통과 | 카카오 판단은 주입 `Clock`(KakaoMemoChannel.java:97). 시험의 `System.nanoTime`은 경과 시간 상한 확인용으로 결과에 영향 없음 |
+| B5 | 해당 없음 | 금액 없음 |
+| B6 | 통과 | F1 시험 3개(`JdkHttpTransportTest#헤더_뒤_본문이_멈추면_기한_안에_시간_초과로_끝난다`, `#응답이_오지_않으면_기한_안에_시간_초과로_끝난다`, `#본문이_아주_느리게_와도_기한_안에_끝난다`), R1 `KakaoMemoChannelTest#미리_갱신이_일시_장애로_실패해도_만료_전이면_지금_토큰으로_보낸다`, `#미리_갱신한_토큰이_401이면_다시_갱신하지_않는다`, `NotifierTest#중단돼도_로그_채널에는_남긴다`. 지우거나 약화한 시험 없음. 다만 F2 경로(미리 갱신 실패 → 발송 401) 시험이 없다 |
+| B7 | 실패(별도 검토 필요) | 보호 경로 변경은 그대로. **risk-ops 검토 필요**. `docs/reviews/pr-127/risk-ops.md` 1차 판정은 "수정 필요"이고, 이 수정에 대한 risk-ops 재검토는 이 글을 쓰는 시점에 파일에 없다(동시 진행 중). 사용자 머지·독립 QA 대상 |
+| B8 | 통과 | 새 예외 문구는 고정 문자열(`"notification request timed out"`, `"notification request failed"`, JdkHttpTransport.java:63, 71). 시험이 문구에 호스트가 없음을 확인(`hasMessageNotContaining("127.0.0.1")`) |
+
+### 1차 지적 처리
+- F1 해소. `sendAsync` + `future.get(total)` + 초과 시 `cancel(true)`·`HttpTimeoutException`(JdkHttpTransport.java:56-72), 본문은 `CappedBody`가 8KB까지만 모으고 구독을 끊는다(:77-). `ExecutionException`의 원인이 `IOException`이면 그대로 올려 `Failures`가 `timeout`·`io-error`로 바꾼다. 위 재현으로 10초 상한 확인. `CappedBody.onNext`는 꽉 찬 뒤 오는 버퍼를 0바이트로 처리하고 `onComplete`의 두 번째 `complete`는 무시되어 문제없다.
+- R1 반영(KakaoMemoChannel.java:97-106): 거절이 아니고 만료 전이면 지금 토큰으로 보낸다.
+- R2·R3는 D-099 후속 5번으로 미뤘다. 권고였으므로 받아들인다.
+- Notifier 중단 처리 변경(Notifier.java:91-100, risk-ops R2 반영): 중단 뒤에도 막지 않는 `LogChannel`만 부르고 `interrupted=true`, `delivered()=false`. 타당하다.
+
+### F2(수정 필요): 한 발송에서 갱신을 두 번 시도할 수 있어 문서의 상한과 다르다
+- `[사실]` `refreshedNow`는 미리 갱신이 **성공**했을 때만 참이다(KakaoMemoChannel.java:101). 미리 갱신이 일시 장애로 실패하고(R1 경로) 지금 토큰으로 보낸 발송이 401이면, `refreshedNow`가 거짓이라 다시 갱신하고 다시 보낸다(:110-117). 위 재현에서 HTTP 4회를 확인했다.
+- `[사실]` 그런데 D-099 결정 6은 "한 발송에 갱신은 최대 한 번", 위험 표와 Notifier.java:15-16 Javadoc은 "갱신 한 번과 발송 두 번까지라 최대 약 30초"라고 적는다. 실제 최악은 HTTP 4회, 약 40초다. 1차 F1에서 고치라고 한 "문서 상한과 실제 동작의 불일치"가 이 경로에 남아 있다.
+- 고칠 방향(둘 중 하나): ① 미리 갱신을 **시도했으면**(성공·실패 무관) 401 뒤 재갱신을 하지 않는다(`refreshTried`). 문서 문구("갱신 최대 한 번, 약 30초")가 그대로 맞게 된다. 추천. ② 동작을 두고 D-099·Javadoc을 "갱신 시도 최대 두 번, 약 40초"로 고친다. 어느 쪽이든 "미리 갱신 503 → 발송 401" 시험을 추가해 HTTP 횟수를 고정한다.
+
+## 판정
+수정 필요(F2: 미리 갱신 실패 뒤 401 경로의 갱신 횟수를 문서와 맞추고 시험 추가). F1은 해소. B7은 risk-ops 재검토가 따로 있어야 한다.

@@ -62,3 +62,47 @@
 
 ## 판정
 수정 필요(A11, A14 — R1: `JdkHttpTransport` 전체 시간 상한을 본문 읽기까지 보장하고 응답 멈춤·느린 본문 실패 시험을 추가, D-099·ADR-001·Notifier Javadoc의 상한 문구를 동작과 일치시킬 것. R2~R4는 권고)
+
+## 재검토 2026-10-16
+- 대상: PR #127 / 커밋 8ee12d1 / main(f724dee) 대비 diff 전체. 1차 검토(895b98a) 뒤 바뀐 것: `git diff 895b98a 8ee12d1`(JdkHttpTransport, KakaoMemoChannel, Notifier, 시험 3개, D-099, 검토 원문 2개). 커밋 6513988의 이 파일 1차 내용이 내가 쓴 원문과 같은지 확인함(작업 트리 변경 없음)
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew --max-workers=2 --offline build` → BUILD SUCCESSFUL(종료 코드 0)
+  - `./gradlew --max-workers=2 --offline :autotrade-notification-jar:test :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-watchdog:test --rerun-tasks` → BUILD SUCCESSFUL. JUnit XML 집계(테스트/실패/오류/건너뜀): notification-jar 37/0/0/0(1차 31에서 6건 늘어남), risk 55/0/0/0, architecture-test 44/0/0/0, app-engine 52/0/0/0, app-watchdog 40/0/0/0
+  - 1차 R1 재현을 고친 코드에 다시 돌림(본문 1초에 1바이트씩 40바이트): `HttpTimeoutException`, **경과 10.03초**(1차 40.1초)
+  - 카카오 갱신 횟수 재현(스크래치, 시험 클래스 `FakeHttp` 사용, 소스 변경 없음): 토큰 만료 60초 전, 응답 순서 503(갱신) → 401(발송) → 200(갱신) → 200(발송). 결과 `ok`, 요청 4건: `oauth/token`, `memo/default/send`, `oauth/token`, `memo/default/send`. 아래 R5의 근거
+
+### 1차 지적 처리
+| 지적 | 결과 | 근거 |
+|---|---|---|
+| R1 HTTP 기한이 본문 읽기에 안 걸림 | 해결 | JdkHttpTransport.java:56-72: `sendAsync` + `future.get(전체 기한)`, 넘으면 `cancel(true)` 뒤 `HttpTimeoutException`(→ Failures.java:12 `timeout`). 본문은 `CappedBody`가 8KB까지만 모으고 구독을 끊는다(:77-123). 실패 시험 `JdkHttpTransportTest#헤더_뒤_본문이_멈추면_기한_안에_시간_초과로_끝난다`, `#응답이_오지_않으면_기한_안에_시간_초과로_끝난다`, `#본문이_아주_느리게_와도_기한_안에_끝난다` 통과. 위 재현 10.03초. 예외 문구는 고정 문자열이고(:63,71) 채널은 문구를 쓰지 않는다. 새로 쓴 JDK 타입(`CompletableFuture`, `Flow`, `ByteBuffer`)은 허용 패키지 `java.util.concurrent`·`java.nio` 안이고 `RealPathReflectionTest` 통과 |
+| R2 중단 때 로그도 건너뜀 | 해결 | Notifier.java: `InterruptedException`이면 남은 외부 채널은 건너뛰고 아직 시도하지 않은 `LogChannel`은 부른다. 시험 `NotifierTest#중단돼도_로그_채널에는_남긴다`(시도 `slack`, `log`, 카카오 미호출, ERROR 로그 1줄, `delivered()` 거짓) 통과. 본문 읽기 중 인터럽트는 이제 `future.get`의 `InterruptedException`으로 올라와 요청을 취소하고 그대로 던진다(JdkHttpTransport.java:64-66) |
+| R3 한 발송에 갱신 두 번 | 부분 해결 | 미리 갱신에 **성공**한 뒤 401이면 다시 갱신하지 않는다(KakaoMemoChannel.java `refreshedNow`, 시험 `#미리_갱신한_토큰이_401이면_다시_갱신하지_않는다`). 그러나 같은 커밋에서 들어온 "미리 갱신이 일시 장애면 만료 전 토큰으로 보냄"(architect R1 반영)과 겹쳐, 미리 갱신이 **실패**한 뒤 401이면 다시 갱신한다. R5 |
+| R4 등급을 부르는 쪽이 바꿀 수 있음 | 후속으로 기록 | D-099 후속 표 5번(연결 PR에서 `EventRoutes`로만 만들게). 이번 PR에서는 알림이 어디에도 연결되지 않아 받아들임 |
+
+### 점검표 A 재판정
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 1차와 같음. 8ee12d1에도 Guard·설정 로딩 변경 없음(`git diff 895b98a 8ee12d1 --stat`). `:autotrade-risk:test` 55건 재실행 통과 |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음. `ArchitectureTest#REUSABLE_JARS_ARE_DOMAIN_FREE`(ArchitectureTest.java:114-120) 통과 |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음. HTTP 대상은 그대로 Slack 고정 호스트와 카카오 상수 URL |
+| A4 | 해당 없음 | 주문 타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음. 알림 모듈은 주문을 만들 수 없다(도메인·브로커 의존 금지 규칙 통과) |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷·킬스위치 변경 없음. `:autotrade-app-engine:test` 52건 통과 |
+| A8 | 통과 | 엔진·감시는 여전히 알림을 부르지 않는다(`grep -rln com.autotrade.notification --include=*.java`의 모듈 밖 결과는 architecture-test 시험뿐). HTTP 한 번이 이제 전체 기한 안에 끝나 연결 PR의 전제가 성립한다(위 재현 10.03초). `RealPathReflectionTest#실전_경로_런타임_구성은_고정_목록과_같다` 통과, 새 외부 jar 없음 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 시험 픽스처도 자리표시자뿐(`REST-KEY-PH`, `ACCESS-OLD`, `TPLACEHOLDER/...`). 시간 초과 예외 문구는 고정 문자열이고 시험이 `hasMessageNotContaining("127.0.0.1")`로 확인. 1차 근거(toString 가림, 사유 코드) 그대로 |
+| A11 | 통과 | 보호 테스트 변경은 1차와 같은 `ModuleOwnershipTest` 2곳(검사를 넓히는 변경)뿐, `@Disabled` 없음. 1차 실패 사유였던 시간 제한에 실패 시험 3건이 생겼고 통과한다. 중단 시 로그, 미리 갱신 실패 시 처리, 미리 갱신 뒤 401에도 시험이 있다 |
+| A12 | 통과 | 장애표 #1~#17, O1~O8, 장애 테스트 8종의 감지·조치는 바뀌지 않는다(알림 미연결). 대체 발송의 전제(시간 초과면 다음 채널)가 이제 응답 멈춤에도 성립한다 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음. 카카오 만료 판단은 주입 `Clock`(KakaoMemoChannel.java `send`의 `clock.instant()`) |
+| A14 | 실패 | D-099 결정 6 "한 발송에 갱신은 최대 한 번"과 "위험과 한계" "카카오는 갱신 한 번과 발송 두 번까지라 최대 약 30초"가 코드와 다르다. 미리 갱신이 일시 장애로 실패하고(만료 전이라 지금 토큰으로 보냄) 발송이 401이면 `refreshedNow`가 거짓이라 다시 갱신한다. 재현에서 한 발송에 갱신 요청 2번, HTTP 4번(최대 약 40초). R5. 그 밖의 결정 4·5·7, ADR-001 표, Notifier Javadoc은 고친 동작과 일치 |
+
+### 점검표 밖 발견
+- **R5 (수정 필요, A14)**: 위 경로. 계좌 안전 영향은 없지만, 연결 PR이 큐 처리 시간과 폭주 억제를 D-099의 상한 숫자로 설계하므로 문서와 코드가 같아야 한다. 둘 중 하나로 맞추면 된다.
+  1. (권장) 코드: 이번 발송에서 갱신을 **시도**했으면(성공·실패 무관) 401 때 다시 갱신하지 않는다. 일시 장애 뒤 곧바로 같은 토큰 엔드포인트를 또 부르는 이득도 적다. 시험: 503(갱신) → 401(발송)이면 요청 2건, 결과 `http-401`.
+  2. 문서: 결정 6과 위험과 한계를 "갱신 시도 최대 두 번(미리 갱신 실패 뒤 401), HTTP 최대 네 번, 최대 약 40초"로 고치고 위 순서의 시험을 추가한다.
+- 확인한 것(문제 없음): `CappedBody`는 cap에 닿으면 결과를 끝내고 구독을 끊으며, 그 뒤 `onComplete`·`onError`는 이미 끝난 결과라 무시된다. `Flow` 규약상 `onNext`는 직렬 호출이라 공유 버퍼 경합이 없다. 연결 시간 초과(`HttpConnectTimeoutException`)는 `HttpTimeoutException` 하위라 사유가 `timeout`이다.
+
+### 판정
+수정 필요(A14 — R5: 미리 갱신이 일시 장애로 실패한 뒤 401이면 한 발송에서 갱신을 두 번 시도해 D-099 결정 6 "최대 한 번"·위험과 한계 "최대 약 30초"와 다름. 코드(권장) 또는 문서를 맞추고 그 순서의 시험을 추가할 것. 1차 R1·R2는 해결, R4는 후속 기록으로 받아들임)
