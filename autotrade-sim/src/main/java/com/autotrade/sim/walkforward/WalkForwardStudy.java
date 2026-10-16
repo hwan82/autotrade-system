@@ -266,7 +266,7 @@ public final class WalkForwardStudy {
      */
     static int experimentsPerCompute(int windows, ComboSets sets, int nullSeeds) {
         int perWindow = Math.addExact(Math.addExact(chunks(sets.train().size()), 2 * chunks(sets.candidates().size())),
-                Math.multiplyExact(nullSeeds, chunks(sets.controls().size())));
+                Math.multiplyExact(nullSeeds, chunks(sets.controlByPair().size())));
         return Math.multiplyExact(windows, perWindow);
     }
 
