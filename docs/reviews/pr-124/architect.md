@@ -38,3 +38,37 @@
 
 ## 판정
 수정 필요(B1·B4·B6 확인 못 함: 검토자가 `./gradlew build`를 직접 돌려 전체 빌드, 워크포워드 골든 바이트 일치, 새 테스트 통과를 확인해야 함. 코드 결함으로 인한 수정 요구는 없음)
+
+## 재검토 2026-10-16
+- 대상: PR #124 / 커밋 `9fbd88bc791ea9e60338cfba6debf1cad39b8fa8` / main 대비 diff(`git diff origin/main...HEAD`, 커밋 3개, 21개 파일, +434 −52). 1차 이후 커밋 `868e725`(권고 R1~R4 반영, 이 파일 추가), `9fbd88b`(실험 수 세기의 대조군 수를 지도 크기로 셈, 시험 NPE 수정)
+- 점검표: B
+- 기록 위치: 검토를 맡긴 쪽은 `architect-2.md`에 쓰라고 했으나 `docs/reviews/README.md`("재검토는 같은 파일 아래에 `## 재검토 <날짜>`로 덧붙인다")와 에이전트 검토 규칙(원문은 `architect.md`)을 따라 여기에 덧붙인다. 위 1차 내용은 고치지 않았다.
+- 직접 실행한 것:
+  - 1차 이후 바뀐 부분(`git diff 44254c6 HEAD`)과 PR 전체 diff를 다시 읽음. 1차 원문(`868e725`가 커밋한 이 파일 앞부분)이 내가 쓴 내용과 같은지 확인함(덧붙이기 전 작업 트리 깨끗, 변경 없음).
+  - `./gradlew build --offline --continue`(저장소 작업 트리) → **BUILD FAILED, 의존성 해석 단계**: `autotrade-app-lab/build.gradle.kts:1` 플러그인 `org.springframework.boot:3.5.16`이 캐시에 없음. 컴파일·테스트에 들어가지 못함.
+  - `./gradlew build --continue`(온라인) → **BUILD FAILED, 의존성 해석 단계**(5초): `Could not find org.apache.commons:commons-compress:1.27.1`, `jna-platform:5.17.0`, `httpclient5:5.5.2`, `tomlj:1.0.0`, `jackson-core:2.21.4`(빌드 스크립트 classpath, `~/.gradle/init.d/mirror.gradle`의 repo1 미러). 이 컨테이너의 Maven 저장소 접근 문제이고 코드와는 무관하다 `[추론]`. 역시 컴파일·테스트에 들어가지 못함.
+  - (참고, 판정 근거 아님) GitHub REST로 CI 조회: `9fbd88b`의 `Gradle build` job은 `Build and test`(`./gradlew build --no-daemon`, `.github/workflows/*.yml:27-28`)와 `Start each process once (ARC-03)` 단계가 success, Secret scan·DB schema도 success. `868e725`는 `Build and test` failure(커밋 메시지대로라면 R2 반영 뒤 시험의 null 자리값 NPE). `44254c6`은 success. job 로그 본문은 이 환경에서 내려받지 못해(로그 저장소 주소 접근 실패) 시험 건수는 보지 못했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 확인 못 함 | 검토자가 직접 돌린 `./gradlew build` 두 번 모두 의존성 해석에서 실패(위). CI는 `9fbd88b`에서 success지만 검토 규칙상 직접 실행 결과가 아니다 |
+| B2 | 통과(코드 읽기) | 1차 이후 변경은 `WalkForwardStudy` 안쪽(`ComboSets` 필드를 지도로, `compute`가 그 지도를 씀)과 시험·문서뿐. 새 의존 없음(`java.util.Collections`, `Map`은 JDK). ArchUnit 실행 결과는 B1과 같은 이유로 확인 못 함 |
+| B3 | 통과 | 1차와 같음. 1차 이후 계약 변경 없음(`ComboSets`는 패키지 전용 record, `experimentsPerCompute`도 패키지 전용) |
+| B4 | 확인 못 함 | 코드상 결과 영향 없음: `compute`의 대조군 지도는 이제 `ComboSets.of`의 `TreeMap`을 감싼 읽기 전용 지도(`WalkForwardStudy.java:251-259`, `:398`)이고, 쓰는 곳은 `pairOf`의 읽기 순회(`:467`, `:571-577`)와 `controls()`의 `List.copyOf(values())`(`:244-246`)뿐이라 이전(같은 규칙의 `TreeMap`을 따로 만듦)과 순서·내용이 같다. 그러나 워크포워드 골든(`WalkForwardStudyTest#등록_파일에서_결과_다섯_파일까지_돌고_병렬_1과_N의_결과가_바이트까지_같다`)을 직접 돌리지 못함 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 확인 못 함 | 1차의 새 테스트 그대로, `실험_수는_조합이_128개를_넘으면_나눠_부른_만큼_센다`는 새 record 모양(지도)에 맞춰 인자만 바뀜(`singletonMap("pair", null)`, `Map.of()`), 기대값 34·0 그대로. 지우거나 끈 테스트 없음. 통과 여부는 직접 확인 못 함 |
+| B7 | 해당 없음 | 1차와 같음. 1차 이후 변경도 보호 경로 밖(`autotrade-sim`, `docs/decisions`, `docs/runbooks`, `docs/reviews`) |
+| B8 | 통과 | 1차와 같음. 새 로그 문구 없음 |
+
+### 1차 권고 반영 확인
+- **R1 반영됨.** 실험 수 계산과 알림을 함께 `try`로 감싸고 실패하면 0(모름)으로 둔다(`WalkForwardStudy.java:147-154`). 로그 "실험 N회"도 0으로 남는다.
+- **R2 반영됨.** 대조군 쌍 지도의 원본이 `ComboSets.controlByPair` 하나(`:242-259`, `:398`), 세기는 지도 크기(`:269`). `9fbd88b`가 세기를 `controls().size()`에서 `controlByPair().size()`로 바꾼 것은 `List.copyOf`가 null 값을 거부해 시험의 null 자리값에서 NPE가 난 것을 피한 것이고, 운영 코드에서는 둘의 크기가 같다(값마다 하나).
+- **R3 반영됨.** D-097 "위험과 한계"에 진행 보고가 꺼질 때 전체 진행률이 낮게 보일 수 있다는 줄 추가.
+- **R4 반영됨.** 4단계 런북 5장에 "실험실과 실행 명령은 같은 커밋에서 띄운다" 추가, D-097에도 연결.
+
+### 점검표 밖 발견
+- 수정 필요: 없음(코드 읽기 기준).
+- 관찰: `868e725`는 CI `Build and test`가 실패한 채 푸시됐다(다음 커밋에서 고침). 머지 대상은 head 하나라 판정에는 영향이 없지만, 고친 뒤 빌드를 로컬에서 못 돌리는 환경이면 CI 결과를 보고 다음 검토를 맡기는 편이 낫다.
+
+### 판정
+수정 필요(B1·B4·B6 확인 못 함: 검토자가 직접 돌린 `./gradlew build`가 이 컨테이너에서 두 번 모두 의존성 해석 단계에서 실패해 전체 빌드, 워크포워드 골든 바이트 일치, 새 테스트 통과를 직접 확인하지 못함. 코드 결함으로 인한 수정 요구는 없고 1차 권고 R1~R4는 모두 반영됨)
