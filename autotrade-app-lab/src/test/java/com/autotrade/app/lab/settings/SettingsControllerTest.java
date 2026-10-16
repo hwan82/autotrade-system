@@ -3,6 +3,7 @@ package com.autotrade.app.lab.settings;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -106,6 +107,27 @@ class SettingsControllerTest {
         String session = mvc.perform(get("/api/session")).andReturn().getResponse().getContentAsString();
         assertNoPlaintext(session);
         assertThat(session).contains("\"keyStatus\":\"CONFIGURED\"", "\"accountNumberStatus\":\"CONFIGURED\"");
+    }
+
+    @Test
+    void 알림_시험은_CSRF_토큰이_있어야_하고_꺼진_채널은_보내지_않는다(CapturedOutput output) throws Exception {
+        // D-103: 변경 요청과 같은 루프백·CSRF 검사를 거친다
+        mvc.perform(post("/api/settings/notification-test")).andExpect(status().isForbidden());
+        String body = mvc.perform(post("/api/settings/notification-test")
+                        .header(LocalOnlyRequestFilter.CSRF_HEADER, token.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.channels[0].channel").value("slack"))
+                .andExpect(jsonPath("$.channels[0].status").value("SKIPPED"))
+                .andExpect(jsonPath("$.channels[1].channel").value("kakao"))
+                .andExpect(jsonPath("$.channels[1].detail").value("disabled"))
+                .andReturn().getResponse().getContentAsString();
+        assertNoPlaintext(body);
+        assertThat(output.getAll()).contains("알림 시험(UI): slack=SKIPPED(disabled), kakao=SKIPPED(disabled)")
+                .doesNotContain(OLD_TOKEN);
+        // 끝난 뒤 바로 다시 누르면 거절한다
+        mvc.perform(post("/api/settings/notification-test").header(LocalOnlyRequestFilter.CSRF_HEADER, token.value()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("TEST_TOO_SOON"));
     }
 
     @Test
