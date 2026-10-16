@@ -59,7 +59,14 @@ public final class KrxDailyCollector {
                     continue;
                 }
                 String body = client.fetchRaw(b, d);
-                boolean empty = KrxOpenApiClient.parse(b, d, body).isEmpty(); // 모양이 틀린 응답은 캐시에 넣지 않는다
+                boolean empty;
+                try {
+                    empty = KrxOpenApiClient.parse(b, d, body).isEmpty(); // 모양이 틀린 응답은 캐시에 넣지 않는다
+                } catch (IOException first) {
+                    // 200인데 목록이 빠진 응답이 일시적으로 오는 경우가 있어(2026-10-16 실측) 한 번만 다시 부른다. 두 번째도 틀리면 멈춘다.
+                    body = client.fetchRaw(b, d);
+                    empty = KrxOpenApiClient.parse(b, d, body).isEmpty();
+                }
                 fetched++;
                 // 최근 평일 빈 응답은 자료 게시 전일 수 있어 캐시하지 않고 다음 실행에서 다시 부른다(오래된 빈 날은 휴장일)
                 boolean maybeNotPublished = empty && d.isAfter(today.minusDays(RECENT_EMPTY_DAYS));

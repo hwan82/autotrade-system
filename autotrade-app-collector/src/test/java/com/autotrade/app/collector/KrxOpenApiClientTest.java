@@ -42,6 +42,12 @@ class KrxOpenApiClientTest {
     void 모양이_다른_응답은_멈춘다() {
         assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSPI, D, "{\"respCode\":\"401\"}"))
                 .hasMessageContaining("OutBlock_1");
+        assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSDAQ, D,
+                "{\"respMsg\":\"Unauthorized API Call\",\"respCode\":\"401\"}"))
+                .hasMessageContaining("응답 항목: respMsg, respCode")
+                .hasMessageContaining("respCode=401, respMsg=Unauthorized API Call");
+        assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSDAQ, D, "[]"))
+                .hasMessageContaining("JSON 객체가 아닙니다");
         String other = KrxFixtures.body(D.minusDays(1), List.of("005930;A;;1;1;1;1;0;1;1"));
         assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSPI, D, other)).hasMessageContaining("날짜");
         String bad = KrxFixtures.body(D, List.of("59;A;;1;1;1;1;0;1;1"));

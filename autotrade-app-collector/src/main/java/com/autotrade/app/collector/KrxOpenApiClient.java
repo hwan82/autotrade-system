@@ -49,7 +49,7 @@ public final class KrxOpenApiClient {
         JsonNode root = JSON.readTree(body);
         JsonNode block = root == null ? null : root.get("OutBlock_1");
         if (block == null || !block.isArray()) {
-            throw new IOException("KRX 응답에 OutBlock_1 목록이 없습니다: " + board + " " + date);
+            throw new IOException("KRX 응답에 OutBlock_1 목록이 없습니다: " + board + " " + date + describe(root));
         }
         List<KrxDailyRow> out = new ArrayList<>(block.size());
         for (JsonNode n : block) {
@@ -62,6 +62,20 @@ public final class KrxOpenApiClient {
                     decimal(n, "CMPPREVDD_PRC"), whole(n, "ACC_TRDVOL"), whole(n, "LIST_SHRS")));
         }
         return out;
+    }
+
+    /** 모양이 틀린 응답의 최상위 항목 이름과 KRX 오류 문구(respCode, respMsg). 시세 값은 넣지 않는다. */
+    static String describe(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            return " (응답이 JSON 객체가 아닙니다)";
+        }
+        List<String> names = new ArrayList<>();
+        root.fieldNames().forEachRemaining(names::add);
+        String msg = text(root, "respMsg");
+        if (msg.length() > 200) {
+            msg = msg.substring(0, 200) + "...";
+        }
+        return " (응답 항목: " + String.join(", ", names) + "; respCode=" + text(root, "respCode") + ", respMsg=" + msg + ")";
     }
 
     /** 6자리 단축코드. 표준코드(KR7005930003 형식)가 오면 4~9번째 자리를 쓴다. */

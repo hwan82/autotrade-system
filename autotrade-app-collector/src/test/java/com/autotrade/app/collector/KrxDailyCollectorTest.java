@@ -76,4 +76,19 @@ class KrxDailyCollectorTest {
         assertThatThrownBy(() -> collector(http(), 100).source(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 5),
                 EnumSet.of(KrxBoard.KOSPI), java.util.Map.of())).hasMessageContaining("수집하지 않은 날");
     }
+
+    @Test
+    void 목록이_빠진_응답은_한_번만_다시_부르고_두_번째도_틀리면_멈춘다() throws IOException {
+        LocalDate d = LocalDate.of(2026, 10, 7);
+        FakeHttp flaky = new FakeHttp((u, n) -> n == 1 ? FakeHttp.ok("{}")
+                : FakeHttp.ok(KrxFixtures.body(d, List.of("005930;삼성전자;;1;1;1;1;0;1;10"))));
+        collector(flaky, 100).collect(d, d, EnumSet.of(KrxBoard.KOSPI));
+        assertThat(flaky.calls).hasSize(2);
+        assertThat(cache.resolve("krx/KOSPI/2026/20261007.json")).exists();
+
+        FakeHttp broken = new FakeHttp((u, n) -> FakeHttp.ok("{\"respMsg\":\"x\"}"));
+        assertThatThrownBy(() -> collector(broken, 100).collect(d.minusDays(1), d.minusDays(1), EnumSet.of(KrxBoard.KOSPI)))
+                .hasMessageContaining("OutBlock_1").hasMessageContaining("respMsg=x");
+        assertThat(broken.calls).hasSize(2);
+    }
 }
