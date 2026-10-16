@@ -222,4 +222,11 @@ class KakaoMemoChannelTest {
         assertThat(channel(http, NOW, "").send(N)).isEqualTo(SendResult.failed("http-401"));
         assertThat(http.requests).hasSize(2);
     }
+
+    @Test
+    void 미리_갱신이_일시_장애로_실패한_뒤_발송이_401이면_다시_갱신하지_않는다() throws Exception {
+        FakeHttp http = new FakeHttp().reply(503, "").reply(401, "{\"code\":-401}");
+        assertThat(channel(http, NOW.plusSeconds(60), "").send(N)).isEqualTo(SendResult.failed("http-401"));
+        assertThat(http.requests).hasSize(2);
+    }
 }
