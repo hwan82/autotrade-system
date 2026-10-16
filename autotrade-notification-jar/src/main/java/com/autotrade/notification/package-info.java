@@ -1,5 +1,5 @@
 /**
- * 알림 라이브러리(MON-06, D-097). 이벤트 종류를 긴급·정보로 나누고({@link com.autotrade.notification.EventRoutes}), 등급별 채널
+ * 알림 라이브러리(MON-06, D-099). 이벤트 종류를 긴급·정보로 나누고({@link com.autotrade.notification.EventRoutes}), 등급별 채널
  * 순서대로 보내며 실패하면 다음 채널로 넘긴다({@link com.autotrade.notification.Notifier}). 채널은 Slack Incoming Webhook,
  * 카카오톡 나에게 보내기(토큰 자동 갱신), 마지막 대체인 로그다. 유료 알림톡(BIZ)은 없다.
  *

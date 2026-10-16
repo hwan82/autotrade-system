@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * 이벤트 종류 → 등급 매핑표(MON-06, 기획서 원본 v2·v4, D-097).
+ * 이벤트 종류 → 등급 매핑표(MON-06, 기획서 원본 v2·v4, D-099).
  *
  * <table>
  *   <caption>기본 매핑</caption>
