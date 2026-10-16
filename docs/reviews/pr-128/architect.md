@@ -123,3 +123,33 @@
 
 ## 판정
 수정 필요(코드·문서 지적은 모두 해소됐다. 남은 항목은 B1·B2 검토자 빌드 확인 하나다: 이 세션은 Maven Central 의존성을 받지 못해 `./gradlew build`를 세 차례 모두 직접 통과시키지 못했다. 빌드가 되는 환경에서 이 커밋으로 `./gradlew build` 통과를 확인하면 승인할 수 있는 상태다). B7은 이번 억제 로직 변경을 본 risk-ops 재검토와 독립 QA 재검토가 따로 있어야 한다.
+
+## 재검토 2026-10-16 (3)
+- 대상: PR #128 / 커밋 e83df63(9a647ed 뒤 94d5bc7·02d779f main 병합·e83df63) / `git diff origin/main...HEAD` 전체(origin/main 0e1a6d7, 45개 파일). `git diff origin/main HEAD --name-only`에 PR 범위 밖 파일이 없음을 확인했다. main 병합 결과물도 PR 변경만 더한 것이다
+- 점검표: B
+- 직접 실행한 것:
+  - 빌드 환경: 사용자가 결정 카드에서 "미러 허용"을 골랐다(coordinator 전달). 그래서 저장소 밖 임시 Gradle init 스크립트로 빌드했다. 스크립트는 `beforeSettings`에서 `pluginManagement`·`dependencyResolutionManagement` 저장소 맨 앞에 Maven Central 공개 미러 `https://maven-central.storage-download.googleapis.com/maven2`를 둔다(플러그인 쪽은 그 뒤에 `gradlePluginPortal()`). 저장소 파일은 바꾸지 않았다. 검토 뒤 임시 파일은 지웠다.
+  - 9a647ed에서 `./gradlew build --no-daemon --refresh-dependencies -I <임시 init 스크립트>` → **BUILD SUCCESSFUL**.
+  - head가 바뀐 뒤 **e83df63**에서 `./gradlew build --no-daemon -I <임시 init 스크립트>` → **BUILD SUCCESSFUL in 1m 30s**(138 tasks: 40 executed, 98 up-to-date. up-to-date는 입력이 같다는 Gradle 판정이라 결과가 이 커밋에도 유효하다).
+  - 시험 결과(JUnit XML 집계, 22개 모듈): **1437건, 실패 0, 오류 0, 건너뜀 0**. 보호 시험 `ArchitectureTest` 19·`ModuleOwnershipTest` 13·`RealPathReflectionTest` 10 모두 통과. 이 PR 관련 `NotificationQueueTest` 13, `KakaoMemoChannelTest` 21, `NotifierTest` 13, `NotifyingCommandAuditLogTest` 2, `EngineMainTest` 12, `WatchdogTest` 21, `WatchdogMainTest` 5, `ConfigLoaderTest` 31, `SettingsDiskGuardTest` 6 모두 통과.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드. e83df63에서 BUILD SUCCESSFUL, 시험 1437건 실패 0 |
+| B2 | 통과 | `ArchitectureTest`(19)·`ModuleOwnershipTest`(13)·`RealPathReflectionTest`(10) 통과. 보호 시험과 고정 값은 바뀌지 않았다(차분에 `autotrade-architecture-test` 없음). 새 모듈 의존 없음 |
+| B3 | 통과 | 앞 재검토들 그대로(ADR-001:56, ADR-005:139-141, config-keys.md, D-100). e83df63은 기획서 이력 문구만 고쳤다(R6 반영) |
+| B4 | 통과 | 주입 `Clock`만 쓴다. 시뮬레이션 코드 변경 없음. 골든 시험을 포함한 sim·strategy 시험이 이 빌드에서 통과했다 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 새 동작마다 시험이 있다(앞 재검토 목록). 이 빌드에서 모두 통과했다. 지우거나 약화한 시험 없음 |
+| B7 | 통과 | 보호 경로 변경이라 risk-ops 검토가 따로 있다. `docs/reviews/pr-128/risk-ops.md` 2차 재검토(94d5bc7)가 90497aa의 억제 로직 변경을 보고 "승인"했다. 그 뒤 커밋(02d779f main 병합, e83df63 기획서 문구)은 실전 경로 코드를 바꾸지 않는다. **실전 관련 PR이라 사용자 머지 대상이다.** 독립 QA 판정(`qa.md`)은 아직 "수정 필요(F1)"이고, F1 수정(90497aa)에 대한 QA 재검토가 머지 전 관문으로 남아 있다(프로젝트 지침 11장) |
+| B8 | 통과 | 비밀값 없음(앞 재검토 근거 그대로). CI gitleaks는 이 커밋에서 확인하지 않았고, 이번 커밋들에 비밀값 형태의 새 문자열은 없다 |
+
+### 처리 현황
+- 1차 F1·F2·F3, 독립 QA F1·Q1, R3·R4·R6는 해결됐다.
+- R1(엔진·감시 `setup` 중복과 위치 인자 순서)과 R2(라이브러리 안 호스트 문구·시간대)는 권고로 남는다. 후속 과제로 남길 것을 권한다.
+
+### 새 발견
+- 없음.
+
+## 판정
+승인 (architect 기준. 실전 관련 PR이므로 독립 QA의 F1 재검토와 사용자 직접 머지가 남아 있다)
