@@ -77,6 +77,7 @@ memory.used=85:95:3
 - 리스크 한도(Q-008), 블랙리스트(RSK-12, DB 영속): risk-ops. RealTradingGuard 상태는 설정 키가 아니며 앞으로도 추가하지 않는다(CFG-02, ADR-002 2.3).
 - 비용 모델 표(수수료·거래세·슬리피지, 적용 시작일): 3단계는 D-021 값을 `CostModels` 코드 기본값으로 둔다. 설정 키(`cost.profiles.*`, Q-004 조사 4장)는 architect 검토 후 추가([ADR-004](../adr/ADR-004-simulation-engine.md) 4장).
 - 가상 체결 주문 지연(`ExecutionSettings`, 기본 0.5초): 실험 설정으로 받을 키는 실험 생성 화면 작업에서 추가(D-025).
+- 카카오 토큰 자동 갱신 키(D-097 변경 제안, architect 결정): `notification.kakao.rest-api-key` 🔒, `notification.kakao.refresh-token` 🔒, `notification.kakao.client-secret` 🔒(선택), `notification.kakao.link-url`. 알림 라이브러리(D-097)는 이 값을 생성자로 받으며, 감시·엔진 연결 PR에서 설정 키와 갱신 토큰 저장 위치를 함께 정한다. 그 전에는 알림이 실제로 나가지 않는다.
 - 감시 에이전트 임계치: risk-ops(monitor-agent-jar 자체 설정). 감시 프로세스의 드라이브·CPU·메모리 임계는 위 `watchdog.properties`로 먼저 정했다(D-092, D-095). 실험실 모니터링 화면은 위 `autotrade.lab.monitor.*` 기동 속성으로 먼저 정했다(D-090). 감시 프로세스가 같은 에이전트를 쓸 때 공통 키 `monitor.interval-seconds`, `monitor.thresholds.<지표>.{direction,warn,critical,sustain}`(재기동, 감시·실험실)을 두자는 변경 제안이 D-090에 있다(architect 결정).
 - 시세 녹화 폴더, 감시 종목 파일, 무응답 판단 시간: data-engineer 제안 [ADR-003 6장](../adr/ADR-003-market-data.md). 2단계는 설정 폴더 아래 `recordings/`, `watchlist.json`, 90초로 고정.
 - 종목명 표 `<설정 폴더>/symbols/<MARKET>.csv`(예: `KRX.csv`, UTF-8, 헤더 `code,name,board`): 화면·보고서 표시용이고 계산·식별에 쓰지 않는다(결과 해시에 영향 없음). 없으면 이름만 비고 기동에는 영향 없다. 깨진 파일은 그 시장만 빼고 경고 로그를 남긴다. `./gradlew :autotrade-app-gateway:symbolMaster`가 한국투자 공개 종목 마스터로 `KRX.csv`를 만든다(키 불필요). 실험실은 기동 때 읽으므로 새로 만든 뒤 실험실을 다시 시작한다.

@@ -38,7 +38,7 @@
      └── config                   └── config, broker-api
                          ▼
                       domain  ◀── 모든 autotrade 모듈이 의존, domain은 아무것도 모름
- notification-jar(자리만), monitor-agent-jar·monitor-sources(D-090): 도메인을 모르는 재사용 라이브러리
+ notification-jar(D-097), monitor-agent-jar·monitor-sources(D-090): 도메인을 모르는 재사용 라이브러리
 ```
 
 | 모듈 | 내용 | 순수 Java | 의존 |
@@ -53,7 +53,7 @@
 | autotrade-control | 실전 제어 명령 채널(ADR-006): ControlRequest·ControlResponse·EngineStatus, ControlCodec, ControlServer(엔진만), ControlClient(실험실만) | O (Jackson만) | config |
 | autotrade-app-{engine,gateway,lab,watchdog} | 프로세스 진입점 | lab만 Spring | 위 표. engine과 lab은 control에도 의존. 네 프로세스 모두 하트비트 때문에 monitor-agent-jar에 의존([ADR-011](ADR-011-watchdog-heartbeat.md)) |
 | autotrade-architecture-test | 모든 모듈을 한 클래스패스에 올려 ArchUnit 규칙 검사 | 테스트 전용 | 전부 |
-| autotrade-notification-jar | 자리만 | O | 없음 |
+| autotrade-notification-jar | 알림(MON-06): EventRoutes(매핑표), Notification, Channel(SlackWebhookChannel, KakaoMemoChannel, LogChannel), Notifier(등급별 순서·대체 발송), HttpTransport(JDK `java.net.http`). 실전 엔진·감시 런타임에 들어가므로 JDK 허용 목록(D-086) 안 타입과 허용된 Jackson만 ([D-097](../decisions/D-097-notification-library-first.md)) | O (Jackson만) | 없음 |
 | autotrade-monitor-agent-jar | 감시 에이전트 코어(MetricSource, Reading, Threshold, ThresholdEvaluator, MonitorAgent)와 하트비트(Heartbeat, HeartbeatWriter, AtomicFile, [ADR-011](ADR-011-watchdog-heartbeat.md)). 감시 런타임에 들어가므로 JDK 허용 목록(D-086) 안 타입만 ([D-090](../decisions/D-090-monitor-agent-and-screen.md)) | O | 없음 |
 | autotrade-monitor-sources | 표준 수집원(OSHI SystemSource, JvmSource), 기본 임계, StandardSources. 실험실이 쓰고 실전 엔진·감시에는 넣지 않는다(D-090) | - (OSHI) | monitor-agent-jar |
 | autotrade-ui | 자리만(D-020: 로컬 웹 대시보드) | - | - |
