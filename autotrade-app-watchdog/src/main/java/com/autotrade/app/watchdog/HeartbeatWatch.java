@@ -39,6 +39,9 @@ final class HeartbeatWatch {
     /** 상태가 바뀐 사건. */
     record Change(String process, State from, State to, Optional<Heartbeat> last, Duration age) {}
 
+    /** 점검 사이에 다시 뜬 프로세스(상태는 계속 ALIVE라 {@link Change}로 나오지 않는다). */
+    record Restart(String process, Instant previousStart, Instant newStart) {}
+
     private final Path configDir;
     private final List<String> processes;
     private final Duration stale;
@@ -53,6 +56,7 @@ final class HeartbeatWatch {
     private boolean seenAny;
     private Instant lastAllAbsentWarning;
     private int allAbsentWarnings;
+    private List<Restart> restarts = List.of();
 
     HeartbeatWatch(Path configDir, List<String> processes, Duration stale) {
         this.configDir = configDir;
@@ -63,6 +67,7 @@ final class HeartbeatWatch {
     /** 한 번 점검하고 바뀐 것을 돌려준다(첫 점검은 모든 프로세스가 "처음"에서 바뀐 것으로 나온다). */
     List<Change> check(Instant now) {
         List<Change> changes = new ArrayList<>();
+        List<Restart> restarted = new ArrayList<>();
         for (String process : processes) {
             Optional<Heartbeat> last = Optional.empty();
             State state;
@@ -87,6 +92,7 @@ final class HeartbeatWatch {
                 if (prev != null && !prev.equals(last.get().startedAt())) {
                     // 점검 사이에 죽고 다시 떴으면 상태는 계속 ALIVE라 바뀜이 없다. 재기동은 따로 알린다(architect PR #116 R4)
                     LOG.log(Level.WARNING, process + " 재기동 감지(이전 시작 " + prev + ", 새 시작 " + last.get().startedAt() + ")");
+                    restarted.add(new Restart(process, prev, last.get().startedAt()));
                 }
             }
             State before = states.put(process, state);
@@ -96,6 +102,7 @@ final class HeartbeatWatch {
                 log(c);
             }
         }
+        restarts = List.copyOf(restarted);
         boolean allAbsent = !processes.isEmpty() && processes.stream().allMatch(p -> states.get(p) == State.ABSENT);
         seenAny |= !allAbsent;
         if (!checkedOnce) {
@@ -104,7 +111,9 @@ final class HeartbeatWatch {
         }
         // 설정 폴더(AUTOTRADE_CONFIG_DIR)를 잘못 적으면 빈 폴더를 지키며 모두 꺼짐으로만 보인다(architect PR #116 N2).
         // 첫 점검 한 번만 알리면 나중에 프로세스를 띄운 사람이 못 본다. 하트비트를 하나도 못 본 동안 주기로 되풀이한다(PR #118 QA R1)
-        if (!seenAny && (lastAllAbsentWarning == null || !now.isBefore(lastAllAbsentWarning.plus(ALL_ABSENT_REPEAT)))) {
+        // 시계가 뒤로 가면(now가 마지막 경고보다 이르면) 간격이 찬 것으로 본다. 그대로 두면 역행 폭만큼 경고가 늦어진다(PR #123 QA R4)
+        if (!seenAny && (lastAllAbsentWarning == null || now.isBefore(lastAllAbsentWarning)
+                || !now.isBefore(lastAllAbsentWarning.plus(ALL_ABSENT_REPEAT)))) {
             lastAllAbsentWarning = now;
             allAbsentWarnings++;
             LOG.log(Level.WARNING, (allAbsentWarnings == 1 ? "첫 점검에서" : "감시 시작 뒤 지금까지") + " 모든 프로세스 하트비트가 없습니다. "
@@ -112,6 +121,11 @@ final class HeartbeatWatch {
                     + configDir.toAbsolutePath());
         }
         return changes;
+    }
+
+    /** 마지막 점검에서 감지한 재기동. */
+    List<Restart> restarts() {
+        return restarts;
     }
 
     /** 설정 폴더 경고를 남긴 횟수(시험용). */

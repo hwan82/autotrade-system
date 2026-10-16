@@ -141,4 +141,65 @@ class JdkHttpTransportTest {
                 .isInstanceOf(HttpTimeoutException.class);
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
     }
+
+    /**
+     * 기한을 넘기면 요청을 취소해 연결을 끊는다(PR #127 QA Q1, 변이 M2). 헤더가 온 뒤라 요청 자체의 시간 제한은 걸리지 않으므로,
+     * 취소하지 않으면 서버는 계속 쓸 수 있다.
+     */
+    @Test
+    void 기한을_넘기면_요청을_취소해_서버_쪽_연결이_끊긴다() throws Exception {
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Long> brokeAt = new AtomicReference<>();
+        server.createContext("/trickle", ex -> {
+            ex.getRequestBody().readAllBytes();
+            ex.sendResponseHeaders(200, 0);
+            OutputStream out = ex.getResponseBody();
+            try {
+                for (int i = 0; i < 100; i++) {
+                    out.write('o');
+                    out.flush();
+                    Thread.sleep(100);
+                }
+            } catch (java.io.IOException e) {
+                brokeAt.set(System.nanoTime());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                done.countDown();
+                ex.close();
+            }
+        });
+        long start = System.nanoTime();
+        assertThatThrownBy(() -> new JdkHttpTransport(Duration.ofSeconds(1)).post(uri("/trickle"), Map.of(), "x"))
+                .isInstanceOf(HttpTimeoutException.class);
+        assertThat(done.await(15, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(brokeAt.get()).as("클라이언트가 연결을 끊어 서버 쓰기가 실패해야 한다").isNotNull();
+        assertThat(Duration.ofNanos(brokeAt.get() - start)).isLessThan(Duration.ofSeconds(5));
+    }
+
+    /** 8KB를 채우면 구독을 끊어 나머지를 받지 않는다(PR #127 QA Q1, 변이 M8). 끊지 않으면 서버는 큰 본문을 끝까지 다 보낸다. */
+    @Test
+    void 본문_상한을_채우면_나머지를_받지_않고_연결을_끊는다() throws Exception {
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Boolean> broke = new AtomicReference<>(false);
+        server.createContext("/flood", ex -> {
+            ex.getRequestBody().readAllBytes();
+            ex.sendResponseHeaders(200, 0);
+            byte[] chunk = new byte[64 * 1024];
+            java.util.Arrays.fill(chunk, (byte) 'a');
+            try (OutputStream out = ex.getResponseBody()) {
+                for (int i = 0; i < 1024; i++) { // 64MB
+                    out.write(chunk);
+                }
+            } catch (java.io.IOException e) {
+                broke.set(true);
+            } finally {
+                done.countDown();
+            }
+        });
+        HttpTransport.HttpResult r = new JdkHttpTransport(Duration.ofSeconds(5)).post(uri("/flood"), Map.of(), "x");
+        assertThat(r.body()).hasSize(JdkHttpTransport.MAX_BODY_BYTES);
+        assertThat(done.await(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(broke.get()).as("상한 뒤 구독을 끊어 서버가 64MB를 다 보내지 못해야 한다").isTrue();
+    }
 }

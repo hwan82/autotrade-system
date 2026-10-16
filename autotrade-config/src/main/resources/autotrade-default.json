@@ -11,7 +11,10 @@
   },
   "notification": {
     "slack": { "enabled": false, "webhook-url": "" },
-    "kakao": { "enabled": false, "mode": "ME", "access-token": "" }
+    "kakao": {
+      "enabled": false, "mode": "ME", "access-token": "",
+      "rest-api-key": "", "refresh-token": "", "client-secret": "", "link-url": ""
+    }
   },
   "brokers": {
     "kis": { "app-key": "", "app-secret": "" },
