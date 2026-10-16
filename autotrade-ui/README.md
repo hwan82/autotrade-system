@@ -11,3 +11,8 @@
 - 실험실: `./gradlew :autotrade-app-lab:bootRun` 후 http://127.0.0.1:8480 (포트는 `AUTOTRADE_UI_PORT`)
 - 실전 운영 화면: 실전 엔진 `./gradlew :autotrade-app-engine:run`을 같은 `AUTOTRADE_CONFIG_DIR`로 띄웁니다. 운영자 비밀번호 해시는 터미널에서 `autotrade-engine hash-password`(installDist 산출물)로 만들어 secrets.json에 넣습니다.
 - 샘플 데이터로 화면 미리 보기: `./gradlew :autotrade-app-lab:bootTestRun` (테스트 소스의 손으로 만든 `DEMO-` 실험, 임시 폴더 사용)
+
+## 브라우저 시험(D-101)
+- `e2e/`: 실험 생성 → 실행 명령 → 불러오기 → 비교 흐름과 진행 상태 화면을 Playwright(Chromium)로 조작합니다. CI 잡 "Lab screens (Playwright)"이 돌립니다.
+- PC에서: 저장소 루트에서 `./gradlew :autotrade-app-lab:bootJar :autotrade-app-lab:testClasses :autotrade-app-experiment:classes` 뒤 `cd autotrade-ui/e2e && npm ci && npx playwright install chromium && npx playwright test`. 포트 18481·18482를 씁니다.
+- PC 보호: 시험은 실험실·Gradle·Chromium을 띄우기 전에 실제 설정 폴더(`AUTOTRADE_CONFIG_DIR`, 없으면 `~/.autotrade`)의 감시 정지 요청 `experiment-state/stop-request`와 장 시간 보호 구간(국내·미국 평일, 캘린더의 특별 운영일은 정규장과 합친 구간의 개장 60분 전 ~ 폐장 30분 뒤. 휴장일도 막아 실제 보호보다 넓거나 같음)을 확인하고 걸리면 시작하지 않습니다. 시험 안의 실행 명령은 임시 설정 폴더를 써서 감시의 정지 요청을 직접 보지 못하므로 실행 직전에 한 번 더 확인합니다. 그래도 실전 엔진이 켜진 운영 PC에서는 돌리지 않습니다. 장 시간 보호는 GitHub Actions 러너에서 워크플로가 `AUTOTRADE_E2E_ALLOW_DURING_SESSION`을 켤 때만 풉니다. 감시·실험실을 `-Dautotrade.config-dir`로 띄웠다면 그 폴더를 `AUTOTRADE_CONFIG_DIR`로 주고 돌립니다. 보호 확인 자체는 `npm run test:guard`로 시험합니다.
