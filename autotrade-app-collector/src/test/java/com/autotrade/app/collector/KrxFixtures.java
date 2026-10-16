@@ -1,5 +1,6 @@
 package com.autotrade.app.collector;
 
+import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -8,6 +9,23 @@ import java.util.List;
 final class KrxFixtures {
 
     private KrxFixtures() {}
+
+    /** 시험용 KRX 캘린더: 2026년만, 휴장일 2026-09-24·10-05·10-09. 번들 krx.json(보호 경로)이 바뀌어도 수집기 시험이 흔들리지 않게(PR #141 architect R2). */
+    static ExchangeCalendar calendar() {
+        String json = """
+                {"market":"KRX","zone":"Asia/Seoul","coverageFrom":"2026-01-01","coverageTo":"2026-12-31",
+                 "regularOpen":"09:00","regularClose":"15:30","checkedOn":"2026-10-16","sources":{"T":"시험용"},
+                 "holidays":[{"date":"2026-09-24","name":"추석 연휴","source":"T","verified":true},
+                             {"date":"2026-10-05","name":"대체공휴일","source":"T","verified":true},
+                             {"date":"2026-10-09","name":"한글날","source":"T","verified":true}],
+                 "specialSessions":[]}
+                """;
+        try {
+            return ExchangeCalendar.parse(new java.io.ByteArrayInputStream(json.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
 
     /** code,name,section,open,high,low,close,change,volume,shares */
     static String body(LocalDate date, List<String> rows) {

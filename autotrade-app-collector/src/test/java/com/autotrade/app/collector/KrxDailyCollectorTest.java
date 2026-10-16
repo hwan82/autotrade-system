@@ -33,7 +33,7 @@ class KrxDailyCollectorTest {
     private KrxDailyCollector collector(FakeHttp http, int cap) {
         CallBudget budget = new CallBudget(cache, "krx", cap, clock);
         ApiCaller caller = new ApiCaller(http, budget, new Redaction(List.of(Secret.of("KEY"))), ms -> {}, 0);
-        return new KrxDailyCollector(new KrxOpenApiClient(caller, "https://krx.test", "KEY"), cache, clock);
+        return new KrxDailyCollector(new KrxOpenApiClient(caller, "https://krx.test", "KEY"), cache, clock, KrxFixtures.calendar());
     }
 
     @Test
@@ -66,7 +66,7 @@ class KrxDailyCollectorTest {
         FakeHttp next = http();
         CallBudget budget = new CallBudget(cache, "krx", 100, tomorrow);
         ApiCaller caller = new ApiCaller(next, budget, new Redaction(List.of()), ms -> {}, 0);
-        new KrxDailyCollector(new KrxOpenApiClient(caller, "https://krx.test", "KEY"), cache, tomorrow)
+        new KrxDailyCollector(new KrxOpenApiClient(caller, "https://krx.test", "KEY"), cache, tomorrow, KrxFixtures.calendar())
                 .collect(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 7), EnumSet.allOf(KrxBoard.class));
         assertThat(next.calls).hasSize(6);
     }
@@ -113,7 +113,7 @@ class KrxDailyCollectorTest {
 
     @Test
     void 캘린더상_거래일의_오래된_빈_목록은_휴장일로_캐시하지_않고_멈춘다() {
-        LocalDate d = LocalDate.of(2026, 9, 22); // 화, 캘린더 거래일
+        LocalDate d = LocalDate.of(2026, 9, 22); // 화, 시험 캘린더 거래일
         FakeHttp http = emptyOn(d);
         assertThatThrownBy(() -> collector(http, 100).collect(d, d, EnumSet.of(KrxBoard.KOSPI)))
                 .hasMessageContaining("캘린더상 거래일에 빈 목록").hasMessageContaining("krx.json");
@@ -124,7 +124,7 @@ class KrxDailyCollectorTest {
     @Test
     void 캘린더_휴장일과_캘린더_범위_밖의_빈_목록은_휴장일로_캐시한다() throws IOException {
         LocalDate chuseok = LocalDate.of(2026, 9, 24);
-        LocalDate old = LocalDate.of(2025, 10, 7); // 범위 밖(2025 추석), 품질 리포트 빈 평일 목록으로 대조
+        LocalDate old = LocalDate.of(2025, 10, 7); // 시험 캘린더 범위 밖, 품질 리포트 빈 평일 목록으로 대조
         collector(emptyOn(chuseok, old), 100).collect(chuseok, chuseok, EnumSet.of(KrxBoard.KOSPI));
         collector(emptyOn(chuseok, old), 100).collect(old, old, EnumSet.of(KrxBoard.KOSPI));
         assertThat(cache.resolve("krx/KOSPI/2026/20260924.json")).exists();

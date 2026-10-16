@@ -47,12 +47,16 @@ public final class KrxDailySnapshotBuilder {
      * @param emptyWeekdays 모든 시장이 빈 목록인 평일(휴장일이거나, 거래일이 휴장일로 캐시된 것)
      * @param boardGaps 다른 시장엔 자료가 있는데 한 시장만 빈 날(그 시장이 앞뒤 날짜엔 나올 때). 다음 거래일에 가짜 수정 이벤트를 만든다
      * @param massAdjustmentDays 수정 이벤트가 {@link #MASS_ADJUSTMENT_MIN}개 종목 이상인 날
+     * @param eventsAfterEmpty 빈 평일 → 그 뒤 첫 자료 있는 날의 수정 이벤트 종목 수(뒤에 자료 있는 날이 없으면 없음). 실제 휴장일이면
+     *     0이거나 권리락 몇 건이고, 거래일이 빈 날로 캐시됐으면 그 시장 종목 대부분이다(PR #141 strategy-researcher R1)
      */
     public record Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose,
             long adjustmentEvents, long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate,
-            List<LocalDate> emptyWeekdays, List<BoardGap> boardGaps, List<AdjustmentDay> massAdjustmentDays) {
+            List<LocalDate> emptyWeekdays, List<BoardGap> boardGaps, List<AdjustmentDay> massAdjustmentDays,
+            Map<LocalDate, Integer> eventsAfterEmpty) {
 
         public Stats {
+            eventsAfterEmpty = Map.copyOf(eventsAfterEmpty);
             emptyWeekdays = List.copyOf(emptyWeekdays);
             boardGaps = List.copyOf(boardGaps);
             massAdjustmentDays = List.copyOf(massAdjustmentDays);
@@ -62,7 +66,7 @@ public final class KrxDailySnapshotBuilder {
         public Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose, long adjustmentEvents,
                 long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate) {
             this(rows, bars, haltedBars, filledMissingPrice, droppedNoClose, adjustmentEvents, missingChange, reappeared,
-                    firstDate, lastTradingDate, List.of(), List.of(), List.of());
+                    firstDate, lastTradingDate, List.of(), List.of(), List.of(), Map.of());
         }
     }
 
@@ -73,10 +77,16 @@ public final class KrxDailySnapshotBuilder {
      * 수정 이벤트가 몰린 날.
      *
      * @param symbols 그날 나온 종목 수
-     * @param gapBefore 직전 거래일과 이 날 사이(직전 거래일 포함)의 빈 평일 또는 시장 공백 날짜. 없으면 {@code null}.
-     *     빈 평일이 실제 휴장일이 아니거나 시장 공백이면 가짜 이벤트일 가능성이 크다
+     * @param gapsBefore 직전 자료 있는 날(그날이 시장 공백이면 그날 포함)부터 이 날 전까지의 빈 평일과 시장 공백 날짜 전부
+     *     (오름차순). 실제 휴장일은 다음 거래일에 이벤트를 만들지 않으므로, 이 중 휴장일이 아닌 날이 원인이다. 가장 가까운 하나만
+     *     적으면 "가짜 빈 거래일 → 실제 휴장일 → 이 날" 순서에서 원인이 빠진다(PR #141 strategy-researcher M1)
      */
-    public record AdjustmentDay(LocalDate date, int events, int symbols, LocalDate gapBefore) {}
+    public record AdjustmentDay(LocalDate date, int events, int symbols, List<LocalDate> gapsBefore) {
+
+        public AdjustmentDay {
+            gapsBefore = List.copyOf(gapsBefore);
+        }
+    }
 
     /**
      * 같은 날 이 수 이상 종목에 수정 이벤트가 나오면 경고한다 `[가정]`. 실제 권리락은 하루 수 건~수십 건이고, 시장 하나가 하루
@@ -100,7 +110,7 @@ public final class KrxDailySnapshotBuilder {
         List<LocalDate> emptyWeekdays = new ArrayList<>();
         List<LocalDate> tradingDates = new ArrayList<>();
         Map<KrxBoard, java.util.NavigableSet<Integer>> boardDays = new java.util.EnumMap<>(KrxBoard.class);
-        Map<LocalDate, int[]> dayEvents = new TreeMap<>(); // 날짜 → {이벤트 수, 종목 수}
+        TreeMap<LocalDate, int[]> dayEvents = new TreeMap<>(); // 자료 있는 날짜 → {이벤트 수, 종목 수}
         // 1차: 이벤트·주식수·구간
         for (LocalDate d : source.dates()) {
             List<KrxDailyRow> day = sorted(source.rows(d));
@@ -113,9 +123,10 @@ public final class KrxDailySnapshotBuilder {
             dayIndex++;
             tradingDates.add(d);
             int eventsToday = 0;
+            int idx = dayIndex;
+            day.stream().map(KrxDailyRow::board).distinct()
+                    .forEach(b -> boardDays.computeIfAbsent(b, x -> new java.util.TreeSet<>()).add(idx));
             for (KrxDailyRow r : day) {
-                int idx = dayIndex;
-                boardDays.computeIfAbsent(r.board(), x -> new java.util.TreeSet<>()).add(idx);
                 rows++;
                 SymbolState s = states.computeIfAbsent(r.code(), c -> new SymbolState());
                 if (s.lastDayIndex >= 0 && dayIndex - s.lastDayIndex > REAPPEAR_GAP_DAYS) {
@@ -171,7 +182,14 @@ public final class KrxDailySnapshotBuilder {
         for (int i = 0; i < allDates.size(); i++) {
             int[] c = dayEvents.get(allDates.get(i));
             if (c != null && c[0] >= MASS_ADJUSTMENT_MIN) {
-                massDays.add(new AdjustmentDay(allDates.get(i), c[0], c[1], gapBefore(allDates, i, gapDays, dayEvents)));
+                massDays.add(new AdjustmentDay(allDates.get(i), c[0], c[1], gapsBefore(allDates, i, gapDays, dayEvents)));
+            }
+        }
+        Map<LocalDate, Integer> eventsAfterEmpty = new TreeMap<>();
+        for (LocalDate e : emptyWeekdays) {
+            Map.Entry<LocalDate, int[]> next = dayEvents.higherEntry(e);
+            if (next != null) {
+                eventsAfterEmpty.put(e, next.getValue()[0]);
             }
         }
         // 구간 쓰기(종목 코드, 시작일 순)
@@ -231,22 +249,23 @@ public final class KrxDailySnapshotBuilder {
             }
         }
         return new Stats(rows, barCount, halted, filled, dropped, events, missingChange, reappeared, first, last,
-                emptyWeekdays, boardGaps, massDays);
+                emptyWeekdays, boardGaps, massDays, eventsAfterEmpty);
     }
 
-    /** 바로 앞 거래일까지 거슬러 가며 처음 만나는 빈 평일이나 시장 공백 날짜(가장 가까운 것). */
-    private static LocalDate gapBefore(List<LocalDate> dates, int i, java.util.Set<LocalDate> gapDays,
+    /** 직전 자료 있는 날까지 거슬러 가며 만나는 빈 평일·시장 공백 날짜 전부(오름차순). 직전 자료 있는 날이 시장 공백이면 포함한다. */
+    private static List<LocalDate> gapsBefore(List<LocalDate> dates, int i, java.util.Set<LocalDate> gapDays,
             Map<LocalDate, int[]> dayEvents) {
+        List<LocalDate> out = new ArrayList<>();
         for (int j = i - 1; j >= 0; j--) {
             LocalDate d = dates.get(j);
             if (gapDays.contains(d)) {
-                return d;
+                out.add(0, d);
             }
             if (dayEvents.containsKey(d)) {
-                return null; // 공백 없는 거래일
+                break; // 자료 있는 직전 거래일
             }
         }
-        return null;
+        return out;
     }
 
     /** 이벤트 날짜 E → E 이후(E 포함) 이벤트 비율의 곱. 날짜 D의 계수는 D보다 뒤 첫 이벤트 날짜의 값이다. */

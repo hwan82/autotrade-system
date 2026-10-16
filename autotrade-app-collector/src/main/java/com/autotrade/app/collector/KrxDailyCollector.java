@@ -1,6 +1,5 @@
 package com.autotrade.app.collector;
 
-import com.autotrade.domain.market.Market;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -29,10 +28,6 @@ public final class KrxDailyCollector {
     private final Clock clock;
     private final ExchangeCalendar calendar;
 
-    public KrxDailyCollector(KrxOpenApiClient client, Path cacheDir, Clock clock) {
-        this(client, cacheDir, clock, ExchangeCalendar.bundled(Market.KRX));
-    }
-
     public KrxDailyCollector(KrxOpenApiClient client, Path cacheDir, Clock clock, ExchangeCalendar calendar) {
         this.client = client;
         this.cacheDir = cacheDir.resolve("krx");
@@ -40,7 +35,7 @@ public final class KrxDailyCollector {
         this.calendar = calendar;
     }
 
-    /** 결과: 새로 부른 횟수와, 캐시에 두지 않은 오늘 응답. */
+    /** 결과: 새로 부른 횟수와, 캐시에 두지 않은 응답(오늘, 최근 게시 전 빈 날. 키는 {@code 시장|날짜}). */
     public record Result(int fetched, Map<String, String> uncached) {}
 
     /** 이 날수 안의 평일 빈 응답은 캐시하지 않는다 `[가정]`. */

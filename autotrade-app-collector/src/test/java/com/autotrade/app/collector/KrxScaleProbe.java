@@ -57,7 +57,7 @@ public final class KrxScaleProbe {
         RunGuard guard = new RunGuard(Clock.systemUTC(), List.of(), true, RunGuard.FILE_STORE, 1, java.nio.file.Path.of("build", "no-such-dir", "stop-request"));
         KrxDailySnapshotBuilder.Stats stats = new KrxDailySnapshotBuilder.Stats((long) codes * days, (long) codes * days, 0, 0, 0,
                 0, 0, 0, first, first.plusDays(days - 1L));
-        Path report = CollectorMain.finishKrxSnapshot(o, root, dir, guard, stats, 0, 0);
+        Path report = CollectorMain.finishKrxSnapshot(o, root, dir, guard, stats, 0, 0, java.util.Set.of());
         if (!Files.exists(report)) {
             throw new IllegalStateException("리포트 없음");
         }
