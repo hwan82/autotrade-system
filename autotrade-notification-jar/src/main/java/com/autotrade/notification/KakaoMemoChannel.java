@@ -106,7 +106,7 @@ public final class KakaoMemoChannel implements Channel {
 
     @Override
     public String name() {
-        return "kakao";
+        return NotificationSetup.KAKAO;
     }
 
     @Override
