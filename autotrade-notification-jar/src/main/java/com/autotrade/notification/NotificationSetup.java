@@ -211,7 +211,11 @@ public final class NotificationSetup {
         return v == null ? "" : v.strip();
     }
 
-    /** 채널을 꾸리고 보내는 스레드를 띄운다. 채널 설정이 틀려도 던지지 않고 그 채널만 끈다(로그 채널은 늘 있다). */
+    /**
+     * 채널을 꾸리고 보내는 스레드를 띄운다. 채널 설정이 틀려도 던지지 않고 그 채널만 끈다(로그 채널은 늘 있다).
+     * 채널 클래스의 이름이 {@link #SLACK}·{@link #KAKAO}와 어긋나는 코드 실수만
+     * {@link IllegalArgumentException}으로 드러난다({@link #externalChannels}).
+     */
     public NotificationQueue start(Path configDir, String process, Clock clock) {
         return start(configDir, process, clock, new JdkHttpTransport());
     }
@@ -227,7 +231,7 @@ public final class NotificationSetup {
 
     /**
      * 외부 채널을 꾸린다. 순서는 늘 Slack, 카카오톡이다. 큐({@link #start})도 이것으로 꾸리므로, 부르는 쪽(실험실 "알림 시험 보내기", D-103)이
-     * 채널마다 직접 보내도 실전 엔진·감시와 같은 규칙으로 꾸린 채널이다. 던지지 않는다: 설정이 틀린 채널은 이유 코드로 돌려주고 HTTP를 부르지
+     * 채널마다 직접 보내도 실전 엔진·감시와 같은 규칙으로 꾸린 채널이다. 설정 값으로는 던지지 않는다: 설정이 틀린 채널은 이유 코드로 돌려주고 HTTP를 부르지
      * 않는다. 로그도 남기지 않는다(로그는 {@link #start}가 남긴다).
      *
      * <ul>
@@ -240,6 +244,8 @@ public final class NotificationSetup {
      * @param configDir 설정 폴더(카카오 토큰 파일 위치)
      * @param clock 카카오 토큰 만료 판단에 쓰는 시계
      * @param http 채널이 쓰는 HTTP
+     * @throws IllegalArgumentException 채널 클래스의 이름이 {@link #SLACK}·{@link #KAKAO}와 어긋나는 코드 실수일 때(설정 값으로는 나지 않음,
+     *     PR #144)
      */
     public List<ExternalChannel> externalChannels(Path configDir, Clock clock, HttpTransport http) {
         Objects.requireNonNull(configDir, "configDir");
