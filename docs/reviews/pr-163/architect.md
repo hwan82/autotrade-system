@@ -30,3 +30,32 @@
 
 ## 판정
 수정 필요(N1)
+
+## 재검토 2026-10-17
+- 대상: PR #163 / 커밋 e87c46f / `git diff origin/main...HEAD` 전체. 앞 검토(91fa207) 뒤 바뀐 코드 커밋은 28b641b·e87c46f(그 사이 e78093f는 risk-ops 원문)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew -I <미러 init> build` → BUILD SUCCESSFUL(138 tasks, 42 executed). 실패·건너뜀 0
+  - 변이(검토 사본에서만, 원복 확인 `git status` 깨끗):
+    - A: `HeartbeatWriter.logQuietly`의 삼킴 제거 → `HeartbeatTest#로그_핸들러가_던져도_기록_실패와_복구에서_던지지_않는다` 실패, `WatchdogTest#감시_로그가_던져도_같은_점검의_알림과_정지_요청은_그대로_한다` 실패(닫기에서 남은 폴더를 못 지운 로그가 던짐)
+    - A+B(`tick()`의 `beat()` try도 제거, 앞 검토 N1 상태) → 위 WatchdogTest 실패
+    - B만(`tick()`의 try 제거, 기록기는 삼킴 유지) → 생존. `beat()`가 이제 던지지 않으므로 `tick()`의 try는 이중 방어라 시험으로 가를 수 없다. 판정에 넣지 않는다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 성공 |
+| B2 | 통과 | 새 의존 없음. `HeartbeatWriter`의 `logQuietly`는 JDK `System.Logger`만(`HeartbeatWriter.java:99-105`). ArchUnit 통과 |
+| B3 | 해당 없음 | 공개 계약 변화 없음: `HeartbeatWriter.beat()` 시그니처 그대로이고, javadoc의 "예외를 던지지 않는다"가 이제 로그 핸들러 예외에도 사실이 됨. D-109 결정 3과 기획서 MON-02에 자기 하트비트 기록 로그 포함을 적음(e87c46f) |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음. 감시 시간은 주입 `Clock` |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | N1에 시험 둘: `HeartbeatTest#로그_핸들러가_던져도_기록_실패와_복구에서_던지지_않는다`(기록기 단위), `WatchdogTest#감시_로그가_던져도_같은_점검의_알림과_정지_요청은_그대로_한다`(핸들러를 `com.autotrade` 로거로 넓히고 자기 하트비트 기록을 막음: 엔진 멈춤·결측·정지 요청 알림과 정지 요청 파일). 위 변이 A·A+B를 잡는다. 지우거나 건너뛴 시험 없음 |
+| B7 | risk-ops 검토 필요 | 보호 경로 `autotrade-app-watchdog/*`, `autotrade-monitor-agent-jar/*` 변경. `HeartbeatWriter`는 실전 엔진(`EngineMain.java:143`)도 쓰므로 엔진 하트비트 경로도 바뀜(로그 삼킴만, 엔진은 원래 `beatQuietly`로 감싸 동작 차이는 없음 `[사실: 코드 읽기]`) |
+| B8 | 통과 | 새 로그 문구는 예외 클래스 이름과 파일 경로뿐 |
+
+## 점검표 밖 발견 (재검토)
+- N1 해소: 기록기 안 실패·복구·삭제 실패 로그를 삼키고(`HeartbeatWriter.java:84`, `:90`, `:133`), `tick()`도 `beat()`를 감싼다(`Watchdog.java:108-112`). 앞 검토의 재현 조건(monitor 로거에 던지는 핸들러 + 자기 하트비트 기록 실패)이 이제 `WatchdogTest`에 들어 있고 통과한다.
+- N2(참고) 그대로: 결측 WARN의 `causes(missing)` 인자 평가는 삼킴 밖(`Watchdog.java:259` 부근). 판정에 넣지 않는다.
+- N3 (참고, 새로): `tick()` catch 안 문구 "자기 하트비트 기록 실패"는 `beat()`가 던지지 않게 된 지금 실제로는 나오지 않는 방어 줄이다. 남겨도 무해하다.
+
+## 판정 (재검토)
+승인
