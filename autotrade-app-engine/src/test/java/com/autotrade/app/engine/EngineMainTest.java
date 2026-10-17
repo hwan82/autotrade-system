@@ -398,4 +398,33 @@ class EngineMainTest {
             assertThat(first.server().socket()).exists();
         }
     }
+
+    @Test
+    void 진입점은_실제_설정_폴더_값이_경로_형식이_아니면_설정_오류로_종료_코드_2로_끝낸다() {
+        // PR #151 risk-ops 권고 2: 운영과 같은 ConfigPaths.defaultLocation으로 본다. NUL 문자는 어느 OS에서도 경로가 아니다
+        String key = "autotrade.config-dir";
+        String before = System.getProperty(key);
+        List<Integer> exits = new ArrayList<>();
+        try {
+            System.setProperty(key, "bad\u0000dir");
+            String err = captureErr(() -> assertThat(EngineMain.launch(ConfigPaths::defaultLocation, FIXED, EngineMain::setup,
+                    exits::add)).isNull());
+
+            assertThat(exits).containsExactly(EngineMain.EXIT_BAD_SETTINGS);
+            assertThat(err).contains(EngineMain.StartFailure.SETTINGS_HEADLINE).contains("설정 폴더 경로가 틀렸습니다");
+        } finally {
+            if (before == null) {
+                System.clearProperty(key);
+            } else {
+                System.setProperty(key, before);
+            }
+        }
+    }
+
+    @Test
+    void 프로그램_오류만_예외_흐름을_남기는_종류로_판정한다() {
+        assertThat(EngineMain.StartFailure.of(new IllegalStateException("x")).programError()).isTrue();
+        assertThat(EngineMain.StartFailure.of(new IOException("x")).programError()).isFalse();
+        assertThat(EngineMain.StartFailure.of(new EngineMain.EngineRefusal("x")).programError()).isFalse();
+    }
 }

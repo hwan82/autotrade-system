@@ -268,8 +268,9 @@ public final class EngineMain {
      * @param exitCode 종료 코드
      * @param headline 콘솔·로그 첫머리 문구
      * @param detail 실제 원인(예외 메시지, 프로그램 오류면 예외 종류도)
+     * @param programError 프로그램 오류인지(로그에 예외 흐름도 남김)
      */
-    record StartFailure(int exitCode, String headline, String detail) {
+    record StartFailure(int exitCode, String headline, String detail, boolean programError) {
 
         static final String SETTINGS_HEADLINE = "실전 엔진 설정이 틀려 기동하지 않습니다";
         static final String CHANNEL_HEADLINE = "실전 제어 명령 채널을 열지 못해 기동을 중단합니다";
@@ -278,17 +279,18 @@ public final class EngineMain {
 
         static StartFailure of(Exception e) {
             if (e instanceof EngineRefusal) {
-                return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, e.getMessage());
+                return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, e.getMessage(), false);
             }
             if (e instanceof IOException) {
-                return new StartFailure(EXIT_START_FAILED, CHANNEL_HEADLINE, e.getMessage());
+                return new StartFailure(EXIT_START_FAILED, CHANNEL_HEADLINE, e.getMessage(), false);
             }
-            return new StartFailure(EXIT_START_FAILED, PROGRAM_ERROR_HEADLINE, e.getClass().getSimpleName() + ": " + e.getMessage());
+            return new StartFailure(EXIT_START_FAILED, PROGRAM_ERROR_HEADLINE, e.getClass().getSimpleName() + ": " + e.getMessage(),
+                    true);
         }
 
         /** 로그(ERROR)와 표준 오류에 한 줄씩 남긴다. 프로그램 오류면 로그에 예외 흐름도 남긴다. */
         void report(Exception e) {
-            if (PROGRAM_ERROR_HEADLINE.equals(headline)) {
+            if (programError) {
                 LOG.log(Level.ERROR, headline + ": " + detail, e);
             } else {
                 LOG.log(Level.ERROR, headline + ": " + detail);
