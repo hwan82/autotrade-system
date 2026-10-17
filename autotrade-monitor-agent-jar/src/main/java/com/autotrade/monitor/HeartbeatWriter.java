@@ -81,17 +81,26 @@ public final class HeartbeatWriter implements AutoCloseable {
                 AtomicFile.write(file, hb.format());
                 if (failing) {
                     failing = false;
-                    LOG.log(System.Logger.Level.INFO, "하트비트 기록 복구: " + file);
+                    logQuietly(System.Logger.Level.INFO, "하트비트 기록 복구: " + file);
                 }
                 return true;
             } catch (IOException | RuntimeException e) {
                 if (!failing) {
                     failing = true;
-                    LOG.log(System.Logger.Level.WARNING,
+                    logQuietly(System.Logger.Level.WARNING,
                             "하트비트를 쓰지 못했습니다(복구될 때까지 다시 알리지 않음): " + file + " (" + e.getClass().getSimpleName() + ")");
                 }
                 return false;
             }
+        }
+    }
+
+    /** 로그 출력 실패(로그 핸들러 예외)는 삼킨다. beat()는 던지지 않는다는 약속을 지키고, 감시 점검의 뒤 단계를 막지 않는다(PR #163 architect N1). */
+    private static void logQuietly(System.Logger.Level level, String text) {
+        try {
+            LOG.log(level, text);
+        } catch (Throwable ignored) {
+            // 출력이 안 되는 로그로 그 실패를 알릴 수도 없다
         }
     }
 
@@ -121,7 +130,7 @@ public final class HeartbeatWriter implements AutoCloseable {
             try {
                 Files.deleteIfExists(file);
             } catch (IOException | RuntimeException e) {
-                LOG.log(System.Logger.Level.WARNING, "하트비트 파일을 지우지 못했습니다: " + file);
+                logQuietly(System.Logger.Level.WARNING, "하트비트 파일을 지우지 못했습니다: " + file);
             }
         }
     }

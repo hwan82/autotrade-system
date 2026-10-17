@@ -582,8 +582,9 @@ class WatchdogTest {
     @Test
     void 감시_로그가_던져도_같은_점검의_알림과_정지_요청은_그대로_한다() throws Exception {
         // risk-ops PR #155 K1: 점검 단계는 상태를 바꾼 뒤 로그를 낸다. 그 로그가 던지면 하트비트 멈춤 알림이 영영 나가지 않고,
-        // 정지 요청 파일·자원 결측 알림이 그 점검에서 빠졌다
-        java.util.logging.Logger pkg = java.util.logging.Logger.getLogger(Watchdog.class.getPackageName());
+        // 정지 요청 파일·자원 결측 알림이 그 점검에서 빠졌다. 자기 하트비트 기록 실패 로그(monitor 패키지)도 같다(PR #163 architect N1).
+        // 감시와 감시 에이전트 코어 로그 모두에 던지는 핸들러를 붙인다
+        java.util.logging.Logger pkg = java.util.logging.Logger.getLogger("com.autotrade");
         Handler throwing = new Handler() {
             @Override
             public void publish(LogRecord r) {
@@ -608,6 +609,9 @@ class WatchdogTest {
             clock.advance(Duration.ofSeconds(20));
             free.set(10 * GIB);
             cpu = -1;
+            // 자기 하트비트 파일 자리에 빈 폴더가 아닌 폴더를 두어 기록을 실패시킨다(실패 WARN이 이 점검에서 나간다)
+            Files.delete(w.heartbeat().file());
+            Files.createDirectories(w.heartbeat().file().resolve("block"));
             w.tick();
             assertThat(kinds()).containsExactlyInAnyOrder(EventRoutes.READING_MISSING, EventRoutes.PROCESS_STALE,
                     EventRoutes.STOP_REQUEST_ON);

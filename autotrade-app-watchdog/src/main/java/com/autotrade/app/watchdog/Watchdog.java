@@ -105,7 +105,11 @@ final class Watchdog implements AutoCloseable {
     /** 점검 한 번. 점검 스레드가 부르며, 시험에서는 직접 부른다. */
     void tick() {
         Instant now = clock.instant();
-        heartbeat.beat();
+        try {
+            heartbeat.beat(); // 던지지 않지만, 자기 하트비트 문제로 이 점검의 판정·알림을 건너뛰지 않게 막아 둔다(PR #163 architect N1)
+        } catch (Throwable e) {
+            log(Logger.Level.WARNING, "자기 하트비트 기록 실패 (" + e.getClass().getSimpleName() + ")");
+        }
         StopRequests.Pressure pressure = StopRequests.Pressure.UNKNOWN;
         String detail = "자원 값을 읽지 못함";
         try {
