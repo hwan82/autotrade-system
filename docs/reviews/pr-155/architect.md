@@ -29,3 +29,31 @@
 
 ## 판정
 수정 필요(F1, B6)
+
+## 재검토 2026-10-17
+- 대상: PR #155 헤드 689fed0 / `git diff origin/main...HEAD` 전체(4파일: `MonitorAgent.java`, `MonitorAgentTest.java`, `docs/spec/autotrade-spec.md`, 이 검토 원문). 앞 검토 뒤 바뀐 것은 `git diff 78db507 689fed0`(3파일)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build` (헤드 689fed0): **BUILD SUCCESSFUL**. 테스트 결과 XML 합계 1,534건, 건너뜀 0, 실패 0. `MonitorAgentTest` 12건(바뀐 시험 `WARN과_INFO를_내지_못하면_다음_주기에_다시_내고_그_주기_판정은_이어_간다` 포함), `RealPathReflectionTest` 10건, `WatchdogTest` 21건 통과
+  - 앞 검토의 탐침 시험(핸들러가 계속 던지고 수집원 하나가 계속 실패, `sampleOnce()` 5회, 임시·커밋 안 함): 이 헤드 성공 5·예외 0(앞 헤드 0·5, main 4·1)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 직접 실행, 1,534건 통과 |
+| B2 | 통과 | 새 의존 없음. 바뀐 운영 코드는 `MonitorAgent.java` 하나. `RealPathReflectionTest`·`ArchitectureTest` 통과 |
+| B3 | 통과 | 계약 변경 없음. 생성자 전제 조건 강화는 `@throws`로 적힘(`MonitorAgent.java:54-55`), MON-05 행에도 적힘 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 바뀐 시험이 F1 동작을 직접 고정한다: 핸들러가 계속 던지는 5주기 동안 매번 스냅샷이 나오고 `failedSources`=a,b, `cpu.system`=CRITICAL, 기록 5건, 로그 0건. 핸들러가 살아나면 a·b 첫 WARN 한 번씩, 회복 INFO 출력 실패 시 다음 주기 재출력. 재던짐을 되살리거나 임계 로그의 catch를 빼면 첫 주기에서 예외가 나 시험이 실패한다(코드 읽기로 확인, 변이 실행은 안 함). 지우거나 건너뛴 시험 없음 |
+| B7 | 해당(risk-ops 검토 필요) | 보호 경로 `autotrade-monitor-agent-jar/*`, 감시 자원 판정·정지 요청 경로(`Watchdog.java:103-106`)에 쓰인다. risk-ops 검토 필요. 사용자 머지·머지 전 독립 QA 대상 |
+| B8 | 통과 | 새 문구 없음. 로그·예외에 수집원 id와 예외 클래스 이름뿐 |
+
+## 점검표 밖 발견 (재검토)
+- F1 해소: `writeSourceLogs`는 상태만 되돌리고 던지지 않는다(`MonitorAgent.java:240-259`). 임계 이벤트 로그 출력 실패도 삼켜(`:111-118`) 스냅샷 반환·`recentEvents()`·듣는 쪽 알림이 끊기지 않는다. 감시 `tick()`은 핸들러 상태와 무관하게 매 점검 압력을 판정한다.
+- N1·N2 해소: `갱신일` 2026-10-17(`docs/spec/autotrade-spec.md:13`), 생성자 `@throws` 추가.
+- N3 유지(참고): 되돌림 경합 방지 비교(`:248`)는 시험 없음. 판정에 넣지 않는다.
+- N4 (참고, 이 PR 전부터, 판정에 넣지 않음): 듣는 쪽이 던지고 핸들러도 던지면 `catch` 안의 `LOG.log`(`:124`)가 밖으로 나가 남은 듣는 쪽과 스냅샷 반환을 건너뛴다. 실험실 `start()` 경로에서는 `sampleQuietly`의 `catch` 안 `LOG.log`(`:150`)마저 던지면 예약 작업이 취소돼 수집이 멈춘다. 감시는 듣는 쪽을 붙이지 않고 `start()`를 쓰지 않아(`addListener`·`start`는 `MonitorService.java:72,80`에만) 실전·감시 영향은 없다. 실험실 화면 쪽 견고성으로 후속 PR에서 두 `catch` 안 로그도 감싸기를 권한다.
+- N5 (참고): 핸들러가 계속 던지는 동안에는 WARN 되돌림으로 실패 상태가 매 주기 새로 시작하므로, 회복 INFO의 "N회 연속 실패 뒤"는 WARN이 실제로 출력된 뒤부터 센 값이다(시험의 "2회"가 그 예). 로그 문구의 횟수만 영향받고 스냅샷·판정에는 영향 없다.
+
+## 판정 (재검토)
+승인
