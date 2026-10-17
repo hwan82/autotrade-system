@@ -9,7 +9,7 @@
 - 실시간 변경: **즉시** = 다음 틱부터 반영, **재기동** = 해당 프로세스 재기동 필요, **재연결 절차** = 미체결·보유 확인 → 세션 종료 → 재연결(해당 작업에서 구현 전까지 UI 변경 불가).
 - 비밀값(🔒)은 화면·로그·REST 응답에 `****`로만 나온다.
 - 실전 엔진은 설정 폴더 안 `run/engine-control.sock`에 실전 제어 명령 채널을 열고 `run/engine.lock`을 잡는다(ADR-006). 같은 설정 폴더로 엔진을 두 번 띄우면 두 번째는 뜨지 않는다. 단, 엔진이 도는 중에 `run` 폴더나 `engine.lock`을 지우면 이 보호가 사라지므로 지우지 않는다(ADR-006 4장). 실험실 운영 화면은 같은 설정 폴더를 써야 엔진에 닿는다. 소켓 경로가 약 100자를 넘으면 엔진이 뜨지 않으니 설정 폴더는 짧은 경로에 둔다.
-- 시세 게이트웨이는 설정 폴더 안 `run/market-feed.sock`에 실험실 실시간 시세 전달 소켓을 연다(D-076, [ADR-010](../adr/ADR-010-live-feed-and-session.md)). 못 열면 경고만 남기고 녹화만 한다. 실험실 실시간 모의 세션은 같은 설정 폴더의 이 소켓에 붙고, 입력 기록을 설정 폴더 `live-sessions/<실험ID>/journal/`(녹화 형식, 저장소 밖, 재배포 금지)에, 세션 잠금을 `live-sessions/<실험ID>/session.lock`에 둔다. 리플레이 확인 명령(`runLiveReplayCheck`)과 주간 점검 명령(`runLiveWeeklyCheck`, D-088)도 기본으로 이 `live-sessions/`를 읽는다(`-PsessionsDir`로 바꿈). 주간 점검은 같은 설정 폴더의 게이트웨이 녹화 `recordings/`도 읽는다(`-PrecordingsDir`).
+- 시세 게이트웨이는 설정 폴더 안 `run/market-feed.sock`에 실험실 실시간 시세 전달 소켓을 연다(D-076, [ADR-010](../adr/ADR-010-live-feed-and-session.md)). 못 열면 경고만 남기고 녹화만 한다. 실험실 실시간 모의 세션은 같은 설정 폴더의 이 소켓에 붙고, 입력 기록을 설정 폴더 `live-sessions/<실험ID>/journal/`(녹화 형식, 저장소 밖, 재배포 금지)에, 세션 잠금을 `live-sessions/<실험ID>/session.lock`에 둔다. 리플레이 확인 명령(`runLiveReplayCheck`)과 주간 점검 명령(`runLiveWeeklyCheck`, D-088)도 기본으로 이 `live-sessions/`를 읽는다(`-PsessionsDir`로 바꿈). 주간 점검은 같은 설정 폴더의 게이트웨이 녹화 `recordings/`도 읽는다(`-PrecordingsDir`). 수집 멈춤 여부(D-105)를 보려고 수집 스냅샷 `snapshots/krx-daily/*/manifest.json`도 읽는다(`-PsnapshotsDir`).
 
 | 키 | 타입 | 기본값 | 범위·허용값 | 실시간 변경 | 읽는 곳 | 근거 |
 |---|---|---|---|---|---|---|

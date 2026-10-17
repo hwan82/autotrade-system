@@ -1,8 +1,10 @@
 package com.autotrade.sim.live;
 
 import com.autotrade.domain.market.DataGap;
+import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.feed.FeedClient;
 import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.recording.EventSequences;
@@ -121,9 +123,10 @@ public final class LiveWeeklyCheck {
      *
      * @param defect 설명되지 않는 차이가 있는지(녹화에 없는 기록 줄, 공백 없이 빠진 이벤트). 있으면 명령이 종료 코드 2를 낸다
      * @param accountsCompared 계좌 대조를 했는지(못 했으면 그 이유가 보고서에 있다)
+     * @param collection 수집 멈춤 여부(D-105). 종료 코드에는 넣지 않는다(명령이 콘솔에 따로 알린다)
      */
     public record Outcome(LocalDate from, LocalDate to, List<DayRow> days, boolean defect, boolean accountsCompared,
-            String report) {
+            CollectionFreshness.Status collection, String report) {
         public Outcome {
             days = List.copyOf(days);
         }
@@ -133,11 +136,12 @@ public final class LiveWeeklyCheck {
      * @param experimentDir {@code experiments/<실험ID>}
      * @param sessionsRoot 세션 폴더들의 부모(설정 폴더 아래 {@code live-sessions})
      * @param recordingsRoot 게이트웨이 녹화 폴더(설정 폴더 아래 {@code recordings})
+     * @param snapshotsRoot 수집 스냅샷 폴더(설정 폴더 아래 {@code snapshots}). 수집 멈춤 여부(D-105)에 쓴다
      * @param to 점검 마지막 날. 비어 있으면 운용 기간 안 입력 기록일과 녹화일 중 마지막 날
      * @throws IllegalArgumentException 입력이 맞지 않을 때(등록 파일, 입력 기록 없음 등)
      */
     public static Outcome run(Path experimentDir, Path repoRoot, Path sessionsRoot, Path recordingsRoot,
-            Optional<LocalDate> to, CodeVersion code, Consumer<String> log, RunGate gate) {
+            Path snapshotsRoot, Optional<LocalDate> to, CodeVersion code, Consumer<String> log, RunGate gate) {
         Path file = experimentDir.resolve("experiment.yaml");
         LivePlan plan;
         try {
@@ -224,14 +228,17 @@ public final class LiveWeeklyCheck {
             }
         }
         boolean defect = rows.stream().anyMatch(r -> r.extraUnexplained() > 0 || r.missing().getOrDefault(UNEXPLAINED, 0L) > 0);
-        String report = render(plan, code, weekFrom, end, rows, defect, accounts);
-        return new Outcome(weekFrom, end, rows, defect, compared, report);
+        CollectionFreshness.Status collection =
+                CollectionFreshness.check(snapshotsRoot, plan.market(), end, ExchangeCalendar.bundled(Market.KRX));
+        log.accept("수집: " + collection.summary().replace("**", ""));
+        String report = render(plan, code, weekFrom, end, rows, defect, accounts, collection);
+        return new Outcome(weekFrom, end, rows, defect, compared, collection, report);
     }
 
     /** {@link #run} 후 보고서를 {@code experiments/<실험ID>/weekly/<마지막 날>.md}에 쓴다. 멈추면 쓰지 않는다. */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path sessionsRoot, Path recordingsRoot,
-            Optional<LocalDate> to, CodeVersion code, Consumer<String> log, RunGate gate) {
-        Outcome out = run(experimentDir, repoRoot, sessionsRoot, recordingsRoot, to, code, log, gate);
+            Path snapshotsRoot, Optional<LocalDate> to, CodeVersion code, Consumer<String> log, RunGate gate) {
+        Outcome out = run(experimentDir, repoRoot, sessionsRoot, recordingsRoot, snapshotsRoot, to, code, log, gate);
         Path target = experimentDir.resolve(WEEKLY_DIR).resolve(out.to() + ".md");
         try {
             Files.createDirectories(target.getParent());
@@ -514,14 +521,15 @@ public final class LiveWeeklyCheck {
     }
 
     static String render(LivePlan plan, CodeVersion code, LocalDate weekFrom, LocalDate end, List<DayRow> rows,
-            boolean defect, String accounts) {
+            boolean defect, String accounts, CollectionFreshness.Status collection) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 주간 점검 ").append(weekFrom).append(" ~ ").append(end).append("\n\n");
         sb.append("- 실시간 모의 입력 기록과 같은 날 게이트웨이 녹화 대조(D-088). 점검 명령이 씀, 손으로 고치지 않는다.\n");
         sb.append("- code: ").append(code.commit()).append(code.dirty() ? " dirty" : "").append('\n');
         sb.append("- 판정: ").append(defect
                 ? "**확인 필요**: 설명되지 않는 차이가 있다(아래 \"설명 없음\" 또는 \"녹화에 없는 기록 줄\"). 전달·기록 경로 결함일 수 있다"
-                : "설명되지 않는 차이 없음").append("\n\n");
+                : "설명되지 않는 차이 없음").append('\n');
+        sb.append("- 수집: ").append(collection.summary()).append("\n\n");
 
         List<DayRow> week = rows.stream().filter(r -> !r.date().isBefore(weekFrom)).toList();
         sb.append("## 1. 입력 대조(이번 주)\n\n");
@@ -570,6 +578,7 @@ public final class LiveWeeklyCheck {
                 .append("등록 파일·코드로 리플레이. 차이는 실험실이 받지 못한 이벤트와 실험실 쪽 공백이 성과에 준 영향이다. 비용 차감 ")
                 .append("성과이고 투자 자문이 아니다.\n\n");
         sb.append(accounts);
+        sb.append(CollectionFreshness.render(collection));
         return sb.toString();
     }
 
