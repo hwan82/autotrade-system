@@ -99,12 +99,19 @@ class ExperimentJobStreamTest {
     }
 
     @Test
+    void 작업_폴더_읽기가_null이면_공개_생성자가_바로_거절한다() {
+        // PR #156 architect R2: 시험용 생성자와 겹쳐 null 인자 호출이 모호하던 것을 없앴다(컴파일되는 것 자체가 확인)
+        assertThatThrownBy(() -> new ExperimentJobStream(null, clock)).isInstanceOf(NullPointerException.class)
+                .hasMessage("jobs");
+    }
+
+    @Test
     void 작업_폴더를_못_읽어도_주석_줄은_보내고_예외는_다시_던진다() {
         // architect PR #117 2차 권고 1: 읽기 실패 분기(tick의 catch에서 keepalive 뒤 재던짐)
         ExperimentJobs real = new ExperimentJobs(config, clock);
         java.util.concurrent.atomic.AtomicBoolean broken = new java.util.concurrent.atomic.AtomicBoolean();
         UncheckedIOException failure = new UncheckedIOException("작업 폴더를 읽지 못했습니다", new IOException("잠김"));
-        ExperimentJobStream s = new ExperimentJobStream(() -> {
+        ExperimentJobStream s = ExperimentJobStream.reading(() -> {
             if (broken.get()) {
                 throw failure;
             }

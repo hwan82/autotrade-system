@@ -55,8 +55,16 @@ public final class ExperimentJobStream implements AutoCloseable {
         this(Objects.requireNonNull(jobs, "jobs")::list, clock);
     }
 
-    /** 시험용: 작업 폴더 읽기를 바꿔 넣는다(읽기 실패 분기 시험, architect PR #117 2차 권고 1). */
-    ExperimentJobStream(Supplier<ExperimentJobs.Listing> jobs, Clock clock) {
+    /**
+     * 시험용: 작업 폴더 읽기를 바꿔 넣는다(읽기 실패 분기 시험, architect PR #117 2차 권고 1). 생성자를 private으로 숨기고 이름
+     * 있는 팩터리로 열어 {@code new ExperimentJobStream(null, clock)}이 모호해지지 않게 한다(PR #156 architect R2).
+     */
+    static ExperimentJobStream reading(Supplier<ExperimentJobs.Listing> jobs, Clock clock) {
+        return new ExperimentJobStream(jobs, clock);
+    }
+
+    /** private이라 클래스 밖의 {@code new} 호출은 공개 생성자만 본다. */
+    private ExperimentJobStream(Supplier<ExperimentJobs.Listing> jobs, Clock clock) {
         this.jobs = Objects.requireNonNull(jobs, "jobs");
         this.clock = Objects.requireNonNull(clock, "clock");
     }

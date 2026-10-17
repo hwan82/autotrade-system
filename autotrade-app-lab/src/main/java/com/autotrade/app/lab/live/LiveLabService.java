@@ -155,7 +155,7 @@ public class LiveLabService implements AutoCloseable {
                     + id + "/experiment.yaml. 다른 프로그램이 파일을 잡고 있지 않은지, 읽기 권한이 있는지 확인하세요");
         }
         // 조합·녹화 실험 등록 파일이면 형식 검사의 "모르는 키" 대신 원인을 바로 알린다(5단계 QA R5). 목록과 같은 기준
-        if (yaml.lines().map(String::strip).noneMatch(l -> LIVE_INPUT.matcher(l).matches())) {
+        if (!isLiveRegistration(yaml)) {
             throw new IllegalArgumentException("실시간 세션 등록 파일(input: live)이 아닙니다: experiments/" + id
                     + "/experiment.yaml");
         }
@@ -410,7 +410,7 @@ public class LiveLabService implements AutoCloseable {
             } catch (IOException e) {
                 continue; // 실시간 등록인지 알 수 없다. 시작하면 같은 사유로 거절된다
             }
-            if (yaml.lines().map(String::strip).noneMatch(l -> LIVE_INPUT.matcher(l).matches())) {
+            if (!isLiveRegistration(yaml)) {
                 continue;
             }
             boolean journal = Files.isDirectory(sessionsRoot.resolve(id));
@@ -576,4 +576,12 @@ public class LiveLabService implements AutoCloseable {
     }
 
     private record Item(String sourceId, MarketEvent event) {}
+
+    /**
+     * 실시간 세션 등록 파일인지(앞뒤 공백을 뺀 한 줄이 {@code input: live}). 목록({@link #registrations()})과
+     * 시작({@code start}) 사전 검사가 같은 기준을 쓰도록 여기에만 둔다(PR #156 architect R1).
+     */
+    private static boolean isLiveRegistration(String yaml) {
+        return yaml.lines().map(String::strip).anyMatch(l -> LIVE_INPUT.matcher(l).matches());
+    }
 }
