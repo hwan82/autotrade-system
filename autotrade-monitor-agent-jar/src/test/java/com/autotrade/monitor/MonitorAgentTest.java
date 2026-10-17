@@ -18,6 +18,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings("try") // 로그 핸들러를 되돌리는 자원(capture)은 시험 본문에서 쓰지 않는다
 class MonitorAgentTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-15T00:00:00Z"), ZoneOffset.UTC);
@@ -312,8 +313,9 @@ class MonitorAgentTest {
 
     @Test
     void WARN과_INFO를_내지_못하면_다음_주기에_다시_내고_그_주기_판정은_이어_간다() {
-        // 로그 핸들러가 던져 첫 WARN이 사라지면 "이미 경고함"으로 남지 않게 상태를 되돌린다(PR #119 QA Q1).
-        // 출력 실패로 그 주기의 스냅샷·임계 판정이 끊기면 안 된다(architect PR #155 F1)
+        // 로그 핸들러가 던져 첫 WARN이 사라지면 다음 주기에 다시 낸다(PR #119 QA Q1).
+        // 출력 실패로 그 주기의 스냅샷·임계 판정이 끊기면 안 된다(architect PR #155 F1).
+        // 출력 실패와 상관없이 연속 실패 횟수는 실제대로 센다(architect PR #155 N5, risk-ops K3)
         AtomicReference<RuntimeException> failure = new AtomicReference<>();
         AtomicReference<Double> cpu = new AtomicReference<>(97.0);
         MetricSource healthy = new MetricSource() {
@@ -377,16 +379,189 @@ class MonitorAgentTest {
             failure.set(null);
             throwNext.set(1); // a의 회복 INFO만 출력 실패
             agent.sampleOnce();
-            assertThat(logs).containsExactly("INFO 수집원 회복: b (IllegalStateException 2회 연속 실패 뒤)");
+            // 실패는 7주기 이어졌다(핸들러가 던진 5주기 포함)
+            assertThat(logs).containsExactly("INFO 수집원 회복: b (IllegalStateException 7회 연속 실패 뒤)");
             agent.sampleOnce();
             agent.sampleOnce();
             assertThat(logs).containsExactly(
-                    "INFO 수집원 회복: b (IllegalStateException 2회 연속 실패 뒤)",
-                    "INFO 수집원 회복: a (IllegalStateException 2회 연속 실패 뒤)");
+                    "INFO 수집원 회복: b (IllegalStateException 7회 연속 실패 뒤)",
+                    "INFO 수집원 회복: a (IllegalStateException 7회 연속 실패 뒤)");
         } finally {
             jul.removeHandler(handler);
             jul.setLevel(oldLevel);
             jul.setUseParentHandlers(oldParent);
+        }
+    }
+
+    /** 감시 에이전트 로거에 핸들러를 붙인다. 돌려준 것을 닫으면 원래대로 돌린다. */
+    private static AutoCloseable capture(Handler handler, java.util.logging.Level level) {
+        Logger jul = Logger.getLogger(MonitorAgent.class.getName());
+        java.util.logging.Level oldLevel = jul.getLevel();
+        boolean oldParent = jul.getUseParentHandlers();
+        handler.setLevel(java.util.logging.Level.ALL);
+        jul.setLevel(level);
+        jul.setUseParentHandlers(false);
+        jul.addHandler(handler);
+        return () -> {
+            jul.removeHandler(handler);
+            jul.setLevel(oldLevel);
+            jul.setUseParentHandlers(oldParent);
+        };
+    }
+
+    /** {@code throwNext}가 양수인 동안 한 번에 하나씩 던지고, 아니면 "수준 문구"로 모은다. */
+    private static Handler flakyHandler(List<String> logs, java.util.concurrent.atomic.AtomicInteger throwNext) {
+        return new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                if (throwNext.getAndDecrement() > 0) {
+                    throw new IllegalStateException("핸들러 예외 주입");
+                }
+                logs.add(r.getLevel() + " " + r.getMessage());
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+    }
+
+    @Test
+    void 실패_종류_바뀜_WARN을_내지_못하면_다음_주기에_한_번_다시_낸다() throws Exception {
+        // PR #155 QA Q1(변이 M9): "바뀜" 줄이 첫 실패 줄로 바뀌거나 사라지면 안 된다
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        MonitorAgent agent = new MonitorAgent(CLOCK, List.of(failing("a", failure)), List.of(), 10, 3);
+        List<String> logs = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger throwNext = new java.util.concurrent.atomic.AtomicInteger();
+        try (AutoCloseable restore = capture(flakyHandler(logs, throwNext), java.util.logging.Level.INFO)) {
+            failure.set(new IllegalStateException("첫 실패"));
+            agent.sampleOnce();
+            failure.set(new UnsupportedOperationException("다른 실패"));
+            throwNext.set(1);
+            agent.sampleOnce();
+            assertThat(logs).containsExactly(
+                    "WARNING 수집원 실패: a (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다");
+            for (int i = 0; i < 3; i++) {
+                agent.sampleOnce();
+            }
+            failure.set(null);
+            agent.sampleOnce();
+        }
+        assertThat(logs).containsExactly(
+                "WARNING 수집원 실패: a (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                "WARNING 수집원 실패 바뀜: a (IllegalStateException → UnsupportedOperationException)",
+                "INFO 수집원 회복: a (UnsupportedOperationException 4회 연속 실패 뒤)");
+    }
+
+    @Test
+    void 회복_INFO를_내지_못한_채_다시_실패하면_새_첫_실패로_세고_낡은_회복_줄은_버린다() throws Exception {
+        // PR #155 QA Q2: 사이의 성공 주기가 사라지고 횟수가 이어서 세지면 안 된다
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        MonitorAgent agent = new MonitorAgent(CLOCK, List.of(failing("a", failure)), List.of(), 10, 3);
+        List<String> logs = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger throwNext = new java.util.concurrent.atomic.AtomicInteger();
+        try (AutoCloseable restore = capture(flakyHandler(logs, throwNext), java.util.logging.Level.INFO)) {
+            failure.set(new IllegalStateException("주입"));
+            agent.sampleOnce();
+            agent.sampleOnce();
+            failure.set(null);
+            throwNext.set(1);
+            agent.sampleOnce(); // 회복 INFO 출력 실패
+            failure.set(new IllegalStateException("주입"));
+            agent.sampleOnce();
+            failure.set(null);
+            agent.sampleOnce();
+            agent.sampleOnce(); // 낡은 회복 줄("2회")이 뒤늦게 나오지 않는다
+        }
+        assertThat(logs).containsExactly(
+                "WARNING 수집원 실패: a (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                "WARNING 수집원 실패: a (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                "INFO 수집원 회복: a (IllegalStateException 1회 연속 실패 뒤)");
+    }
+
+    @Test
+    void 출력에_실패한_줄은_그_사이_만든_새_줄을_덮지_않는다() throws Exception {
+        // architect PR #155 N3: 출력 중 다른 호출이 같은 수집원의 새 줄을 내면, 늦게 실패한 옛 줄을 다시 내지 않는다.
+        // 수집 스레드와 직접 호출이 겹치는 경우를 핸들러 안에서 sampleOnce를 다시 불러 결정적으로 만든다
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        MonitorAgent agent = new MonitorAgent(CLOCK, List.of(failing("a", failure)), List.of(), 10, 3);
+        List<String> logs = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean nestOnce = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                if (r.getMessage().startsWith("수집원 실패: a") && nestOnce.getAndSet(false)) {
+                    failure.set(null);
+                    agent.sampleOnce(); // 그 사이 회복: 회복 INFO가 먼저 나간다
+                    throw new IllegalStateException("핸들러 예외 주입");
+                }
+                logs.add(r.getLevel() + " " + r.getMessage());
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        try (AutoCloseable restore = capture(handler, java.util.logging.Level.INFO)) {
+            failure.set(new IllegalStateException("주입"));
+            agent.sampleOnce();
+            agent.sampleOnce();
+            agent.sampleOnce();
+        }
+        assertThat(logs).containsExactly("INFO 수집원 회복: a (IllegalStateException 1회 연속 실패 뒤)");
+    }
+
+    @Test
+    void 리스너_실패_로그가_던져도_남은_리스너와_스냅샷_반환을_건너뛰지_않는다() throws Exception {
+        // architect PR #155 N4
+        MonitorAgent agent = agent(10);
+        agent.addListener((s, e) -> {
+            throw new IllegalStateException("리스너 실패 주입");
+        });
+        List<MetricSnapshot> heard = new ArrayList<>();
+        agent.addListener((s, e) -> heard.add(s));
+        java.util.concurrent.atomic.AtomicInteger throwNext = new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
+        try (AutoCloseable restore = capture(flakyHandler(new ArrayList<>(), throwNext), java.util.logging.Level.INFO)) {
+            MetricSnapshot snap = agent.sampleOnce();
+            assertThat(heard).containsExactly(snap);
+        }
+    }
+
+    @Test
+    void 주기_수집_실패_로그가_던져도_주기_수집이_이어진다() throws Exception {
+        // architect PR #155 N4: sampleQuietly의 catch 안 로그가 던지면 예약 작업이 취소돼 수집이 멈췄다
+        java.util.concurrent.atomic.AtomicInteger clockFailures = new java.util.concurrent.atomic.AtomicInteger(3);
+        Clock broken = new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                if (clockFailures.getAndDecrement() > 0) {
+                    throw new IllegalStateException("시계 예외 주입"); // sampleOnce가 던지게 한다
+                }
+                return CLOCK.instant();
+            }
+        };
+        java.util.concurrent.atomic.AtomicInteger throwNext = new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
+        try (AutoCloseable restore = capture(flakyHandler(new ArrayList<>(), throwNext), java.util.logging.Level.INFO);
+                MonitorAgent agent = new MonitorAgent(broken, List.of(source), List.of(), 10, 3)) {
+            CountDownLatch sampled = new CountDownLatch(2);
+            agent.addListener((s, e) -> sampled.countDown());
+            agent.start(Duration.ofMillis(10));
+            assertThat(sampled.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(clockFailures.get()).isNegative();
         }
     }
 

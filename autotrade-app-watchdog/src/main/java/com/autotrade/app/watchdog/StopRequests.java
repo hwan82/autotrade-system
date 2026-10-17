@@ -77,7 +77,7 @@ final class StopRequests {
                     activeSince = first;
                 }
                 reason = "감시 기동 때 남아 있던 정지 요청 파일";
-                LOG.log(Level.WARNING, "남은 정지 요청 파일을 이어받습니다(자원이 정상으로 " + hold.toSeconds() + "초 이어지면 지움): " + f);
+                WatchdogLog.log(LOG, Level.WARNING, "남은 정지 요청 파일을 이어받습니다(자원이 정상으로 " + hold.toSeconds() + "초 이어지면 지움): " + f);
             }
         }
     }
@@ -90,7 +90,7 @@ final class StopRequests {
                 if (!active) {
                     active = true;
                     activeSince = now;
-                    LOG.log(Level.WARNING, "자원 위험: 단발 일괄 명령 정지 요청 파일을 만듭니다(5.2 0번): " + detail);
+                    WatchdogLog.log(LOG, Level.WARNING, "자원 위험: 단발 일괄 명령 정지 요청 파일을 만듭니다(5.2 0번): " + detail);
                 }
                 reason = detail;
             }
@@ -139,13 +139,13 @@ final class StopRequests {
             } catch (IOException | RuntimeException e) {
                 ok = false;
                 if (!writeFailing) {
-                    LOG.log(Level.ERROR, "정지 요청 파일을 쓰지 못했습니다(복구될 때까지 다시 알리지 않음): " + f + " ("
+                    WatchdogLog.log(LOG, Level.ERROR, "정지 요청 파일을 쓰지 못했습니다(복구될 때까지 다시 알리지 않음): " + f + " ("
                             + e.getClass().getSimpleName() + ")");
                 }
             }
         }
         if (ok && writeFailing) {
-            LOG.log(Level.INFO, "정지 요청 파일 쓰기 복구");
+            WatchdogLog.log(LOG, Level.INFO, "정지 요청 파일 쓰기 복구");
         }
         writeFailing = !ok;
     }
@@ -158,7 +158,7 @@ final class StopRequests {
             } catch (IOException | RuntimeException e) {
                 ok = false;
                 if (!deleteFailing) {
-                    LOG.log(Level.ERROR, "정지 요청 파일을 지우지 못했습니다(다음 점검에 다시 시도): " + f);
+                    WatchdogLog.log(LOG, Level.ERROR, "정지 요청 파일을 지우지 못했습니다(다음 점검에 다시 시도): " + f);
                 }
             }
         }
@@ -169,7 +169,7 @@ final class StopRequests {
             active = false;
             activeSince = null;
             reason = "";
-            LOG.log(Level.INFO, "자원 정상이 " + hold.toSeconds() + "초 이어져 정지 요청 파일을 지웠습니다");
+            WatchdogLog.log(LOG, Level.INFO, "자원 정상이 " + hold.toSeconds() + "초 이어져 정지 요청 파일을 지웠습니다");
         }
     }
 }

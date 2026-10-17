@@ -91,7 +91,7 @@ final class HeartbeatWatch {
                 Instant prev = startedAt.put(process, last.get().startedAt());
                 if (prev != null && !prev.equals(last.get().startedAt())) {
                     // 점검 사이에 죽고 다시 떴으면 상태는 계속 ALIVE라 바뀜이 없다. 재기동은 따로 알린다(architect PR #116 R4)
-                    LOG.log(Level.WARNING, process + " 재기동 감지(이전 시작 " + prev + ", 새 시작 " + last.get().startedAt() + ")");
+                    WatchdogLog.log(LOG, Level.WARNING, process + " 재기동 감지(이전 시작 " + prev + ", 새 시작 " + last.get().startedAt() + ")");
                     restarted.add(new Restart(process, prev, last.get().startedAt()));
                 }
             }
@@ -116,7 +116,7 @@ final class HeartbeatWatch {
                 || !now.isBefore(lastAllAbsentWarning.plus(ALL_ABSENT_REPEAT)))) {
             lastAllAbsentWarning = now;
             allAbsentWarnings++;
-            LOG.log(Level.WARNING, (allAbsentWarnings == 1 ? "첫 점검에서" : "감시 시작 뒤 지금까지") + " 모든 프로세스 하트비트가 없습니다. "
+            WatchdogLog.log(LOG, Level.WARNING, (allAbsentWarnings == 1 ? "첫 점검에서" : "감시 시작 뒤 지금까지") + " 모든 프로세스 하트비트가 없습니다. "
                     + "아무것도 띄우지 않았다면 정상이고, 띄웠다면 감시의 설정 폴더가 그 프로세스들과 같은지 확인하세요: "
                     + configDir.toAbsolutePath());
         }
@@ -145,12 +145,12 @@ final class HeartbeatWatch {
     private static void log(Change c) {
         String what = c.process() + " 하트비트 " + (c.from() == null ? "처음" : c.from().name()) + " → " + c.to();
         switch (c.to()) {
-            case ALIVE -> LOG.log(Level.INFO, what + c.last().map(h -> " (pid " + h.pid() + ", 시작 " + h.startedAt() + ")").orElse(""));
-            case ABSENT -> LOG.log(Level.INFO, what + " (실행하지 않았거나 정상 종료)");
-            case STALE -> LOG.log("engine".equals(c.process()) ? Level.ERROR : Level.WARNING,
+            case ALIVE -> WatchdogLog.log(LOG, Level.INFO, what + c.last().map(h -> " (pid " + h.pid() + ", 시작 " + h.startedAt() + ")").orElse(""));
+            case ABSENT -> WatchdogLog.log(LOG, Level.INFO, what + " (실행하지 않았거나 정상 종료)");
+            case STALE -> WatchdogLog.log(LOG, "engine".equals(c.process()) ? Level.ERROR : Level.WARNING,
                     what + " (마지막 기록 " + c.age().toSeconds() + "초 전. 비정상 종료나 멈춤"
                             + ("engine".equals(c.process()) ? ", 장애표 #8: 재기동은 사람이 하고 대사 통과 후에만 재개)" : ", 장애표 #9)"));
-            case UNREADABLE -> LOG.log(Level.WARNING, what + " (하트비트 파일을 읽지 못함)");
+            case UNREADABLE -> WatchdogLog.log(LOG, Level.WARNING, what + " (하트비트 파일을 읽지 못함)");
         }
     }
 }

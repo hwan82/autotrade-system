@@ -113,6 +113,36 @@ class HeartbeatTest {
     }
 
     @Test
+    void 로그_핸들러가_던져도_기록_실패와_복구에서_던지지_않는다() throws Exception {
+        // PR #163 architect N1: 실패·복구 로그가 던지면 beat()가 던져 감시 점검의 뒤 단계를 건너뛰었다
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(HeartbeatWriter.class.getName());
+        java.util.logging.Handler throwing = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                throw new IllegalStateException("핸들러 예외 주입");
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        jul.addHandler(throwing);
+        try {
+            Path blocker = dir.resolve("heartbeat");
+            Files.writeString(blocker, "폴더 자리에 파일");
+            HeartbeatWriter writer = new HeartbeatWriter(dir, "engine", Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+            assertThat(writer.beat()).isFalse();
+            Files.delete(blocker);
+            assertThat(writer.beat()).isTrue();
+            writer.close();
+        } finally {
+            jul.removeHandler(throwing);
+        }
+    }
+
+    @Test
     void 주기_기록은_데몬_스레드에서_바로_시작한다() throws Exception {
         HeartbeatWriter writer = HeartbeatWriter.start(dir, "gateway", Clock.systemUTC(), Duration.ofMillis(20));
         try {
