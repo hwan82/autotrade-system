@@ -174,6 +174,31 @@ class CollectorMainTest {
     }
 
     @Test
+    void 최근_날_한_시장만_빈_목록이면_콘솔에_게시_전_시장_날짜를_한_줄로_알린다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC); // 서울 10-08 19:00
+        LocalDate wed = LocalDate.of(2026, 10, 7);
+        FakeHttp http = new FakeHttp((u, n) -> {
+            LocalDate d = LocalDate.parse(FakeHttp.query(u, "basDd"), KrxOpenApiClient.BAS_DD);
+            boolean kospi = u.getPath().endsWith(KrxBoard.KOSPI.service);
+            return FakeHttp.ok(KrxFixtures.body(d, kospi && !d.isBefore(wed) ? List.of() : List.of("111111;가;;100;100;100;100;0;1;10")));
+        });
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream old = System.out;
+        int code;
+        System.setOut(new java.io.PrintStream(out, true, StandardCharsets.UTF_8));
+        try {
+            code = CollectorMain.run(args("krx-daily", "--from", "2026-10-06", "--to", "2026-10-08", "--boards", "KOSPI,KOSDAQ"),
+                    clock, http, ms -> {}, PLENTY);
+        } finally {
+            System.setOut(old);
+        }
+        assertThat(code).isZero();
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("게시 전으로 보고 넘긴 시장·날짜: 2026-10-07 KOSPI, 2026-10-08 KOSPI.")
+                .contains("그날 일봉에서 빠지는 시장: 2026-10-07 KOSPI, 2026-10-08 KOSPI");
+    }
+
+    @Test
     void 키가_없거나_사용법이_틀리면_멈춘다() {
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
         FakeHttp http = krxServer();

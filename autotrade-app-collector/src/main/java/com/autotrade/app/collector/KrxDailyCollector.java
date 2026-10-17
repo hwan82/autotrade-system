@@ -35,8 +35,14 @@ public final class KrxDailyCollector {
         this.calendar = calendar;
     }
 
-    /** 결과: 새로 부른 횟수와, 캐시에 두지 않은 응답(오늘, 최근 게시 전 빈 날. 키는 {@code 시장|날짜}). */
-    public record Result(int fetched, Map<String, String> uncached) {}
+    /**
+     * 결과: 새로 부른 횟수, 캐시에 두지 않은 응답(오늘, 최근 게시 전 빈 날. 키는 {@code 시장|날짜}), 그중 게시 전으로 보고 넘긴
+     * 빈 목록(캘린더 휴장일은 뺌, 날짜·시장 순). 콘솔에 한 줄로 알린다(PR #141 strategy-researcher R3).
+     */
+    public record Result(int fetched, Map<String, String> uncached, List<NotPublished> notPublished) {}
+
+    /** 게시 전으로 보고 캐시 없이 넘긴 시장·날짜. 다음 실행이 다시 부른다. */
+    public record NotPublished(LocalDate date, KrxBoard board) {}
 
     /** 이 날수 안의 평일 빈 응답은 캐시하지 않는다 `[가정]`. */
     static final int RECENT_EMPTY_DAYS = 7;
@@ -53,6 +59,7 @@ public final class KrxDailyCollector {
         int fetched = 0;
         Map<String, String> uncached = new HashMap<>();
         List<String> emptyTradingDays = new ArrayList<>(); // 캘린더상 거래일인데 최근이라 게시 전으로 본 빈 응답
+        List<NotPublished> notPublished = new ArrayList<>();
 
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
             if (isWeekend(d)) {
@@ -101,6 +108,9 @@ public final class KrxDailyCollector {
                     write(f, body);
                 } else {
                     uncached.put(key(b, d), body);
+                    if (empty && !calendarSaysHoliday(d)) {
+                        notPublished.add(new NotPublished(d, b));
+                    }
                 }
             }
         }
@@ -115,12 +125,17 @@ public final class KrxDailyCollector {
                         + "에는 자료가 있습니다. 나중에 같은 명령을 다시 돌려 주세요(그날이 실제 휴장일이면 krx.json을 고쳐야 합니다)");
             }
         }
-        return new Result(fetched, Map.copyOf(uncached));
+        return new Result(fetched, Map.copyOf(uncached), List.copyOf(notPublished)); // 날짜 바깥, 시장 enum 안 순서
     }
 
     /** 캘린더 수록 범위 안이고 거래일이면 참. 범위 밖(2025년 이전 등)은 판단하지 않는다(품질 리포트의 빈 평일 목록으로 대조). */
     boolean calendarSaysTrading(LocalDate d) {
         return !d.isBefore(calendar.coverageFrom()) && !d.isAfter(calendar.coverageTo()) && calendar.isTradingDay(d);
+    }
+
+    /** 캘린더 수록 범위 안이고 휴장일이면 참. 최근 휴장일의 빈 목록은 게시 전이 아니라 쉬는 날이다. */
+    boolean calendarSaysHoliday(LocalDate d) {
+        return !d.isBefore(calendar.coverageFrom()) && !d.isAfter(calendar.coverageTo()) && !calendar.isTradingDay(d);
     }
 
     private LocalDate laterDayWithRows(KrxBoard b, LocalDate d, LocalDate to, Map<String, String> uncached) throws IOException {

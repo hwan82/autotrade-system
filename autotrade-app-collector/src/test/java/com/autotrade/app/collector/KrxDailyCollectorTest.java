@@ -138,6 +138,8 @@ class KrxDailyCollectorTest {
         // 뒤 날짜도 비면 게시 전으로 보고 캐시 없이 넘긴다
         var r = collector(emptyOn(tue, wed), 100).collect(tue, wed, EnumSet.of(KrxBoard.KOSPI));
         assertThat(r.uncached()).containsOnlyKeys("KOSPI|2026-10-06", "KOSPI|2026-10-07");
+        assertThat(r.notPublished()).containsExactly(new KrxDailyCollector.NotPublished(tue, KrxBoard.KOSPI),
+                new KrxDailyCollector.NotPublished(wed, KrxBoard.KOSPI));
         // 앞 날만 비고 뒤 날에 자료가 있으면 멈춘다(빈 날이 휴장일처럼 다뤄지면 다음 날 가짜 수정 이벤트)
         assertThatThrownBy(() -> collector(emptyOn(tue), 100).collect(tue, wed, EnumSet.of(KrxBoard.KOSPI)))
                 .hasMessageContaining("2026-10-06").hasMessageContaining("2026-10-07");
@@ -146,5 +148,35 @@ class KrxDailyCollectorTest {
         assertThat(cache.resolve("krx/KOSPI/2026/20261007.json")).exists();
         assertThatThrownBy(() -> collector(emptyOn(tue), 100).collect(tue, wed, EnumSet.of(KrxBoard.KOSPI)))
                 .hasMessageContaining("뒤 거래일 2026-10-07");
+    }
+
+    @Test
+    void 여러_시장_중_최근_날_한_시장만_빈_목록이면_멈추지_않고_그_시장_날짜만_게시_전으로_알린다() throws IOException {
+        // PR #141 strategy-researcher R3: KOSPI만 10-06·10-07 빈 목록(뒤 날도 비어 게시 전), KOSDAQ은 자료 있음
+        LocalDate tue = LocalDate.of(2026, 10, 6);
+        LocalDate wed = LocalDate.of(2026, 10, 7);
+        FakeHttp http = new FakeHttp((u, n) -> {
+            LocalDate d = LocalDate.parse(FakeHttp.query(u, "basDd"), KrxOpenApiClient.BAS_DD);
+            boolean kospi = u.getPath().endsWith(KrxBoard.KOSPI.service);
+            return FakeHttp.ok(KrxFixtures.body(d, kospi && !d.isBefore(tue) ? List.of() : List.of("005930;삼성전자;;1;1;1;1;0;1;10")));
+        });
+        LocalDate mon = LocalDate.of(2026, 10, 5); // 시험 캘린더 휴장일: 최근이어도 게시 전 목록에 넣지 않는다
+        var r = collector(http, 100).collect(mon, wed, EnumSet.of(KrxBoard.KOSPI, KrxBoard.KOSDAQ));
+        assertThat(r.notPublished()).containsExactly(new KrxDailyCollector.NotPublished(tue, KrxBoard.KOSPI),
+                new KrxDailyCollector.NotPublished(wed, KrxBoard.KOSPI));
+        assertThat(cache.resolve("krx/KOSDAQ/2026/20261006.json")).exists();
+        assertThat(cache.resolve("krx/KOSPI/2026/20261006.json")).doesNotExist();
+        assertThat(CollectorMain.notPublishedLine(r.notPublished(), EnumSet.of(KrxBoard.KOSPI, KrxBoard.KOSDAQ)))
+                .hasValue("게시 전으로 보고 넘긴 시장·날짜: 2026-10-06 KOSPI, 2026-10-07 KOSPI. 캐시에 두지 않았고 다음 실행이 다시"
+                        + " 받습니다. 같은 날 다른 시장은 자료가 있어 이번 스냅샷의 그날 일봉에서 빠지는 시장: 2026-10-06 KOSPI, 2026-10-07 KOSPI");
+    }
+
+    @Test
+    void 게시_전_한_줄은_모든_시장이_빈_날을_빠지는_시장으로_적지_않고_넘긴_날이_없으면_비어_있다() {
+        LocalDate d = LocalDate.of(2026, 10, 8);
+        var both = List.of(new KrxDailyCollector.NotPublished(d, KrxBoard.KOSPI), new KrxDailyCollector.NotPublished(d, KrxBoard.KOSDAQ));
+        assertThat(CollectorMain.notPublishedLine(both, EnumSet.of(KrxBoard.KOSPI, KrxBoard.KOSDAQ)))
+                .hasValue("게시 전으로 보고 넘긴 시장·날짜: 2026-10-08 KOSPI·KOSDAQ. 캐시에 두지 않았고 다음 실행이 다시 받습니다");
+        assertThat(CollectorMain.notPublishedLine(List.of(), EnumSet.of(KrxBoard.KOSPI))).isEmpty();
     }
 }

@@ -20,7 +20,9 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * 과거 데이터 수집 일괄 명령(ADR-008, D-051). 실행이 끝나면 종료한다.
@@ -118,6 +120,7 @@ public final class CollectorMain {
         KrxDailyCollector collector = new KrxDailyCollector(client, o.cacheDir, clock, ExchangeCalendar.bundled(Market.KRX));
         KrxDailyCollector.Result r = collector.collect(from, to, o.boards);
         System.out.println("KRX 일별매매정보: 새로 받은 응답 " + r.fetched() + "건, 오늘 누적 호출 " + budget.usedToday());
+        notPublishedLine(r.notPublished(), o.boards).ifPresent(System.out::println);
         if (o.noSnapshot) {
             return 0;
         }
@@ -216,6 +219,32 @@ public final class CollectorMain {
     }
 
     /** 이번 실행에서 캐시하지 않은 응답의 날짜(오늘, 최근 게시 전 빈 날). */
+    /**
+     * 게시 전으로 보고 넘긴 시장·날짜 한 줄(PR #141 strategy-researcher R3). 일부 시장만 빈 날은 이번 스냅샷의 그날 일봉에서
+     * 그 시장이 빠지므로 따로 적는다. 넘긴 날이 없으면 비어 있다.
+     */
+    static Optional<String> notPublishedLine(List<KrxDailyCollector.NotPublished> skipped, Set<KrxBoard> boards) {
+        if (skipped.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<LocalDate, List<String>> byDate = new TreeMap<>();
+        for (KrxDailyCollector.NotPublished n : skipped) {
+            byDate.computeIfAbsent(n.date(), k -> new ArrayList<>()).add(n.board().name());
+        }
+        List<String> all = new ArrayList<>();
+        List<String> partial = new ArrayList<>();
+        byDate.forEach((d, bs) -> {
+            String item = d + " " + String.join("·", bs);
+            all.add(item);
+            if (bs.size() < boards.size()) {
+                partial.add(item);
+            }
+        });
+        return Optional.of("게시 전으로 보고 넘긴 시장·날짜: " + String.join(", ", all)
+                + ". 캐시에 두지 않았고 다음 실행이 다시 받습니다"
+                + (partial.isEmpty() ? "" : ". 같은 날 다른 시장은 자료가 있어 이번 스냅샷의 그날 일봉에서 빠지는 시장: " + String.join(", ", partial)));
+    }
+
     static Set<LocalDate> uncachedDates(KrxDailyCollector.Result r) {
         Set<LocalDate> out = new java.util.TreeSet<>();
         for (String k : r.uncached().keySet()) {
