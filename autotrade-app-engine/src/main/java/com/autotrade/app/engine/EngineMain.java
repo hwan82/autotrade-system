@@ -31,10 +31,18 @@ import java.time.Clock;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Function;
+import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 /**
  * 실전 매매 엔진(D-013 ①). 설정을 읽고 RealTradingGuard(모든 실전 계좌 OFF)와 실전 제어 명령 채널(ADR-006)을 띄운 뒤
  * 종료 신호까지 돈다. 계좌별 워커, 주문 큐, 증권사 연동은 7단계 risk-ops 작업.
+ *
+ * <p>기동 실패는 종류로 나눠 알린다(D-107, 감시 D-106과 같은 기준): 설정 폴더 경로가 틀리면 사람이 고칠 설정 오류로 종료 코드 2,
+ * 실전 제어 명령 채널을 열지 못하면(다른 엔진이 이미 돎 등) 종료 코드 1, 그 밖의 기동 예외(알림 채널 꾸리기 같은 코드 실수)는 "설정
+ * 오류"로 표시하지 않고 프로그램 오류로 알린 뒤 종료 코드 1. 어느 경우든 엔진은 뜨지 않고, Guard는 메모리 상태라 다음 기동도 모든 계좌
+ * OFF로 시작한다.
  *
  * <p>{@code hash-password} 인자로 실행하면 운영자 비밀번호 해시를 만들어 출력하고 끝난다(ADR-006 2.4).
  *
@@ -44,6 +52,10 @@ public final class EngineMain {
 
     static final String PROCESS = "engine";
     static final String HASH_PASSWORD = "hash-password";
+    /** 기동 실패: 명령 채널을 열지 못함이나 프로그램 오류(D-107). JVM이 처리되지 않은 예외로 끝낼 때와 같은 값이다. */
+    static final int EXIT_START_FAILED = 1;
+    /** 사람이 고칠 설정 오류로 기동 거부(설정 폴더 경로, D-107). 감시의 같은 뜻 코드(D-106)와 같은 값이다. */
+    static final int EXIT_BAD_SETTINGS = 2;
 
     private static final Logger LOG = System.getLogger("com.autotrade." + PROCESS);
 
@@ -53,13 +65,8 @@ public final class EngineMain {
         if (args.length == 1 && HASH_PASSWORD.equals(args[0])) {
             System.exit(hashPassword(System.console()));
         }
-        Clock clock = Clock.systemUTC();
-        Engine engine;
-        try {
-            engine = start(ConfigPaths.defaultLocation(), clock);
-        } catch (IOException e) {
-            LOG.log(Level.ERROR, "실전 제어 명령 채널을 열지 못해 기동을 중단합니다: {0}", e.getMessage());
-            System.exit(1);
+        Engine engine = launch(ConfigPaths::defaultLocation, Clock.systemUTC(), EngineMain::setup, System::exit);
+        if (engine == null) {
             return;
         }
         CountDownLatch stopped = new CountDownLatch(1);
@@ -74,24 +81,59 @@ public final class EngineMain {
         }
     }
 
-    /** 기동하고 곧바로 닫는다(테스트·점검용). 종료 코드를 돌려준다(0: 정상). */
+    /** 기동하고 곧바로 닫는다(테스트·점검용). 종료 코드를 돌려준다(0: 정상, 1: 명령 채널을 열지 못함). 그 밖의 예외는 던진다. */
     static int run(ConfigPaths paths, Clock clock) {
         try {
             start(paths, clock).close();
             return 0;
         } catch (IOException e) {
-            LOG.log(Level.ERROR, "실전 제어 명령 채널을 열지 못했습니다: {0}", e.getMessage());
-            return 1;
+            StartFailure failure = StartFailure.of(e);
+            failure.report(e);
+            return failure.exitCode();
+        }
+    }
+
+    /**
+     * 진입점의 기동 절차(D-107). 설정 폴더를 정하고 엔진을 띄운다. 실패하면 {@link StartFailure}로 알리고 그 종료 코드로 {@code exit}를
+     * 부른 뒤 null을 돌려준다. 시험이 {@code exit}와 알림 설정 옮기기({@code setup})를 바꿔 끼워 진입점의 판정·종료 코드를 직접 본다.
+     */
+    static Engine launch(Supplier<ConfigPaths> paths, Clock clock, Function<RuntimeConfig.Notification, NotificationSetup> setup,
+            IntConsumer exit) {
+        try {
+            return start(configPaths(paths), clock, setup);
+        } catch (IOException | RuntimeException e) {
+            StartFailure failure = StartFailure.of(e);
+            failure.report(e);
+            exit.accept(failure.exitCode());
+            return null;
+        }
+    }
+
+    /**
+     * 설정 폴더 경로를 정한다. {@code autotrade.config-dir}·{@code AUTOTRADE_CONFIG_DIR} 값이 경로 형식이 아니면(예: Windows에서 따옴표를
+     * 넣음) 사람이 고칠 설정 문제로 거부한다(종료 코드 2). 감시의 같은 검사(D-106 4번)와 같은 기준이다.
+     */
+    private static ConfigPaths configPaths(Supplier<ConfigPaths> paths) {
+        try {
+            return paths.get();
+        } catch (IllegalArgumentException e) {
+            throw new EngineRefusal("설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): " + e.getMessage());
         }
     }
 
     /** 설정 로딩 → Guard(모두 OFF) → 알림 큐 → 명령 채널 → 하트비트(감시가 읽음, MON-02·D-092). */
     static Engine start(ConfigPaths paths, Clock clock) throws IOException {
+        return start(paths, clock, EngineMain::setup);
+    }
+
+    private static Engine start(ConfigPaths paths, Clock clock, Function<RuntimeConfig.Notification, NotificationSetup> setup)
+            throws IOException {
         LoadedConfig loaded = ProcessStartup.start(PROCESS, paths, clock);
         RuntimeConfig config = loaded.config();
         RealTradingGuard guard = startGuard(config, clock);
         // 알림은 전용 스레드 하나에서만 보내고, 엔진 스레드는 큐에 넣기만 한다(D-100, 절대 규칙 6)
-        NotificationQueue notifications = startNotifications(config, paths, clock, guard.accounts().size());
+        NotificationQueue notifications = startNotifications(setup.apply(config.notification()), paths, clock,
+                guard.accounts().size());
         try {
             EngineCommandHandler handler = commandHandler(config, guard, clock, loaded.warning(),
                     new NotifyingCommandAuditLog(CommandAuditLog.LOGGING, notifications));
@@ -114,8 +156,8 @@ public final class EngineMain {
     }
 
     /** 설정의 알림 값으로 채널을 꾸리고 보내는 스레드를 띄운다. 채널 설정이 틀려도 기동을 막지 않는다(로그 채널은 늘 있음). */
-    static NotificationQueue startNotifications(RuntimeConfig config, ConfigPaths paths, Clock clock, int realAccounts) {
-        NotificationQueue queue = setup(config.notification()).start(paths.runtimeFile().getParent(), PROCESS, clock);
+    static NotificationQueue startNotifications(NotificationSetup setup, ConfigPaths paths, Clock clock, int realAccounts) {
+        NotificationQueue queue = setup.start(paths.runtimeFile().getParent(), PROCESS, clock);
         LOG.log(Level.INFO, "알림 채널: 긴급 {0}, 정보 {1}", queue.notifier().channelNames(Severity.URGENT),
                 queue.notifier().channelNames(Severity.INFO));
         if (realAccounts > 0 && !queue.notifier().hasExternalChannel(Severity.URGENT)) {
@@ -205,6 +247,53 @@ public final class EngineMain {
             if (second != null) {
                 Arrays.fill(second, '\0');
             }
+        }
+    }
+
+    /** 사람이 고칠 설정 문제로 엔진이 뜨지 않기로 판정한 이유(종료 코드 2, D-107). 지금은 설정 폴더 경로뿐이다. */
+    static final class EngineRefusal extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        EngineRefusal(String detail) {
+            super(detail);
+        }
+    }
+
+    /**
+     * 기동 실패를 운영자에게 어떻게 알릴지(D-107, PR #144 독립 QA R2). {@link EngineRefusal}만 설정 오류로 종료 코드 2, 명령 채널을 열지
+     * 못한 {@link IOException}은 예전 문구 그대로 종료 코드 1, 나머지는 설정 문제가 아닌 프로그램 오류로 종료 코드 1이다. 알림 채널 이름
+     * 검사 같은 코드 실수도 {@link IllegalArgumentException}이지만 설정 오류로 표시하지 않는다.
+     *
+     * @param exitCode 종료 코드
+     * @param headline 콘솔·로그 첫머리 문구
+     * @param detail 실제 원인(예외 메시지, 프로그램 오류면 예외 종류도)
+     */
+    record StartFailure(int exitCode, String headline, String detail) {
+
+        static final String SETTINGS_HEADLINE = "실전 엔진 설정이 틀려 기동하지 않습니다";
+        static final String CHANNEL_HEADLINE = "실전 제어 명령 채널을 열지 못해 기동을 중단합니다";
+        static final String PROGRAM_ERROR_HEADLINE =
+                "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다(설정 파일 문제가 아닙니다. 로그의 예외를 개발 쪽에 알려 주세요)";
+
+        static StartFailure of(Exception e) {
+            if (e instanceof EngineRefusal) {
+                return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, e.getMessage());
+            }
+            if (e instanceof IOException) {
+                return new StartFailure(EXIT_START_FAILED, CHANNEL_HEADLINE, e.getMessage());
+            }
+            return new StartFailure(EXIT_START_FAILED, PROGRAM_ERROR_HEADLINE, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+
+        /** 로그(ERROR)와 표준 오류에 한 줄씩 남긴다. 프로그램 오류면 로그에 예외 흐름도 남긴다. */
+        void report(Exception e) {
+            if (PROGRAM_ERROR_HEADLINE.equals(headline)) {
+                LOG.log(Level.ERROR, headline + ": " + detail, e);
+            } else {
+                LOG.log(Level.ERROR, headline + ": " + detail);
+            }
+            System.err.println(headline + "(실전 엔진이 뜨지 않았습니다): " + detail);
         }
     }
 
