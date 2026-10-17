@@ -28,7 +28,8 @@ import java.util.concurrent.TimeUnit;
  * <p>수집원 실패 로그는 상태가 바뀔 때만 WARN이다: 처음 실패, 실패 종류가 바뀜. 같은 실패가 이어지는 동안은 DEBUG, 다시
  * 읽히면 INFO 한 줄. OSHI가 안 되는 PC에서 매 주기 WARN이 쌓여 다른 경고를 묻지 않게 한다(risk-ops PR #114 K5). 주기마다의
  * 실패는 스냅샷의 {@link MetricSnapshot#failedSources()}에 그대로 남는다. WARN·INFO 줄을 내지 못하면(로그 핸들러 예외) 그
- * 수집원 상태를 되돌려 다음 주기에 같은 줄을 다시 낸다(PR #119 QA Q1). 수집원 id는 겹치면 안 된다.
+ * 수집원 상태를 되돌려 다음 주기에 같은 줄을 다시 낸다. 그 주기의 스냅샷과 임계 판정은 그대로 낸다(PR #119 QA Q1, PR #155 F1).
+ * 수집원 id는 겹치면 안 된다.
  */
 public final class MonitorAgent implements AutoCloseable {
 
@@ -50,6 +51,8 @@ public final class MonitorAgent implements AutoCloseable {
     /**
      * @param historySize 들고 있을 최근 스냅샷 수(1 이상)
      * @param eventHistorySize 들고 있을 최근 임계 이벤트 수(1 이상)
+     * @throws IllegalArgumentException 수집원 id가 겹치거나 기록 크기가 1보다 작을 때
+     * @throws NullPointerException 수집원 id가 null일 때
      */
     public MonitorAgent(Clock clock, List<MetricSource> sources, List<Threshold> thresholds, int historySize,
             int eventHistorySize) {
@@ -106,9 +109,13 @@ public final class MonitorAgent implements AutoCloseable {
             }
         }
         for (ThresholdEvent e : fired) {
-            LOG.log(e.escalation() ? System.Logger.Level.WARNING : System.Logger.Level.INFO,
-                    "임계 " + e.from() + " → " + e.to() + ": " + e.reading() + " = " + e.value() + e.unit()
-                            + " (경계 " + e.limit() + e.unit() + ")");
+            try {
+                LOG.log(e.escalation() ? System.Logger.Level.WARNING : System.Logger.Level.INFO,
+                        "임계 " + e.from() + " → " + e.to() + ": " + e.reading() + " = " + e.value() + e.unit()
+                                + " (경계 " + e.limit() + e.unit() + ")");
+            } catch (Throwable ignored) {
+                // 로그 출력 실패로 듣는 쪽 알림과 스냅샷 반환을 막지 않는다. 이벤트는 recentEvents()와 듣는 쪽에 그대로 간다(PR #155 F1)
+            }
         }
         for (MonitorListener l : listeners) {
             try {
@@ -224,40 +231,30 @@ public final class MonitorAgent implements AutoCloseable {
     }
 
     /**
-     * 수집원 로그를 낸다. WARN·INFO 줄을 내지 못하면 그 수집원 상태를 줄을 만들기 전으로 되돌려, 다음 주기에 같은 줄을 다시 내게
-     * 한다(PR #119 QA Q1: 첫 WARN이 출력되지 못한 채 "이미 경고함"으로 남지 않게). 나머지 줄도 마저 내 본 뒤 첫 예외를 다시
-     * 던진다(그 주기는 예전처럼 실패로 끝난다. RuntimeException이 아니면 IllegalStateException으로 감싼다).
-     * DEBUG 반복 줄은 되돌리지 않는다(횟수만 센다).
+     * 수집원 로그를 낸다. WARN·INFO 줄을 내지 못하면(로그 핸들러 예외) 그 수집원 상태를 줄을 만들기 전으로 되돌려, 다음 주기에
+     * 같은 줄을 다시 내게 한다(PR #119 QA Q1: 첫 WARN이 출력되지 못한 채 "이미 경고함"으로 남지 않게). 출력 실패는 삼키고 그 주기의
+     * 스냅샷·임계 판정은 그대로 이어 간다: 핸들러가 계속 던져도 감시 판정이 끊기면 안 된다(architect PR #155 F1). 출력이 안 되는
+     * 로그로 그 실패를 알릴 수도 없다. DEBUG 반복 줄은 되돌리지 않는다(횟수만 센다).
      */
     private void writeSourceLogs(List<LogLine> lines) {
-        Throwable first = null;
         for (LogLine line : lines) {
             try {
                 LOG.log(line.level(), line.text());
             } catch (Throwable e) {
-                if (line.level() != System.Logger.Level.DEBUG) {
-                    synchronized (lock) {
-                        // 그 사이 다른 호출이 상태를 또 바꿨으면 그대로 둔다
-                        if (failing.get(line.id()) == line.installed()) {
-                            if (line.previous() == null) {
-                                failing.remove(line.id());
-                            } else {
-                                failing.put(line.id(), line.previous());
-                            }
+                if (line.level() == System.Logger.Level.DEBUG) {
+                    continue;
+                }
+                synchronized (lock) {
+                    // 그 사이 다른 호출이 상태를 또 바꿨으면 그대로 둔다
+                    if (failing.get(line.id()) == line.installed()) {
+                        if (line.previous() == null) {
+                            failing.remove(line.id());
+                        } else {
+                            failing.put(line.id(), line.previous());
                         }
                     }
                 }
-                if (first == null) {
-                    first = e;
-                }
             }
-        }
-        if (first instanceof RuntimeException e) {
-            throw e;
-        }
-        if (first != null) {
-            // Error 등은 이름으로 가르지 않고 감싼다(코어는 JDK 허용 목록 안 타입만 쓴다, D-086). 부르는 쪽은 Throwable을 잡는다
-            throw new IllegalStateException("수집원 로그 출력 실패", first);
         }
     }
 
