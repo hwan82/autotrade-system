@@ -6,10 +6,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -25,7 +27,9 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>수집원 실패 로그는 상태가 바뀔 때만 WARN이다: 처음 실패, 실패 종류가 바뀜. 같은 실패가 이어지는 동안은 DEBUG, 다시
  * 읽히면 INFO 한 줄. OSHI가 안 되는 PC에서 매 주기 WARN이 쌓여 다른 경고를 묻지 않게 한다(risk-ops PR #114 K5). 주기마다의
- * 실패는 스냅샷의 {@link MetricSnapshot#failedSources()}에 그대로 남는다.
+ * 실패는 스냅샷의 {@link MetricSnapshot#failedSources()}에 그대로 남는다. WARN·INFO 줄을 내지 못하면(로그 핸들러 예외) 그
+ * 수집원 상태를 되돌려 다음 주기에 같은 줄을 다시 낸다. 그 주기의 스냅샷과 임계 판정은 그대로 낸다(PR #119 QA Q1, PR #155 F1).
+ * 수집원 id는 겹치면 안 된다.
  */
 public final class MonitorAgent implements AutoCloseable {
 
@@ -47,11 +51,20 @@ public final class MonitorAgent implements AutoCloseable {
     /**
      * @param historySize 들고 있을 최근 스냅샷 수(1 이상)
      * @param eventHistorySize 들고 있을 최근 임계 이벤트 수(1 이상)
+     * @throws IllegalArgumentException 수집원 id가 겹치거나 기록 크기가 1보다 작을 때
+     * @throws NullPointerException 수집원 id가 null일 때
      */
     public MonitorAgent(Clock clock, List<MetricSource> sources, List<Threshold> thresholds, int historySize,
             int eventHistorySize) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.sources = List.copyOf(sources);
+        // 같은 id가 둘이면 실패 상태가 섞여 주기마다 WARN·INFO가 번갈아 남는다(PR #119 QA R1)
+        Set<String> ids = new HashSet<>();
+        for (MetricSource source : this.sources) {
+            if (!ids.add(Objects.requireNonNull(source.id(), "수집원 id"))) {
+                throw new IllegalArgumentException("수집원 id가 겹칩니다: " + source.id());
+            }
+        }
         this.evaluator = new ThresholdEvaluator(thresholds);
         if (historySize < 1 || eventHistorySize < 1) {
             throw new IllegalArgumentException("기록 크기는 1 이상이어야 합니다");
@@ -82,9 +95,7 @@ public final class MonitorAgent implements AutoCloseable {
                 }
             }
         }
-        for (LogLine line : sourceLogs) {
-            LOG.log(line.level(), line.text());
-        }
+        writeSourceLogs(sourceLogs);
         readings.sort(Comparator.comparing(Reading::name));
         MetricSnapshot snapshot;
         List<ThresholdEvent> fired;
@@ -98,9 +109,13 @@ public final class MonitorAgent implements AutoCloseable {
             }
         }
         for (ThresholdEvent e : fired) {
-            LOG.log(e.escalation() ? System.Logger.Level.WARNING : System.Logger.Level.INFO,
-                    "임계 " + e.from() + " → " + e.to() + ": " + e.reading() + " = " + e.value() + e.unit()
-                            + " (경계 " + e.limit() + e.unit() + ")");
+            try {
+                LOG.log(e.escalation() ? System.Logger.Level.WARNING : System.Logger.Level.INFO,
+                        "임계 " + e.from() + " → " + e.to() + ": " + e.reading() + " = " + e.value() + e.unit()
+                                + " (경계 " + e.limit() + e.unit() + ")");
+            } catch (Throwable ignored) {
+                // 로그 출력 실패로 듣는 쪽 알림과 스냅샷 반환을 막지 않는다. 이벤트는 recentEvents()와 듣는 쪽에 그대로 간다(PR #155 F1)
+            }
         }
         for (MonitorListener l : listeners) {
             try {
@@ -193,26 +208,61 @@ public final class MonitorAgent implements AutoCloseable {
             }
             failing.remove(id);
             return new LogLine(System.Logger.Level.INFO,
-                    "수집원 회복: " + id + " (" + before.error + " " + before.count + "회 연속 실패 뒤)");
+                    "수집원 회복: " + id + " (" + before.error + " " + before.count + "회 연속 실패 뒤)", id, before, null);
         }
         if (before == null) {
-            failing.put(id, new Failure(error));
+            Failure now = new Failure(error);
+            failing.put(id, now);
             return new LogLine(System.Logger.Level.WARNING,
-                    "수집원 실패: " + id + " (" + error + "). 같은 실패가 이어지는 동안은 다시 경고하지 않는다");
+                    "수집원 실패: " + id + " (" + error + "). 같은 실패가 이어지는 동안은 다시 경고하지 않는다", id, null, now);
         }
         if (!before.error.equals(error)) {
-            failing.put(id, new Failure(error));
+            Failure now = new Failure(error);
+            failing.put(id, now);
             return new LogLine(System.Logger.Level.WARNING,
-                    "수집원 실패 바뀜: " + id + " (" + before.error + " → " + error + ")");
+                    "수집원 실패 바뀜: " + id + " (" + before.error + " → " + error + ")", id, before, now);
         }
         before.count++;
         if (!LOG.isLoggable(System.Logger.Level.DEBUG)) {
             return null; // DEBUG가 꺼져 있으면 주기마다 문자열을 만들지 않는다(architect PR #119 A2)
         }
-        return new LogLine(System.Logger.Level.DEBUG, "수집원 실패 계속: " + id + " (" + error + ", " + before.count + "회째)");
+        return new LogLine(System.Logger.Level.DEBUG, "수집원 실패 계속: " + id + " (" + error + ", " + before.count + "회째)",
+                id, null, null);
     }
 
-    private record LogLine(System.Logger.Level level, String text) {}
+    /**
+     * 수집원 로그를 낸다. WARN·INFO 줄을 내지 못하면(로그 핸들러 예외) 그 수집원 상태를 줄을 만들기 전으로 되돌려, 다음 주기에
+     * 같은 줄을 다시 내게 한다(PR #119 QA Q1: 첫 WARN이 출력되지 못한 채 "이미 경고함"으로 남지 않게). 출력 실패는 삼키고 그 주기의
+     * 스냅샷·임계 판정은 그대로 이어 간다: 핸들러가 계속 던져도 감시 판정이 끊기면 안 된다(architect PR #155 F1). 출력이 안 되는
+     * 로그로 그 실패를 알릴 수도 없다. DEBUG 반복 줄은 되돌리지 않는다(횟수만 센다).
+     */
+    private void writeSourceLogs(List<LogLine> lines) {
+        for (LogLine line : lines) {
+            try {
+                LOG.log(line.level(), line.text());
+            } catch (Throwable e) {
+                if (line.level() == System.Logger.Level.DEBUG) {
+                    continue;
+                }
+                synchronized (lock) {
+                    // 그 사이 다른 호출이 상태를 또 바꿨으면 그대로 둔다
+                    if (failing.get(line.id()) == line.installed()) {
+                        if (line.previous() == null) {
+                            failing.remove(line.id());
+                        } else {
+                            failing.put(line.id(), line.previous());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 낼 로그 한 줄과, 출력에 실패했을 때 되돌릴 상태. {@code previous}는 줄을 만들기 전 상태(없으면 null), {@code installed}는
+     * 줄을 만들며 넣은 상태(지웠으면 null).
+     */
+    private record LogLine(System.Logger.Level level, String text, String id, Failure previous, Failure installed) {}
 
     /** 수집원 하나의 연속 실패 상태. */
     private static final class Failure {

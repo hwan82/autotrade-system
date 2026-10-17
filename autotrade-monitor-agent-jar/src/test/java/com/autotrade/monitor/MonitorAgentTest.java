@@ -291,6 +291,117 @@ class MonitorAgentTest {
                 "수집원 회복: injected (IllegalStateException 3회 연속 실패 뒤)");
     }
 
+    /** 수집원 하나(id만 다른) 실패 주입. */
+    private static MetricSource failing(String id, AtomicReference<RuntimeException> failure) {
+        return new MetricSource() {
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public List<Reading> read() {
+                RuntimeException e = failure.get();
+                if (e != null) {
+                    throw e;
+                }
+                return List.of();
+            }
+        };
+    }
+
+    @Test
+    void WARN과_INFO를_내지_못하면_다음_주기에_다시_내고_그_주기_판정은_이어_간다() {
+        // 로그 핸들러가 던져 첫 WARN이 사라지면 "이미 경고함"으로 남지 않게 상태를 되돌린다(PR #119 QA Q1).
+        // 출력 실패로 그 주기의 스냅샷·임계 판정이 끊기면 안 된다(architect PR #155 F1)
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        AtomicReference<Double> cpu = new AtomicReference<>(97.0);
+        MetricSource healthy = new MetricSource() {
+            @Override
+            public String id() {
+                return "cpu";
+            }
+
+            @Override
+            public List<Reading> read() {
+                return List.of(new Reading("cpu.system", cpu.get(), "%"));
+            }
+        };
+        MonitorAgent agent = new MonitorAgent(CLOCK, List.of(failing("a", failure), failing("b", failure), healthy),
+                List.of(new Threshold("cpu.system", Direction.ABOVE, 85, 95, 1)), 10, 3);
+        List<String> logs = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger throwNext = new java.util.concurrent.atomic.AtomicInteger();
+        Logger jul = Logger.getLogger(MonitorAgent.class.getName());
+        java.util.logging.Level oldLevel = jul.getLevel();
+        boolean oldParent = jul.getUseParentHandlers();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                if (throwNext.getAndDecrement() > 0) {
+                    throw new IllegalStateException("핸들러 예외 주입");
+                }
+                logs.add(r.getLevel() + " " + r.getMessage());
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        handler.setLevel(java.util.logging.Level.ALL);
+        jul.setLevel(java.util.logging.Level.INFO);
+        jul.setUseParentHandlers(false);
+        jul.addHandler(handler);
+        try {
+            failure.set(new IllegalStateException("주입"));
+            // 핸들러가 계속 던져도 매 주기 스냅샷과 임계 판정이 나온다
+            throwNext.set(Integer.MAX_VALUE);
+            for (int i = 0; i < 5; i++) {
+                MetricSnapshot snap = agent.sampleOnce();
+                assertThat(snap.failedSources()).containsExactly("a", "b");
+                assertThat(snap.levels()).containsEntry("cpu.system", Level.CRITICAL);
+            }
+            assertThat(agent.history()).hasSize(5);
+            assertThat(logs).isEmpty();
+
+            // 핸들러가 살아나면 a·b의 첫 WARN이 한 번씩 나온다
+            throwNext.set(0);
+            agent.sampleOnce();
+            agent.sampleOnce();
+            assertThat(logs).containsExactly(
+                    "WARNING 수집원 실패: a (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                    "WARNING 수집원 실패: b (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다");
+
+            logs.clear();
+            failure.set(null);
+            throwNext.set(1); // a의 회복 INFO만 출력 실패
+            agent.sampleOnce();
+            assertThat(logs).containsExactly("INFO 수집원 회복: b (IllegalStateException 2회 연속 실패 뒤)");
+            agent.sampleOnce();
+            agent.sampleOnce();
+            assertThat(logs).containsExactly(
+                    "INFO 수집원 회복: b (IllegalStateException 2회 연속 실패 뒤)",
+                    "INFO 수집원 회복: a (IllegalStateException 2회 연속 실패 뒤)");
+        } finally {
+            jul.removeHandler(handler);
+            jul.setLevel(oldLevel);
+            jul.setUseParentHandlers(oldParent);
+        }
+    }
+
+    @Test
+    void 수집원_id가_겹치면_만들지_않는다() {
+        // 같은 id의 실패·성공 수집원이 섞이면 주기마다 WARN·INFO가 번갈아 남는다(PR #119 QA R1)
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        assertThatThrownBy(() -> new MonitorAgent(CLOCK, List.of(failing("system", failure), source,
+                failing("system", failure)), List.of(), 10, 3))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("수집원 id가 겹칩니다: system");
+        assertThatThrownBy(() -> new MonitorAgent(CLOCK, List.of(failing(null, failure)), List.of(), 10, 3))
+                .isInstanceOf(NullPointerException.class);
+    }
+
     @Test
     void 잘못된_주기와_기록_크기는_거절한다() {
         assertThatThrownBy(() -> agent(0)).isInstanceOf(IllegalArgumentException.class);
