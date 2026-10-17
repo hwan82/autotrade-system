@@ -38,7 +38,7 @@ D-104부터 KRX 일봉 수집기는 캘린더상 거래일에 빈 목록이 오�
 
 ## 검증
 
-- `CollectionFreshnessTest`(7, 후속으로 10): 스냅샷 폴더 없음은 확인 필요(예외 아님), 1거래일 뒤처짐은 정상·2거래일은 멈춤 의심, 주말 제외, 한글날(2026-10-09) 휴장일은 세지 않음, 여러 스냅샷 중 가장 늦은 것을 고르고 깨진 manifest는 목록에 적고 만들다 만 폴더는 무시·같은 폴더면 같은 보고서, 캘린더 범위 밖은 평일로 셈·표시, KRX 밖 시장은 해당 없음.
+- `CollectionFreshnessTest`(7, 후속으로 10, 2차 후속으로 12): 스냅샷 폴더 없음은 확인 필요(예외 아님), 1거래일 뒤처짐은 정상·2거래일은 멈춤 의심, 주말 제외, 한글날(2026-10-09) 휴장일은 세지 않음, 여러 스냅샷 중 가장 늦은 것을 고르고 깨진 manifest는 목록에 적고 만들다 만 폴더는 무시·같은 폴더면 같은 보고서, 캘린더 범위 밖은 평일로 셈·표시, KRX 밖 시장은 해당 없음.
 - `LiveWeeklyCheckTest` 깨끗한 세션 시험에 덧붙임: 스냅샷 없음은 머리·4장에 나오고 결함(종료 코드 2 조건)이 아님, 하루 전 스냅샷은 정상, 이틀 뒤처지면 멈춤 의심과 날짜 목록.
 
 ## 후속(PR #145 검토 권고, 2026-10-17)
@@ -49,3 +49,12 @@ D-104부터 KRX 일봉 수집기는 캘린더상 거래일에 빈 목록이 오�
 - strategy-researcher R3·architect N2: 스냅샷 마지막 거래일이 점검 마지막 날보다 뒤면(`-Pto`로 지난 주를 다시 점검) 판정은 정상 그대로 두고 4장에 "그 주에 있었던 멈춤은 이 칸에 보이지 않는다"를 적는다(`Status.newerThanEnd`). 시험 `recheckingAnEarlierWeekSeesNewerSnapshotsAsNormal`.
 - architect N1: `coverage`(또는 `lastTradingDate`)가 없는 ADR-008 이전 형식 manifest는 "읽지 못함"이 아니라 "마지막 거래일 칸이 없는 옛 형식이라 세지 않은 스냅샷 폴더(깨진 것 아님)"로 따로 적는다(`Status.noCoverage`). 판정은 그대로(이것만 있으면 확인 필요). 시험 `oldManifestWithoutCoverageIsListedApartFromBrokenOnes`.
 - strategy-researcher R1(KRX 게시가 T+1이면 매주 거짓 멈춤 의심)은 첫 실데이터 주간 점검에서 스냅샷 `lastTradingDate`와 실행 시각을 대조해 정한다. R4(더 빠른 감지)는 대안 C 방향으로 남긴다.
+
+## 2차 후속(PR #147 검토 선택 권고, 2026-10-17)
+
+판정·종료 코드는 그대로이고 머리·콘솔 한 줄(`Status.summary()`)과 시험만 보탠다(새 결정 번호 없음).
+
+- strategy-researcher P2: 옛 형식 스냅샷만 있으면 머리 한 줄을 "셀 수 있는 일봉 스냅샷이 없음(마지막 거래일 칸 없는 옛 형식 N개, 아래 4장)"으로 적는다. 옛 형식도 없으면 지금처럼 "일봉 스냅샷이 없음".
+- architect 3: 지난 주 재점검(`newerThanEnd`)이면 머리·콘솔 한 줄에도 "점검 마지막 날보다 뒤라 그 주의 멈춤은 보이지 않음"을 붙인다.
+- architect 2: `coverage`는 있고 `lastTradingDate`만 없는 manifest도 옛 형식(`noCoverage`)으로 적히는지 시험 `coverageWithoutLastTradingDateIsOldFormatToo`.
+- 남은 것: architect 1(선정 프로필을 `LivePlan`에 연결하는 PR이 4장 "6단계 계좌는 일봉 스냅샷을 안 씀" 문구와 시험 `sectionSaysTheLiveAccountsDoNotReadDailySnapshots`를 함께 고침), strategy-researcher P1(`createdAt` 기준 당시 스냅샷 재구성, 지난 주 재점검이 자주 쓰일 때만), PR #145 R1(첫 실데이터 점검에서 KRX 게시 시각 대조).

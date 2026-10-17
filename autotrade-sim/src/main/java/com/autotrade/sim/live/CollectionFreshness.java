@@ -69,14 +69,21 @@ public final class CollectionFreshness {
             return kind == Kind.BEHIND || kind == Kind.NO_SNAPSHOT;
         }
 
-        /** 보고서 머리와 콘솔에 쓰는 한 줄. */
+        /**
+         * 보고서 머리와 콘솔에 쓰는 한 줄. 지난 주 재점검({@code newerThanEnd})과 옛 형식 스냅샷만 있는 경우도 4장을 보지 않고
+         * 알 수 있게 적는다(PR #147 strategy-researcher P2·architect 3).
+         */
         public String summary() {
             return switch (kind) {
                 case OK -> "정상(일봉 스냅샷 마지막 거래일 " + lastTradingDate
-                        + (behind.isEmpty() ? "" : ", 점검 마지막 날 " + behind.get(0) + "은 아직 수집 전일 수 있음") + ")";
+                        + (behind.isEmpty() ? "" : ", 점검 마지막 날 " + behind.get(0) + "은 아직 수집 전일 수 있음")
+                        + (newerThanEnd ? ", 점검 마지막 날보다 뒤라 그 주의 멈춤은 보이지 않음" : "") + ")";
                 case BEHIND -> "**멈춤 의심**: 일봉 스냅샷 마지막 거래일 " + lastTradingDate + ", 그 뒤 " + behind.size()
                         + "거래일 수집 안 됨(아래 4장)";
-                case NO_SNAPSHOT -> "**확인 필요**: 일봉 스냅샷이 없음(아래 4장)";
+                case NO_SNAPSHOT -> noCoverage.isEmpty()
+                        ? "**확인 필요**: 일봉 스냅샷이 없음(아래 4장)"
+                        : "**확인 필요**: 셀 수 있는 일봉 스냅샷이 없음(마지막 거래일 칸 없는 옛 형식 " + noCoverage.size()
+                                + "개, 아래 4장)";
                 case NOT_APPLICABLE -> "해당 없음(일봉 수집은 KRX만)";
             };
         }
