@@ -16,13 +16,16 @@ import java.util.regex.Pattern;
  * {@link RunGate}로 넣는다(D-063).
  *
  * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--to YYYY-MM-DD] [--sessions-dir 폴더]
- * [--recordings-dir 폴더]}. 폴더 기본값은 설정 폴더 아래 {@value LiveCheckMain#SESSIONS_DIR}와 {@value #RECORDINGS_DIR}.
+ * [--recordings-dir 폴더] [--snapshots-dir 폴더]}. 폴더 기본값은 설정 폴더 아래 {@value LiveCheckMain#SESSIONS_DIR},
+ * {@value #RECORDINGS_DIR}, {@value #SNAPSHOTS_DIR}(수집 멈춤 여부, D-105).
  * 종료 코드: 0 설명되지 않는 차이 없음, 1 입력 오류, 2 설명되지 않는 차이 있음(전달·기록 경로 확인 필요), 3 취소 요청으로 멈춤(D-089), 4 정지 확인으로 멈춤.
  */
 public final class LiveWeeklyMain {
 
     /** 설정 폴더 안 게이트웨이 녹화 폴더 이름(ADR-003 2.3). */
     public static final String RECORDINGS_DIR = "recordings";
+    /** 설정 폴더 안 수집 스냅샷 폴더 이름(ADR-008 2.4). */
+    public static final String SNAPSHOTS_DIR = "snapshots";
     private static final Pattern EXPERIMENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
     private LiveWeeklyMain() {
@@ -34,7 +37,7 @@ public final class LiveWeeklyMain {
     public static int run(String[] args, Path configDir, RunGate gate) {
         if (args.length < 4) {
             System.err.println("인자: <저장소 루트> <커밋> <dirty true|false> <실험ID> [--to YYYY-MM-DD] [--sessions-dir 폴더] "
-                    + "[--recordings-dir 폴더]");
+                    + "[--recordings-dir 폴더] [--snapshots-dir 폴더]");
             return 1;
         }
         Path root = Path.of(args[0]);
@@ -46,12 +49,15 @@ public final class LiveWeeklyMain {
         }
         Path sessions = configDir.resolve(LiveCheckMain.SESSIONS_DIR);
         Path recordings = configDir.resolve(RECORDINGS_DIR);
+        Path snapshots = configDir.resolve(SNAPSHOTS_DIR);
         Optional<LocalDate> to = Optional.empty();
         for (int i = 4; i < args.length; i++) {
             if (args[i].equals("--sessions-dir") && i + 1 < args.length) {
                 sessions = Path.of(args[++i]);
             } else if (args[i].equals("--recordings-dir") && i + 1 < args.length) {
                 recordings = Path.of(args[++i]);
+            } else if (args[i].equals("--snapshots-dir") && i + 1 < args.length) {
+                snapshots = Path.of(args[++i]);
             } else if (args[i].equals("--to") && i + 1 < args.length) {
                 try {
                     to = Optional.of(LocalDate.parse(args[++i]));
@@ -71,8 +77,13 @@ public final class LiveWeeklyMain {
         }
         try {
             gate.check();
-            LiveWeeklyCheck.Outcome out = LiveWeeklyCheck.runAndWrite(dir, root, sessions, recordings, to, code,
+            LiveWeeklyCheck.Outcome out = LiveWeeklyCheck.runAndWrite(dir, root, sessions, recordings, snapshots, to, code,
                     LiveWeeklyMain::log, gate);
+            if (out.collection().warn()) {
+                // 종료 코드는 전달·기록 결함(2)에만 쓴다. 수집 멈춤은 다른 프로그램의 상태라 눈에 띄게 알리기만 한다(D-105)
+                log("수집 확인 필요: " + out.collection().summary().replace("**", "") + ". weekly/" + out.to()
+                        + ".md 4장을 보세요.");
+            }
             if (out.defect()) {
                 log("설명되지 않는 차이가 있습니다. weekly/" + out.to() + ".md의 \"설명 없음\" 칸을 보고 알리세요.");
                 return 2;

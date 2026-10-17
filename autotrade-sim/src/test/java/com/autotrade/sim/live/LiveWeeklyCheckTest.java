@@ -53,6 +53,7 @@ class LiveWeeklyCheckTest {
     Path experimentDir;
     Path sessions;
     Path recordings;
+    Path snapshots;
     LivePlan plan;
     final LiveSessionTest.Mutable clock = new LiveSessionTest.Mutable();
 
@@ -81,6 +82,7 @@ class LiveWeeklyCheckTest {
         plan = LivePlan.parse(yaml, "experiment.yaml");
         sessions = tmp.resolve("live-sessions");
         recordings = tmp.resolve("recordings");
+        snapshots = tmp.resolve("snapshots");
     }
 
     /** 게이트웨이 녹화: 이틀치 시세에 boards 밖 종목(카카오)이 섞인다. 녹화기와 같은 줄 형식. */
@@ -107,7 +109,7 @@ class LiveWeeklyCheckTest {
     }
 
     private LiveWeeklyCheck.Outcome check(Optional<LocalDate> to) {
-        return LiveWeeklyCheck.run(experimentDir, REPO, sessions, recordings, to, new CodeVersion("c", false), m -> { },
+        return LiveWeeklyCheck.run(experimentDir, REPO, sessions, recordings, snapshots, to, new CodeVersion("c", false), m -> { },
                 RunGate.NONE);
     }
 
@@ -145,6 +147,20 @@ class LiveWeeklyCheckTest {
         // 빠진 이벤트가 없으면 녹화 리플레이와 입력 기록 리플레이가 체결 원장까지 같다
         assertThat(out.report()).contains("상세 보고서: 같음").contains("설명되지 않는 차이 없음")
                 .contains("| kr-bh-baseline@1 |").doesNotContain("035720");
+        // 수집 스냅샷이 없으면 4장과 머리에 확인 필요로 나오지만, 전달·기록 결함(종료 코드 2)과는 따로다(D-105)
+        assertThat(out.collection().kind()).isEqualTo(CollectionFreshness.Kind.NO_SNAPSHOT);
+        assertThat(out.report()).contains("- 수집: **확인 필요**: 일봉 스냅샷이 없음").contains("## 4. 수집 멈춤 여부(D-105)");
+
+        // 점검 마지막 날(DAY2) 하루 전까지 수집됐으면 정상, 그보다 이틀 이상 뒤처지면 멈춤 의심
+        CollectionFreshnessTest.writeSnapshot(snapshots, "krx-daily-2026-10-14-0000aaaa", DAY1);
+        assertThat(check(Optional.empty()).collection().kind()).isEqualTo(CollectionFreshness.Kind.OK);
+        Files.walk(snapshots).sorted(java.util.Comparator.reverseOrder()).forEach(f -> f.toFile().delete());
+        CollectionFreshnessTest.writeSnapshot(snapshots, "krx-daily-2026-10-13-0000bbbb", LocalDate.of(2026, 10, 13));
+        LiveWeeklyCheck.Outcome behind = check(Optional.empty());
+        assertThat(behind.defect()).isFalse();
+        assertThat(behind.collection().behind()).containsExactly(DAY1, DAY2);
+        assertThat(behind.report()).contains("- 수집: **멈춤 의심**: 일봉 스냅샷 마지막 거래일 2026-10-13, 그 뒤 2거래일 수집 안 됨")
+                .contains("- 수집 안 된 거래일: 2026-10-14, 2026-10-15");
     }
 
     @Test
@@ -356,7 +372,7 @@ class LiveWeeklyCheckTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("운용 기간 밖");
 
         LiveWeeklyCheck.Outcome out = LiveWeeklyCheck.runAndWrite(experimentDir, REPO, sessions, recordings,
-                Optional.empty(), new CodeVersion("c", false), m -> { }, RunGate.NONE);
+                snapshots, Optional.empty(), new CodeVersion("c", false), m -> { }, RunGate.NONE);
         Path written = experimentDir.resolve(LiveWeeklyCheck.WEEKLY_DIR).resolve("2026-10-14.md");
         assertThat(Files.readString(written, StandardCharsets.UTF_8)).isEqualTo(out.report());
         // 같은 입력이면 같은 보고서(실행 시각 같은 메타가 없음)
@@ -374,7 +390,7 @@ class LiveWeeklyCheckTest {
         }
         AtomicInteger calls = new AtomicInteger();
         RunGate stopOnSecond = () -> calls.incrementAndGet() >= 2 ? Optional.of("정지 요청") : Optional.empty();
-        assertThatThrownBy(() -> LiveWeeklyCheck.runAndWrite(experimentDir, REPO, sessions, recordings, Optional.empty(),
+        assertThatThrownBy(() -> LiveWeeklyCheck.runAndWrite(experimentDir, REPO, sessions, recordings, snapshots, Optional.empty(),
                 new CodeVersion("c", false), m -> { }, stopOnSecond)).isInstanceOf(ExperimentStoppedException.class);
         assertThat(experimentDir.resolve(LiveWeeklyCheck.WEEKLY_DIR)).doesNotExist();
     }
