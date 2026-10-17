@@ -19,7 +19,7 @@ import java.util.Set;
  * 기본값을 쓴다.
  *
  * <p><b>틀린 설정은 기동을 거부한다</b>(PR #115 risk-ops K2): 모르는 키(오타), 중복 키, 형식·범위 오류, 없는 드라이브 경로가
- * 하나라도 있으면 문제를 모두 모아 {@link IllegalArgumentException}을 던지고, 진입점은 종료 코드 2로 끝난다. 실험실 모니터링처럼
+ * 하나라도 있으면 문제를 모두 모아 {@link WatchdogRefusal}({@link IllegalArgumentException})을 던지고, 진입점은 종료 코드 2로 끝난다. 실험실 모니터링처럼
  * "사용 불가"로 두고 뜨면 감시가 도는 것처럼 보이면서 아무것도 지키지 않게 되기 때문이다. 일반 설정({@code runtime-config.json})은
  * 틀리면 경고 뒤 기본값으로 뜨는 체계라 감시 설정을 그 파일에 두지 않았다.
  *
@@ -78,7 +78,7 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
         try {
             return parse(SmallFile.read(file), configDir);
         } catch (IOException e) {
-            throw new IllegalArgumentException("감시 설정 파일을 읽지 못했습니다: " + file + " (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
+            throw WatchdogRefusal.settings("감시 설정 파일을 읽지 못했습니다: " + file + " (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
         }
     }
 
@@ -142,7 +142,7 @@ record WatchdogSettings(Duration interval, Duration heartbeatStale, List<String>
         Limits memory = usage(values, MEMORY, problems);
 
         if (!problems.isEmpty()) {
-            throw new IllegalArgumentException("감시 설정 오류(" + configDir.resolve(FILE) + "): " + String.join("; ", problems));
+            throw WatchdogRefusal.settings("감시 설정 오류(" + configDir.resolve(FILE) + "): " + String.join("; ", problems));
         }
         return new WatchdogSettings(Duration.ofSeconds(interval), Duration.ofSeconds(stale), processes, disks, warn, critical,
                 sustain, Duration.ofSeconds(hold), cpu, memory);

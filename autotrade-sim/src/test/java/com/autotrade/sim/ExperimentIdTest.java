@@ -23,8 +23,17 @@ class ExperimentIdTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"con", "Nul", "CON.TXT", "../X", ""})
-    void 형식이_아니면_받지_않는다(String value) {
-        assertThatThrownBy(() -> new ExperimentId(value)).isInstanceOf(IllegalArgumentException.class);
+    @ValueSource(strings = {"con", "Nul", "CON.TXT", "../X", "", "-EXP", "EXP_1", "A/B",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})
+    void 형식이_아니면_규칙을_적은_문구로_거절한다(String value) {
+        assertThatThrownBy(() -> new ExperimentId(value))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("48자 이내");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"A", "9", "0-", "A----------------------------------------------9"})
+    void 영문_대문자_숫자로_시작하고_48자_이내면_받는다(String value) {
+        assertThat(new ExperimentId(value).value()).isEqualTo(value);
     }
 }

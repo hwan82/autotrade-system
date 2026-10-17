@@ -56,6 +56,31 @@ class ExperimentRegistrationsTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"exp-1", "-EXP", "EXP_1", "EXP.1", "../X", "A/B", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})
+    void 형식이_아닌_실험_ID는_ExperimentId_문구로_거절하고_폴더를_만들지_않는다(String id) {
+        // 형식 규칙은 ExperimentId 한 곳에 있다(PR #126 architect N2). 화면은 그 문구를 그대로 400으로 보인다
+        assertThatThrownBy(() -> registrations().create(request(id)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("48자 이내")
+                .hasMessageContaining("예: EXP-20261014-CMB01");
+        assertThatThrownBy(() -> registrations().preview(request(id)))
+                .isInstanceOf(IllegalArgumentException.class);
+        try (var children = Files.list(dir)) {
+            assertThat(children).isEmpty();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Test
+    void 영문_대문자_숫자_하이픈_48자_ID는_받는다() {
+        String id = "A" + "-".repeat(46) + "9";
+        assertThat(id).hasSize(48);
+
+        assertThat(registrations().create(request(id)).written()).isTrue();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"CONX", "COM10", "LPT10", "NUL-1", "EXP-CON", "AUX2", "COMA"})
     void 예약_이름을_포함하기만_한_ID는_받는다(String id) {
         ExperimentRegistrations.Registration r = registrations().create(request(id));
