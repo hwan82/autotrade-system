@@ -86,9 +86,14 @@ public final class NotificationSetup {
      * @param name {@link #SLACK} 또는 {@link #KAKAO}
      * @param channel 꾸린 채널(못 꾸렸으면 null)
      * @param skipReason 못 꾸린 이유 코드(꾸렸으면 null)
-     * @throws IllegalArgumentException 이름이 둘 중 하나가 아니거나, 채널 이름과 다르거나, 채널과 이유가 둘 다 있거나 둘 다 없을 때
      */
     public record ExternalChannel(String name, Channel channel, String skipReason) {
+        /**
+         * 이름·채널·이유가 위 조건에 맞는지 검사한다.
+         *
+         * @throws IllegalArgumentException 이름이 둘 중 하나가 아니거나, 채널 이름과 다르거나, 채널과 이유가 둘 다 있거나 둘 다 없을 때
+         * @throws NullPointerException 이름이 null일 때
+         */
         public ExternalChannel {
             Objects.requireNonNull(name, "name");
             if (!name.equals(SLACK) && !name.equals(KAKAO)) {

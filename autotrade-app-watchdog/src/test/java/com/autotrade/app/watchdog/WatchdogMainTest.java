@@ -37,7 +37,63 @@ class WatchdogMainTest {
         Files.writeString(dir.resolve(WatchdogSettings.FILE), "disk.free-gb=20:50:1\n");
 
         assertThat(WatchdogMain.run(ConfigPaths.in(dir), fixed)).isEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
-        assertThatThrownBy(() -> WatchdogMain.start(ConfigPaths.in(dir), fixed)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WatchdogMain.start(ConfigPaths.in(dir), fixed)).isInstanceOf(WatchdogRefusal.class)
+                .satisfies(e -> {
+                    WatchdogMain.StartFailure f = WatchdogMain.StartFailure.of((RuntimeException) e);
+                    assertThat(f.exitCode()).isEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
+                    // 수집기 runbook 3.5가 이 문구로 찾게 한다
+                    assertThat(f.headline()).isEqualTo("감시 설정이 틀려 기동하지 않습니다");
+                    assertThat(f.detail()).contains("disk.free-gb");
+                });
+    }
+
+    @Test
+    void 설정_파일을_못_읽어도_설정_오류로_거부한다() throws Exception {
+        Files.createDirectory(dir.resolve(WatchdogSettings.FILE)); // 파일 자리에 폴더
+
+        assertThat(WatchdogMain.run(ConfigPaths.in(dir), fixed)).isEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
+        assertThatThrownBy(() -> WatchdogMain.start(ConfigPaths.in(dir), fixed)).isInstanceOf(WatchdogRefusal.class)
+                .hasMessageContaining("감시 설정 파일을 읽지 못했습니다");
+    }
+
+    @Test
+    void 알림_채널_코드_실수_같은_예외는_설정_오류로_표시하지_않는다() {
+        // PR #144 독립 QA R1(D-106): 채널 이름 검사 실패도 IllegalArgumentException이지만 사람이 고칠 설정 문제가 아니다
+        IllegalArgumentException codeBug = new IllegalArgumentException("외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x");
+
+        WatchdogMain.StartFailure f = WatchdogMain.StartFailure.of(codeBug);
+
+        assertThat(f.exitCode()).isEqualTo(WatchdogMain.EXIT_START_FAILED).isNotEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
+        assertThat(f.headline()).doesNotContain("설정이 틀려").contains("프로그램 오류").contains("설정 파일 문제가 아닙니다");
+        assertThat(f.detail()).isEqualTo("IllegalArgumentException: 외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x");
+    }
+
+    @Test
+    void 그_밖의_기동_예외도_프로그램_오류로_종료_코드_1이다() {
+        WatchdogMain.StartFailure f = WatchdogMain.StartFailure.of(new IllegalStateException("이미 시작했습니다"));
+
+        assertThat(f.exitCode()).isEqualTo(WatchdogMain.EXIT_START_FAILED);
+        assertThat(f.detail()).isEqualTo("IllegalStateException: 이미 시작했습니다");
+    }
+
+    @Test
+    void 기동_실패는_표준_오류에_첫머리_문구와_원인을_한_줄로_남긴다() {
+        java.io.PrintStream original = System.err;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        IllegalArgumentException codeBug = new IllegalArgumentException("외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x");
+        WatchdogRefusal refusal = WatchdogRefusal.settings("감시 설정 오류(x): 1번째 줄: 모르는 키입니다(오타?): y");
+        try {
+            System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+            WatchdogMain.StartFailure.of(codeBug).report(codeBug);
+            WatchdogMain.StartFailure.of(refusal).report(refusal);
+        } finally {
+            System.setErr(original);
+        }
+
+        String err = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(err).contains("감시가 기동 중 프로그램 오류로 멈췄습니다")
+                .contains("(감시 없이 실전·실험을 돌리지 마세요): IllegalArgumentException: 외부 채널 이름과 꾸린 채널 이름이 다르다")
+                .contains("감시 설정이 틀려 기동하지 않습니다(감시 없이 실전·실험을 돌리지 마세요): 감시 설정 오류(x)");
     }
 
     @Test
@@ -45,7 +101,9 @@ class WatchdogMainTest {
         // D-095 4번. 기동 점검(run)과 실제 기동(start)이 같은 판정을 한다(PR #122 architect N4)
         assertThat(WatchdogMain.run(ConfigPaths.in(dir), fixed, java.util.Optional::empty)).isEqualTo(WatchdogMain.EXIT_BAD_SETTINGS);
         assertThatThrownBy(() -> WatchdogMain.start(ConfigPaths.in(dir), fixed, java.util.Optional::empty))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("CPU·메모리").hasMessageContaining("D-095");
+                .isInstanceOf(WatchdogRefusal.class).hasMessageContaining("CPU·메모리").hasMessageContaining("D-095")
+                .satisfies(e -> assertThat(WatchdogMain.StartFailure.of((RuntimeException) e).headline())
+                        .isEqualTo("이 JVM에서는 감시가 기동하지 않습니다"));
         assertThat(dir.resolve("heartbeat").resolve("watchdog.hb")).doesNotExist(); // 점검을 시작하지 않았다
     }
 
