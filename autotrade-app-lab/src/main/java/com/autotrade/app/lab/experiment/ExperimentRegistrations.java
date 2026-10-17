@@ -26,7 +26,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.regex.Pattern;
 
 /**
  * 실험 생성 화면(UI-02)이 조합 실험 등록 파일 {@code experiments/<실험ID>/experiment.yaml}을 쓴다(D-074). 실험실은 실험을
@@ -41,8 +40,6 @@ public final class ExperimentRegistrations {
 
     /** 조합 수 상한(SIM-14 {@code SimulationExperimentRunner.MAX_COMBINATIONS}와 같은 값). */
     static final int MAX_COMBINATIONS = 128;
-    /** 등록 파일이 받는 실험 ID 모양({@code ExperimentId}와 같음). 경로 구분자와 {@code ..}가 들어갈 수 없다. */
-    private static final Pattern ID = Pattern.compile("[A-Z0-9][A-Z0-9-]{0,47}");
     private static final int MAX_QUESTION = 500;
     private static final String COMMAND = "./gradlew :autotrade-app-experiment:runCombinationExperiment -Pexperiment=%s"
             + " -PverifyDeterminism";
@@ -145,10 +142,8 @@ public final class ExperimentRegistrations {
             throw new IllegalArgumentException("요청이 비었습니다");
         }
         String id = required(r.id(), "실험 ID");
-        if (!ID.matcher(id).matches()) {
-            throw new IllegalArgumentException("실험 ID는 영문 대문자·숫자로 시작하고 영문 대문자·숫자·- 48자 이내여야 합니다(예: EXP-20261014-CMB01)");
-        }
-        // Windows 예약 이름(D-097)은 폴더를 만들기 전에 거절한다. 거절 문구는 ExperimentId가 준다
+        // 형식(경로 구분자·".." 불가)과 Windows 예약 이름(D-097)을 폴더를 만들기 전에 거절한다. 규칙과 거절 문구는
+        // ExperimentId 한 곳에만 둔다(PR #126 architect N2)
         new ExperimentId(id);
         String question = required(r.question(), "질문");
         if (question.length() > MAX_QUESTION || question.chars().anyMatch(c -> c == '\n' || c == '\r')) {
