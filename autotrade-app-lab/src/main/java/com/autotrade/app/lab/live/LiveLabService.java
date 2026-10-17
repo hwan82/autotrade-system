@@ -146,14 +146,20 @@ public class LiveLabService implements AutoCloseable {
         if (!dir.getParent().equals(experimentsRoot) || !Files.isRegularFile(file)) {
             throw new IllegalArgumentException("등록 파일이 없습니다: experiments/" + id + "/experiment.yaml");
         }
-        LivePlan plan;
+        String yaml;
         try {
-            plan = LivePlan.parse(Files.readString(file, StandardCharsets.UTF_8), "experiments/" + id + "/experiment.yaml");
+            yaml = Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException e) {
             // 파일이 다른 프로그램에 잠겼거나 권한이 없을 때. 사용자가 고칠 수 있는 상태라 500이 아니라 거절로 알린다
             throw new IllegalStateException("등록 파일을 읽을 수 없습니다(" + e.getClass().getSimpleName() + "): experiments/"
                     + id + "/experiment.yaml. 다른 프로그램이 파일을 잡고 있지 않은지, 읽기 권한이 있는지 확인하세요");
         }
+        // 조합·녹화 실험 등록 파일이면 형식 검사의 "모르는 키" 대신 원인을 바로 알린다(5단계 QA R5). 목록과 같은 기준
+        if (!isLiveRegistration(yaml)) {
+            throw new IllegalArgumentException("실시간 세션 등록 파일(input: live)이 아닙니다: experiments/" + id
+                    + "/experiment.yaml");
+        }
+        LivePlan plan = LivePlan.parse(yaml, "experiments/" + id + "/experiment.yaml");
         if (!plan.id().value().equals(id)) {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다");
         }
@@ -404,7 +410,7 @@ public class LiveLabService implements AutoCloseable {
             } catch (IOException e) {
                 continue; // 실시간 등록인지 알 수 없다. 시작하면 같은 사유로 거절된다
             }
-            if (yaml.lines().map(String::strip).noneMatch(l -> LIVE_INPUT.matcher(l).matches())) {
+            if (!isLiveRegistration(yaml)) {
                 continue;
             }
             boolean journal = Files.isDirectory(sessionsRoot.resolve(id));
@@ -570,4 +576,12 @@ public class LiveLabService implements AutoCloseable {
     }
 
     private record Item(String sourceId, MarketEvent event) {}
+
+    /**
+     * 실시간 세션 등록 파일인지(앞뒤 공백을 뺀 한 줄이 {@code input: live}). 목록({@link #registrations()})과
+     * 시작({@code start}) 사전 검사가 같은 기준을 쓰도록 여기에만 둔다(PR #156 architect R1).
+     */
+    private static boolean isLiveRegistration(String yaml) {
+        return yaml.lines().map(String::strip).anyMatch(l -> LIVE_INPUT.matcher(l).matches());
+    }
 }
