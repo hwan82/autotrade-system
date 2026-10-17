@@ -524,6 +524,102 @@ class WatchdogTest {
         }
     }
 
+    @Test
+    void 드라이브_둘_중_하나만_실패하면_원인은_그_드라이브에만_붙는다() throws Exception {
+        // PR #157 QA Q1(변이 M13): 실패 맵의 원인을 다른 빠진 값(다른 드라이브, CPU)에 붙이면 안 된다
+        Path a = dir.resolve("a");
+        Path b = dir.resolve("b");
+        java.nio.file.Files.createDirectories(a);
+        java.nio.file.Files.createDirectories(b);
+        WatchdogSettings settings = WatchdogSettings.parse("disks=" + a + "," + b, dir);
+        Watchdog w = new Watchdog(dir, settings, new TestClock("2026-10-15T00:00:00Z"), path -> {
+            if (path.equals(settings.disks().get(1))) {
+                throw new IOException("fail b");
+            }
+            return 100 * GIB;
+        }, os);
+        List<LogRecord> records = new ArrayList<>();
+        Handler handler = capture(records);
+        try {
+            cpu = -1;
+            w.tick();
+            w.close();
+        } finally {
+            java.util.logging.Logger.getLogger(Watchdog.class.getName()).removeHandler(handler);
+        }
+        String nameB = DiskFreeSource.readingName(settings.disks().get(1));
+        assertThat(records).filteredOn(r -> r.getMessage().startsWith("자원 값을 읽지 못함")).singleElement()
+                .satisfies(r -> assertThat(r.getMessage())
+                        .startsWith("자원 값을 읽지 못함: [cpu.system, " + nameB + "] (원인: " + nameB + " ← IOException: fail b). "));
+    }
+
+    @Test
+    void 미룬_회복_INFO는_지난_회복_뒤_경고한_값만_적는다() {
+        // risk-ops PR #157 K3: 간격 안에서 합친 경고 목록(이미 회복을 알린 값 포함)을 회복 본문에 적지 않는다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 5초 WARN [cpu]
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 10초 INFO [cpu]
+        diskFails = true;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 15초 WARN [disk]
+        diskFails = false;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 20초 회복은 미룸
+        clock.advance(Watchdog.MISSING_REPEAT.minusSeconds(10));
+        w.tick(); // 첫 INFO에서 10분: 미룬 회복
+        w.close();
+        String disk = DiskFreeSource.readingName(dir.toAbsolutePath());
+        assertThat(sent).filteredOn(a -> a.kind().equals(EventRoutes.READING_RECOVERED)).extracting(Sent::body)
+                .containsExactly("[cpu.system]", "[" + disk + "]");
+    }
+
+    @Test
+    void 감시_로그가_던져도_같은_점검의_알림과_정지_요청은_그대로_한다() throws Exception {
+        // risk-ops PR #155 K1: 점검 단계는 상태를 바꾼 뒤 로그를 낸다. 그 로그가 던지면 하트비트 멈춤 알림이 영영 나가지 않고,
+        // 정지 요청 파일·자원 결측 알림이 그 점검에서 빠졌다
+        java.util.logging.Logger pkg = java.util.logging.Logger.getLogger(Watchdog.class.getPackageName());
+        Handler throwing = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                throw new IllegalStateException("핸들러 예외 주입");
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        pkg.addHandler(throwing);
+        try {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            HeartbeatWriter engine = new HeartbeatWriter(dir, "engine", clock);
+            engine.beat();
+            Watchdog w = watchdog(clock);
+            w.tick();
+            assertThat(w.heartbeats().states()).containsEntry("engine", State.ALIVE);
+
+            clock.advance(Duration.ofSeconds(20));
+            free.set(10 * GIB);
+            cpu = -1;
+            w.tick();
+            assertThat(kinds()).containsExactlyInAnyOrder(EventRoutes.READING_MISSING, EventRoutes.PROCESS_STALE,
+                    EventRoutes.STOP_REQUEST_ON);
+            assertThat(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST)).exists();
+            assertThat(dir.resolve(StopRequests.EXPERIMENT_STOP_REQUEST)).exists();
+            assertThat(w.missingWarnings()).isEqualTo(1);
+            w.close();
+        } finally {
+            pkg.removeHandler(throwing);
+        }
+    }
+
     /** 감시 로거 기록을 모은다. 시험이 끝나면 떼야 한다. */
     private static Handler capture(List<LogRecord> records) {
         Handler handler = new Handler() {

@@ -75,6 +75,16 @@ final class DiskFreeSource implements MetricSource {
         return failures;
     }
 
+    /** 제어 문자(CR·LF·탭·ESC 등)를 공백으로 바꾼다. 콘솔 줄 모양이 깨지거나 ANSI 색 문자열이 먹지 않게(PR #157 QA R2). */
+    private static String oneLine(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            out.append(Character.isISOControl(c) ? ' ' : c);
+        }
+        return out.toString();
+    }
+
     /** 예외 종류와 메시지 한 줄(메시지는 {@value #CAUSE_MAX}자까지). 메시지는 경로 같은 OS 문구라 비밀값이 없다. */
     static String cause(Exception e) {
         String type = e.getClass().getSimpleName().isEmpty() ? e.getClass().getName() : e.getClass().getSimpleName();
@@ -82,7 +92,7 @@ final class DiskFreeSource implements MetricSource {
         if (message == null || message.isBlank()) {
             return type;
         }
-        String oneLine = message.strip().replace('\r', ' ').replace('\n', ' ');
+        String oneLine = oneLine(message.strip());
         if (oneLine.length() <= CAUSE_MAX) {
             return type + ": " + oneLine;
         }
