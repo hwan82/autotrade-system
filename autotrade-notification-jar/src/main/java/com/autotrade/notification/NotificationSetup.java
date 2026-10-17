@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * 설정 값으로 알림 채널을 꾸리고 큐를 띄운다(D-100). 실전 엔진·감시가 설정({@code notification.*})을 이 값으로 옮겨 부른다. 이 모듈은
@@ -210,7 +211,11 @@ public final class NotificationSetup {
         return v == null ? "" : v.strip();
     }
 
-    /** 채널을 꾸리고 보내는 스레드를 띄운다. 채널 설정이 틀려도 던지지 않고 그 채널만 끈다(로그 채널은 늘 있다). */
+    /**
+     * 채널을 꾸리고 보내는 스레드를 띄운다. 채널 설정이 틀려도 던지지 않고 그 채널만 끈다(로그 채널은 늘 있다).
+     * 채널 클래스의 이름이 {@link #SLACK}·{@link #KAKAO}와 어긋나는 코드 실수만
+     * {@link IllegalArgumentException}으로 드러난다({@link #externalChannels}).
+     */
     public NotificationQueue start(Path configDir, String process, Clock clock) {
         return start(configDir, process, clock, new JdkHttpTransport());
     }
@@ -226,7 +231,7 @@ public final class NotificationSetup {
 
     /**
      * 외부 채널을 꾸린다. 순서는 늘 Slack, 카카오톡이다. 큐({@link #start})도 이것으로 꾸리므로, 부르는 쪽(실험실 "알림 시험 보내기", D-103)이
-     * 채널마다 직접 보내도 실전 엔진·감시와 같은 규칙으로 꾸린 채널이다. 던지지 않는다: 설정이 틀린 채널은 이유 코드로 돌려주고 HTTP를 부르지
+     * 채널마다 직접 보내도 실전 엔진·감시와 같은 규칙으로 꾸린 채널이다. 설정 값으로는 던지지 않는다: 설정이 틀린 채널은 이유 코드로 돌려주고 HTTP를 부르지
      * 않는다. 로그도 남기지 않는다(로그는 {@link #start}가 남긴다).
      *
      * <ul>
@@ -239,6 +244,8 @@ public final class NotificationSetup {
      * @param configDir 설정 폴더(카카오 토큰 파일 위치)
      * @param clock 카카오 토큰 만료 판단에 쓰는 시계
      * @param http 채널이 쓰는 HTTP
+     * @throws IllegalArgumentException 채널 클래스의 이름이 {@link #SLACK}·{@link #KAKAO}와 어긋나는 코드 실수일 때(설정 값으로는 나지 않음,
+     *     PR #144)
      */
     public List<ExternalChannel> externalChannels(Path configDir, Clock clock, HttpTransport http) {
         Objects.requireNonNull(configDir, "configDir");
@@ -251,11 +258,7 @@ public final class NotificationSetup {
         if (!slackEnabled) {
             return ExternalChannel.skipped(SLACK, SKIP_DISABLED);
         }
-        try {
-            return ExternalChannel.ready(SLACK, SlackWebhookChannel.of(slackWebhookUrl, http));
-        } catch (RuntimeException e) {
-            return ExternalChannel.skipped(SLACK, SKIP_INVALID_WEBHOOK_URL);
-        }
+        return built(SLACK, () -> SlackWebhookChannel.of(slackWebhookUrl, http), SKIP_INVALID_WEBHOOK_URL);
     }
 
     private ExternalChannel kakao(Path configDir, Clock clock, HttpTransport http) {
@@ -268,16 +271,28 @@ public final class NotificationSetup {
         if (kakaoRestApiKey.isEmpty() || kakaoRefreshToken.isEmpty() || kakaoLinkUrl.isEmpty()) {
             return ExternalChannel.skipped(KAKAO, SKIP_MISSING_VALUES);
         }
-        try {
+        return built(KAKAO, () -> {
             FileKakaoTokenStore store = new FileKakaoTokenStore(configDir.resolve(FileKakaoTokenStore.DEFAULT_FILE),
                     kakaoRefreshToken);
             String access = kakaoAccessToken.isEmpty() ? NO_ACCESS_TOKEN : kakaoAccessToken;
             KakaoToken token = store.initial(new KakaoToken(access, kakaoRefreshToken, Instant.EPOCH));
-            return ExternalChannel.ready(KAKAO,
-                    new KakaoMemoChannel(kakaoRestApiKey, kakaoClientSecret, kakaoLinkUrl, token, store, http, clock));
+            return new KakaoMemoChannel(kakaoRestApiKey, kakaoClientSecret, kakaoLinkUrl, token, store, http, clock);
+        }, SKIP_INVALID_VALUES);
+    }
+
+    /**
+     * 채널을 꾸리고, 꾸리다 난 예외(설정 값 문제)만 {@code failReason}으로 바꾼다. 이름 검사({@link ExternalChannel} 생성자)는 try 밖에
+     * 두어, 채널 이름이 상수와 어긋나는 코드 실수가 설정 오류 로그로 바뀌어 채널이 조용히 꺼지지 않고 예외로 드러나게 한다(PR #140 QA 위험
+     * 시나리오 1·risk-ops K1).
+     */
+    static ExternalChannel built(String name, Supplier<Channel> build, String failReason) {
+        Channel channel;
+        try {
+            channel = build.get();
         } catch (RuntimeException e) {
-            return ExternalChannel.skipped(KAKAO, SKIP_INVALID_VALUES);
+            return ExternalChannel.skipped(name, failReason);
         }
+        return ExternalChannel.ready(name, channel);
     }
 
     /** 이름이 같은 외부 채널의 꾸린 채널(못 꾸렸으면 null). 목록에 그 이름이 꼭 하나 있어야 한다. */

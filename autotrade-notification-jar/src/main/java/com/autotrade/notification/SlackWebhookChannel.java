@@ -50,7 +50,7 @@ public final class SlackWebhookChannel implements Channel {
 
     @Override
     public String name() {
-        return "slack";
+        return NotificationSetup.SLACK;
     }
 
     @Override

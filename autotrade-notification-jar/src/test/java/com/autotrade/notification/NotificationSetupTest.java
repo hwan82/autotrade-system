@@ -202,6 +202,32 @@ class NotificationSetupTest {
     }
 
     @Test
+    void 채널_이름이_어긋나는_코드_실수는_설정_오류로_바뀌지_않고_그대로_드러난다() {
+        // PR #140 QA 위험 시나리오 1·risk-ops K1: 이름 검사가 꾸리기 try 안에 있으면 코드 실수가 invalid-values로 바뀌어
+        // 카카오가 "형식이 틀려" 로그와 함께 조용히 꺼진다(원인이 틀린 로그)
+        assertThatThrownBy(() -> NotificationSetup.built(NotificationSetup.KAKAO, LogChannel::new,
+                NotificationSetup.SKIP_INVALID_VALUES))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("kakao").hasMessageContaining("log");
+        // 꾸리다 난 예외(설정 값 문제)만 이유 코드가 된다
+        NotificationSetup.ExternalChannel failed = NotificationSetup.built(NotificationSetup.KAKAO, () -> {
+            throw new IllegalArgumentException("형식");
+        }, NotificationSetup.SKIP_INVALID_VALUES);
+        assertThat(failed.channel()).isNull();
+        assertThat(failed.skipReason()).isEqualTo(NotificationSetup.SKIP_INVALID_VALUES);
+        Channel slack = SlackWebhookChannel.of(SLACK_URL, new FakeHttp());
+        assertThat(NotificationSetup.built(NotificationSetup.SLACK, () -> slack, NotificationSetup.SKIP_INVALID_WEBHOOK_URL)
+                .channel()).isSameAs(slack);
+    }
+
+    @Test
+    void 꾸린_채널_이름은_외부_채널_상수와_같다() {
+        assertThat(SlackWebhookChannel.of(SLACK_URL, new FakeHttp()).name()).isEqualTo(NotificationSetup.SLACK);
+        List<NotificationSetup.ExternalChannel> ready = full().build().externalChannels(dir, CLOCK, new FakeHttp());
+        assertThat(ready).allSatisfy(c -> assertThat(c.channel()).isNotNull());
+        assertThat(ready).allSatisfy(c -> assertThat(c.channel().name()).isEqualTo(c.name()));
+    }
+
+    @Test
     void 켰는데_못_꾸린_채널은_이유마다_로그를_남기고_꺼진_채널은_조용하다() {
         // PR #138 QA Q2(변이 M7·M14): 엔진이 채널을 조용히 끄는 일은 운영자가 이 로그로만 안다
         assertThat(skipLogs(minimal().build())).isEmpty();
