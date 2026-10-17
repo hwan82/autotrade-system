@@ -14,6 +14,7 @@ import java.lang.System.Logger.Level;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Optional;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 import java.util.concurrent.CountDownLatch;
 
@@ -40,13 +41,8 @@ public final class WatchdogMain {
     private WatchdogMain() {}
 
     public static void main(String[] args) throws InterruptedException {
-        Watchdog watchdog;
-        try {
-            watchdog = start(ConfigPaths.defaultLocation(), Clock.systemUTC());
-        } catch (RuntimeException e) {
-            StartFailure failure = StartFailure.of(e);
-            failure.report(e);
-            System.exit(failure.exitCode());
+        Watchdog watchdog = launch(ConfigPaths::defaultLocation, Clock.systemUTC(), PlatformOsReadings::create, System::exit);
+        if (watchdog == null) {
             return;
         }
         CountDownLatch stopped = new CountDownLatch(1);
@@ -58,6 +54,33 @@ public final class WatchdogMain {
             }
         }, "watchdog-shutdown"));
         stopped.await();
+    }
+
+    /**
+     * 진입점의 기동 절차(D-106). 설정 폴더를 정하고 감시를 띄운다. 실패하면 {@link StartFailure}로 알리고 그 종료 코드로 {@code exit}를
+     * 부른 뒤 null을 돌려준다. 시험이 {@code exit}를 바꿔 끼워 진입점의 판정·종료 코드를 직접 본다(PR #148 risk-ops R2).
+     */
+    static Watchdog launch(Supplier<ConfigPaths> paths, Clock clock, Supplier<Optional<OsReadings>> osReadings, IntConsumer exit) {
+        try {
+            return start(configPaths(paths), clock, osReadings);
+        } catch (RuntimeException e) {
+            StartFailure failure = StartFailure.of(e);
+            failure.report(e);
+            exit.accept(failure.exitCode());
+            return null;
+        }
+    }
+
+    /**
+     * 설정 폴더 경로를 정한다. {@code autotrade.config-dir}·{@code AUTOTRADE_CONFIG_DIR} 값이 경로 형식이 아니면(예: Windows에서 따옴표를
+     * 넣음) 사람이 고칠 설정 문제로 거부한다(종료 코드 2, PR #148 architect N1·risk-ops R1).
+     */
+    private static ConfigPaths configPaths(Supplier<ConfigPaths> paths) {
+        try {
+            return paths.get();
+        } catch (IllegalArgumentException e) {
+            throw WatchdogRefusal.settings("설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): " + e.getMessage());
+        }
     }
 
     /** 기동 점검: 설정을 읽고 감시 설정을 검사만 한다. 종료 코드를 돌려준다(0: 정상, 2: 감시 설정 오류·JVM 미지원). 그 밖의 예외는 던진다. */

@@ -18,7 +18,7 @@
 | 키움 일봉 대조표 | 단발 | 게이트웨이를 끈 뒤 | `.\gradlew :autotrade-app-gateway:kiwoomDaily --args="<날짜> kiwoom-daily-<날짜>.md"` | 스스로 종료 | 종료 코드 0 | [2단계 녹화](stage-2-real-recording.md) 8번 |
 | 종목명 표 | 단발 | 처음 한 번, 상장 종목이 바뀌었을 때 | `.\gradlew :autotrade-app-gateway:symbolMaster` | 스스로 종료 | `<설정 폴더>\symbols\KRX.csv` 생성. 실험실 다시 시작 | [설정 키](../config/config-keys.md) 종목명 표 |
 | 실전 엔진 | 상주 | **지금은 켤 필요 없음**(아래 4장) | `.\gradlew :autotrade-app-engine:run` | Ctrl+C | 로그 `RealTradingGuard 모두 OFF로 시작` | [ADR-006](../adr/ADR-006-real-control-channel.md) |
-| 감시 | 단발(현재) | **지금은 켤 필요 없음**(아래 4장) | `.\gradlew :autotrade-app-watchdog:run` | 설정만 읽고 바로 종료 | 종료 코드 0 | [장애 설계](../team/broker-and-fault-design.md) |
+| 감시 | 상주 | **지금은 켤 필요 없음**(아래 4장) | `.\gradlew :autotrade-app-watchdog:run` | Ctrl+C | 로그 `감시 시작`과 `<설정 폴더>\heartbeat\watchdog.hb`. 뜨지 않으면 종료 코드 2는 감시 설정·설정 폴더 경로 오류, 1은 프로그램 오류(D-106, [수집기](collector.md) 3.5) | [장애 설계](../team/broker-and-fault-design.md) |
 
 - **설정 폴더**: 기본 `C:\Users\<사용자>\.autotrade\`(환경 변수 `AUTOTRADE_CONFIG_DIR`로 바꿈). 증권사 키는 `secrets.json`, 수집 키는 `collector-secrets.json`, 감시 종목은 `watchlist.json`. 형식은 [설정 키](../config/config-keys.md)와 각 절차서 준비 절. 키 값은 저장소·채팅에 올리지 않는다.
 - 게이트웨이는 `gradlew run` 대신 설치본(`installDist`)으로 띄운다. `run`으로 띄우면 Ctrl+C 때 정상 종료 처리가 돌지 않아 녹화 메타에 정상 종료 표시가 빠질 수 있다([2단계 녹화](stage-2-real-recording.md) 5번).

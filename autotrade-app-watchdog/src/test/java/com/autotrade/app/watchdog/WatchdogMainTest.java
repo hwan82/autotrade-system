@@ -69,6 +69,49 @@ class WatchdogMainTest {
     }
 
     @Test
+    void 진입점은_설정_오류면_종료_코드_2로_끝내고_감시를_돌려주지_않는다() throws Exception {
+        Files.writeString(dir.resolve(WatchdogSettings.FILE), "disk.free-gb=20:50:1\n");
+        java.util.List<Integer> exits = new java.util.ArrayList<>();
+
+        assertThat(WatchdogMain.launch(() -> ConfigPaths.in(dir), fixed, PlatformOsReadings::create, exits::add)).isNull();
+        assertThat(exits).containsExactly(WatchdogMain.EXIT_BAD_SETTINGS);
+    }
+
+    @Test
+    void 진입점은_설정_폴더_경로가_틀리면_설정_오류로_거부한다() {
+        // PR #148 architect N1·risk-ops R1: Windows에서 AUTOTRADE_CONFIG_DIR에 따옴표를 넣은 경우
+        java.util.List<Integer> exits = new java.util.ArrayList<>();
+
+        assertThat(WatchdogMain.launch(() -> {
+            throw new java.nio.file.InvalidPathException("\"C:\\autotrade\"", "Illegal char <\"> at index 0");
+        }, fixed, PlatformOsReadings::create, exits::add)).isNull();
+        assertThat(exits).containsExactly(WatchdogMain.EXIT_BAD_SETTINGS);
+    }
+
+    @Test
+    void 진입점은_설정_오류가_아닌_기동_예외를_종료_코드_1로_끝낸다() {
+        // PR #148 risk-ops R2 변이 M4: 진입점이 IllegalArgumentException만 잡으면 아래 두 번째 경우가 빠져나간다
+        java.util.List<Integer> exits = new java.util.ArrayList<>();
+
+        assertThat(WatchdogMain.launch(() -> ConfigPaths.in(dir), fixed, () -> {
+            throw new IllegalArgumentException("외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x");
+        }, exits::add)).isNull();
+        assertThat(WatchdogMain.launch(() -> ConfigPaths.in(dir), fixed, () -> {
+            throw new IllegalStateException("코드 실수");
+        }, exits::add)).isNull();
+        assertThat(exits).containsExactly(WatchdogMain.EXIT_START_FAILED, WatchdogMain.EXIT_START_FAILED);
+        assertThat(dir.resolve("heartbeat").resolve("watchdog.hb")).doesNotExist();
+    }
+
+    @Test
+    void 기동_점검은_설정_오류가_아닌_예외를_종료_코드로_바꾸지_않고_던진다() {
+        // PR #148 risk-ops R2 변이 M6
+        assertThatThrownBy(() -> WatchdogMain.run(ConfigPaths.in(dir), fixed, () -> {
+            throw new IllegalStateException("코드 실수");
+        })).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void 그_밖의_기동_예외도_프로그램_오류로_종료_코드_1이다() {
         WatchdogMain.StartFailure f = WatchdogMain.StartFailure.of(new IllegalStateException("이미 시작했습니다"));
 
