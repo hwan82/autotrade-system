@@ -51,13 +51,17 @@ public final class CollectionFreshness {
      * @param behind 스냅샷 마지막 거래일 뒤부터 점검 마지막 날까지의 거래일(수집이 안 된 날)
      * @param weekdayFallback {@code behind} 일부를 캘린더 수록 범위 밖이라 평일로 셌는지
      * @param unreadable 읽지 못해 건너뛴 스냅샷 폴더 이름(만들다 만 폴더, 스키마 버전 다름 등)
+     * @param noCoverage manifest는 읽었지만 마지막 거래일 칸({@code coverage})이 없어 셀 수 없는 옛 형식 스냅샷 폴더 이름
+     *     (ADR-008 이전, PR #145 architect N1)
+     * @param newerThanEnd 스냅샷 마지막 거래일이 점검 마지막 날보다 뒤인지(지난 주를 {@code -Pto}로 다시 점검할 때)
      */
     public record Status(Kind kind, Path snapshotsRoot, String snapshotId, LocalDate lastTradingDate, List<LocalDate> behind,
-            boolean weekdayFallback, List<String> unreadable) {
+            boolean weekdayFallback, List<String> unreadable, List<String> noCoverage, boolean newerThanEnd) {
         public Status {
             Objects.requireNonNull(kind, "kind");
             behind = List.copyOf(behind);
             unreadable = List.copyOf(unreadable);
+            noCoverage = List.copyOf(noCoverage);
         }
 
         /** 사람에게 알릴 상태인지(멈춤 의심, 스냅샷 없음). */
@@ -90,10 +94,11 @@ public final class CollectionFreshness {
     public static Status check(Path snapshotsRoot, Market market, LocalDate end, ExchangeCalendar calendar) {
         Path root = snapshotsRoot.toAbsolutePath();
         if (market != Market.KRX) {
-            return new Status(Kind.NOT_APPLICABLE, root, null, null, List.of(), false, List.of());
+            return new Status(Kind.NOT_APPLICABLE, root, null, null, List.of(), false, List.of(), List.of(), false);
         }
         Path dir = root.resolve(KRX_DAILY);
         List<String> unreadable = new ArrayList<>();
+        List<String> noCoverage = new ArrayList<>();
         String bestId = null;
         LocalDate best = null;
         if (Files.isDirectory(dir)) {
@@ -110,11 +115,21 @@ public final class CollectionFreshness {
                 }
                 LocalDate last;
                 String id;
+                SnapshotManifest m;
                 try {
-                    SnapshotManifest m = SnapshotFiles.readManifest(child);
-                    last = LocalDate.parse(m.coverage().lastTradingDate());
-                    id = m.snapshotId();
+                    m = SnapshotFiles.readManifest(child);
                 } catch (IOException | RuntimeException e) {
+                    unreadable.add(name);
+                    continue;
+                }
+                if (m.coverage() == null || m.coverage().lastTradingDate() == null) {
+                    noCoverage.add(name); // 깨진 것이 아니라 마지막 거래일을 적기 전 형식(SnapshotManifest 주석)
+                    continue;
+                }
+                try {
+                    last = LocalDate.parse(m.coverage().lastTradingDate());
+                    id = Objects.requireNonNull(m.snapshotId(), "snapshotId");
+                } catch (RuntimeException e) {
                     unreadable.add(name);
                     continue;
                 }
@@ -126,7 +141,7 @@ public final class CollectionFreshness {
             }
         }
         if (best == null) {
-            return new Status(Kind.NO_SNAPSHOT, root, null, null, List.of(), false, unreadable);
+            return new Status(Kind.NO_SNAPSHOT, root, null, null, List.of(), false, unreadable, noCoverage, false);
         }
         List<LocalDate> behind = new ArrayList<>();
         boolean fallback = false;
@@ -143,7 +158,7 @@ public final class CollectionFreshness {
             }
         }
         Kind kind = behind.size() > ALLOWED_LAG ? Kind.BEHIND : Kind.OK;
-        return new Status(kind, root, bestId, best, behind, fallback, unreadable);
+        return new Status(kind, root, bestId, best, behind, fallback, unreadable, noCoverage, best.isAfter(end));
     }
 
     /** 보고서 4장. */
@@ -152,7 +167,9 @@ public final class CollectionFreshness {
         sb.append("\n## 4. 수집 멈춤 여부(D-105)\n\n");
         sb.append("KRX 일봉 수집기는 캘린더상 거래일에 빈 목록이 오면(캘린더에 없는 임시공휴일 등) 멈추고 스냅샷을 만들지 않는다(D-104). ")
                 .append("그동안 선정 결과에 공백이 생기므로 스냅샷 마지막 거래일이 점검 마지막 날보다 ").append(ALLOWED_LAG + 1)
-                .append("거래일 이상 뒤처지면 멈춤 의심으로 본다. 이 칸은 점검을 돌린 때의 스냅샷 폴더를 본다.\n\n");
+                .append("거래일 이상 뒤처지면 멈춤 의심으로 본다. 이 칸은 점검을 돌린 때의 스냅샷 폴더를 본다. ")
+                .append("지금의 6단계 실시간 모의 계좌는 일봉 스냅샷을 입력으로 쓰지 않으므로(선정 프로필 미연결) 수집이 멈춰도 ")
+                .append("3장 계좌 성과는 바뀌지 않고, 공백은 4단계 실험과 선정 결과 입력 쪽에 생긴다.\n\n");
         sb.append("- 판정: ").append(s.summary()).append('\n');
         if (s.kind() == Kind.NOT_APPLICABLE) {
             return sb.toString();
@@ -162,11 +179,19 @@ public final class CollectionFreshness {
             sb.append("- 최근 스냅샷: `").append(s.snapshotId()).append("`\n");
             sb.append("- 수집 안 된 거래일: ").append(s.behind().isEmpty() ? "없음" : join(s.behind())).append('\n');
         }
+        if (s.newerThanEnd()) {
+            sb.append("- 스냅샷이 점검 마지막 날보다 뒤(").append(s.lastTradingDate())
+                    .append(")까지 있다. 지난 주를 다시 점검하면 그 주에 있었던 멈춤은 이 칸에 보이지 않는다.\n");
+        }
         if (s.weekdayFallback()) {
             sb.append("- 일부 날짜가 거래소 캘린더 수록 범위 밖이라 평일로 셌다(휴장일이 섞였을 수 있음).\n");
         }
         if (!s.unreadable().isEmpty()) {
             sb.append("- 읽지 못해 건너뛴 스냅샷 폴더: ").append(String.join(", ", s.unreadable())).append('\n');
+        }
+        if (!s.noCoverage().isEmpty()) {
+            sb.append("- 마지막 거래일 칸이 없는 옛 형식이라 세지 않은 스냅샷 폴더(깨진 것 아님): ")
+                    .append(String.join(", ", s.noCoverage())).append('\n');
         }
         if (s.kind() == Kind.BEHIND) {
             sb.append("- 할 일: 수집기 명령을 다시 돌려 콘솔 메시지를 본다. \"캘린더상 거래일에 빈 목록\"이면 그날이 캘린더에 없는 ")

@@ -106,6 +106,54 @@ class CollectionFreshnessTest {
     }
 
     @Test
+    void recheckingAnEarlierWeekSeesNewerSnapshotsAsNormal() throws Exception {
+        // PR #145 strategy-researcher R3·architect N2: -Pto로 지난 주를 다시 볼 때 그 뒤 수집된 스냅샷이면 뒤처짐 없음
+        writeSnapshot(tmp, "krx-daily-2026-10-16-13131313", LocalDate.of(2026, 10, 16));
+        CollectionFreshness.Status s = check(LocalDate.of(2026, 10, 8));
+        assertThat(s.kind()).isEqualTo(CollectionFreshness.Kind.OK);
+        assertThat(s.behind()).isEmpty();
+        assertThat(s.newerThanEnd()).isTrue();
+        assertThat(CollectionFreshness.render(s)).contains("스냅샷이 점검 마지막 날보다 뒤(2026-10-16)까지 있다")
+                .contains("그 주에 있었던 멈춤은 이 칸에 보이지 않는다");
+        // 같은 날까지면 그 표시가 없다
+        assertThat(check(LocalDate.of(2026, 10, 16)).newerThanEnd()).isFalse();
+        assertThat(CollectionFreshness.render(check(LocalDate.of(2026, 10, 16)))).doesNotContain("점검 마지막 날보다 뒤");
+    }
+
+    @Test
+    void oldManifestWithoutCoverageIsListedApartFromBrokenOnes() throws Exception {
+        // PR #145 architect N1: ADR-008 이전 형식(coverage 없음)은 깨진 것이 아니라 셀 수 없는 것
+        Path old = tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-01-aaaaaaaa");
+        Files.createDirectories(old);
+        Files.writeString(old.resolve("manifest.json"), """
+                {"snapshotId":"krx-daily-2026-10-01-aaaaaaaa","schemaVersion":1,"createdAt":"2026-10-01T09:00:00Z",
+                 "scriptVersion":"0.1.0","sources":[],"files":[]}
+                """, StandardCharsets.UTF_8);
+        CollectionFreshness.Status only = check(LocalDate.of(2026, 10, 16));
+        assertThat(only.kind()).isEqualTo(CollectionFreshness.Kind.NO_SNAPSHOT);
+        assertThat(only.noCoverage()).containsExactly("krx-daily-2026-10-01-aaaaaaaa");
+        assertThat(only.unreadable()).isEmpty();
+        assertThat(CollectionFreshness.render(only))
+                .contains("마지막 거래일 칸이 없는 옛 형식이라 세지 않은 스냅샷 폴더(깨진 것 아님): krx-daily-2026-10-01-aaaaaaaa")
+                .doesNotContain("읽지 못해 건너뛴");
+
+        writeSnapshot(tmp, "krx-daily-2026-10-15-bbbbbbbb", LocalDate.of(2026, 10, 15));
+        CollectionFreshness.Status s = check(LocalDate.of(2026, 10, 16));
+        assertThat(s.kind()).isEqualTo(CollectionFreshness.Kind.OK);
+        assertThat(s.snapshotId()).isEqualTo("krx-daily-2026-10-15-bbbbbbbb");
+        assertThat(s.noCoverage()).containsExactly("krx-daily-2026-10-01-aaaaaaaa");
+    }
+
+    @Test
+    void sectionSaysTheLiveAccountsDoNotReadDailySnapshots() throws Exception {
+        // PR #145 strategy-researcher R2: 3장 계좌 성과를 의심하지 않도록
+        writeSnapshot(tmp, "krx-daily-2026-10-14-cccccccc", LocalDate.of(2026, 10, 14));
+        assertThat(CollectionFreshness.render(check(LocalDate.of(2026, 10, 16))))
+                .contains("6단계 실시간 모의 계좌는 일봉 스냅샷을 입력으로 쓰지 않으므로")
+                .contains("3장 계좌 성과는 바뀌지 않고");
+    }
+
+    @Test
     void daysBeyondTheCalendarAreCountedAsWeekdaysAndFlagged() throws Exception {
         writeSnapshot(tmp, "krx-daily-2027-12-30-99999999", LocalDate.of(2027, 12, 30));
         CollectionFreshness.Status s = check(LocalDate.of(2028, 1, 4));
