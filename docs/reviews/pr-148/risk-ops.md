@@ -56,3 +56,51 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-17
+- 대상: PR #148 / 헤드 커밋 c6cd841f9c5f99ef56ddff718e1b3d2968a022c8(브랜치 `claude/project-thread-87sta8`) / main 대비 diff(`git diff origin/main...HEAD`, 머지 기준 c4be949, 파일 11개 +352 −23, 검토 원문 2개 포함). 앞 검토(82e2cb5) 뒤 커밋은 e692f2d(이 원문, 앞 검토 커밋 ec025aa와 내용 같음), fcea7b3(architect 원문), c6cd841(코드·문서)
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --console=plain`(헤드 c6cd841): BUILD SUCCESSFUL in 42s(바뀌지 않은 모듈은 Gradle 최신 판정으로 다시 돌지 않음). 그래서 `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-watchdog:test :autotrade-notification-jar:test --rerun`을 따로 돌림: 종료 코드 0. 결과 XML 합계 1,510건, 실패·오류·건너뜀 0. 모듈별 risk 55, architecture-test 46, app-engine 55, app-watchdog 61(앞 검토보다 4건 늘어남), notification-jar 86.
+  - `:autotrade-app-watchdog:installDist` 뒤 CI 단계 재현(틀린 `watchdog.properties`, `AUTOTRADE_CONFIG_DIR`): 종료 코드 **2**.
+  - 변이 4개(한 번에 하나, 각 변이 뒤 `git checkout -- autotrade-app-watchdog`로 원복, 마지막에 작업 트리 깨끗함 확인), 실행 범위 `:autotrade-app-watchdog:test`:
+    | 변이 | 내용 | 결과 |
+    |---|---|---|
+    | M4' | `launch`의 catch를 `RuntimeException` → `IllegalArgumentException`(앞 검토 M4와 같은 뜻) | 잡힘(1건, `#진입점은_설정_오류가_아닌_기동_예외를_종료_코드_1로_끝낸다`) |
+    | M6 | `run`의 catch를 `WatchdogRefusal` → `RuntimeException` | 잡힘(1건, `#기동_점검은_...던진다`) |
+    | M8 | `configPaths`가 `InvalidPathException`을 거부로 바꾸지 않고 그대로 던짐 | 잡힘(1건, `#진입점은_설정_폴더_경로가_틀리면_설정_오류로_거부한다`) |
+    | M9 | `launch`가 판정과 상관없이 늘 종료 코드 1을 넘김 | 잡힘(2건) |
+  - `git merge-tree --write-tree origin/main HEAD` 충돌 없음. 머지 기준 뒤 main 변경(`autotrade-sim` 수집 신선도, 문서, `docs/reviews/pr-147`)은 이 PR 파일과 겹치지 않아 병합본 빌드는 하지 않았다.
+
+### 바뀐 것과 영향
+- [사실] `main`(`WatchdogMain.java:44`)이 `launch(ConfigPaths::defaultLocation, Clock.systemUTC(), PlatformOsReadings::create, System::exit)`를 부르고 null이면 끝난다. `launch`(`:63-71`)는 앞 검토의 `main` catch와 같은 판정(`StartFailure.of` → `report` → `exit`)이고, 종료 함수를 바꿔 끼울 수 있어 시험이 진입점의 종료 코드를 직접 본다. 운영에서는 `System::exit`라 `exit` 뒤 null 반환에 닿지 않는다.
+- [사실] `configPaths`(`:78-84`)가 설정 폴더 공급자의 `IllegalArgumentException`(경로 형식 오류 `InvalidPathException` 포함)을 `WatchdogRefusal.settings("설정 폴더 경로가 틀렸습니다(...)")`로 바꾼다. 앞 검토 R1을 해결한다. `ConfigPaths.in`이 던질 수 있는 다른 IAE("일반 설정과 비밀값은 다른 파일", `ConfigPaths.java`)는 `in(dir)`로는 닿지 않는다. NPE(`user.home` 없음)는 프로그램 오류 1로 남는데, 사람이 고칠 값이 아니라 맞는 분류다.
+- [사실] 기동 거부 조건과 감시 기동 순서(`start`)는 바뀌지 않았다. 바뀐 것은 설정 폴더 경로 오류를 1이 아닌 2로 표시하는 것 하나다. 감시를 띄우는 경우·막는 경우의 집합은 그대로다.
+- [사실] `Clock.systemUTC()`는 여전히 진입점 한 곳에서만 만든다(ArchitectureTest 통과).
+- [사실] 문서: D-106에 4번(설정 폴더 경로 오류도 거부)과 남은 위험(폴더 쓰기 권한 같은 I/O 실패는 1로 표시), 시험 이름 4개, M7을 시험하지 않는 이유를 더했다. `docs/runbooks/README.md:21` 감시 행을 상주 프로세스로 고쳐 앞 검토의 참고 사항을 반영했다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | RealTradingGuard·`autotrade-risk`·`EngineMain` 무변경. `:autotrade-risk:test` 55건 다시 돌려 통과, `EngineMainTest#설정_파일에_활성화를_넣어도_Guard는_OFF로_시작한다` 통과 |
+| A2 | 해당 없음 | 주문 출구·Guard 팩토리 무변경. `autotrade-architecture-test` 무변경, 46건 다시 돌려 통과 |
+| A3 | 해당 없음 | 증권사 연동 무변경. 감시는 증권사를 부르지 않는다 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 무변경 |
+| A5 | 해당 없음 | 멱등 키 무변경 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 무변경 |
+| A7 | 해당 없음 | 계좌별 직렬 큐·토큰 버킷·킬스위치 무변경 |
+| A8 | 통과 | 감시 프로세스의 기동 실패 표시만 바뀌고 실전 엔진은 별도 JVM이다. 감시가 뜨는 조건과 막히는 조건은 그대로다. CI 단계(`.github/workflows/ci.yml:37-40`)를 재현해 2 확인 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 무변경. 거부 경로 변이(앞 검토 M2·M3·M5, 이번 M8)를 시험이 잡는다 |
+| A10 | 통과 | 새 문구는 설정 폴더 경로와 예외 메시지뿐이다(경로는 비밀값 아님). 새 시험 값은 `"C:\autotrade"`, 채널 이름 `kakao`/`kakao-x`, "코드 실수"뿐 |
+| A11 | 통과 | 보호 테스트 삭제·약화·고정 값 변경 없음. 새 시험 4개(`WatchdogMainTest.java:72`, `:81`, `:92`, `:107`)가 진입점 종료 코드 2·1, 설정 폴더 경로 거부, 기동 점검의 예외 전파를 실패하는 경우와 함께 확인한다. 앞 검토에서 살아남은 M4·M6을 이제 잡는다. M7(프로그램 오류 로그의 스택)만 시험 밖이고 이유가 D-106에 적혀 있다 |
+| A12 | 통과 | 장애표 #8·#9·#10의 감지 수단과 장애 시험 8종의 전제가 그대로다. 종료 코드 2의 뜻은 "사람이 고칠 설정·JVM 문제"로 같고, 그 안에 설정 폴더 경로가 더해졌다. runbook README·수집기 runbook 3.5가 2/1 구분과 맞는다 |
+| A13 | 해당 없음 | 시장별 경로 무변경. 시각은 주입 `Clock` 그대로 |
+| A14 | 통과 | D-106 4·5번, 위험과 한계, 검증 목록이 코드·시험 이름(실제로 있고 통과)과 일치한다. 결정 내용(종료 코드 나눔)은 같고 범위만 넓어져 같은 번호에 반영한 것은 타당하다 |
+
+### 점검표 밖 발견
+- 앞 검토 R1(설정 폴더 경로 오류가 "프로그램 오류"로 보임): 해결. `configPaths`가 거부로 바꾸고, `#진입점은_설정_폴더_경로가_틀리면_설정_오류로_거부한다`와 변이 M8로 확인했다. Windows 실제 환경 변수로는 재현하지 않았고, 공급자가 `InvalidPathException`을 던지는 시험으로 확인했다.
+- 앞 검토 R2(M4·M6·M7 생존): M4·M6 해결. M7은 남지만 표준 오류 한 줄에 예외 종류와 메시지가 남아 보호와 무관하다. 그대로 둬도 된다.
+- 참고(막지 않음): 설정 폴더 경로 오류의 첫머리 문구는 `WatchdogRefusal.SETTINGS_HEADLINE` "감시 설정이 틀려 기동하지 않습니다"이다. 수집기 runbook 3.5는 이 문구를 보면 "`watchdog.properties`를 고친다"고 안내한다. 상세 줄의 "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR)"로 무엇을 고칠지는 알 수 있다. 다음에 runbook을 고칠 때 "상세에 설정 폴더 경로가 나오면 환경 변수를 고친다"를 한 줄 더하면 더 정확하다.
+- 참고: 이 재검토는 docs/reviews/README.md("재검토는 같은 파일 아래에 `## 재검토 <날짜>`로 덧붙인다")를 따라 이 파일에 덧붙였다. 별도 파일(`risk-ops-2.md`)을 만들라는 요청은 검토 규칙(원문 보존 형식)과 달라 따르지 않았다.
+
+### 판정
+승인
