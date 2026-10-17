@@ -37,6 +37,34 @@ class DiskFreeSourceTest {
     }
 
     @Test
+    void 읽기_중_Error가_나가도_이전_점검의_원인을_남기지_않는다() {
+        // PR #157 risk-ops K1
+        boolean[] error = {false};
+        DiskFreeSource source = new DiskFreeSource(List.of(c), path -> {
+            if (error[0]) {
+                throw new AssertionError("Error 주입");
+            }
+            throw new IOException("이전 원인");
+        });
+        source.read();
+        assertThat(source.failures()).isNotEmpty();
+        error[0] = true;
+        try {
+            source.read();
+        } catch (AssertionError expected) {
+            // 수집원 밖으로 나가 감시 에이전트가 그 수집원을 버린다
+        }
+        assertThat(source.failures()).isEmpty();
+    }
+
+    @Test
+    void 원인을_자를_때_서로게이트_쌍을_가르지_않는다() {
+        String message = "x".repeat(DiskFreeSource.CAUSE_MAX - 1) + "😀" + "y";
+        assertThat(DiskFreeSource.cause(new IOException(message)))
+                .isEqualTo("IOException: " + "x".repeat(DiskFreeSource.CAUSE_MAX - 1) + "…");
+    }
+
+    @Test
     void 원인은_한_줄이고_길면_자르며_메시지가_없으면_종류만() {
         assertThat(DiskFreeSource.cause(new IOException("가\n나\r다"))).isEqualTo("IOException: 가 나 다");
         assertThat(DiskFreeSource.cause(new IllegalStateException())).isEqualTo("IllegalStateException");

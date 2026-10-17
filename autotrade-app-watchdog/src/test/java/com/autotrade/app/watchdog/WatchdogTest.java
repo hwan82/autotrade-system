@@ -215,7 +215,7 @@ class WatchdogTest {
     }
 
     @Test
-    void 같은_값이_빠졌다_돌아오기를_되풀이해도_간격마다_한_번만_알린다() {
+    void 같은_값이_빠졌다_돌아오기를_되풀이해도_간격마다_정해진_횟수만_알린다() {
         // PR #122 독립 QA R4: 점검마다 오가면 WARN·INFO가 5초마다 쌓였다
         TestClock clock = new TestClock("2026-10-15T00:00:00Z");
         Watchdog w = watchdog(clock);

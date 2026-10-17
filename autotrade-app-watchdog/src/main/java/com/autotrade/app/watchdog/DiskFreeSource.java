@@ -51,6 +51,8 @@ final class DiskFreeSource implements MetricSource {
 
     @Override
     public List<Reading> read() {
+        // 먼저 비운다. 읽기 중 Error가 나가면 이전 점검의 원인이 남아 틀린 원인을 보일 수 있다(PR #157 risk-ops K1)
+        failures = Map.of();
         List<Reading> out = new ArrayList<>();
         Map<String, String> failed = new TreeMap<>();
         for (Path p : paths) {
@@ -65,6 +67,9 @@ final class DiskFreeSource implements MetricSource {
         return out;
     }
 
+    /** 원인 문구 최대 길이(문자). */
+    static final int CAUSE_MAX = 160;
+
     /** 마지막 읽기에서 실패한 값 이름과 원인. */
     Map<String, String> failures() {
         return failures;
@@ -78,8 +83,11 @@ final class DiskFreeSource implements MetricSource {
             return type;
         }
         String oneLine = message.strip().replace('\r', ' ').replace('\n', ' ');
-        return type + ": " + (oneLine.length() > CAUSE_MAX ? oneLine.substring(0, CAUSE_MAX) + "…" : oneLine);
+        if (oneLine.length() <= CAUSE_MAX) {
+            return type + ": " + oneLine;
+        }
+        int end = Character.isHighSurrogate(oneLine.charAt(CAUSE_MAX - 1)) ? CAUSE_MAX - 1 : CAUSE_MAX; // 서로게이트 쌍을 가르지 않음
+        return type + ": " + oneLine.substring(0, end) + "…";
     }
 
-    static final int CAUSE_MAX = 160;
 }
