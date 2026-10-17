@@ -226,7 +226,8 @@ public final class MonitorAgent implements AutoCloseable {
     /**
      * 수집원 로그를 낸다. WARN·INFO 줄을 내지 못하면 그 수집원 상태를 줄을 만들기 전으로 되돌려, 다음 주기에 같은 줄을 다시 내게
      * 한다(PR #119 QA Q1: 첫 WARN이 출력되지 못한 채 "이미 경고함"으로 남지 않게). 나머지 줄도 마저 내 본 뒤 첫 예외를 다시
-     * 던진다(그 주기는 예전처럼 실패로 끝난다). DEBUG 반복 줄은 되돌리지 않는다(횟수만 센다).
+     * 던진다(그 주기는 예전처럼 실패로 끝난다. RuntimeException이 아니면 IllegalStateException으로 감싼다).
+     * DEBUG 반복 줄은 되돌리지 않는다(횟수만 센다).
      */
     private void writeSourceLogs(List<LogLine> lines) {
         Throwable first = null;
@@ -254,11 +255,9 @@ public final class MonitorAgent implements AutoCloseable {
         if (first instanceof RuntimeException e) {
             throw e;
         }
-        if (first instanceof Error e) {
-            throw e;
-        }
         if (first != null) {
-            throw new IllegalStateException(first);
+            // Error 등은 이름으로 가르지 않고 감싼다(코어는 JDK 허용 목록 안 타입만 쓴다, D-086). 부르는 쪽은 Throwable을 잡는다
+            throw new IllegalStateException("수집원 로그 출력 실패", first);
         }
     }
 
