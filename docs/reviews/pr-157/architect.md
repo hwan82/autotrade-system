@@ -36,3 +36,33 @@
 
 ## 판정
 승인 (아키텍처·코드 기준. 보호 경로 변경이므로 B7대로 risk-ops 검토와 사용자 머지·독립 QA가 별도로 필요하다)
+
+## 재검토 2026-10-17
+- 대상: PR #157 / 커밋 30bcfd4 / `git diff origin/main...HEAD` 전체(merge-base = origin/main b17c8ff). 앞 검토(970e099) 뒤 커밋은 75fd0f9(이 원문), 9fe0f9d(risk-ops 원문), 30bcfd4(검토 반영). 30bcfd4가 바꾼 것은 `DiskFreeSource.java`, `DiskFreeSourceTest.java`, `WatchdogTest.java`(시험 이름 1줄), D-108 검증 절 2줄이다. 이 원문(`architect.md`)은 970e099 뒤에 다른 커밋이 고치지 않았다(`git diff 75fd0f9 HEAD -- docs/reviews/pr-157/architect.md` 비어 있음).
+- 점검표: B
+- 직접 실행한 것:
+  - 같은 clone에서 `./gradlew -I <스크래치>/mirror.gradle build --no-daemon` → **BUILD SUCCESSFUL**(1m 2s, 138 tasks 중 27 실행·111 up-to-date). 바뀐 감시 모듈과 그 모듈의 의존 모듈(`autotrade-architecture-test` 포함)은 다시 돌았다. 미러 init 스크립트의 의미는 앞 절과 같다.
+  - 감시 모듈 시험: DiskFreeSourceTest 4(2 늘어남), HeartbeatWatchTest 7, OsMetricsSourceTest 4, StopRequestsTest 7, WatchdogMainTest 15, WatchdogSettingsTest 8, WatchdogTest 25. skipped 0, failures 0, errors 0.
+  - 변이 2건(각각 원본으로 되돌렸고, `git status`가 깨끗함을 확인):
+    - R1: `DiskFreeSource.read()` 첫머리의 `failures = Map.of();` 삭제 → 1건 실패(`DiskFreeSourceTest#읽기_중_Error가_나가도_이전_점검의_원인을_남기지_않는다`)
+    - R2: 자르는 위치를 늘 `CAUSE_MAX`로 → 1건 실패(`#원인을_자를_때_서로게이트_쌍을_가르지_않는다`)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 직접 실행 BUILD SUCCESSFUL |
+| B2 | 통과 | 새 의존·모듈·패키지가 없다. 30bcfd4는 JDK `Character.isHighSurrogate`만 더했다. ArchUnit·`RealPathReflectionTest` 통과 |
+| B3 | 통과 | 계약 변경이 없다. D-108 검증 절이 바뀐 시험 이름과 새 시험에 맞게 갱신됐다 |
+| B4 | 해당 없음 | 시뮬레이션 변경이 없다. 새 시각·난수 사용도 없다 |
+| B5 | 해당 없음 | 금액 계산이 없다 |
+| B6 | 통과 | 새 동작 두 가지(읽기 첫머리 비우기, 서로게이트 보존 자르기)에 각각 시험이 있고, 변이 R1·R2를 잡는다. `WatchdogTest`는 시험 이름만 바뀌었고 본문 단언은 그대로다. 삭제나 건너뛰기는 없다. 앞 절 변이 M1~M5의 대상 코드(`Watchdog.java`)는 30bcfd4에서 바뀌지 않았다 |
+| B7 | 해당(risk-ops 검토 필요) | `autotrade-app-watchdog/*`는 보호 경로다. risk-ops 원문 `docs/reviews/pr-157/risk-ops.md`(9fe0f9d)가 있고, 30bcfd4는 그 원문의 K1을 반영한 것이다. 반영본에 대해서는 risk-ops 재검토가 필요하다. 이 PR은 사용자 머지와 머지 전 독립 QA 대상이다 |
+| B8 | 통과 | 바뀐 것은 원인 문구를 자르는 위치뿐이다. 새로 로그에 남는 항목은 없다 |
+
+## 점검표 밖 발견(재검토)
+- K1 반영(`DiskFreeSource.java` `read()` 첫머리 `failures = Map.of()`) 확인: `FreeSpace`가 `Error`를 던지면 그 예외는 `catch (IOException | RuntimeException)` 밖으로 나간다. 그러면 `MonitorAgent.sampleOnce`(autotrade-monitor-agent-jar `MonitorAgent.java:70-77`)가 그 수집원을 버린다. 이때 맵은 이미 비어 있으므로, `Watchdog.causes`가 이전 점검의 원인을 붙이지 않는다. 같은 점검 스레드에서 쓰고 읽으며 필드는 `volatile`이다. 경쟁 상태는 없다.
+- N2 반영 확인: 160번째 문자(색인 159)가 high surrogate이면 159에서 자른다. 그래서 낮은 surrogate만 남는 일이 없다. 상수 선언도 사용하는 곳 앞으로 옮겼다. N1 시험 이름도 바뀌었다.
+- 앞 절의 N3·N4는 정보 항목이고, 이번에 바꿀 대상이 아니다.
+- 새 지적은 없다.
+
+## 판정(재검토)
+승인. 아키텍처·코드 기준이다. 보호 경로 변경이므로 B7대로 risk-ops 재검토, 사용자 머지, 독립 QA를 별도로 거쳐야 한다.
