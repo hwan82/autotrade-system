@@ -225,13 +225,14 @@ class WatchdogTest {
             clock.advance(Duration.ofSeconds(5));
             w.tick();
         }
-        assertThat(w.missingWarnings()).isEqualTo(1);
+        // 5초 WARN, 10초 회복 INFO, 15초 다시 빠져 바로 WARN(D-108, PR #123 QA R1). 그 뒤 회복 INFO는 간격까지 미루고 조용하다
+        assertThat(w.missingWarnings()).isEqualTo(2);
         assertThat(w.missingRecoveries()).isEqualTo(1);
 
         clock.advance(Watchdog.MISSING_REPEAT);
         cpu = -1;
         w.tick();
-        assertThat(w.missingWarnings()).isEqualTo(2);
+        assertThat(w.missingWarnings()).isEqualTo(3);
 
         for (int i = 0; i < 20; i++) { // 두 값이 번갈아 빠짐: 둘 다 한 번씩 알린 뒤로는 간격 안에서 조용하다
             cpu = i % 2 == 0 ? 0.1 : -1;
@@ -239,7 +240,8 @@ class WatchdogTest {
             clock.advance(Duration.ofSeconds(5));
             w.tick();
         }
-        assertThat(w.missingWarnings()).isEqualTo(3);
+        assertThat(w.missingWarnings()).isEqualTo(4);
+        assertThat(w.missingRecoveries()).isEqualTo(1);
         w.close();
     }
 
@@ -407,6 +409,137 @@ class WatchdogTest {
         assertThat(w.stopRequests().active()).isTrue();
         assertThat(dir.resolve(StopRequests.EXPERIMENT_STOP_REQUEST)).exists();
         w.close();
+    }
+
+    @Test
+    void 회복_알림_뒤_다시_빠지면_간격을_기다리지_않고_바로_알린다() {
+        // PR #123 독립 QA R1: 5초 WARN → 10초 회복 INFO → 15초부터 계속 빠짐이면 다음 WARN이 10분 5초였다(595초 동안 마지막 로그가 "다시 읽음")
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingRecoveries()).isEqualTo(1);
+
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(2);
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED, EventRoutes.READING_MISSING);
+        for (int i = 0; i < 119; i++) { // 계속 빠진 채 간격 직전(10분 10초)까지는 조용하다
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+        }
+        assertThat(w.missingWarnings()).isEqualTo(2);
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(w.missingWarnings()).isEqualTo(3); // 다시 빠진 경고(15초)부터 10분
+        assertThat(kinds()).hasSize(3); // 10분 반복은 로그로만
+        w.close();
+    }
+
+    @Test
+    void 간격_안에_두_번째_회복은_미뤘다가_간격이_찬_뒤_값이_다_있으면_남긴다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 5초 WARN
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 10초 INFO
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 15초 WARN
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 20초: 간격 안 두 번째 회복이라 미룸(마지막 로그는 "읽지 못함", 안전한 쪽)
+        assertThat(w.missingRecoveries()).isEqualTo(1);
+        clock.advance(Watchdog.MISSING_REPEAT.minusSeconds(15)); // 첫 INFO(10초)에서 간격 직전
+        w.tick();
+        assertThat(w.missingRecoveries()).isEqualTo(1);
+        clock.advance(Duration.ofSeconds(5)); // 첫 INFO에서 정확히 10분
+        w.tick();
+        assertThat(w.missingRecoveries()).isEqualTo(2);
+        assertThat(w.missingWarnings()).isEqualTo(2);
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED, EventRoutes.READING_MISSING,
+                EventRoutes.READING_RECOVERED);
+        clock.advance(Duration.ofMinutes(30)); // 그 뒤로는 조용하다
+        w.tick();
+        assertThat(w.missingRecoveries()).isEqualTo(2);
+        w.close();
+    }
+
+    @Test
+    void 점검마다_오가도_간격마다_WARN_둘_INFO_하나를_넘지_않고_마지막_로그가_틀린_회복이_아니다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        List<LogRecord> records = new ArrayList<>();
+        Handler handler = capture(records);
+        try {
+            Watchdog w = watchdog(clock);
+            w.tick();
+            int intervals = 6;
+            int ticks = (int) (Watchdog.MISSING_REPEAT.toSeconds() / 5) * intervals; // 60분, 5초마다 번갈아 빠짐
+            for (int i = 0; i < ticks; i++) {
+                cpu = i % 2 == 0 ? -1 : 0.1;
+                clock.advance(Duration.ofSeconds(5));
+                w.tick();
+                boolean missingNow = cpu < 0;
+                List<LogRecord> missingLogs = records.stream().filter(r -> r.getMessage().startsWith("자원 값")).toList();
+                if (missingNow) {
+                    // 빠진 점검 뒤 마지막 결측 로그는 늘 "읽지 못함"이다(QA R1)
+                    assertThat(missingLogs.get(missingLogs.size() - 1).getMessage()).startsWith("자원 값을 읽지 못함");
+                }
+            }
+            w.close();
+            assertThat(w.missingWarnings()).isLessThanOrEqualTo(2 * intervals);
+            assertThat(w.missingRecoveries()).isLessThanOrEqualTo(intervals);
+        } finally {
+            java.util.logging.Logger.getLogger(Watchdog.class.getName()).removeHandler(handler);
+        }
+    }
+
+    @Test
+    void 드라이브를_읽지_못한_원인을_결측_경고에_적는다() {
+        // PR #119 risk-ops K3·QA R3: 드라이브 읽기 실패가 원인 없이 값만 빠졌다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        List<LogRecord> records = new ArrayList<>();
+        Handler handler = capture(records);
+        try {
+            Watchdog w = watchdog(clock);
+            diskFails = true;
+            w.tick();
+            w.close();
+            assertThat(records).filteredOn(r -> r.getMessage().startsWith("자원 값을 읽지 못함")).singleElement()
+                    .satisfies(r -> assertThat(r.getMessage())
+                            .contains("(원인: " + DiskFreeSource.readingName(dir) + " ← IOException: 읽기 실패 주입)")
+                            .contains("D-096"));
+        } finally {
+            java.util.logging.Logger.getLogger(Watchdog.class.getName()).removeHandler(handler);
+        }
+    }
+
+    /** 감시 로거 기록을 모은다. 시험이 끝나면 떼야 한다. */
+    private static Handler capture(List<LogRecord> records) {
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                records.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        java.util.logging.Logger.getLogger(Watchdog.class.getName()).addHandler(handler);
+        return handler;
     }
 
     @Test
