@@ -115,8 +115,12 @@ class CollectionFreshnessTest {
         assertThat(s.newerThanEnd()).isTrue();
         assertThat(CollectionFreshness.render(s)).contains("스냅샷이 점검 마지막 날보다 뒤(2026-10-16)까지 있다")
                 .contains("그 주에 있었던 멈춤은 이 칸에 보이지 않는다");
+        // PR #147 architect 3: 머리·콘솔 한 줄에도 나온다
+        assertThat(s.summary())
+                .isEqualTo("정상(일봉 스냅샷 마지막 거래일 2026-10-16, 점검 마지막 날보다 뒤라 그 주의 멈춤은 보이지 않음)");
         // 같은 날까지면 그 표시가 없다
         assertThat(check(LocalDate.of(2026, 10, 16)).newerThanEnd()).isFalse();
+        assertThat(check(LocalDate.of(2026, 10, 16)).summary()).isEqualTo("정상(일봉 스냅샷 마지막 거래일 2026-10-16)");
         assertThat(CollectionFreshness.render(check(LocalDate.of(2026, 10, 16)))).doesNotContain("점검 마지막 날보다 뒤");
     }
 
@@ -136,12 +140,37 @@ class CollectionFreshnessTest {
         assertThat(CollectionFreshness.render(only))
                 .contains("마지막 거래일 칸이 없는 옛 형식이라 세지 않은 스냅샷 폴더(깨진 것 아님): krx-daily-2026-10-01-aaaaaaaa")
                 .doesNotContain("읽지 못해 건너뛴");
+        // PR #147 strategy-researcher P2: 머리 한 줄도 "없음"이 아니라 셀 수 있는 것이 없다고 적는다
+        assertThat(only.summary()).isEqualTo("**확인 필요**: 셀 수 있는 일봉 스냅샷이 없음(마지막 거래일 칸 없는 옛 형식 1개, 아래 4장)");
+        assertThat(only.warn()).isTrue();
 
         writeSnapshot(tmp, "krx-daily-2026-10-15-bbbbbbbb", LocalDate.of(2026, 10, 15));
         CollectionFreshness.Status s = check(LocalDate.of(2026, 10, 16));
         assertThat(s.kind()).isEqualTo(CollectionFreshness.Kind.OK);
         assertThat(s.snapshotId()).isEqualTo("krx-daily-2026-10-15-bbbbbbbb");
         assertThat(s.noCoverage()).containsExactly("krx-daily-2026-10-01-aaaaaaaa");
+    }
+
+    @Test
+    void coverageWithoutLastTradingDateIsOldFormatToo() throws Exception {
+        // PR #147 architect 2: coverage는 있고 lastTradingDate만 없으면(다른 형식이 섞인 경우 등) 같은 옛 형식 취급
+        Path half = tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-02-dddddddd");
+        Files.createDirectories(half);
+        Files.writeString(half.resolve("manifest.json"), """
+                {"snapshotId":"krx-daily-2026-10-02-dddddddd","schemaVersion":1,"createdAt":"2026-10-02T09:00:00Z",
+                 "scriptVersion":"0.1.0","sources":[],"files":[],
+                 "coverage":{"firstDate":"2010-01-04","sharesAsOf":"2026-10-02","lastCollectedAt":"2026-10-02T09:00:00Z"}}
+                """, StandardCharsets.UTF_8);
+        CollectionFreshness.Status s = check(LocalDate.of(2026, 10, 16));
+        assertThat(s.kind()).isEqualTo(CollectionFreshness.Kind.NO_SNAPSHOT);
+        assertThat(s.noCoverage()).containsExactly("krx-daily-2026-10-02-dddddddd");
+        assertThat(s.unreadable()).isEmpty();
+        assertThat(s.summary()).contains("옛 형식 1개");
+    }
+
+    @Test
+    void noSnapshotSummaryWithoutOldFormatStaysShort() {
+        assertThat(check(LocalDate.of(2026, 10, 16)).summary()).isEqualTo("**확인 필요**: 일봉 스냅샷이 없음(아래 4장)");
     }
 
     @Test
