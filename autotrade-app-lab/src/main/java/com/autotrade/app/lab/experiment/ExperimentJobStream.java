@@ -11,6 +11,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -39,7 +40,8 @@ public final class ExperimentJobStream implements AutoCloseable {
     /** 이벤트 하나에 담는 작업 수(목록 API 첫 페이지 기본 크기와 같음). */
     static final int PAGE_SIZE = 50;
 
-    private final ExperimentJobs jobs;
+    /** 작업 폴더 읽기({@link ExperimentJobs#list()}). 시험은 읽기 실패를 넣는다. */
+    private final Supplier<ExperimentJobs.Listing> jobs;
     private final Clock clock;
     private final List<SseEmitter> streams = new CopyOnWriteArrayList<>();
     /** 첫 이벤트를 아직 받지 못한 연결. 다음 읽기에서 바뀌지 않았어도 보낸다. */
@@ -50,6 +52,11 @@ public final class ExperimentJobStream implements AutoCloseable {
     private volatile boolean closing;
 
     public ExperimentJobStream(ExperimentJobs jobs, Clock clock) {
+        this(Objects.requireNonNull(jobs, "jobs")::list, clock);
+    }
+
+    /** 시험용: 작업 폴더 읽기를 바꿔 넣는다(읽기 실패 분기 시험, architect PR #117 2차 권고 1). */
+    ExperimentJobStream(Supplier<ExperimentJobs.Listing> jobs, Clock clock) {
         this.jobs = Objects.requireNonNull(jobs, "jobs");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -117,7 +124,7 @@ public final class ExperimentJobStream implements AutoCloseable {
         Instant at = clock.instant();
         Snapshot now;
         try {
-            now = Snapshot.of(jobs.list());
+            now = Snapshot.of(jobs.get());
         } catch (RuntimeException e) {
             // 작업 폴더를 못 읽어도 주석 줄은 보낸다(떠난 연결이 상한 자리를 30분 동안 차지하지 않게, architect PR #117)
             keepalive(at);

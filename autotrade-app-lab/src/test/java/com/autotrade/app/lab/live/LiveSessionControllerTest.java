@@ -49,6 +49,16 @@ class LiveSessionControllerTest {
     }
 
     @Test
+    void comboRegistrationIsBadRequestNamingTheCause() throws Exception {
+        Path dir = Files.createDirectories(experiments.resolve("EXP-TEST-COMBO"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: \"EXP-TEST-COMBO\"\nbars-snapshot: \"krx-daily-0001\"\n");
+        assertThatThrownBy(() -> controller.start("EXP-TEST-COMBO")).isInstanceOfSatisfying(ApiException.class, e -> {
+            assertThat(e.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(e.getMessage()).contains("실시간 세션 등록 파일(input: live)이 아닙니다");
+        });
+    }
+
+    @Test
     void badRequestsAreRefused() {
         assertThatThrownBy(() -> controller.start("../x")).isInstanceOfSatisfying(ApiException.class,
                 e -> assertThat(e.status()).isEqualTo(HttpStatus.BAD_REQUEST));

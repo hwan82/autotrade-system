@@ -1,11 +1,13 @@
 package com.autotrade.app.lab.experiment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.sim.run.ExperimentJobFiles;
 import com.autotrade.sim.run.ExperimentJobStatus;
 import com.autotrade.sim.run.ExperimentProgress;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -94,6 +96,40 @@ class ExperimentJobStreamTest {
         stream.tick();
         assertThat(a.comments).isEqualTo(1);
         assertThat(a.snapshots()).hasSize(1);
+    }
+
+    @Test
+    void 작업_폴더를_못_읽어도_주석_줄은_보내고_예외는_다시_던진다() {
+        // architect PR #117 2차 권고 1: 읽기 실패 분기(tick의 catch에서 keepalive 뒤 재던짐)
+        ExperimentJobs real = new ExperimentJobs(config, clock);
+        java.util.concurrent.atomic.AtomicBoolean broken = new java.util.concurrent.atomic.AtomicBoolean();
+        UncheckedIOException failure = new UncheckedIOException("작업 폴더를 읽지 못했습니다", new IOException("잠김"));
+        ExperimentJobStream s = new ExperimentJobStream(() -> {
+            if (broken.get()) {
+                throw failure;
+            }
+            return real.list();
+        }, clock);
+        Capture a = new Capture();
+        s.register(a);
+        s.tick();
+        assertThat(a.snapshots()).hasSize(1);
+
+        broken.set(true);
+        clock.set(T0.plus(ExperimentJobStream.KEEPALIVE).minusSeconds(1));
+        assertThatThrownBy(s::tick).isSameAs(failure);
+        assertThat(a.comments).isZero(); // 주기 전에는 보내지 않는다
+
+        clock.set(T0.plus(ExperimentJobStream.KEEPALIVE));
+        assertThatThrownBy(s::tick).isSameAs(failure);
+        assertThat(a.comments).isEqualTo(1);
+        assertThat(a.snapshots()).hasSize(1);
+
+        // 떠난 연결은 읽기 실패 중에도 주석 줄 보내기에서 빠진다(상한 자리를 차지하지 않게)
+        a.fail = true;
+        clock.set(T0.plus(ExperimentJobStream.KEEPALIVE.multipliedBy(2)));
+        assertThatThrownBy(s::tick).isSameAs(failure);
+        assertThat(s.openStreams()).isZero();
     }
 
     @Test
