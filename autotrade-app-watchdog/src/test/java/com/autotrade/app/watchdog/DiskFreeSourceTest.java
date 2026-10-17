@@ -58,6 +58,13 @@ class DiskFreeSourceTest {
     }
 
     @Test
+    void 원인의_제어_문자는_공백으로_바꾼다() {
+        // PR #157 QA R2: 탭·ESC(ANSI 색 문자열)가 콘솔 줄 모양을 깨지 않게
+        assertThat(DiskFreeSource.cause(new IOException("a\tb\u001b[31mc d\u0000e\u007f")))
+                .isEqualTo("IOException: a b [31mc d e ");
+    }
+
+    @Test
     void 원인을_자를_때_서로게이트_쌍을_가르지_않는다() {
         String message = "x".repeat(DiskFreeSource.CAUSE_MAX - 1) + "😀" + "y";
         assertThat(DiskFreeSource.cause(new IOException(message)))

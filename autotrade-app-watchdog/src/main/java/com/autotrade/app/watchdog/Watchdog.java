@@ -31,7 +31,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>점검은 스레드 하나에서 고정 간격으로 돈다. 한 점검의 어느 단계가 던져도 그 단계만 버리고 다음 단계와 다음 점검은 계속한다
  * (예약 작업 밖으로 아무것도 내보내지 않음, D-090과 같은 원칙). 자기 하트비트를 점검 루프 안에서 쓰므로 하트비트가 멈추면 루프가
- * 멈춘 것이다.
+ * 멈춘 것이다. 로그 출력 실패(로그 핸들러 예외)도 단계·판정·알림을 끊지 않는다: 점검 중 감시 로그는 모두 {@link WatchdogLog}로
+ * 내고, 결측 알림은 로그보다 먼저 넣는다(risk-ops PR #155 K1).
  */
 final class Watchdog implements AutoCloseable {
 
@@ -59,6 +60,8 @@ final class Watchdog implements AutoCloseable {
 
     /** 마지막 경고 뒤 경고한 값들. 여기 없는 값이 새로 빠지면 간격과 상관없이 바로 알린다. */
     private Set<String> warnedReadings = Set.of();
+    /** 마지막 회복 INFO 뒤 결측 WARN에 실제로 적은 값들. 회복 INFO 본문은 이것이다(risk-ops PR #157 K3). */
+    private Set<String> missingSinceRecovery = new TreeSet<>();
     private Instant lastMissingWarning;
     /** 마지막 회복 INFO 시각. 회복 INFO는 이 간격마다 한 번만 남긴다(D-108). */
     private Instant lastRecoveryInfo;
@@ -84,7 +87,8 @@ final class Watchdog implements AutoCloseable {
         }
         requiredReadings.add(OsMetricsSource.CPU);
         requiredReadings.add(OsMetricsSource.MEMORY);
-        Threshold disk = new Threshold(DiskFreeSource.METRIC, Threshold.Direction.BELOW, settings.diskWarnGb(),
+        // 지역 이름을 필드 disk(DiskFreeSource)와 달리 한다(risk-ops PR #157 K2)
+        Threshold diskThreshold = new Threshold(DiskFreeSource.METRIC, Threshold.Direction.BELOW, settings.diskWarnGb(),
                 settings.diskCriticalGb(), settings.diskSustain());
         Threshold cpu = new Threshold(OsMetricsSource.CPU, Threshold.Direction.ABOVE, settings.cpu().warn(),
                 settings.cpu().critical(), settings.cpu().sustain());
@@ -92,7 +96,7 @@ final class Watchdog implements AutoCloseable {
                 settings.memory().critical(), settings.memory().sustain());
         this.disk = new DiskFreeSource(settings.disks(), freeSpace);
         this.agent = new MonitorAgent(clock, List.of(this.disk, new OsMetricsSource(os)),
-                List.of(disk, cpu, memory), 1, 50);
+                List.of(diskThreshold, cpu, memory), 1, 50);
         this.heartbeats = new HeartbeatWatch(configDir, settings.processes(), settings.heartbeatStale());
         this.stopRequests = new StopRequests(configDir, settings.releaseHold());
         stopRequests.adoptLeftovers(clock.instant());
@@ -101,7 +105,11 @@ final class Watchdog implements AutoCloseable {
     /** 점검 한 번. 점검 스레드가 부르며, 시험에서는 직접 부른다. */
     void tick() {
         Instant now = clock.instant();
-        heartbeat.beat();
+        try {
+            heartbeat.beat(); // 던지지 않지만, 자기 하트비트 문제로 이 점검의 판정·알림을 건너뛰지 않게 막아 둔다(PR #163 architect N1)
+        } catch (Throwable e) {
+            log(Logger.Level.WARNING, "자기 하트비트 기록 실패 (" + e.getClass().getSimpleName() + ")");
+        }
         StopRequests.Pressure pressure = StopRequests.Pressure.UNKNOWN;
         String detail = "자원 값을 읽지 못함";
         try {
@@ -110,7 +118,7 @@ final class Watchdog implements AutoCloseable {
             pressure = pressure(snapshot);
             detail = detail(snapshot);
         } catch (Throwable e) {
-            LOG.log(Logger.Level.WARNING, "자원 점검 실패 (" + e.getClass().getSimpleName() + ")");
+            log(Logger.Level.WARNING, "자원 점검 실패 (" + e.getClass().getSimpleName() + ")");
         }
         try {
             for (HeartbeatWatch.Change c : heartbeats.check(now)) {
@@ -122,7 +130,7 @@ final class Watchdog implements AutoCloseable {
                                 + ("engine".equals(r.process()) ? " 장애표 #8: 대사 통과 전에는 실전 매매를 재개하지 마세요" : ""));
             }
         } catch (Throwable e) {
-            LOG.log(Logger.Level.WARNING, "하트비트 점검 실패 (" + e.getClass().getSimpleName() + ")");
+            log(Logger.Level.WARNING, "하트비트 점검 실패 (" + e.getClass().getSimpleName() + ")");
         }
         try {
             boolean before = stopRequests.active();
@@ -136,8 +144,12 @@ final class Watchdog implements AutoCloseable {
                         "자원이 정상으로 " + settings.releaseHold().toSeconds() + "초 이어져 정지 요청 파일을 지웠습니다");
             }
         } catch (Throwable e) {
-            LOG.log(Logger.Level.ERROR, "정지 요청 파일 처리 실패 (" + e.getClass().getSimpleName() + ")");
+            log(Logger.Level.ERROR, "정지 요청 파일 처리 실패 (" + e.getClass().getSimpleName() + ")");
         }
+    }
+
+    private static void log(Logger.Level level, String text) {
+        WatchdogLog.log(LOG, level, text);
     }
 
     /** 하트비트 상태 변화를 알림으로. 처음 본 꺼짐·살아 있음은 알리지 않는다(기동 직후 소음). */
@@ -214,8 +226,11 @@ final class Watchdog implements AutoCloseable {
                 warnedSinceRecovery = false;
                 lastRecoveryInfo = now;
                 missingRecoveries++;
-                LOG.log(Logger.Level.INFO, "자원 값을 다시 읽음: " + warnedReadings);
-                alert(EventRoutes.READING_RECOVERED, "readings", "자원 값을 다시 읽음", String.valueOf(warnedReadings));
+                String recovered = String.valueOf(missingSinceRecovery);
+                missingSinceRecovery = new TreeSet<>();
+                // 알림을 로그보다 먼저 넣는다(risk-ops PR #155 K1)
+                alert(EventRoutes.READING_RECOVERED, "readings", "자원 값을 다시 읽음", recovered);
+                log(Logger.Level.INFO, "자원 값을 다시 읽음: " + recovered);
             }
             return;
         }
@@ -234,14 +249,16 @@ final class Watchdog implements AutoCloseable {
         lastMissingWarning = now;
         warnedSinceRecovery = true;
         missingWarnings++;
-        LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + causes(missing) + ". 그 값의 위험 판정을 못 하므로 정지 요청을 "
-                + "새로 만들지 못하고, 켜진 정지 요청은 풀지 않는다(D-092 3번, D-095). 빠진 동안 " + MISSING_REPEAT.toMinutes()
-                + "분마다 다시 알린다(D-096)");
+        missingSinceRecovery.addAll(missing);
         if (newName || afterRecovery) {
-            // 알림은 새로 빠진 값과 회복 알림 뒤 다시 빠진 값만(10분 반복은 로그로). 같은 대상·종류는 알림 큐도 10분에 한 번만 보낸다
+            // 알림은 새로 빠진 값과 회복 알림 뒤 다시 빠진 값만(10분 반복은 로그로). 같은 대상·종류는 알림 큐도 10분에 한 번만 보낸다.
+            // 로그보다 먼저 넣어 로그 출력 실패가 긴급 알림을 막지 않게 한다(risk-ops PR #155 K1)
             alert(EventRoutes.READING_MISSING, "readings", "감시가 자원 값을 읽지 못함",
                     missing + ". 그 값으로는 정지 요청을 새로 만들지 못합니다(켜진 정지 요청은 유지)");
         }
+        log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + causes(missing) + ". 그 값의 위험 판정을 못 하므로 정지 요청을 "
+                + "새로 만들지 못하고, 켜진 정지 요청은 풀지 않는다(D-092 3번, D-095). 빠진 동안 " + MISSING_REPEAT.toMinutes()
+                + "분마다 다시 알린다(D-096)");
     }
 
     /** 간격이 찼는지. 처음이거나 시계가 뒤로 가면 찬 것으로 본다(PR #123 QA R4, HeartbeatWatch와 같이). */
