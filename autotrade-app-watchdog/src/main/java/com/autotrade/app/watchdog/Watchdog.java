@@ -43,6 +43,7 @@ final class Watchdog implements AutoCloseable {
     private final Clock clock;
     private final HeartbeatWriter heartbeat;
     private final MonitorAgent agent;
+    private final DiskFreeSource disk;
     private final HeartbeatWatch heartbeats;
     private final StopRequests stopRequests;
     private final Alerts alerts;
@@ -59,6 +60,9 @@ final class Watchdog implements AutoCloseable {
     /** 마지막 경고 뒤 경고한 값들. 여기 없는 값이 새로 빠지면 간격과 상관없이 바로 알린다. */
     private Set<String> warnedReadings = Set.of();
     private Instant lastMissingWarning;
+    /** 마지막 회복 INFO 시각. 회복 INFO는 이 간격마다 한 번만 남긴다(D-108). */
+    private Instant lastRecoveryInfo;
+    /** 마지막 결측 로그가 WARN이고 아직 회복 INFO를 남기지 않음. false면 마지막 결측 로그는 회복 INFO다(또는 아직 없음). */
     private boolean warnedSinceRecovery;
     private int missingWarnings;
     private int missingRecoveries;
@@ -86,7 +90,8 @@ final class Watchdog implements AutoCloseable {
                 settings.cpu().critical(), settings.cpu().sustain());
         Threshold memory = new Threshold(OsMetricsSource.MEMORY, Threshold.Direction.ABOVE, settings.memory().warn(),
                 settings.memory().critical(), settings.memory().sustain());
-        this.agent = new MonitorAgent(clock, List.of(new DiskFreeSource(settings.disks(), freeSpace), new OsMetricsSource(os)),
+        this.disk = new DiskFreeSource(settings.disks(), freeSpace);
+        this.agent = new MonitorAgent(clock, List.of(this.disk, new OsMetricsSource(os)),
                 List.of(disk, cpu, memory), 1, 50);
         this.heartbeats = new HeartbeatWatch(configDir, settings.processes(), settings.heartbeatStale());
         this.stopRequests = new StopRequests(configDir, settings.releaseHold());
@@ -193,8 +198,11 @@ final class Watchdog implements AutoCloseable {
     }
 
     /**
-     * 빠진 필수 값을 알린다(D-096). 새 값이 빠지면 바로, 같은 값이 계속(또는 되풀이해) 빠지면 {@link #MISSING_REPEAT}마다 WARN.
-     * 경고한 뒤 모두 돌아오면 INFO 한 번.
+     * 빠진 필수 값을 알린다(D-096, D-108). 새 값이 빠지면 바로, 같은 값이 계속(또는 되풀이해) 빠지면 {@link #MISSING_REPEAT}마다 WARN.
+     * 경고한 뒤 모두 돌아오면 INFO. 회복 INFO 뒤 다시 빠지면 간격과 상관없이 바로 WARN한다. 마지막 로그가 "다시 읽음"인 채 값이
+     * 빠져 있는 일이 없게 하려는 것이다(PR #123 독립 QA R1). 대신 회복 INFO는 간격마다 한 번만 남겨, 점검마다 오가는 값도 간격마다
+     * WARN 둘·INFO 하나를 넘지 않는다. 미룬 회복 INFO는 간격이 찬 뒤 값이 다 있는 첫 점검에 남긴다(그동안 마지막 로그는 "읽지 못함",
+     * 안전한 쪽).
      */
     private void reportMissing(MetricSnapshot snapshot, Instant now) {
         Set<String> missing = new TreeSet<>(requiredReadings);
@@ -202,8 +210,9 @@ final class Watchdog implements AutoCloseable {
             missing.remove(r.name());
         }
         if (missing.isEmpty()) {
-            if (warnedSinceRecovery) {
+            if (warnedSinceRecovery && due(lastRecoveryInfo, now)) {
                 warnedSinceRecovery = false;
+                lastRecoveryInfo = now;
                 missingRecoveries++;
                 LOG.log(Logger.Level.INFO, "자원 값을 다시 읽음: " + warnedReadings);
                 alert(EventRoutes.READING_RECOVERED, "readings", "자원 값을 다시 읽음", String.valueOf(warnedReadings));
@@ -211,10 +220,10 @@ final class Watchdog implements AutoCloseable {
             return;
         }
         boolean newName = !warnedReadings.containsAll(missing);
-        // 시계가 뒤로 가면 간격이 찬 것으로 본다(PR #123 QA R4, HeartbeatWatch와 같이)
-        boolean due = lastMissingWarning == null || now.isBefore(lastMissingWarning)
-                || !now.isBefore(lastMissingWarning.plus(MISSING_REPEAT));
-        if (!newName && !due) {
+        // 회복 INFO를 남긴 뒤 다시 빠짐. 마지막 로그가 회복이므로 간격을 기다리지 않는다(D-108)
+        boolean afterRecovery = !warnedSinceRecovery && lastMissingWarning != null;
+        boolean due = due(lastMissingWarning, now);
+        if (!newName && !afterRecovery && !due) {
             return;
         }
         Set<String> warned = new TreeSet<>(missing);
@@ -225,13 +234,32 @@ final class Watchdog implements AutoCloseable {
         lastMissingWarning = now;
         warnedSinceRecovery = true;
         missingWarnings++;
-        LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + ". 그 값의 위험 판정을 못 하므로 정지 요청을 새로 만들지 못하고, "
-                + "켜진 정지 요청은 풀지 않는다(D-092 3번, D-095). 빠진 동안 " + MISSING_REPEAT.toMinutes() + "분마다 다시 알린다(D-096)");
-        if (newName) {
-            // 알림은 새로 빠진 값만(10분 반복은 로그로). 같은 대상·종류는 알림 큐도 10분에 한 번만 보낸다
+        LOG.log(Logger.Level.WARNING, "자원 값을 읽지 못함: " + missing + causes(missing) + ". 그 값의 위험 판정을 못 하므로 정지 요청을 "
+                + "새로 만들지 못하고, 켜진 정지 요청은 풀지 않는다(D-092 3번, D-095). 빠진 동안 " + MISSING_REPEAT.toMinutes()
+                + "분마다 다시 알린다(D-096)");
+        if (newName || afterRecovery) {
+            // 알림은 새로 빠진 값과 회복 알림 뒤 다시 빠진 값만(10분 반복은 로그로). 같은 대상·종류는 알림 큐도 10분에 한 번만 보낸다
             alert(EventRoutes.READING_MISSING, "readings", "감시가 자원 값을 읽지 못함",
                     missing + ". 그 값으로는 정지 요청을 새로 만들지 못합니다(켜진 정지 요청은 유지)");
         }
+    }
+
+    /** 간격이 찼는지. 처음이거나 시계가 뒤로 가면 찬 것으로 본다(PR #123 QA R4, HeartbeatWatch와 같이). */
+    private static boolean due(Instant last, Instant now) {
+        return last == null || now.isBefore(last) || !now.isBefore(last.plus(MISSING_REPEAT));
+    }
+
+    /** 빠진 드라이브 값의 읽기 실패 원인(PR #119 risk-ops K3·QA R3). 원인을 모르면 빈 문자열. */
+    private String causes(Set<String> missing) {
+        List<String> parts = new ArrayList<>();
+        Map<String, String> failures = disk.failures();
+        for (String name : missing) {
+            String cause = failures.get(name);
+            if (cause != null) {
+                parts.add(name + " ← " + cause);
+            }
+        }
+        return parts.isEmpty() ? "" : " (원인: " + String.join(", ", parts) + ")";
     }
 
     /** 빠진 필수 값으로 WARN을 남긴 횟수(시험용). */

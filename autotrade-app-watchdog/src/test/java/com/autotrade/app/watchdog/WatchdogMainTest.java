@@ -82,10 +82,71 @@ class WatchdogMainTest {
         // PR #148 architect N1·risk-ops R1: Windows에서 AUTOTRADE_CONFIG_DIR에 따옴표를 넣은 경우
         java.util.List<Integer> exits = new java.util.ArrayList<>();
 
-        assertThat(WatchdogMain.launch(() -> {
+        String err = stderrOf(() -> assertThat(WatchdogMain.launch(() -> {
             throw new java.nio.file.InvalidPathException("\"C:\\autotrade\"", "Illegal char <\"> at index 0");
-        }, fixed, PlatformOsReadings::create, exits::add)).isNull();
+        }, fixed, PlatformOsReadings::create, exits::add)).isNull());
         assertThat(exits).containsExactly(WatchdogMain.EXIT_BAD_SETTINGS);
+        // 수집기 runbook 3.5가 이 문구로 환경 변수를 고치게 한다(PR #148 QA Q2, 변이 Q-M6)
+        assertThat(err).startsWith("감시 설정이 틀려 기동하지 않습니다(감시 없이 실전·실험을 돌리지 마세요): "
+                + "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): ");
+    }
+
+    @Test
+    void 진입점은_기동_실패를_표준_오류에_알리고_프로그램_오류면_로그에_예외_흐름을_남긴다() throws Exception {
+        // PR #148 QA Q1(변이 Q-M10: launch에서 report를 지우면 아무 줄도 없이 종료 코드만 남음)과 risk-ops M7(스택 빼기)
+        java.util.List<Integer> exits = new java.util.ArrayList<>();
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger("com.autotrade." + WatchdogMain.PROCESS);
+        java.util.List<java.util.logging.LogRecord> records = new java.util.ArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                records.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        IllegalStateException codeBug = new IllegalStateException("코드 실수");
+        jul.addHandler(handler);
+        String programError;
+        String refusal;
+        try {
+            programError = stderrOf(() -> WatchdogMain.launch(() -> ConfigPaths.in(dir), fixed, () -> {
+                throw codeBug;
+            }, exits::add));
+            Files.writeString(dir.resolve(WatchdogSettings.FILE), "disk.free-gb=20:50:1\n");
+            refusal = stderrOf(() -> WatchdogMain.launch(() -> ConfigPaths.in(dir), fixed, PlatformOsReadings::create, exits::add));
+        } finally {
+            jul.removeHandler(handler);
+        }
+
+        assertThat(exits).containsExactly(WatchdogMain.EXIT_START_FAILED, WatchdogMain.EXIT_BAD_SETTINGS);
+        assertThat(programError).startsWith(WatchdogMain.StartFailure.PROGRAM_ERROR_HEADLINE
+                + "(감시 없이 실전·실험을 돌리지 마세요): IllegalStateException: 코드 실수");
+        assertThat(refusal).startsWith("감시 설정이 틀려 기동하지 않습니다(감시 없이 실전·실험을 돌리지 마세요): ").contains("disk.free-gb");
+        java.util.List<java.util.logging.LogRecord> errors = records.stream()
+                .filter(r -> r.getLevel() == java.util.logging.Level.SEVERE).toList();
+        assertThat(errors).hasSize(2);
+        assertThat(errors.get(0).getMessage()).startsWith(WatchdogMain.StartFailure.PROGRAM_ERROR_HEADLINE);
+        assertThat(errors.get(0).getThrown()).isSameAs(codeBug); // 프로그램 오류는 로그에 예외 흐름(스택)까지
+        assertThat(errors.get(1).getMessage()).startsWith("감시 설정이 틀려 기동하지 않습니다: ");
+        assertThat(errors.get(1).getThrown()).isNull(); // 설정 오류는 한 줄만(사람이 고칠 문제)
+    }
+
+    /** 표준 오류로 나간 글을 모은다. */
+    private static String stderrOf(Runnable body) {
+        java.io.PrintStream original = System.err;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        try {
+            System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+            body.run();
+        } finally {
+            System.setErr(original);
+        }
+        return captured.toString(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     @Test

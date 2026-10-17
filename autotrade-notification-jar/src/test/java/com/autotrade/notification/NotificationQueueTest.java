@@ -210,14 +210,18 @@ class NotificationQueueTest {
     @Test
     void 큐가_차서_회복_알림을_버려도_다시_멈춤은_억제하지_않는다() throws Exception {
         // PR #128 QA 탐침 P2: 채널이 막혀 큐가 찬 동안 회복을 버리고, 큐가 비면 다시 멈춤은 받아야 한다
+        CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         sink.behavior.set(n -> {
+            entered.countDown();
             release.await();
             return SendResult.ok();
         });
         NotificationQueue q = queue();
         // 전체 상한 창은 T0에 시작한다. 엔진 멈춤은 T0+9분이라, T0+10분 새 창에서 회복은 상한이 아니라 큐 가득으로만 버려진다
         assertThat(q.offer(EventRoutes.WATCHDOG_STARTED, "watchdog", "감시 시작", "")).isTrue();
+        // 보내는 스레드가 첫 알림에서 막힌 뒤 채운다. 채운 뒤에 첫 건을 꺼내 가면 자리가 하나 생겨 회복이 받아진다(PR #151 risk-ops 점검표 밖 4번)
+        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
         clock.now = T0.plus(Duration.ofMinutes(9));
         assertThat(q.offer(EventRoutes.PROCESS_STALE, "engine", "엔진 멈춤", "")).isTrue();
         int i = 0;

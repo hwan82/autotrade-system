@@ -35,6 +35,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -290,5 +293,138 @@ class EngineMainTest {
                 .displayZone(ZoneId.of("Asia/Seoul"))
                 .kakaoReconsentHelp(RuntimeConfig.Notification.KAKAO_RECONSENT_HELP)
                 .build());
+    }
+
+    // ---- 기동 실패 종류(D-107, PR #144 독립 QA R2) ----
+
+    /** 알림 채널 이름이 어긋나는 코드 실수(PR #144)와 같은 예외를 알림 설정 단계에서 던진다. */
+    private static final Function<RuntimeConfig.Notification, NotificationSetup> CHANNEL_NAME_BUG = n -> {
+        throw new IllegalArgumentException("외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x");
+    };
+
+    private String captureErr(Runnable action) {
+        java.io.PrintStream original = System.err;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        try {
+            System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        return captured.toString(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private void writeTwoAccounts(ConfigPaths paths) throws IOException {
+        Files.writeString(paths.runtimeFile(), """
+                { "real-trading": { "accounts": [
+                    { "id": "KIS-US-1", "broker": "KIS", "market": "US" },
+                    { "id": "KIWOOM-KR-1", "broker": "KIWOOM", "market": "KRX" } ] } }
+                """);
+    }
+
+    @Test
+    void 진입점은_정상이면_종료를_부르지_않고_모든_계좌_OFF인_엔진을_돌려준다() throws IOException {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        writeTwoAccounts(paths);
+        List<Integer> exits = new ArrayList<>();
+
+        try (EngineMain.Engine engine = EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add)) {
+            assertThat(engine).isNotNull();
+            assertThat(exits).isEmpty();
+            assertThat(engine.guard().accounts()).hasSize(2)
+                    .allSatisfy(a -> assertThat(engine.guard().state(a.id())).isEqualTo(GuardState.OFF));
+        }
+    }
+
+    @Test
+    void 진입점은_알림_채널_코드_실수를_설정_오류로_표시하지_않고_종료_코드_1로_끝낸다() throws IOException {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        writeTwoAccounts(paths);
+        List<Integer> exits = new ArrayList<>();
+        EngineMain.Engine[] result = new EngineMain.Engine[1];
+
+        String err = captureErr(() -> result[0] = EngineMain.launch(() -> paths, FIXED, CHANNEL_NAME_BUG, exits::add));
+
+        assertThat(result[0]).isNull();
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED);
+        assertThat(err).contains(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE)
+                .contains("IllegalArgumentException: 외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x")
+                .doesNotContain(EngineMain.StartFailure.SETTINGS_HEADLINE);
+        // 명령 채널을 열기 전에 멈췄다: 소켓이 없고, 잠금이 남지 않아 고친 뒤 바로 다시 뜬다
+        assertThat(ControlSocket.path(paths)).doesNotExist();
+        // 기동 실패 뒤에도 다음 기동은 모든 계좌 OFF로 시작한다(절대 규칙 1)
+        try (EngineMain.Engine engine = EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add)) {
+            assertThat(engine).isNotNull();
+            assertThat(engine.guard().accounts()).hasSize(2)
+                    .allSatisfy(a -> assertThat(engine.guard().state(a.id())).isEqualTo(GuardState.OFF));
+        }
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED);
+    }
+
+    @Test
+    void 진입점은_그_밖의_기동_예외도_프로그램_오류로_종료_코드_1이다() {
+        List<Integer> exits = new ArrayList<>();
+        String err = captureErr(() -> assertThat(EngineMain.launch(() -> ConfigPaths.in(dir), FIXED, n -> {
+            throw new IllegalStateException("꾸리기 실패");
+        }, exits::add)).isNull());
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED);
+        assertThat(err).contains(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE).contains("IllegalStateException: 꾸리기 실패");
+    }
+
+    @Test
+    void 진입점은_설정_폴더_경로가_틀리면_설정_오류로_종료_코드_2로_끝낸다() {
+        List<Integer> exits = new ArrayList<>();
+        String err = captureErr(() -> assertThat(EngineMain.launch(() -> {
+            throw new java.nio.file.InvalidPathException("\"C:\\x\"", "Illegal char <\">");
+        }, FIXED, EngineMain::setup, exits::add)).isNull());
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_BAD_SETTINGS);
+        assertThat(err).contains(EngineMain.StartFailure.SETTINGS_HEADLINE)
+                .contains("설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR)")
+                .doesNotContain(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE);
+    }
+
+    @Test
+    void 진입점은_명령_채널을_열지_못하면_예전_문구로_종료_코드_1로_끝낸다() throws Exception {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        List<Integer> exits = new ArrayList<>();
+        try (EngineMain.Engine first = EngineMain.start(paths, FIXED)) {
+            String err = captureErr(() -> assertThat(EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add)).isNull());
+
+            assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED);
+            assertThat(err).contains(EngineMain.StartFailure.CHANNEL_HEADLINE).contains("다른 실전 엔진이 이미 실행 중입니다")
+                    .doesNotContain(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE);
+            assertThat(first.server().socket()).exists();
+        }
+    }
+
+    @Test
+    void 진입점은_실제_설정_폴더_값이_경로_형식이_아니면_설정_오류로_종료_코드_2로_끝낸다() {
+        // PR #151 risk-ops 권고 2: 운영과 같은 ConfigPaths.defaultLocation으로 본다. NUL 문자는 어느 OS에서도 경로가 아니다
+        String key = "autotrade.config-dir";
+        String before = System.getProperty(key);
+        List<Integer> exits = new ArrayList<>();
+        try {
+            System.setProperty(key, "bad\u0000dir");
+            String err = captureErr(() -> assertThat(EngineMain.launch(ConfigPaths::defaultLocation, FIXED, EngineMain::setup,
+                    exits::add)).isNull());
+
+            assertThat(exits).containsExactly(EngineMain.EXIT_BAD_SETTINGS);
+            assertThat(err).contains(EngineMain.StartFailure.SETTINGS_HEADLINE).contains("설정 폴더 경로가 틀렸습니다");
+        } finally {
+            if (before == null) {
+                System.clearProperty(key);
+            } else {
+                System.setProperty(key, before);
+            }
+        }
+    }
+
+    @Test
+    void 프로그램_오류만_예외_흐름을_남기는_종류로_판정한다() {
+        assertThat(EngineMain.StartFailure.of(new IllegalStateException("x")).programError()).isTrue();
+        assertThat(EngineMain.StartFailure.of(new IOException("x")).programError()).isFalse();
+        assertThat(EngineMain.StartFailure.of(new EngineMain.EngineRefusal("x")).programError()).isFalse();
     }
 }

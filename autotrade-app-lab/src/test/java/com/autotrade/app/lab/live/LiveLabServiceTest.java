@@ -227,6 +227,30 @@ class LiveLabServiceTest {
     }
 
     @Test
+    void otherRegistrationKindIsRefusedWithTheCause() throws Exception {
+        // 조합 실험 등록 파일은 형식 검사의 "모르는 키입니다: bars-snapshot"이 아니라 원인을 바로 알린다(5단계 QA R5)
+        Path combo = Files.createDirectories(experiments.resolve("EXP-TEST-COMBO"));
+        Files.writeString(combo.resolve("experiment.yaml"), String.join("\n", "id: \"EXP-TEST-COMBO\"",
+                "question: \"q\"", "market: \"KRX\"", "bars-snapshot: \"krx-daily-0001\"", "combinations:",
+                "  - \"x\"", ""), StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-COMBO")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("실시간 세션 등록 파일(input: live)이 아닙니다: experiments/EXP-TEST-COMBO/experiment.yaml");
+        // 녹화 실험 등록 파일(input: recording)도 같다
+        Path rec = Files.createDirectories(experiments.resolve("EXP-TEST-REC"));
+        Files.writeString(rec.resolve("experiment.yaml"), "id: \"EXP-TEST-REC\"\ninput: \"recording\"\n",
+                StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-REC")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("실시간 세션 등록 파일(input: live)이 아닙니다");
+        // input: live인데 형식이 틀리면 지금처럼 형식 검사 문구(줄 번호 포함)
+        Path broken = Files.createDirectories(experiments.resolve("EXP-TEST-LIVE01"));
+        Files.writeString(broken.resolve("experiment.yaml"), "id: \"EXP-TEST-LIVE01\"\ninput: live\nbars-snapshot: x\n",
+                StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-LIVE01")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("experiments/EXP-TEST-LIVE01/experiment.yaml:3: 모르는 키입니다: bars-snapshot");
+        assertThat(service.status().experimentId()).isEmpty();
+    }
+
+    @Test
     void listsLiveRegistrationsOnly() throws Exception {
         Path combo = Files.createDirectories(experiments.resolve("EXP-TEST-COMBO"));
         Files.writeString(combo.resolve("experiment.yaml"), "id: \"EXP-TEST-COMBO\"\ncombinations:\n  - \"x\"\n",
