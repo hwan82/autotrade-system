@@ -46,3 +46,42 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-17
+- 대상: PR #157 / 헤드 커밋 30bcfd4(앞 검토 970e099 뒤 운영 코드 커밋은 30bcfd4 하나, 그 사이 75fd0f9·9fe0f9d는 검토 원문뿐) / main 대비 diff 전체(`git diff origin/main...HEAD`)를 다시 보고, 970e099→30bcfd4 변경(`DiskFreeSource.java`, `DiskFreeSourceTest.java`, `WatchdogTest.java` 시험 이름, D-108 검증 절)을 따로 확인했다.
+- 점검표: A
+- 직접 실행한 것(같은 별도 clone, 같은 미러 init 스크립트 `-I <스크래치>/mirror.gradle`):
+  - `./gradlew -I <스크래치>/mirror.gradle build --no-daemon`(헤드 30bcfd4): **BUILD SUCCESSFUL in 1m 3s**, 종료 코드 0. 바뀌지 않은 모듈은 Gradle 최신 판정으로 앞 실행 결과를 재사용했다(같은 clone, 그 모듈 입력 불변). 시험 결과 XML 합계 1,541건, 실패·오류·건너뜀 0. `:autotrade-risk` 55, `:autotrade-architecture-test` 46, `:autotrade-app-engine` 55, `:autotrade-app-watchdog` 70(새 시험 2건 포함), 모두 실패 0.
+  - 변이(한 번에 하나, 각 뒤 `git checkout -- autotrade-app-watchdog`로 원복, 마지막 `git status` 깨끗함), 범위 `:autotrade-app-watchdog:test`:
+    | 변이 | 내용 | 결과 |
+    |---|---|---|
+    | M7 | `read()` 첫머리 `failures = Map.of()` 삭제(K1 수정 되돌림) | 잡힘 1건(`DiskFreeSourceTest#읽기_중_Error가_나가도_이전_점검의_원인을_남기지_않는다`) |
+    | M8 | 서로게이트 판정 제거(`end = CAUSE_MAX`) | 잡힘 1건(`DiskFreeSourceTest#원인을_자를_때_서로게이트_쌍을_가르지_않는다`) |
+    | M1 | `afterRecovery = false` 재실행 | 잡힘 4건(이름 바뀐 `#같은_값이_빠졌다_돌아오기를_되풀이해도_간격마다_정해진_횟수만_알린다` 포함) |
+    | M4 | 성공 시 원인을 지우지 않음(`if (!failed.isEmpty())`) 재실행 | 생존. 첫머리 비우기가 들어와 이 변이는 동작이 같은 변이(equivalent)가 됐다: 실패가 없으면 이미 빈 맵이다. 결함 아님 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | Guard·설정 로딩 변경 없음(970e099→30bcfd4 변경 파일은 감시 모듈 3개와 D-108뿐). `:autotrade-risk:test` 55건 통과 |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음. `:autotrade-architecture-test:test` 46건 통과 |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·조회 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 계좌 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 정지 요청 판정(`Watchdog.pressure` Watchdog.java:175-198, `stopRequests.update` :129)은 앞 검토와 같이 변경 없음. 새 커밋은 원인 문구 보관 시점(DiskFreeSource.java:55)과 자르기(:89)만 바꾼다. `WatchdogTest#드라이브를_읽지_못하면_판단_못_함이라_정지_요청을_풀지_않는다` 통과 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 원인은 로그에만, 알림 본문에는 넣지 않음(Watchdog.java:242-243). 한 줄·160자 자르기 유지(DiskFreeSource.java:71, :83-90). 새 시험 픽스처는 가짜 경로·이모지뿐. gitleaks는 이 컨테이너에 없어 CI에 맡기고, 추가 줄을 키·토큰·계좌번호 모양 정규식으로 찾아 0건 |
+| A11 | 통과 | 보호 테스트 변경 없음. 보호 경로 안 시험은 이름만 바뀜(WatchdogTest.java:218, 본문 동일, architect N1)이고 기대값·단언은 그대로. 새 동작(K1 수정, 서로게이트)에 실패 경우 시험 2건(DiskFreeSourceTest.java:40, :61) 추가, M7·M8로 둘 다 실제로 잡는 것 확인 |
+| A12 | 통과 | 장애 대응표·5.2 문단 이번 커밋 변경 없음(앞 검토 판단 유지, 17행). 장애 테스트 8종 전제 불변 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 통과 | D-108 검증 절이 새 시험 이름·K1·N2 시험을 반영(코드와 일치). 결정 본문(결정 1~4번)은 바뀌지 않음 |
+
+## 점검표 밖 발견(재검토)
+- 앞 검토 K1(Error 시 이전 원인이 남음): **해결**. `read()` 첫머리에서 비운다(DiskFreeSource.java:55). 읽는 쪽은 같은 점검 스레드라(`MonitorAgent.sampleOnce` 순차 호출) 비운 직후 읽기 사이 경쟁 없음. 시험·변이 M7로 확인.
+- K2(지역 `Threshold disk`가 필드를 가림)·K3(미뤄진 회복 INFO 본문 값)은 참고로 남는다. 안전 영향 없음, 판정에 넣지 않음.
+- 서로게이트 처리: `charAt(CAUSE_MAX - 1)`이 상위 서로게이트면 159자에서 자른다. `oneLine.length() > CAUSE_MAX`일 때만 들어오므로 인덱스 범위 문제 없음.
+- 새 발견 없음.
+
+## 판정
+승인
