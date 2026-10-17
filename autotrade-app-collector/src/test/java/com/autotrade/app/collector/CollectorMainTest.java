@@ -181,7 +181,9 @@ class CollectorMainTest {
         FakeHttp http = new FakeHttp((u, n) -> {
             LocalDate d = LocalDate.parse(FakeHttp.query(u, "basDd"), KrxOpenApiClient.BAS_DD);
             boolean kospi = u.getPath().endsWith(KrxBoard.KOSPI.service);
-            return FakeHttp.ok(KrxFixtures.body(d, kospi && !d.isBefore(wed) ? List.of() : List.of("111111;가;;100;100;100;100;0;1;10")));
+            // 시장마다 다른 종목(같은 날 같은 종목이 두 시장에 나오면 스냅샷이 멈춘다)
+            String row = kospi ? "111111;가;;100;100;100;100;0;1;10" : "222222;나;;200;200;200;200;0;1;10";
+            return FakeHttp.ok(KrxFixtures.body(d, kospi && !d.isBefore(wed) ? List.of() : List.of(row)));
         });
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         java.io.PrintStream old = System.out;
