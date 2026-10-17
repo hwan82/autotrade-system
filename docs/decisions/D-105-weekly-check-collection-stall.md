@@ -38,5 +38,14 @@ D-104부터 KRX 일봉 수집기는 캘린더상 거래일에 빈 목록이 오�
 
 ## 검증
 
-- `CollectionFreshnessTest`(7): 스냅샷 폴더 없음은 확인 필요(예외 아님), 1거래일 뒤처짐은 정상·2거래일은 멈춤 의심, 주말 제외, 한글날(2026-10-09) 휴장일은 세지 않음, 여러 스냅샷 중 가장 늦은 것을 고르고 깨진 manifest는 목록에 적고 만들다 만 폴더는 무시·같은 폴더면 같은 보고서, 캘린더 범위 밖은 평일로 셈·표시, KRX 밖 시장은 해당 없음.
+- `CollectionFreshnessTest`(7, 후속으로 10): 스냅샷 폴더 없음은 확인 필요(예외 아님), 1거래일 뒤처짐은 정상·2거래일은 멈춤 의심, 주말 제외, 한글날(2026-10-09) 휴장일은 세지 않음, 여러 스냅샷 중 가장 늦은 것을 고르고 깨진 manifest는 목록에 적고 만들다 만 폴더는 무시·같은 폴더면 같은 보고서, 캘린더 범위 밖은 평일로 셈·표시, KRX 밖 시장은 해당 없음.
 - `LiveWeeklyCheckTest` 깨끗한 세션 시험에 덧붙임: 스냅샷 없음은 머리·4장에 나오고 결함(종료 코드 2 조건)이 아님, 하루 전 스냅샷은 정상, 이틀 뒤처지면 멈춤 의심과 날짜 목록.
+
+## 후속(PR #145 검토 권고, 2026-10-17)
+
+결정 내용은 그대로이고 4장 표시와 시험만 보탠다(새 결정 번호 없음).
+
+- strategy-researcher R2: 4장 설명과 runbook에 "지금의 6단계 계좌는 일봉 스냅샷을 입력으로 쓰지 않으므로(`LivePlan` 선정 프로필 미연결) 3장 계좌 성과는 바뀌지 않고, 공백은 4단계 실험과 선정 결과 입력 쪽에 생긴다"를 적는다.
+- strategy-researcher R3·architect N2: 스냅샷 마지막 거래일이 점검 마지막 날보다 뒤면(`-Pto`로 지난 주를 다시 점검) 판정은 정상 그대로 두고 4장에 "그 주에 있었던 멈춤은 이 칸에 보이지 않는다"를 적는다(`Status.newerThanEnd`). 시험 `recheckingAnEarlierWeekSeesNewerSnapshotsAsNormal`.
+- architect N1: `coverage`(또는 `lastTradingDate`)가 없는 ADR-008 이전 형식 manifest는 "읽지 못함"이 아니라 "마지막 거래일 칸이 없는 옛 형식이라 세지 않은 스냅샷 폴더(깨진 것 아님)"로 따로 적는다(`Status.noCoverage`). 판정은 그대로(이것만 있으면 확인 필요). 시험 `oldManifestWithoutCoverageIsListedApartFromBrokenOnes`.
+- strategy-researcher R1(KRX 게시가 T+1이면 매주 거짓 멈춤 의심)은 첫 실데이터 주간 점검에서 스냅샷 `lastTradingDate`와 실행 시각을 대조해 정한다. R4(더 빠른 감지)는 대안 C 방향으로 남긴다.
