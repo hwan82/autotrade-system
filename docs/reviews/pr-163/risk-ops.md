@@ -53,3 +53,43 @@
 
 ## 판정
 수정 필요(A8·A14 / K1: 감시 `tick()`의 `heartbeat.beat()` 로그 출력 실패가 그 점검의 판정·알림·정지 요청을 건너뜀. 감싸기 또는 `HeartbeatWriter` 로그 삼킴 + 실패 경우 시험 + D-109·MON-02 문장 정정)
+
+## 재검토 2026-10-17
+- 대상: PR #163 / 헤드 커밋 e87c46f / main 대비 diff 전체(`git diff origin/main...HEAD`, 머지 기준 4d75626 = 현재 origin/main, 파일 16개 +607 −70. 검토 원문 2개 포함)를 다시 봤다. 앞 검토(91fa207) 뒤의 코드·문서 변경은 28b641b(`HeartbeatWriter`·`Watchdog`·시험 2개)와 e87c46f(D-109·기획서 MON-02)이고, 이 둘은 따로 확인했다.
+- 점검표: A
+- 직접 실행한 것(같은 별도 clone, 같은 미러 init 스크립트):
+  - `./gradlew -I <스크래치>/mirror.init.gradle build`(헤드 e87c46f): **BUILD SUCCESSFUL in 1m 36s**, 종료 코드 0. 시험 결과 XML 합계 1,564건, 실패·오류·건너뜀 0.
+    - 모듈별: `:autotrade-risk` 55, `:autotrade-architecture-test` 46, `:autotrade-app-engine` 62, `:autotrade-app-watchdog` 74, `:autotrade-monitor-agent-jar` 35(새 시험 1건 포함), `:autotrade-app-gateway` 50. 모두 실패 0.
+    - `HeartbeatWriter`가 바뀌어 이를 쓰는 엔진·게이트웨이 시험도 다시 돌았다.
+  - 변이(각 실행 뒤 `git checkout -- .`로 원복, 마지막 `git status` 깨끗함):
+    | 변이 | 내용 | 결과 |
+    |---|---|---|
+    | M10 | `HeartbeatWriter.logQuietly`가 삼키지 않고 다시 던짐 | 잡힘(`HeartbeatTest#로그_핸들러가_던져도_기록_실패와_복구에서_던지지_않는다`). 감시 시험은 통과: `tick()`의 감싸기가 막아 줘서, 의도한 이중 방어다 |
+    | M11 | `tick()`의 `heartbeat.beat()` 감싸기 제거 | 생존. `HeartbeatWriter`가 이미 삼키므로 결과가 같은 변이다. 결함 아님 |
+    | M10+M11 | 둘을 함께 적용(앞 검토 K1의 원래 상태) | 잡힘(`WatchdogTest#감시_로그가_던져도_같은_점검의_알림과_정지_요청은_그대로_한다`). 앞 검토 탐침과 같은 상황을 이제 상시 시험이 잡는다 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | Guard·설정 로딩 변경 없음. `:autotrade-risk:test` 55건 통과 |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음. `:autotrade-architecture-test:test` 46건 통과 |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·조회 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 계좌 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 자기 하트비트 쓰기 실패와 로그 핸들러 예외가 겹쳐도 점검의 알림·정지 요청 파일이 이어진다. 두 겹으로 막는다: `tick()`이 `beat()`를 try로 감싸고(Watchdog.java:108-112), `HeartbeatWriter`의 실패·복구·삭제 실패 로그는 출력 실패를 삼킨다(HeartbeatWriter.java:84, :90, :99-105, :133). 시험 `WatchdogTest#감시_로그가_던져도_같은_점검의_알림과_정지_요청은_그대로_한다`(WatchdogTest.java:583)가 `com.autotrade` 로거에 던지는 핸들러와 자기 하트비트 쓰기 실패를 함께 주입해 이를 확인한다. M10+M11로 그 시험이 실제로 잡는 것을 확인했다. 실전 엔진(EngineMain.java:143)·게이트웨이는 `HeartbeatWriter`의 로그 삼킴만 얻는다. 그 밖의 동작 변경은 없고 `beatQuietly`도 그대로이며, 엔진 시험 62건이 통과했다. 정지 요청 판정(`pressure`·`StopRequests` 판정 분기)은 앞 검토와 같이 변경 없음 |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 로그 문구는 하트비트 파일 경로와 예외 클래스 이름뿐이다(Watchdog.java:111, HeartbeatWriter.java:84-91). 하트비트 파일 경로는 설정 폴더 아래 `heartbeat/<프로세스>.hb`로, 비밀값이 아니다. 새 시험 픽스처는 임시 폴더와 "주입" 문구뿐. 추가 줄을 키·토큰·계좌번호 모양 정규식으로 찾아 0건이다(gitleaks는 CI에 맡김) |
+| A11 | 통과 | 보호 테스트(`autotrade-architecture-test`, Guard 테스트, 장애 테스트)와 고정 값 변경 없음. 보호 경로 안 기존 시험 `WatchdogTest.java:583`은 핸들러 대상을 감시 패키지 로거에서 상위 `com.autotrade` 로거로 넓혔고, 자기 하트비트 쓰기 실패를 더했다. 기대값은 그대로라 약화가 아니라 강화다. 새 동작에는 실패 경우 시험 `HeartbeatTest.java:116`을 추가했다. 앞 검토 변이 M1~M9의 대상 코드는 28b641b에서 바뀌지 않았다 |
+| A12 | 통과 | 장애 대응표 6장 17행과 `docs/team`은 변경 없음. 장애 테스트 8종의 전제(감시는 정지 요청 파일만 만들고 실전 엔진을 멈추지 않음)도 그대로다. 해외 O1~O8 무관 |
+| A13 | 해당 없음 | 시장별 경로 변경 없음 |
+| A14 | 통과 | 다음 문서가 코드와 일치한다(Watchdog.java:108-112, HeartbeatWriter.java:99-105): D-109 결정 3(`HeartbeatWriter`의 기록 실패·복구·삭제 실패 로그, `tick()`의 `beat()` 감싸기 추가), 검증 절(새 시험 이름), 기획서 MON-02(v14.48 행, "자기 하트비트 기록 로그 포함"). 기획서 버전과 변경 이력 줄은 v14.48 그대로다. 같은 PR 안에서 아직 머지되지 않은 판의 문구를 다듬은 것이라 새 버전이 필요하지 않다고 본다 |
+
+## 점검표 밖 발견(재검토)
+- 앞 검토 K1(감시 `tick()` 첫 줄 `heartbeat.beat()`의 로그가 던지면 그 점검 전체가 빠짐): **해결**. 두 겹 방어와 상시 시험, 변이 M10·M10+M11로 확인했다.
+- `HeartbeatWriter.beat()` javadoc의 "예외를 던지지 않는다"(HeartbeatWriter.java:71)가 이제 로그 핸들러 예외에도 맞다. 다만 `clock.instant()`나 `hb.format()`이 Error를 던지는 경우는 여전히 나갈 수 있다. 감시 쪽은 `tick()`의 `catch (Throwable)`가, 엔진 쪽은 `beatQuietly`가 막으므로 실전 영향은 없다(참고, 판정에 넣지 않음).
+- 앞 검토 K2(결측 알림 순서는 이중 방어)와 K3(재출력 상한 없음)는 참고로 남긴다.
+- 새 발견 없음.
+
+## 판정
+승인
