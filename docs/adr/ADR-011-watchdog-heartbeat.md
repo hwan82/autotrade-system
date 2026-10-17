@@ -32,7 +32,7 @@
 - 실전 엔진 런타임에 이 모듈이 들어와도 실전 경로 검사(`RealPathReflectionTest`)는 바뀌지 않는다(이미 감시 때문에 실전 경로 모듈 목록에 있음). `autotrade-monitor-sources`(OSHI)는 엔진·감시 런타임에 들어오지 않고, 두 프로세스의 `processIsolation.forbiddenProjects`가 직접 금지하고 `forbiddenGroups`가 OSHI(`com.github.oshi`)·JNA(`net.java.dev.jna`)를 금지한다(PR #114 QA R5, architect A1, PR #118 architect N4).
 
 - **PC CPU·메모리(D-095, Q-053 사용자 결정 ①)**: 감시의 `PlatformOsReadings` 한 클래스만 JDK `ManagementFactory#getOperatingSystemMXBean`과 `com.sun.management.OperatingSystemMXBean`의 `getCpuLoad`·`getTotalMemorySize`·`getFreeMemorySize`를 쓴다. 다른 감시 클래스는 인터페이스 `OsReadings`만 본다. `RealPathReflectionTest`가 이 클래스 이름과 메서드 셋을 고정하고, 그 밖의 관리 API(MBean 서버, 다른 MXBean, 다른 메서드)는 이 클래스에서도 금지다. OSHI·JNA·`autotrade-monitor-sources` 금지는 그대로다.
-- **값 결측 로그(D-096)**: 필수 값(드라이브 경로별 여유, `cpu.system`, `memory.used`)이 빠지면 감시가 WARN, 빠진 채 이어지면 10분(`Watchdog.MISSING_REPEAT`, 하트비트 설정 폴더 경고 `HeartbeatWatch.ALL_ABSENT_REPEAT`와 같음)마다 다시 WARN, 경고 뒤 모두 돌아오면 INFO. 같은 값이 오가도 간격 안에서는 다시 알리지 않는다.
+- **값 결측 로그(D-096)**: 필수 값(드라이브 경로별 여유, `cpu.system`, `memory.used`)이 빠지면 감시가 WARN, 빠진 채 이어지면 10분(`Watchdog.MISSING_REPEAT`, 하트비트 설정 폴더 경고 `HeartbeatWatch.ALL_ABSENT_REPEAT`와 같음)마다 다시 WARN, 경고 뒤 모두 돌아오면 INFO. 같은 값이 오가도 간격 안에서는 다시 알리지 않는다. 단, 회복 INFO 뒤 다시 빠지면 바로 WARN하고, 회복 INFO는 10분마다 한 번만 남긴다(D-108, 오가는 결측은 간격당 WARN 둘·INFO 하나 이하). 드라이브를 못 읽으면 WARN에 원인(예외 종류·메시지)을 붙인다(D-108).
 
 ## 4. 되돌릴 조건
 - 하트비트 파일 대신 실전 엔진 상태를 명령 채널(ADR-006)로 묻게 되면(7단계 감시 긴급 경로가 엔진과 통신할 때) 엔진 하트비트는 그 채널의 응답으로 바꿀 수 있다. 그때도 다른 프로세스 하트비트는 파일로 둔다.
