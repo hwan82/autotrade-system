@@ -190,8 +190,9 @@ public final class WatchdogMain {
      */
     record StartFailure(int exitCode, String headline, String detail) {
 
+        // 괄호로 끝나지 않게 한다: 표준 오류 줄이 첫머리 뒤에 "(감시 없이 실전·실험을 돌리지 마세요)"를 붙인다(PR #165 검토 권고)
         static final String PROGRAM_ERROR_HEADLINE =
-                "감시가 기동 중 프로그램 오류로 멈췄습니다(설정 파일 문제가 아닙니다. 로그의 예외를 개발 쪽에 알려 주세요)";
+                "감시가 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아닙니다. 로그의 예외를 개발 쪽에 알려 주세요";
 
         static StartFailure of(RuntimeException e) {
             if (e instanceof WatchdogRefusal refusal) {
