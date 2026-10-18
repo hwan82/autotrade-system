@@ -422,6 +422,81 @@ class EngineMainTest {
     }
 
     @Test
+    void 진입점은_프로그램_오류만_로그에_예외_흐름을_남기고_설정_오류와_명령_채널_실패는_한_줄만_남긴다() throws Exception {
+        // PR #151 독립 QA Q1(변이 M4 늘 스택, M5 스택 없음 생존): report가 programError 필드대로 로그에 넘기는지 본다.
+        // 명령 채널 IOException이나 설정 거부 원인의 예외 흐름이 로그에 남지 않아야 한다(비밀값이 실릴 수 있는 원인 예외)
+        ConfigPaths paths = ConfigPaths.in(dir);
+        List<Integer> exits = new ArrayList<>();
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger("com.autotrade." + EngineMain.PROCESS);
+        List<java.util.logging.LogRecord> records = new ArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                records.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        IllegalStateException codeBug = new IllegalStateException("꾸리기 실패");
+        jul.addHandler(handler);
+        try {
+            captureErr(() -> EngineMain.launch(() -> paths, FIXED, n -> {
+                throw codeBug;
+            }, exits::add));
+            captureErr(() -> EngineMain.launch(() -> {
+                throw new java.nio.file.InvalidPathException("\"C:\\x\"", "Illegal char <\">");
+            }, FIXED, EngineMain::setup, exits::add));
+            try (EngineMain.Engine first = EngineMain.start(paths, FIXED)) {
+                captureErr(() -> EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add));
+                assertThat(first.server().socket()).exists();
+            }
+        } finally {
+            jul.removeHandler(handler);
+        }
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED, EngineMain.EXIT_BAD_SETTINGS,
+                EngineMain.EXIT_START_FAILED);
+        List<java.util.logging.LogRecord> errors = records.stream()
+                .filter(r -> r.getLevel() == java.util.logging.Level.SEVERE).toList();
+        assertThat(errors).hasSize(3);
+        assertThat(errors.get(0).getMessage()).startsWith(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE);
+        assertThat(errors.get(0).getThrown()).isSameAs(codeBug); // 프로그램 오류는 로그에 예외 흐름(스택)까지
+        assertThat(errors.get(1).getMessage()).startsWith(EngineMain.StartFailure.SETTINGS_HEADLINE);
+        assertThat(errors.get(1).getThrown()).isNull(); // 설정 오류는 한 줄만
+        assertThat(errors.get(2).getMessage()).startsWith(EngineMain.StartFailure.CHANNEL_HEADLINE);
+        assertThat(errors.get(2).getThrown()).isNull(); // 명령 채널 실패도 한 줄만
+    }
+
+    @Test
+    void 기동_실패_표준_오류_첫머리는_runbook이_안내하는_낱말로_시작한다() throws Exception {
+        // PR #151 독립 QA Q2(변이 M10·M11 생존): 상수끼리 비교하면 문구가 바뀌어도 통과하므로 runbook 낱말을 글자로 본다.
+        // docs/runbooks/README.md 종료 코드 표: "명령 채널을 열지 못해"면 다른 엔진, "프로그램 오류"면 코드 문제(D-107).
+        // 괄호가 두 번 이어지지 않는다(PR #151 QA R1)
+        ConfigPaths paths = ConfigPaths.in(dir);
+        List<Integer> exits = new ArrayList<>();
+        String programError = captureErr(() -> EngineMain.launch(() -> paths, FIXED, CHANNEL_NAME_BUG, exits::add));
+        String settings = captureErr(() -> EngineMain.launch(() -> {
+            throw new java.nio.file.InvalidPathException("\"C:\\x\"", "Illegal char <\">");
+        }, FIXED, EngineMain::setup, exits::add));
+        String channel;
+        try (EngineMain.Engine first = EngineMain.start(paths, FIXED)) {
+            channel = captureErr(() -> EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add));
+            assertThat(first.server().socket()).exists();
+        }
+
+        assertThat(programError).startsWith("실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 "
+                + "로그의 예외를 개발 쪽에 알려 주세요(실전 엔진이 뜨지 않았습니다): IllegalArgumentException: ");
+        assertThat(settings).startsWith("실전 엔진 설정이 틀려 기동하지 않습니다(실전 엔진이 뜨지 않았습니다): "
+                + "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): ");
+        assertThat(channel).startsWith("실전 제어 명령 채널을 열지 못해 기동을 중단합니다(실전 엔진이 뜨지 않았습니다): ");
+        assertThat(List.of(programError, settings, channel)).allSatisfy(err -> assertThat(err).doesNotContain(")("));
+    }
+
+    @Test
     void 프로그램_오류만_예외_흐름을_남기는_종류로_판정한다() {
         assertThat(EngineMain.StartFailure.of(new IllegalStateException("x")).programError()).isTrue();
         assertThat(EngineMain.StartFailure.of(new IOException("x")).programError()).isFalse();
