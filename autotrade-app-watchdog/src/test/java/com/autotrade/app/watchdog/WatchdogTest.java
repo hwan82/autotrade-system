@@ -6,11 +6,15 @@ import com.autotrade.app.watchdog.HeartbeatWatch.State;
 import com.autotrade.monitor.Heartbeat;
 import com.autotrade.monitor.HeartbeatWriter;
 import com.autotrade.notification.EventRoutes;
+import com.autotrade.notification.LogChannel;
+import com.autotrade.notification.NotificationQueue;
+import com.autotrade.notification.Notifier;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -56,13 +60,26 @@ class WatchdogTest {
     private final List<Sent> sent = new ArrayList<>();
 
     private Watchdog watchdog(TestClock clock) {
+        return watchdog(clock, (kind, subject, title, body) -> sent.add(new Sent(kind, subject, title, body)), stage -> { });
+    }
+
+    private Watchdog watchdog(TestClock clock, Alerts alerts, java.util.function.Consumer<Watchdog.Stage> probe) {
         WatchdogSettings settings = WatchdogSettings.parse("release-hold-seconds=60\ncpu.system=85:95:2\nmemory.used=85:95:1", dir);
         return new Watchdog(dir, settings, clock, path -> {
             if (diskFails) {
                 throw new IOException("읽기 실패 주입");
             }
             return free.get();
-        }, os, (kind, subject, title, body) -> sent.add(new Sent(kind, subject, title, body)), null);
+        }, os, alerts, null, probe);
+    }
+
+    /** 이 단계에서 던지는 감시. 실패시킬 단계는 {@code failing[0]}으로 점검 사이에 바꿀 수 있다(null이면 안 던짐). */
+    private Watchdog failingAt(TestClock clock, Watchdog.Stage[] failing) {
+        return watchdog(clock, (kind, subject, title, body) -> sent.add(new Sent(kind, subject, title, body)), stage -> {
+            if (stage == failing[0]) {
+                throw new IllegalStateException("단계 실패 주입");
+            }
+        });
     }
 
     private List<String> kinds() {
@@ -802,6 +819,207 @@ class WatchdogTest {
         }
         assertThat(w.missingWarnings()).isEqualTo(3);
         w.close();
+    }
+
+    @Test
+    void 큐가_억제한_결측_알림은_간격이_찬_반복_경고_때_한_번_다시_넣는다() {
+        // PR #166 독립 QA R1(탐침 PB): cpu 결측 → cpu 회복 → 드라이브 결측 → 드라이브 회복·cpu 재결측이면 cpu 결측 알림은 큐가
+        // 같은 대상·종류 10분 억제로 버린다. 예전에는 그 뒤 cpu가 계속 빠져도 반복 경고가 로그로만 나 채널에 cpu가 끝까지 오지 않았다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        NotificationQueue queue = new NotificationQueue(Notifier.of(List.of(new LogChannel()), List.of(new LogChannel())),
+                EventRoutes.defaults(), clock, ZoneOffset.UTC, "watchdog-test", NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP);
+        Watchdog w = watchdog(clock, (kind, subject, title, body) -> {
+            boolean accepted = queue.offer(kind, subject, title, body);
+            if (accepted) {
+                sent.add(new Sent(kind, subject, title, body));
+            }
+            return accepted;
+        }, stage -> { });
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // cpu 결측 알림
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 회복 알림
+        diskFails = true;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 드라이브 결측 알림
+        diskFails = false;
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // cpu 결측 알림은 큐가 억제
+        assertThat(queue.suppressedTotal()).isEqualTo(1);
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED,
+                EventRoutes.READING_MISSING);
+        assertThat(sent.get(2).body()).doesNotContain("cpu.system");
+
+        clock.advance(Watchdog.MISSING_REPEAT.minusSeconds(5));
+        w.tick(); // 간격 안: 아무것도 없음
+        assertThat(sent).hasSize(3);
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 간격이 찬 반복 경고: 못 보낸 결측 알림을 지금 빠진 값으로 다시 넣는다
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED,
+                EventRoutes.READING_MISSING, EventRoutes.READING_MISSING);
+        assertThat(sent.get(3).body()).startsWith("[cpu.system]");
+
+        clock.advance(Watchdog.MISSING_REPEAT);
+        w.tick(); // 받은 뒤의 반복 경고는 다시 로그로만(D-096)
+        assertThat(sent).hasSize(4);
+        assertThat(w.missingWarnings()).isEqualTo(5);
+        queue.close(Duration.ZERO);
+        w.close();
+    }
+
+    @Test
+    void 큐가_받은_결측_알림은_반복_경고_때_다시_넣지_않는다() {
+        // R1 고침이 D-096(반복 경고는 로그로)을 깨지 않는지: 받은 알림은 다시 넣지 않는다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        for (int i = 0; i < 3; i++) {
+            clock.advance(Watchdog.MISSING_REPEAT);
+            w.tick();
+        }
+        assertThat(w.missingWarnings()).isEqualTo(3);
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING);
+        w.close();
+    }
+
+    @Test
+    void 결측_알림을_넣다_던지면_다음_반복_경고_때_다시_넣는다() {
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        boolean[] broken = {true};
+        Watchdog w = watchdog(clock, (kind, subject, title, body) -> {
+            if (broken[0]) {
+                throw new IllegalStateException("알림 큐 실패 주입");
+            }
+            return sent.add(new Sent(kind, subject, title, body));
+        }, stage -> { });
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick();
+        assertThat(sent).isEmpty();
+        broken[0] = false;
+        clock.advance(Watchdog.MISSING_REPEAT);
+        w.tick();
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING);
+        w.close();
+    }
+
+    @Test
+    void 드라이브를_읽지_못하는_점검에서도_엔진_멈춤_알림이_나간다() throws Exception {
+        // PR #166 독립 QA Q1(변이 V2): 자원 판정이 UNKNOWN이어도 하트비트 단계는 따로 돈다(장애표 #8 감지가 자원 읽기에 묶이지 않게)
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        HeartbeatWriter engine = new HeartbeatWriter(dir, "engine", clock);
+        engine.beat();
+        Watchdog w = watchdog(clock);
+        w.tick();
+        diskFails = true;
+        clock.advance(Duration.ofMinutes(5)); // 엔진 하트비트가 끊김
+        w.tick();
+        assertThat(w.stopRequests().active()).isFalse();
+        assertThat(kinds()).containsExactlyInAnyOrder(EventRoutes.READING_MISSING, EventRoutes.PROCESS_STALE);
+        assertThat(sent).filteredOn(a -> a.kind().equals(EventRoutes.PROCESS_STALE)).singleElement()
+                .extracting(Sent::subject).isEqualTo("engine");
+        w.close();
+    }
+
+    /** 감시 로거 기록 중 단계 실패 줄만. */
+    private static List<LogRecord> stageFailures(List<LogRecord> records) {
+        return records.stream().filter(r -> r.getMessage().endsWith("(IllegalStateException)")).toList();
+    }
+
+    /** 엔진이 멈추고 드라이브 여유가 위험인 점검을, 한 단계를 실패시켜 돌린다. 기록된 로그를 돌려준다. */
+    private List<LogRecord> tickWithFailingStage(Watchdog.Stage stage) throws IOException {
+        List<LogRecord> records = new ArrayList<>();
+        Handler handler = capture(records);
+        try {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            new HeartbeatWriter(dir, "engine", clock).beat();
+            clock.advance(Duration.ofMinutes(5));
+            free.set(10 * GIB);
+            Watchdog w = failingAt(clock, new Watchdog.Stage[] {stage});
+            w.tick();
+            w.close();
+        } finally {
+            java.util.logging.Logger.getLogger(Watchdog.class.getName()).removeHandler(handler);
+        }
+        return records;
+    }
+
+    private static void assertStageFailure(List<LogRecord> records, java.util.logging.Level level, String message) {
+        assertThat(stageFailures(records)).singleElement().satisfies(r -> {
+            assertThat(r.getLevel()).isEqualTo(level);
+            assertThat(r.getMessage()).isEqualTo(message);
+        });
+    }
+
+    // PR #166 독립 QA Q2(변이 V1·V6)·architect N3: tick이 넘기는 단계 실패 로그 수준·문구와, 한 단계가 실패해도 나머지 단계가 도는지를
+    // tick 경로로 고정한다. 문구는 D-110 결정 2대로 예전 catch와 같다
+
+    @Test
+    void 자기_하트비트_단계가_실패해도_나머지_단계는_돈다() throws Exception {
+        List<LogRecord> records = tickWithFailingStage(Watchdog.Stage.SELF_HEARTBEAT);
+        assertStageFailure(records, java.util.logging.Level.WARNING, "자기 하트비트 기록 실패 (IllegalStateException)");
+        assertThat(Heartbeat.file(dir, Watchdog.PROCESS)).doesNotExist();
+        assertThat(kinds()).containsExactly(EventRoutes.PROCESS_STALE, EventRoutes.STOP_REQUEST_ON);
+    }
+
+    @Test
+    void 자원_단계가_실패하면_판단_못_함이라_정지_요청을_새로_만들지_않고_하트비트_단계는_돈다() throws Exception {
+        List<LogRecord> records = tickWithFailingStage(Watchdog.Stage.RESOURCES);
+        assertStageFailure(records, java.util.logging.Level.WARNING, "자원 점검 실패 (IllegalStateException)");
+        assertThat(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST)).doesNotExist();
+        assertThat(kinds()).containsExactly(EventRoutes.PROCESS_STALE);
+    }
+
+    @Test
+    void 자원_단계가_실패하는_동안_켜진_정지_요청은_풀지_않는다() {
+        // risk-ops PR #166 K2: 자원 단계의 대신 값은 UNKNOWN(판단 못 함)이라 해제 대기 시간이 지나도 정지 요청을 유지한다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog.Stage[] failing = {null};
+        Watchdog w = failingAt(clock, failing);
+        free.set(10 * GIB);
+        w.tick();
+        assertThat(w.stopRequests().active()).isTrue();
+        failing[0] = Watchdog.Stage.RESOURCES;
+        free.set(100 * GIB);
+        for (int i = 0; i < 30; i++) {
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+        }
+        assertThat(w.stopRequests().active()).isTrue();
+        assertThat(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST)).exists();
+        w.close();
+    }
+
+    @Test
+    void 정지_요청_사유를_만들다_던져도_위험_판정은_남아_정지_요청을_만든다() throws Exception {
+        // PR #166 독립 QA R2: 판정과 사유를 한 람다로 묶으면 사유가 던질 때 CRITICAL이 UNKNOWN이 되어 정지 요청을 못 만들었다
+        List<LogRecord> records = tickWithFailingStage(Watchdog.Stage.DETAIL);
+        assertStageFailure(records, java.util.logging.Level.WARNING, "정지 요청 사유 작성 실패 (IllegalStateException)");
+        assertThat(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST)).exists();
+        assertThat(dir.resolve(StopRequests.EXPERIMENT_STOP_REQUEST)).exists();
+        assertThat(kinds()).containsExactly(EventRoutes.PROCESS_STALE, EventRoutes.STOP_REQUEST_ON);
+        assertThat(sent.get(1).body()).startsWith("사유를 만들지 못함. ");
+    }
+
+    @Test
+    void 하트비트_단계가_실패해도_정지_요청_단계는_돈다() throws Exception {
+        List<LogRecord> records = tickWithFailingStage(Watchdog.Stage.HEARTBEATS);
+        assertStageFailure(records, java.util.logging.Level.WARNING, "하트비트 점검 실패 (IllegalStateException)");
+        assertThat(kinds()).containsExactly(EventRoutes.STOP_REQUEST_ON);
+    }
+
+    @Test
+    void 정지_요청_단계_실패는_ERROR로_남기고_앞_단계_알림은_나간다() throws Exception {
+        List<LogRecord> records = tickWithFailingStage(Watchdog.Stage.STOP_REQUESTS);
+        assertStageFailure(records, java.util.logging.Level.SEVERE, "정지 요청 파일 처리 실패 (IllegalStateException)");
+        assertThat(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST)).doesNotExist();
+        assertThat(kinds()).containsExactly(EventRoutes.PROCESS_STALE);
     }
 
     /** 감시 로거 기록을 모은다. 시험이 끝나면 떼야 한다. */
