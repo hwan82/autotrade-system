@@ -274,8 +274,9 @@ public final class EngineMain {
 
         static final String SETTINGS_HEADLINE = "실전 엔진 설정이 틀려 기동하지 않습니다";
         static final String CHANNEL_HEADLINE = "실전 제어 명령 채널을 열지 못해 기동을 중단합니다";
+        // 괄호로 끝나지 않게 한다: 표준 오류 줄이 첫머리 뒤에 "(실전 엔진이 뜨지 않았습니다)"를 붙인다(PR #151 QA R1)
         static final String PROGRAM_ERROR_HEADLINE =
-                "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다(설정 파일 문제가 아닙니다. 로그의 예외를 개발 쪽에 알려 주세요)";
+                "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 로그의 예외를 개발 쪽에 알려 주세요";
 
         static StartFailure of(Exception e) {
             if (e instanceof EngineRefusal) {
