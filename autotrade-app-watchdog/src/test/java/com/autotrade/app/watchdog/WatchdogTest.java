@@ -872,6 +872,51 @@ class WatchdogTest {
     }
 
     @Test
+    void 억제된_결측_알림은_값이_잠깐_다_읽혀도_잊지_않는다() {
+        // risk-ops PR #170 K1(변이 M10): 억제 → 값이 모두 읽힘(회복 INFO는 간격이 안 차 미뤄짐) → cpu 다시 빠짐이면 cpu를 채널에
+        // 보내는 길은 간격이 찬 반복 경고 때의 재전송뿐이다. 값이 다 읽힌 점검에서 표시를 지우면 cpu 결측이 끝까지 오지 않는다
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        NotificationQueue queue = new NotificationQueue(Notifier.of(List.of(new LogChannel()), List.of(new LogChannel())),
+                EventRoutes.defaults(), clock, ZoneOffset.UTC, "watchdog-test", NotificationQueue.DEFAULT_KAKAO_RECONSENT_HELP);
+        Watchdog w = watchdog(clock, (kind, subject, title, body) -> {
+            boolean accepted = queue.offer(kind, subject, title, body);
+            if (accepted) {
+                sent.add(new Sent(kind, subject, title, body));
+            }
+            return accepted;
+        }, stage -> { });
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // cpu 결측 알림
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 회복 알림
+        diskFails = true;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 드라이브 결측 알림
+        diskFails = false;
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // cpu 결측 알림은 큐가 억제
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // 값이 모두 읽힘. 회복 INFO는 간격이 안 차 미뤄짐
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // cpu 다시 빠짐: 이미 경고한 값이라 간격 안에서는 조용
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED,
+                EventRoutes.READING_MISSING);
+        clock.advance(Watchdog.MISSING_REPEAT);
+        w.tick(); // 간격이 찬 반복 경고: 못 보낸 cpu 결측 알림을 넣는다
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED,
+                EventRoutes.READING_MISSING, EventRoutes.READING_MISSING);
+        assertThat(sent.get(3).body()).startsWith("[cpu.system]");
+        queue.close(Duration.ZERO);
+        w.close();
+    }
+
+    @Test
     void 큐가_받은_결측_알림은_반복_경고_때_다시_넣지_않는다() {
         // R1 고침이 D-096(반복 경고는 로그로)을 깨지 않는지: 받은 알림은 다시 넣지 않는다
         TestClock clock = new TestClock("2026-10-15T00:00:00Z");
