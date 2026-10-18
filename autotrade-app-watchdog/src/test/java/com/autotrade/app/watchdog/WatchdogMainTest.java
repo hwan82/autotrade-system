@@ -127,6 +127,9 @@ class WatchdogMainTest {
         assertThat(programError).startsWith(WatchdogMain.StartFailure.PROGRAM_ERROR_HEADLINE
                 + "(감시 없이 실전·실험을 돌리지 마세요): IllegalStateException: 코드 실수");
         assertThat(refusal).startsWith("감시 설정이 틀려 기동하지 않습니다(감시 없이 실전·실험을 돌리지 마세요): ").contains("disk.free-gb");
+        // 첫머리는 괄호로 끝나지 않아야 한다. 끝나면 표준 오류 줄에 ")("가 생긴다(PR #165 검토 권고)
+        assertThat(programError).doesNotContain(")(");
+        assertThat(refusal).doesNotContain(")(");
         java.util.List<java.util.logging.LogRecord> errors = records.stream()
                 .filter(r -> r.getLevel() == java.util.logging.Level.SEVERE).toList();
         assertThat(errors).hasSize(2);
