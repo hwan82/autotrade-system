@@ -21,6 +21,7 @@ import java.util.TreeSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * 감시 루프(MON-02 1차, D-092·D-095). 점검마다 ① 자기 하트비트 기록 ② 드라이브 여유·PC CPU·메모리 수집과 임계 판정(감시 에이전트 코어) ③ 상주 프로세스
@@ -105,22 +106,14 @@ final class Watchdog implements AutoCloseable {
     /** 점검 한 번. 점검 스레드가 부르며, 시험에서는 직접 부른다. */
     void tick() {
         Instant now = clock.instant();
-        try {
-            heartbeat.beat(); // 던지지 않지만, 자기 하트비트 문제로 이 점검의 판정·알림을 건너뛰지 않게 막아 둔다(PR #163 architect N1)
-        } catch (Throwable e) {
-            log(Logger.Level.WARNING, "자기 하트비트 기록 실패 (" + e.getClass().getSimpleName() + ")");
-        }
-        StopRequests.Pressure pressure = StopRequests.Pressure.UNKNOWN;
-        String detail = "자원 값을 읽지 못함";
-        try {
+        // 던지지 않지만, 자기 하트비트 문제로 이 점검의 판정·알림을 건너뛰지 않게 막아 둔다(PR #163 architect N1)
+        stage(Logger.Level.WARNING, "자기 하트비트 기록 실패", heartbeat::beat);
+        Assessment assessment = stage(Logger.Level.WARNING, "자원 점검 실패", () -> {
             MetricSnapshot snapshot = agent.sampleOnce();
             reportMissing(snapshot, now);
-            pressure = pressure(snapshot);
-            detail = detail(snapshot);
-        } catch (Throwable e) {
-            log(Logger.Level.WARNING, "자원 점검 실패 (" + e.getClass().getSimpleName() + ")");
-        }
-        try {
+            return new Assessment(pressure(snapshot), detail(snapshot));
+        }, Assessment.UNKNOWN);
+        stage(Logger.Level.WARNING, "하트비트 점검 실패", () -> {
             for (HeartbeatWatch.Change c : heartbeats.check(now)) {
                 alertChange(c);
             }
@@ -129,23 +122,45 @@ final class Watchdog implements AutoCloseable {
                         "점검 사이에 프로세스가 죽었다 다시 떴습니다(이전 시작 " + r.previousStart() + ", 새 시작 " + r.newStart() + ")."
                                 + ("engine".equals(r.process()) ? " 장애표 #8: 대사 통과 전에는 실전 매매를 재개하지 마세요" : ""));
             }
-        } catch (Throwable e) {
-            log(Logger.Level.WARNING, "하트비트 점검 실패 (" + e.getClass().getSimpleName() + ")");
-        }
-        try {
+        });
+        stage(Logger.Level.ERROR, "정지 요청 파일 처리 실패", () -> {
             boolean before = stopRequests.active();
-            stopRequests.update(now, pressure, detail);
+            stopRequests.update(now, assessment.pressure(), assessment.detail());
             boolean after = stopRequests.active();
             if (!before && after) {
                 alert(EventRoutes.STOP_REQUEST_ON, "stop-request", "자원 위험: 일괄 명령 정지 요청",
-                        detail + ". 수집기·실험 명령에 정지 요청 파일을 만들었습니다(5.2 0번). 실전 엔진은 멈추지 않습니다");
+                        assessment.detail() + ". 수집기·실험 명령에 정지 요청 파일을 만들었습니다(5.2 0번). 실전 엔진은 멈추지 않습니다");
             } else if (before && !after) {
                 alert(EventRoutes.STOP_REQUEST_OFF, "stop-request", "정지 요청 해제",
                         "자원이 정상으로 " + settings.releaseHold().toSeconds() + "초 이어져 정지 요청 파일을 지웠습니다");
             }
+        });
+    }
+
+    /** 이번 점검의 자원 판정과 정지 요청 사유. */
+    private record Assessment(StopRequests.Pressure pressure, String detail) {
+        static final Assessment UNKNOWN = new Assessment(StopRequests.Pressure.UNKNOWN, "자원 값을 읽지 못함");
+    }
+
+    /**
+     * 점검 단계 하나를 돌린다. 던지면 그 단계만 버리고 {@code fallback}을 돌려준다. 실패 로그도 {@link WatchdogLog}로 내므로 로그 출력
+     * 실패가 다음 단계를 건너뛰게 하지 않는다(PR #163 QA Q1: 단계마다 같은 catch를 두면 그중 하나만 바꿔도 시험이 못 잡았다).
+     */
+    static <T> T stage(Logger.Level level, String failure, Supplier<T> body, T fallback) {
+        try {
+            return body.get();
         } catch (Throwable e) {
-            log(Logger.Level.ERROR, "정지 요청 파일 처리 실패 (" + e.getClass().getSimpleName() + ")");
+            log(level, failure + " (" + e.getClass().getSimpleName() + ")");
+            return fallback;
         }
+    }
+
+    /** 돌려줄 값이 없는 점검 단계. */
+    static void stage(Logger.Level level, String failure, Runnable body) {
+        stage(level, failure, () -> {
+            body.run();
+            return null;
+        }, null);
     }
 
     private static void log(Logger.Level level, String text) {
@@ -234,7 +249,10 @@ final class Watchdog implements AutoCloseable {
             }
             return;
         }
-        boolean newName = !warnedReadings.containsAll(missing);
+        // 간격 안에서 경고한 값에도, 마지막 회복 INFO 뒤 경고한 값에도 들어 있어야 "이미 알린 값"이다. 앞의 것만 보면 회복을 알린 값이
+        // 다른 값의 경고 뒤 다시 빠질 때 간격이 찰 때까지 조용했다(PR #163 독립 QA R1). 뒤의 것만 보면 간격이 찬 반복 경고에서 빠진 값이
+        // 다시 빠질 때 조용하다(PR #123 QA Q1). 두 집합 모두 간격마다 한 번만 비워지므로 오가는 값도 간격마다 경고 수가 묶인다
+        boolean newName = !warnedReadings.containsAll(missing) || !missingSinceRecovery.containsAll(missing);
         // 회복 INFO를 남긴 뒤 다시 빠짐. 마지막 로그가 회복이므로 간격을 기다리지 않는다(D-108)
         boolean afterRecovery = !warnedSinceRecovery && lastMissingWarning != null;
         boolean due = due(lastMissingWarning, now);

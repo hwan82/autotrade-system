@@ -624,6 +624,186 @@ class WatchdogTest {
         }
     }
 
+    /** 시험 본문. */
+    interface Body {
+        void run() throws Exception;
+    }
+
+    /** 감시·감시 에이전트 코어의 모든 로그 기록에 던지는 핸들러를 붙인 채 돌린다(PR #163 QA Q1). */
+    private static void withThrowingLogs(Body body) throws Exception {
+        java.util.logging.Logger pkg = java.util.logging.Logger.getLogger("com.autotrade");
+        java.util.logging.Level oldLevel = pkg.getLevel();
+        Handler throwing = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                throw new IllegalStateException("핸들러 예외 주입");
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        throwing.setLevel(java.util.logging.Level.ALL);
+        pkg.setLevel(java.util.logging.Level.ALL); // DEBUG 줄까지 핸들러에 닿게
+        pkg.addHandler(throwing);
+        try {
+            body.run();
+        } finally {
+            pkg.removeHandler(throwing);
+            pkg.setLevel(oldLevel);
+        }
+    }
+
+    @Test
+    void 감시_로그가_던져도_재기동_알림이_나간다() throws Exception {
+        // PR #163 QA Q1(변이 QM2): 재기동 감지 로그가 던지면 시작 시각은 이미 바뀌어 재기동 알림이 영영 나가지 않았다
+        withThrowingLogs(() -> {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            Watchdog w = watchdog(clock);
+            new HeartbeatWriter(dir, "engine", clock).beat();
+            w.tick();
+            clock.advance(Duration.ofSeconds(3));
+            new HeartbeatWriter(dir, "engine", clock).beat(); // 새 시작 시각
+            w.tick();
+            clock.advance(Duration.ofSeconds(3));
+            w.tick();
+            assertThat(sent).singleElement().satisfies(a -> {
+                assertThat(a.kind()).isEqualTo(EventRoutes.PROCESS_RESTARTED);
+                assertThat(a.subject()).isEqualTo("engine");
+            });
+            w.close();
+        });
+    }
+
+    @Test
+    void 감시_로그가_던져도_하트비트_읽기_실패와_회복_알림이_나간다() throws Exception {
+        // PR #163 QA Q1(변이 QM3·QM4): UNREADABLE·ALIVE 바뀜 로그가 던지면 상태는 이미 바뀌어 그 알림이 영영 나가지 않았다
+        withThrowingLogs(() -> {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            Watchdog w = watchdog(clock);
+            HeartbeatWriter engine = new HeartbeatWriter(dir, "engine", clock);
+            engine.beat();
+            w.tick();
+            Files.writeString(Heartbeat.file(dir, "engine"), "깨진 하트비트", StandardCharsets.UTF_8);
+            clock.advance(Duration.ofSeconds(1));
+            w.tick();
+            assertThat(w.heartbeats().states()).containsEntry("engine", State.UNREADABLE);
+            engine.beat();
+            clock.advance(Duration.ofSeconds(1));
+            w.tick();
+            assertThat(kinds()).containsExactly(EventRoutes.HEARTBEAT_UNREADABLE, EventRoutes.PROCESS_RECOVERED);
+            w.close();
+        });
+    }
+
+    @Test
+    void 감시_로그가_던져도_정지_요청_해제_알림이_나간다() throws Exception {
+        // PR #163 QA Q1(변이 QM7): 해제 로그가 던지면 파일은 지워지고 꺼짐 상태가 되어 해제 알림이 영영 나가지 않았다
+        withThrowingLogs(() -> {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            Watchdog w = watchdog(clock);
+            free.set(10 * GIB);
+            w.tick();
+            free.set(100 * GIB);
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+            clock.advance(Duration.ofSeconds(60));
+            w.tick();
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+            assertThat(w.stopRequests().active()).isFalse();
+            assertThat(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST)).doesNotExist();
+            assertThat(dir.resolve(StopRequests.EXPERIMENT_STOP_REQUEST)).doesNotExist();
+            assertThat(kinds()).containsExactly(EventRoutes.STOP_REQUEST_ON, EventRoutes.STOP_REQUEST_OFF);
+            w.close();
+        });
+    }
+
+    @Test
+    void 감시_로그가_던져도_한_정지_요청_파일_쓰기_실패가_다른_파일과_켜짐_알림을_막지_않는다() throws Exception {
+        // PR #163 QA Q1(변이 QM1): 쓰기 실패 ERROR 로그가 던지면 남은 파일을 쓰지 않고 켜짐 알림도 건너뛰었다
+        withThrowingLogs(() -> {
+            TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+            Watchdog w = watchdog(clock);
+            // 수집기 정지 요청 파일 자리에 빈 폴더가 아닌 폴더를 두어 쓰기를 실패시킨다(파일 순서상 먼저 쓴다)
+            Files.createDirectories(dir.resolve(StopRequests.COLLECTOR_STOP_REQUEST).resolve("block"));
+            free.set(10 * GIB);
+            w.tick();
+            assertThat(w.stopRequests().active()).isTrue();
+            assertThat(dir.resolve(StopRequests.EXPERIMENT_STOP_REQUEST)).isRegularFile();
+            assertThat(kinds()).containsExactly(EventRoutes.STOP_REQUEST_ON);
+            w.close();
+        });
+    }
+
+    @Test
+    void 점검_단계가_던지고_그_실패_로그도_던져도_다음_단계로_넘어간다() throws Exception {
+        // PR #163 QA Q1(변이 QM8): 단계 catch 안 로그가 던지면 그 점검의 남은 단계가 빠졌다. 점검의 모든 단계는 stage로 돈다
+        withThrowingLogs(() -> {
+            String value = Watchdog.stage(System.Logger.Level.WARNING, "주입 단계 실패", () -> {
+                throw new IllegalStateException("단계 실패 주입");
+            }, "대신 값");
+            assertThat(value).isEqualTo("대신 값");
+            boolean[] next = {false};
+            Watchdog.stage(System.Logger.Level.ERROR, "주입 단계 실패", () -> {
+                throw new IllegalStateException("단계 실패 주입");
+            });
+            Watchdog.stage(System.Logger.Level.ERROR, "다음 단계", () -> next[0] = true);
+            assertThat(next[0]).isTrue();
+        });
+    }
+
+    @Test
+    void 점검_단계_실패는_단계_이름과_예외_종류로_남긴다() {
+        List<LogRecord> records = new ArrayList<>();
+        Handler handler = capture(records);
+        try {
+            Watchdog.stage(System.Logger.Level.ERROR, "정지 요청 파일 처리 실패", () -> {
+                throw new IllegalStateException("비밀이 섞일 수 있는 문구");
+            });
+        } finally {
+            java.util.logging.Logger.getLogger(Watchdog.class.getName()).removeHandler(handler);
+        }
+        assertThat(records).singleElement().satisfies(r -> {
+            assertThat(r.getLevel()).isEqualTo(java.util.logging.Level.SEVERE);
+            assertThat(r.getMessage()).isEqualTo("정지 요청 파일 처리 실패 (IllegalStateException)");
+        });
+    }
+
+    @Test
+    void 회복을_알린_값이_다른_값의_경고_뒤_다시_빠지면_바로_알린다() {
+        // PR #163 독립 QA R1(탐침 P3): cpu WARN → cpu 회복 INFO → 드라이브 WARN → 드라이브 회복·cpu 다시 빠짐이면
+        // cpu는 간격 안에서 합친 경고 목록에 남아 있어 10분 동안 WARN·알림이 없었다(마지막 cpu 로그가 "다시 읽음")
+        TestClock clock = new TestClock("2026-10-15T00:00:00Z");
+        Watchdog w = watchdog(clock);
+        w.tick();
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // WARN [cpu]
+        cpu = 0.1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // INFO [cpu]
+        diskFails = true;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // WARN [disk]
+        diskFails = false;
+        cpu = -1;
+        clock.advance(Duration.ofSeconds(5));
+        w.tick(); // cpu 다시 빠짐: 바로 WARN
+        assertThat(w.missingWarnings()).isEqualTo(3);
+        assertThat(kinds()).containsExactly(EventRoutes.READING_MISSING, EventRoutes.READING_RECOVERED,
+                EventRoutes.READING_MISSING, EventRoutes.READING_MISSING);
+        assertThat(sent.get(3).body()).startsWith("[cpu.system]");
+        for (int i = 0; i < 10; i++) { // 계속 빠진 채로는 간격 안에서 다시 알리지 않는다
+            clock.advance(Duration.ofSeconds(5));
+            w.tick();
+        }
+        assertThat(w.missingWarnings()).isEqualTo(3);
+        w.close();
+    }
+
     /** 감시 로거 기록을 모은다. 시험이 끝나면 떼야 한다. */
     private static Handler capture(List<LogRecord> records) {
         Handler handler = new Handler() {

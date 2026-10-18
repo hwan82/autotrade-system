@@ -456,6 +456,27 @@ class MonitorAgentTest {
     }
 
     @Test
+    void DEBUG가_켜진_주기에도_내지_못한_WARN을_DEBUG_줄_앞에_다시_낸다() throws Exception {
+        // PR #163 QA Q2(변이 QM12): 반복 실패 주기에 DEBUG 줄이 생겨도 들고 있던 WARN을 버리거나 뒤로 미루지 않는다
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        MonitorAgent agent = new MonitorAgent(CLOCK, List.of(failing("a", failure)), List.of(), 10, 3);
+        List<String> logs = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger throwNext = new java.util.concurrent.atomic.AtomicInteger();
+        try (AutoCloseable restore = capture(flakyHandler(logs, throwNext), java.util.logging.Level.ALL)) {
+            failure.set(new IllegalStateException("첫 실패"));
+            throwNext.set(1);
+            agent.sampleOnce();
+            assertThat(logs).isEmpty();
+            agent.sampleOnce();
+            agent.sampleOnce();
+        }
+        assertThat(logs).containsExactly(
+                "WARNING 수집원 실패: a (IllegalStateException). 같은 실패가 이어지는 동안은 다시 경고하지 않는다",
+                "FINE 수집원 실패 계속: a (IllegalStateException, 2회째)",
+                "FINE 수집원 실패 계속: a (IllegalStateException, 3회째)");
+    }
+
+    @Test
     void 회복_INFO를_내지_못한_채_다시_실패하면_새_첫_실패로_세고_낡은_회복_줄은_버린다() throws Exception {
         // PR #155 QA Q2: 사이의 성공 주기가 사라지고 횟수가 이어서 세지면 안 된다
         AtomicReference<RuntimeException> failure = new AtomicReference<>();
