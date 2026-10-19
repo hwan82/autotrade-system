@@ -32,3 +32,37 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-19
+- 대상: PR #172 / 브랜치 `claude/project-thread-blfvr9` / 헤드 `b6ae7d6`(첫 검토 `1556952` 뒤 `c201bc7` 검토 반영 K1·N1·N2, `b6ae7d6` risk-ops 재검토 K4 반영. 사이의 `ca9d379`·`22ba2a7`·`117553e`는 검토 원문만) / main 대비 diff 전체(`git diff origin/main...HEAD`, main `dc41d07`과 `git merge-tree` 충돌 없음)
+- 점검표: B
+- 직접 실행한 것:
+  - `c201bc7` 시점에 그 정규식(`LINE_BREAK_RUN`·`EDGE_BREAKS`)을 단독 `java` 프로그램으로 돌려, `EDGE_BREAKS` `^(?:\s|\R)+|(?:\s|\R)+$`가 줄바꿈이 든 원인에서 공백·줄바꿈이 약 2000자 이어지면(가운데·앞·끝 어디든) `StackOverflowError`를 내는 것을 확인했다(1000자는 통과). `launch`의 catch 안 `StartFailure.of`에서 나므로 `exit`·안내 줄이 모두 사라지는 결함이다. risk-ops 재검토 K4와 같은 발견이고 `b6ae7d6`이 고쳤으므로 아래는 `b6ae7d6` 기준으로 판정한다.
+  - 같은 clone에서 `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**(58s, 바뀌지 않은 모듈은 Gradle 최신 상태 재사용). 시험 결과 XML 합계 1589건, 실패·오류·건너뜀 0. `EngineMainTest` 26건 모두 통과(새 시험 `#기동_실패_원인에_긴_공백과_줄바꿈이_있어도_판정과_종료_코드와_한_줄_안내가_남는다` 포함).
+  - 변이 시험(`EngineMain.java`를 바꾸고 `:autotrade-app-engine:test --tests EngineMainTest`, 매번 HEAD로 원복):
+    - X1 `EngineMain.java`를 `c201bc7` 정규식 판으로 되돌림 → **잡힘**(K4 새 시험 실패)
+    - X3 `isLineBreak`에서 U+0085 뺌 → **잡힘**(`#…세_종류_모두_한_줄로_접는다`)
+    - X4 끝 걷기 반복문 삭제 → **잡힘**(3건)
+    - X6 줄바꿈 유무 검사를 `\n`만으로 → **잡힘**(1건)
+    - X2 `isBlank`에서 탭 뺌 → **생존**(아래 N5)
+    - X5 줄바꿈 없는 공백 묶음도 공백 하나로 줄임(`out.append(message, runStart, i)`→`out.append(' ')`) → **생존**(아래 N5)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` 성공, 1589건 실패·오류·건너뜀 0 |
+| B2 | 통과 | 운영 코드 변경은 여전히 `EngineMain.StartFailure` 안(`EngineMain.java:298-347`, `oneLine`·`isLineBreak`·`isBlank`), 정규식 의존도 사라져 JDK 외 새 의존 없음. ArchUnit·순수 모듈 검사 빌드 안에서 통과 |
+| B3 | 통과 | 인터페이스·스키마·설정 키·REST 변경 없음. D-112 결정 1번에 VT·FF 추가와 "정규식 없이 한 번 훑음", "검토 반영"·"재검토 반영" 절 추가로 문서가 코드와 맞음. 판정·종료 코드·첫머리 무변경 |
+| B4 | 해당 없음 | 시뮬레이션 무관, 시험은 `FIXED` Clock |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 기존 단언 삭제·약화 없음(diff는 추가뿐). K4 시험이 35만 자 묶음으로 접기 결과와 설정 오류(2)·프로그램 오류(1) 종료 코드·표준 오류 전체를 `isEqualTo`로 봄(EngineMainTest.java:581). 유니코드 줄바꿈 연속·끝·VT·FF 단언 추가. 변이 X1·X3·X4·X6 잡힘. 생존 X2·X5는 표시 공백 세부라 판정 무관(N5) |
+| B7 | 해당(risk-ops 검토 필요) | 보호 경로 `autotrade-app-engine/*`(scripts/ci/protected-paths.txt:8)의 운영 코드 변경. 판정(`StartFailure.of`)·종료 코드·Guard 기동(모든 계좌 OFF)·명령 채널·주문 경로는 diff에 없음. **risk-ops 재검토 필요**(K4 반영 확인), 머지는 사용자 직접, 머지 전 독립 QA |
+| B8 | 통과 | diff·커밋 메시지에 키·계좌번호·토큰 없음. 설정 오류·명령 채널 실패는 여전히 예외 흐름을 남기지 않음(`report`) |
+
+### 재검토 점검표 밖 발견
+- 첫 검토 N1(VT·FF 목록)·N2(U+0085 끝, 유니코드 줄바꿈 연속)는 `c201bc7`·`b6ae7d6`으로 해소. 단언 `"a  b"`→`"a / b"`, `" a\nb\u0085"`→`"a / b"`, `"a\u000Bb\fc"`→`"a / b / c"`로 고정됨.
+- 첫 검토에서 내가 N2의 대안으로 적은 정규식 `"(?:\\s|\\R)*\\R(?:\\s|\\R)*"`류도 같은 재귀 반복이라 긴 묶음에서 `StackOverflowError`를 낼 수 있는 꼴이었다. 정규식을 버리고 한 번 훑는 반복문(선형 시간, 재귀 없음)으로 바꾼 지금 구현이 더 낫다.
+- N5 (권고, 판정 무관) 줄바꿈이 있는 원인 안의 "줄바꿈 없는 공백 묶음은 그대로"(`EngineMain.java:333`)와 "탭도 공백으로 묶음"(`isBlank`)을 고정하는 단언이 없다(X2·X5 생존). 결과는 어느 쪽이든 한 줄이고 표시 공백만 다르다. 다음에 이 함수를 만질 때 `"a  b\nc"`→`"a  b / c"`, `"a\t\n\tb"`→`"a / b"` 단언을 넣으면 된다.
+- 첫 검토 N4(감시 `WatchdogMain`의 같은 출력)는 그대로 남음. 감시 쪽에 옮길 때 정규식 판이 아닌 이 반복문 판을 쓰기를 권한다.
+
+### 재검토 판정
+승인
