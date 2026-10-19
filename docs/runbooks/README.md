@@ -5,6 +5,7 @@
 - 대상: `C:\2.Code\myproject\autotrade-system`에서 PowerShell로 실행하는 경우. 명령은 모두 **저장소 루트**에서 친다.
 - PowerShell에서는 `./gradlew` 대신 `.\gradlew`(같은 `gradlew.bat`이 돈다)를 써도 된다. 절차서의 `./gradlew ...`는 그대로 붙여 넣어도 동작한다.
 - 실행 전에 항상 `git pull`로 main을 받는다.
+- 6단계 실시간 모의(LIVE00 시험 10-20~10-23, LIVE01 본 운용 10-26~12-18)는 날짜·명령 순서를 [6단계 시작 점검표](stage-6-start-checklist.md)에 모았다.
 
 ## 1. 프로그램 한눈에
 

@@ -1,0 +1,35 @@
+# 실시간 모의 등록 파일(사전 등록, D-076·D-113). 운용 전에 main에 커밋하고 운용 중 고치지 않는다. 바꾸려면 새 실험 ID를 쓴다.
+# 6단계 본 운용 8주(40거래일). 계획·판정 기준: docs/strategy/stage-6-plan.md, 시작 점검표: docs/runbooks/stage-6-start-checklist.md
+# 입력 기록(<설정 폴더>/live-sessions/<ID>/journal)과 게이트웨이 녹화는 사용자 PC에만 두고 저장소에 넣지 않는다(ADR-003 4장).
+# boards는 게이트웨이 watchlist.json 감시 종목 안이어야 한다. 035720은 블랙리스트 확인용(무사고 조건 I2: 이 종목 체결 0건).
+id: "EXP-20261026-LIVE01"
+question: "장중 프로필 6개가 8주(2026-10-26~2026-12-18, 40거래일) 실시간 시세에서 사고 없이 돌고, 비용 차감 후 매수 후 보유 기준선과 무작위 진입 대조군을 넘는 프로필이 있는가(6단계 승격 후보 판정, 기준은 stage-6-plan 4장)"
+input: "live"
+market: "KRX"
+from: "2026-10-26"
+to: "2026-12-18"
+seed: "20261026"
+seed-capital: "10000000"
+benchmark: "005930"
+profiles:
+  - "kr-bh-baseline@1"
+  - "kr-random-control@1"
+  - "kr-orb-30@1"
+  - "kr-vwap-reclaim@1"
+  - "kr-pdh-breakout@1"
+  - "kr-volume-surge@1"
+  - "kr-book-imbalance@1"
+  - "kr-pullback@1"
+boards:
+  - "005930 KOSPI"
+  - "000660 KOSPI"
+  - "035420 KOSPI"
+  - "005380 KOSPI"
+  - "373220 KOSPI"
+  - "068270 KOSPI"
+  - "105560 KOSPI"
+  - "035720 KOSPI"
+  - "247540 KOSDAQ"
+  - "028300 KOSDAQ"
+blacklist:
+  - "035720"
