@@ -41,3 +41,19 @@
 
 ## 판정
 수정 필요(R1 ADR-004 갱신, R2 LiveWeeklyCheck 새 거부 동작 시험)
+
+## 재검토 2026-10-19
+- 대상: PR #178 / 커밋 7158b3e / `git diff origin/main...HEAD` 전체(origin/main fa046c3, 충돌 없음). 앞 검토(116261b) 뒤 바뀐 것은 `LiveWeeklyCheckTest.java` +60, `docs/adr/ADR-004-simulation-engine.md` +5 −2, `D-115` 문서 +4 −2뿐이다. 운영 코드는 바뀌지 않았다(`git diff 116261b..7158b3e --stat`).
+- 직접 실행한 것: 같은 스크래치 clone에서 `./gradlew -I <미러 init 스크립트> build` → **BUILD SUCCESSFUL, 종료 0**. `autotrade-sim:test`는 다시 돌았다: 318건, 실패 0, 건너뜀 0(앞 검토 316 + 새 2). `autotrade-architecture-test:test`는 입력이 바뀌지 않아 UP-TO-DATE였고, 앞 검토 실행(46건 통과)과 같은 입력이다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| R1 / B3 | 통과 | ADR-004 2.4에 `MarketEventStream` 계약(같은 순서·같은 이벤트, 원본이 바뀌면 예외, 입력 예외는 실험 실패, `MarketDataSet`이 상속)과 목록이 아닌 입력의 실행 방식(두 번 읽기, 조합 순서로 함께 진행, 병렬 미사용, 예열 거부, 정지 확인 지점, 둘째 읽기 불일치는 실패)을 적었다. 녹화 입력 절에는 `StreamedRecordingDataSet`(같은 어댑터·버전, `forEach` 전 해시 확인)을, 3장 대안 표에는 새 행(D-115 ②③④ 버린 이유, 되돌릴 조건)을 더했다(ADR-004-simulation-engine.md:64-66, :72, :105). 적힌 내용을 코드와 대조했고 일치한다(SimulationExperimentRunner.java:178, :512-:577, StreamedRecordingDataSet `forEach`) |
+| R2 / B6 | 통과 | ① `LiveWeeklyCheckTest#sameLineSeveralTimesIsMatchedByCountLikeTheOldListComparison`: 녹화에 같은 줄 2번 + 기록에 다른 같은 줄 2번 → matched = n, 빠짐(UNEXPLAINED) 1, 남음 1, 결함. 128비트 열쇠로 개수를 맞추는 대조가 예전 문자열 개수 맞추기와 같은 수를 낸다. ② `#recordingChangedAfterTheDayComparisonIsRejectedBeforeAnyEventReachesTheReplay`: `compareDay` 뒤 첫 `stream().forEach`는 `count()`만큼 넘기고, 파일 끝에 1바이트를 덧붙이면 "녹화가 대조한 뒤 바뀌었습니다"로 이벤트 0건에서 거부한다. 지문 확인을 빼면 정상 종료 녹화의 SHA-256 선검사가 다른 메시지("SHA-256이 메타와 다릅니다")로 던지므로, 이 시험은 새 지문 확인을 구별해서 잡는다. 두 시험 모두 통과 |
+| B1 | 통과 | 위 빌드 |
+| B2·B4·B5·B7·B8 | 앞 판정 유지(통과·통과·통과·해당 없음·통과) | 운영 코드 변경 없음. 추가된 시험·문서에 시계·난수·`double`·비밀값 없음 |
+| N1·N2 | 반영 | D-115 후속에 선정 조합 골든 대조 선행 조건(N1)을, 위험과 한계에 해시 확인 추가 읽기(N2)를 적었고, ADR-004 대안 표 되돌릴 조건에도 N1을 넣었다 |
+| N3·N4·N5 | 앞과 같음 | N3은 후속 과제로 등록됨. N4(메모리 실측·19건 바이트 일치)는 여전히 검토자가 재현하지 않았지만 점검표 항목이 아니고, B4는 골든 시험으로 판정했다 |
+
+### 판정
+승인
