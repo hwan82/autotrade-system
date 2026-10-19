@@ -10,7 +10,7 @@
 | 항목 | 값 |
 |---|---|
 | 버전 | v14.51 |
-| 갱신일 | 2026-10-18 |
+| 갱신일 | 2026-10-19 |
 | 관리 역할 | pm-lead (`autotrade-spec-keeper` 스킬) |
 | 이전 판 | v1.0~v11.0과 ChatGPT 설계서 2종(저장소 밖 원본). 분석 결과는 [team-design.md](../team/team-design.md) 2장 |
 
