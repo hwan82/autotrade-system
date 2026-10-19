@@ -510,36 +510,100 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      * 때도 묻는다. 입력이 읽는 도중 바뀌어 예외가 나면 Run 실패가 아니라 실험 전체를 멈춘다(결과 없음).
      */
     private SimulationReport runStreamed(ExperimentSpec spec) {
+        return streamLanes(List.of(new Lane(spec, execution)), spec.id().value()).get(0);
+    }
+
+    /**
+     * 같은 입력·같은 기간의 실험 여러 개({@link Lane}: 명세 + 체결 설정)를 입력 한 번 읽기에 함께 돈다(D-116, 6단계 녹화 판정).
+     * 레인마다 결과는 그 레인 체결 설정으로 만든 실행기의 {@link #runDetailed}와 같다(Run은 아무것도 공유하지 않는다). 다른 점은
+     * 입력을 레인 수와 상관없이 두 번만 읽는다는 것이다. 목록 입력도 받는다(같은 {@link MarketEventStream#forEach} 경로).
+     *
+     * <p>모든 레인은 기간(from·to)이 같아야 한다(첫 읽기로 구하는 거래일·첫 수신 시각·벤치마크가 기간에 따른다). 레인 명세는
+     * {@link #runDetailed}와 같은 검사를 받고, 하나라도 맞지 않으면 아무 Run도 시작하지 않는다. 한 스레드로 돌고 예열은 받지
+     * 않는다. 진행 보고는 {@code progressId} 하나로 모든 레인의 Run을 합쳐 낸다.
+     *
+     * @return 레인 순서대로 실험 결과
+     */
+    public List<SimulationReport> runLanes(List<Lane> lanes, String progressId) {
+        Objects.requireNonNull(progressId, "progressId");
+        if (lanes.isEmpty()) {
+            throw new IllegalArgumentException("레인이 없습니다");
+        }
+        ExperimentSpec first = lanes.get(0).spec();
+        for (Lane lane : lanes) {
+            validate(lane.spec());
+            if (!lane.spec().from().equals(first.from()) || !lane.spec().to().equals(first.to())) {
+                throw new IllegalArgumentException("레인 기간이 다릅니다: " + lane.spec().id() + " " + lane.spec().from() + " ~ "
+                        + lane.spec().to() + " ≠ " + first.from() + " ~ " + first.to());
+            }
+        }
+        return streamLanes(List.copyOf(lanes), progressId);
+    }
+
+    /**
+     * 실험 하나: 명세와 그 실험의 체결 설정(주문 지연 등). {@link #runLanes}가 받는다.
+     */
+    public record Lane(ExperimentSpec spec, ExecutionSettings execution) {
+        public Lane {
+            Objects.requireNonNull(spec, "spec");
+            Objects.requireNonNull(execution, "execution");
+        }
+    }
+
+    /**
+     * 목록이 아닌 입력({@link MarketEventStream}, D-115): 이벤트를 메모리에 모으지 않고 두 번 읽는다. 첫 번째 읽기로 순서를
+     * 확인하고 실험 기간 안 이벤트의 거래일·첫 수신 시각·벤치마크 수익률을 구한다. 두 번째 읽기에서 이벤트 하나마다 모든 레인의
+     * 모든 Run을 레인 순서·조합 순서대로 한 걸음씩 진행한다. Run은 서로 아무것도 공유하지 않으므로(클래스 설명) 목록 입력에서 Run을
+     * 따로 도는 것과 Run별 결과가 같다. 그래서 병렬 실행 수({@code parallelism})는 쓰지 않는다(한 스레드). 예열({@code warmupDays})은
+     * 목록 입력만 받는다.
+     *
+     * <p>정지 확인(D-063)은 목록 입력과 같은 자리(Run 시작 전, Run 안에서 거래일이 바뀔 때)에 더해 첫 번째 읽기의 거래일이 바뀔
+     * 때도 묻는다. 입력이 읽는 도중 바뀌어 예외가 나면 Run 실패가 아니라 실험 전체를 멈춘다(결과 없음).
+     */
+    private List<SimulationReport> streamLanes(List<Lane> lanes, String progressId) {
         if (warmupDays > 0) {
             throw new IllegalArgumentException("예열 거래일은 목록 데이터셋(MarketDataSet)만 받습니다: " + data.version());
         }
-        StreamScan scan = scanStream(spec);
+        ExperimentSpec window = lanes.get(0).spec();
+        StreamScan scan = scanStream(window);
         BigDecimal benchmarkReturn = scan.benchmarkReturn();
+        int total = 0;
+        for (Lane lane : lanes) {
+            total += lane.spec().combinations().size();
+        }
         gate.check(); // 선정 일정 계산 전(목록 입력과 같음)
-        SelectionSchedule schedule = spec.hasSelections()
-                ? SelectionSchedule.compute(spec.combinations(), scan.dates, selections, gate::check)
-                : SelectionSchedule.empty();
-        List<Combination> combinations = spec.combinations();
-        int n = combinations.size();
-        Progress progress = new Progress(gate, spec.id().value(), n, scan.dayChanges);
+        SelectionSchedule[] schedules = new SelectionSchedule[lanes.size()];
+        for (int l = 0; l < lanes.size(); l++) {
+            ExperimentSpec spec = lanes.get(l).spec();
+            schedules[l] = spec.hasSelections()
+                    ? SelectionSchedule.compute(spec.combinations(), scan.dates, selections, gate::check)
+                    : SelectionSchedule.empty();
+        }
+        Progress progress = new Progress(gate, progressId, total, scan.dayChanges);
         progress.started();
         AtomicReference<ExperimentStoppedException> stopped = new AtomicReference<>();
         Instant start = scan.firstReceivedAt != null ? scan.firstReceivedAt
-                : spec.from().atStartOfDay(rules.zone()).toInstant();
-        RunStepper[] runs = new RunStepper[n];
-        RunReport[] reports = new RunReport[n];
-        for (int i = 0; i < n; i++) {
-            checkGate(stopped);
-            progress.runStarted();
-            runs[i] = new RunStepper(spec, i, rules, cost, execution, strategies, risk, data.exchangeTimed(), schedule);
-            try {
-                runs[i].begin(start, List.of());
-            } catch (ExperimentStoppedException e) {
-                throw e;
-            } catch (RuntimeException e) {
-                reports[i] = runs[i].failed(e); // 계좌 격리: 이 Run만 실패
+                : window.from().atStartOfDay(rules.zone()).toInstant();
+        RunStepper[] runs = new RunStepper[total];
+        RunReport[] reports = new RunReport[total];
+        int g = 0;
+        for (int l = 0; l < lanes.size(); l++) {
+            Lane lane = lanes.get(l);
+            for (int i = 0; i < lane.spec().combinations().size(); i++, g++) {
+                checkGate(stopped);
+                progress.runStarted();
+                runs[g] = new RunStepper(lane.spec(), i, rules, cost, lane.execution(), strategies, risk,
+                        data.exchangeTimed(), schedules[l]);
+                try {
+                    runs[g].begin(start, List.of());
+                } catch (ExperimentStoppedException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    reports[g] = runs[g].failed(e); // 계좌 격리: 이 Run만 실패
+                }
             }
         }
+        int n = total;
         List<DataGap> gaps = new ArrayList<>();
         long[] seen = {0};
         long[] prev = {Long.MIN_VALUE};
@@ -549,7 +613,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                         + data.version());
             }
             prev[0] = e.sequence();
-            if (!inWindow(spec, e)) {
+            if (!inWindow(window, e)) {
                 return;
             }
             seen[0]++;
@@ -569,33 +633,40 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     reports[i] = runs[i].failed(x); // 계좌 격리: 이 Run만 실패로 끝낸다. 다른 Run은 계속 돈다
                 }
             }
-            if (e instanceof DataGap g) {
-                gaps.add(g);
+            if (e instanceof DataGap gap) {
+                gaps.add(gap);
             }
         });
         if (seen[0] != scan.count) {
             throw new IllegalStateException("두 번째 읽기의 실험 기간 이벤트 수가 다릅니다: " + scan.count + " -> " + seen[0]
                     + " (" + data.version() + ")");
         }
-        List<RunReport> out = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            if (reports[i] == null) {
-                try {
-                    reports[i] = runs[i].finish(benchmarkReturn, settleAtWindowEnd);
-                } catch (ExperimentStoppedException e) {
-                    throw e;
-                } catch (RuntimeException e) {
-                    reports[i] = runs[i].failed(e);
+        List<SimulationReport> out = new ArrayList<>(lanes.size());
+        g = 0;
+        for (Lane lane : lanes) {
+            ExperimentSpec spec = lane.spec();
+            List<RunReport> laneReports = new ArrayList<>(spec.combinations().size());
+            for (int i = 0; i < spec.combinations().size(); i++, g++) {
+                if (reports[g] == null) {
+                    try {
+                        reports[g] = runs[g].finish(benchmarkReturn, settleAtWindowEnd);
+                    } catch (ExperimentStoppedException e) {
+                        throw e;
+                    } catch (RuntimeException e) {
+                        reports[g] = runs[g].failed(e);
+                    }
                 }
+                runs[g] = null; // 끝난 Run의 상태(거래소·전략)를 놓는다. 결과는 reports에 있다
+                progress.runFinished(g, reports[g].summary().status() == RunStatus.FAILED);
+                laneReports.add(reports[g]);
             }
-            progress.runFinished(i, reports[i].summary().status() == RunStatus.FAILED);
-            out.add(reports[i]);
+            List<RunResult> summaries = laneReports.stream().map(RunReport::summary).toList();
+            ExperimentResult result = new ExperimentResult(spec.id(), code.commit(), code.dirty(),
+                    cost.tableHash(spec.from(), spec.to()), lane.execution().id(), summaries);
+            out.add(new SimulationReport(result, laneReports, gaps));
         }
-        List<RunResult> summaries = out.stream().map(RunReport::summary).toList();
-        ExperimentResult result = new ExperimentResult(spec.id(), code.commit(), code.dirty(),
-                cost.tableHash(spec.from(), spec.to()), execution.id(), summaries);
         progress.finished();
-        return new SimulationReport(result, out, gaps);
+        return out;
     }
 
     private boolean inWindow(ExperimentSpec spec, MarketEvent e) {

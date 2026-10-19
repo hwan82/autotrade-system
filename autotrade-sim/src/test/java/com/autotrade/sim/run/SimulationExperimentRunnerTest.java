@@ -343,6 +343,86 @@ class SimulationExperimentRunnerTest {
         assertThatThrownBy(() -> r.runDetailed(spec(List.of(MKT_HOLD)))).hasMessageContaining("예열");
     }
 
+    /**
+     * 레인 경로(D-116): 체결 지연·시드·프로필이 다른 실험 여럿을 입력 한 번 읽기(두 번 읽음)에 함께 돌려도, 레인마다 그 지연으로 만든
+     * 실행기의 {@code runDetailed}와 보고서가 바이트로 같다. 한 레인의 실패 계좌는 다른 레인을 바꾸지 않는다.
+     */
+    @Test
+    void 레인_여럿을_한_번_읽기에_돌려도_레인마다_따로_돈_결과와_같다() {
+        Streamed streamed = new Streamed(DATA);
+        ExperimentSpec a = spec(List.of(MKT_HOLD, LIMIT_MAKER, PROBE));
+        ExperimentSpec b = ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD-L2000"), FROM, TO, 8,
+                Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY, List.of(LIMIT_MAKER, BOOM, PROBE));
+        ExperimentSpec c = ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD-L0"), FROM, TO, 9,
+                Money.of(5_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY, List.of(MKT_HOLD));
+        ExecutionSettings slow = new ExecutionSettings(java.time.Duration.ofSeconds(2));
+        ExecutionSettings none = new ExecutionSettings(java.time.Duration.ZERO);
+
+        List<SimulationReport> lanes = runner(streamed, 1).runLanes(List.of(
+                new SimulationExperimentRunner.Lane(a, ExecutionSettings.defaults()),
+                new SimulationExperimentRunner.Lane(b, slow),
+                new SimulationExperimentRunner.Lane(c, none)), "EXP-20261008-GOLD-JUDGE");
+
+        assertThat(streamed.reads).isEqualTo(2);
+        assertThat(lanes).hasSize(3);
+        assertThat(ReportWriter.render(lanes.get(0))).isEqualTo(ReportWriter.render(runner(1).runDetailed(a)));
+        assertThat(ReportWriter.render(lanes.get(1))).isEqualTo(ReportWriter.render(runner(DATA, 1, slow).runDetailed(b)));
+        assertThat(ReportWriter.render(lanes.get(2))).isEqualTo(ReportWriter.render(runner(DATA, 1, none).runDetailed(c)));
+        assertThat(lanes.get(1).result().executionModelId()).isEqualTo(slow.id());
+        assertThat(lanes.get(1).result().runs()).extracting(rr -> rr.status())
+                .containsExactly(RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.COMPLETED);
+        // 지연이 다르면 실제로 다른 결과다(레인 설정이 쓰인다)
+        assertThat(ReportWriter.render(runner(DATA, 1, slow).runDetailed(a))).isNotEqualTo(ReportWriter.render(lanes.get(0)));
+    }
+
+    @Test
+    void 레인_기간이_다르거나_입력과_맞지_않으면_아무_Run도_시작하지_않는다() {
+        Streamed streamed = new Streamed(DATA);
+        ExperimentSpec a = spec(List.of(MKT_HOLD));
+        ExperimentSpec shorter = ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD-S"), FROM, FROM, 7,
+                Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY, List.of(MKT_HOLD));
+        ExperimentSpec otherData = ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD-D"), FROM, TO, 7,
+                Money.of(10_000_000, Money.KRW), COST.id(), "OTHER", ClockMode.REPLAY, List.of(MKT_HOLD));
+        SimulationExperimentRunner r = runner(streamed, 1);
+        assertThatThrownBy(() -> r.runLanes(List.of(new SimulationExperimentRunner.Lane(a, ExecutionSettings.defaults()),
+                new SimulationExperimentRunner.Lane(shorter, ExecutionSettings.defaults())), "x"))
+                .hasMessageContaining("레인 기간이 다릅니다");
+        assertThatThrownBy(() -> r.runLanes(List.of(new SimulationExperimentRunner.Lane(a, ExecutionSettings.defaults()),
+                new SimulationExperimentRunner.Lane(otherData, ExecutionSettings.defaults())), "x"))
+                .hasMessageContaining("데이터 스냅샷");
+        assertThatThrownBy(() -> r.runLanes(List.of(), "x")).hasMessageContaining("레인이 없습니다");
+        assertThat(streamed.reads).isZero();
+    }
+
+    @Test
+    void 레인_경로의_진행_보고는_모든_레인의_Run을_합쳐_낸다() {
+        List<ExperimentProgress> seen = new java.util.ArrayList<>();
+        RunGate gate = new RunGate() {
+            @Override
+            public java.util.Optional<String> stopReason() {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public void onProgress(ExperimentProgress p) {
+                seen.add(p);
+            }
+        };
+        SimulationExperimentRunner r = new SimulationExperimentRunner(new Streamed(DATA), TestKrxRules.INSTANCE, COST,
+                new FixtureStrategies(), RiskChain.builder(BlacklistSnapshot.EMPTY).build(), ExecutionSettings.defaults(),
+                new CodeVersion("test", false), 1, SAMSUNG, null, gate);
+        ExperimentSpec b = ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD-B"), FROM, TO, 8,
+                Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY, List.of(LIMIT_MAKER, PROBE));
+        r.runLanes(List.of(new SimulationExperimentRunner.Lane(spec(List.of(MKT_HOLD)), ExecutionSettings.defaults()),
+                new SimulationExperimentRunner.Lane(b, ExecutionSettings.defaults())), "EXP-JUDGE");
+        ExperimentProgress last = seen.get(seen.size() - 1);
+        assertThat(last.experimentId()).isEqualTo("EXP-JUDGE");
+        assertThat(last.phase()).isEqualTo(ExperimentProgress.Phase.FINISHED);
+        assertThat(last.runsTotal()).isEqualTo(3);
+        assertThat(last.runsFinished()).isEqualTo(3);
+        assertThat(last.daysDone()).isEqualTo(last.daysTotal());
+    }
+
     /** 목록 입력을 감싸 {@link MarketDataSet}이 아닌 입력으로 만든다(실행기가 목록 경로를 못 타게). 읽은 횟수를 센다. */
     private static class Streamed implements MarketEventStream {
         private final MarketDataSet inner;
@@ -381,10 +461,14 @@ class SimulationExperimentRunnerTest {
     }
 
     private static SimulationExperimentRunner runner(MarketEventStream data, int parallelism) {
+        return runner(data, parallelism, ExecutionSettings.defaults());
+    }
+
+    private static SimulationExperimentRunner runner(MarketEventStream data, int parallelism, ExecutionSettings execution) {
         return new SimulationExperimentRunner(data, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
                 RiskChain.builder(BlacklistSnapshot.of(List.of(new BlacklistEntry(HYNIX, BlacklistType.MANUAL, "테스트"))))
                         .build(),
-                ExecutionSettings.defaults(), new CodeVersion("test", false),
+                execution, new CodeVersion("test", false),
                 parallelism, SAMSUNG);
     }
 
