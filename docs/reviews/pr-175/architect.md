@@ -43,3 +43,35 @@
 
 ## 판정
 수정 필요(N1, N2)
+
+## 재검토 2026-10-19
+- 대상: PR #175 / 커밋 834d9246 / main 대비 diff 전체(`git diff origin/main...HEAD`). 첫 검토 뒤 더해진 커밋: d26aed3c(기준선 `kr-bh-baseline@2`, 등록 파일 두 개, D-113·계획 문구, `StageSixRegistrationTest` 기대값), af156511(시작 점검표·계획, 이 검토 N1·N2·R1~R5 반영), 834d9246(`RepositoryProfilesTest` 기준선 예외, D-113·계획 문구). 검토 원문 커밋(adba7da5, 906e4470, 9ff54c68)은 판정 대상 아님.
+- 점검표: B
+- 직접 실행한 것:
+  - 다른 프로세스와 겹치지 않게 `git worktree add --detach`로 스크래치 폴더에 따로 풀어 빌드.
+  - af156511에서 `./gradlew build --no-daemon` → **실패**: `:autotrade-sim:test`의 `RepositoryProfilesTest`("kr-bh-baseline@2: 새 스윙 프로필은 exit.max-hold-days(2~20) 필수"). d26aed3c가 들여온 결함이고 834d9246이 이것을 고친 커밋이다.
+  - 834d9246에서 `./gradlew build --no-daemon` → **BUILD SUCCESSFUL**(이번에는 Maven 429 없음). 22개 모듈 테스트가 모두 실패·오류·건너뜀 0: app-lab 246, architecture-test 46(ArchUnit 포함), sim 301, marketdata 141, watchdog 93, toss 90, notification 86, collector 79, engine 64, risk 55, kiwoom 51, gateway 50, strategy 44, config 42, experiment 40, monitor-agent 36, selection 34, domain 31, kis 30, control 23, monitor-sources 6, broker-api 1.
+  - CI(834d9246, 조회 시점): DB schema success, Secret scan success, Gradle build·Playwright는 진행 중. 판정은 위 로컬 전체 빌드를 근거로 한다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 834d9246 로컬 `./gradlew build` BUILD SUCCESSFUL(별도 worktree, 전체 모듈·ArchUnit·금지 의존 검사 포함) |
+| B2 | 통과 | 운영 코드 변경 없음. 바뀐 Java는 `autotrade-sim` 테스트 2개(`StageSixRegistrationTest`, `RepositoryProfilesTest`)뿐. architecture-test 46개 통과 |
+| B3 | 통과 | 계약 변경 없음. `strategies/kr-bh-baseline/v2.yaml`은 기존 프로필 형식(ADR-005 4장)으로 새 버전을 더한 것이고, v1은 그대로 둠(불변 버전 규칙 지킴) |
+| B4 | 통과 | 시드·기간 고정은 그대로. `BuyAndHold`는 `attempted` 집합으로 종목마다 한 번만 시도하고(BuyAndHold.java:42-43), 순서는 호가 도착 순서. 같은 입력이면 같은 결과이고, slots 10 ≥ boards 10이라 바구니가 도착 순서에 달리지 않음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음(`perSlot`은 기존 BigDecimal 코드) |
+| B6 | 통과 | `RepositoryProfilesTest` 변경을 약화로 볼지 따로 확인함. 기획서 STR-18 인수 조건이 "기준선(`buy-and-hold`)은 예외"라고 정하고(docs/spec/autotrade-spec.md:207), `buy-and-hold`는 `exit.*` 키를 읽지 않아 `requireAllUsed()`가 거절한다(CatalogStrategyFactory.java:44-46·62, ProfileParams.java:118-121). 따라서 그 로직은 이 검사를 만족할 수 없고, 로직 조건으로 빼는 것이 기획서와 맞음. 다른 스윙 로직에 대한 검사와 `SWING_WITHOUT_MAX_HOLD` 목록은 그대로. 보호 테스트가 아님(`scripts/ci/protected-paths.txt` 밖). 지우거나 건너뛴 테스트 없음 |
+| B7 | 해당 없음 | 실전 경로·보호 경로 미접촉. 새로 바뀐 파일(strategies/, experiments/, docs/, autotrade-sim 테스트)은 모두 보호 경로 밖 |
+| B8 | 통과 | 비밀값 없음. 점검표의 새 명령도 런타임 값만 읽음. CI Secret scan success |
+
+### 첫 검토 항목 처리
+- N1 해결: 점검표 2.2가 `@($st.session.failures | Where-Object { $_ }).Count`로 실패 계좌 수를 세고 0이 아니면 알리게 바뀜. 계획 4.1 I1도 "빈 문자열이 아닌 칸 0개"(LiveSession.java:341-344 근거)로 바뀜.
+- N2 해결: 점검표 2.3에 "운용 마지막 날(10-23, 12-18)은 실험실을 끄지 않는다"가 들어갔고, 4장 앞에 409 원인과 다시 여는 순서, `restoring`이 false이고 `session`이 있을 때까지 기다리는 블록이 생김. 5장(12-18)도 "세션이 열려 있는지 먼저 확인"을 가리킴. `LiveLabService.finish`의 두 409 조건(252-256행)과 맞음.
+- R1 해결(계획 7장: 3장으로 고치고, 스레드에 올리면 Claude가 커밋하는 것으로 통일). R2 해결(LIVE00 매일 장중 재기동). R3 해결(`$id`를 0장으로 옮김). R4 해결(GC 기록을 저장소 `build\weekly-gc`에 씀, 루트 `.gitignore` 10행 `build/`라 결과의 코드 줄에 dirty가 붙지 않음). R5 해결(기존 `candidates`를 덮어쓴다는 문장, 게이트웨이를 다시 띄우라는 문장).
+
+### 새 발견(권고, 머지 막지 않음)
+- R7: 점검표 4장의 대기 블록 `do { … } while ($st.restoring -or -not $st.session)`에는 끝이 없음. 세션 시작이 실패하면(`stopReason`에 `시작 실패`) 영원히 돎. 실험실이 꺼져 있으면 `Invoke-RestMethod` 오류를 내고 이전 `$st`로 계속 돎. 매 회 `stopReason`도 찍거나 `$st.stopReason`이 있으면 멈추게 하면 사용자가 바로 알아챈다. 지금도 5초마다 상태 줄을 찍으므로 사람이 보고 멈출 수는 있다.
+- R8: 기준선 v2는 boards 10종목 가운데 실제로 8종목만 산다(000660은 99만 원 배정으로 0주, 035720은 블랙리스트). 계획 R5 문장이 이 점과 리포트 기재를 이미 다룸. 확인만 함.
+
+## 판정(재검토)
+승인
