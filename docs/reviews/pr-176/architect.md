@@ -61,3 +61,32 @@
 
 ### 판정
 승인. R1이 해결됐고 점검표 B는 통과 또는 해당 없음이며 확인 못 함은 없다. N3·N4는 막지 않는 권고다. 실전 경로를 건드리지 않아 risk-ops 검토 대상이 아니다.
+
+## 재검토 (2) 2026-10-19
+- 대상: PR #176 / 헤드 `00e197de09894f2ed18cbfc13dab216887a21567` / `git diff origin/main...HEAD` 전체(8개 파일, 모두 `docs/`). 재검토 뒤 더해진 것: `8a9adca`(기획서 갱신일, N3), 머지 `752b97a9`(부모 `8a9adca`·`caa73a7b` = origin/main, PR #178·D-115), `00e197de`(D-115 후속 6단계 문서 4개).
+- 점검표: B
+- 직접 실행한 것:
+  - `git pull` 후 `./gradlew clean build --no-daemon`(헤드 `00e197d`, 작업 트리 깨끗): **BUILD SUCCESSFUL in 5m 9s**, 161 actionable tasks, EXIT=0. 머지로 들어온 main 코드(PR #178 `autotrade-sim` 줄 단위 읽기 등)도 이 빌드에서 함께 컴파일·시험됐다.
+  - 머지 확인: `git merge-base --is-ancestor origin/main HEAD` 참. `git diff origin/main HEAD --name-only`가 이 PR 문서 8개뿐이라 머지가 main 쪽 파일(코드 포함)을 바꾸지 않았다. 결정 로그 표는 main 대비 D-113 행 교체, D-114 행 추가, Q-013 행 교체만 있고 D-112(`docs/decisions/README.md:118`)·D-115(`:121`) 행은 main 그대로, 번호 순서 D-110~D-115가 맞다. 기획서도 main 대비 v14.51·갱신일·변경 이력 한 줄·STR-14·Q-013 다섯 곳만 다르다.
+  - `00e197de` 내용 대조: D-115 "후속(변경 제안)" 6단계 몫(`docs/decisions/D-115-stream-recordings-in-live-checks.md:64`: 계획 5장 T1 행, 6·7장 시간 추정, live-session 주간 점검 절의 "힙은 기간과 상관없음, 시간은 기간에 비례")이 모두 반영됐다(`docs/strategy/stage-6-plan.md:142`·`:161`, `docs/runbooks/stage-6-live-session.md:52`). 수치(하루 약 176만 줄, 7.7만 줄/초, 첫 주 약 20분, 8주차 약 2~3시간)가 D-115 42행과 같다. 같은 D-115 실측(2종목 8일 기록·녹화 192만 줄, 145초)으로 내가 다시 비례 계산하면 5일 약 22분, 40일 약 2.9시간이라 `[추론]` 범위 안이다.
+  - 점검표 3장 PowerShell(`docs/runbooks/stage-6-start-checklist.md:120`·`:123`): `$t0` 뒤 `-f`로 분 단위 출력. 종료 코드·GC 로그 줄은 그대로라 기존 절차를 깨지 않는다. `-Pheap=8g` 인자는 `autotrade-app-experiment/build.gradle.kts:119` 주석에 있다.
+  - diff 전체 비밀값 패턴 grep: 새로 걸리는 것 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `clean build` BUILD SUCCESSFUL(EXIT=0) |
+| B2 | 해당 없음 | PR 범위(main 대비) 변경은 모두 `docs/`. 모듈·ArchUnit 파일 변경 없음 |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST 변경 없음. 운용 문서의 명령·인자는 기존 것(`runLiveWeeklyCheck`, `-Pheap`) |
+| B4 | 해당 없음 | 코드 변경 없음. 문서는 D-115의 결과 동일(보고서 바이트 일치) 주장을 옮겼을 뿐 바꾸지 않는다 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 코드·테스트 변경 없음, 테스트 삭제 없음 |
+| B7 | 해당 없음 | 실전 경로·보호 경로 변경 없음(`scripts/ci/protected-paths.txt` 대상 파일 없음). 머지로 main에 이미 있는 `EngineMain` 변경이 diff 계산에 보이지만 main 대비 차이는 0이며 그 검토는 원래 PR 몫이다 |
+| B8 | 통과 | 새 문서 줄에 키·계좌번호·토큰 없음. PowerShell 예시는 경로·실험 ID 변수뿐 |
+
+### 새로 본 것
+- **N5 (권고) D-113 후속 줄의 T1이 끝남 표시가 없다.** `docs/decisions/D-113-stage-6-live-operation.md:50`은 T3에만 "D-114로 끝남"이 있고 T1은 "10-30 전" 그대로다. 같은 파일 38행 위험 항목과 계획 5장 T1 행은 D-115로 해소됐다고 적었으므로 한 문서 안에서 어긋난다. 다음 6단계 문서 변경 때 "T1 … D-115로 끝남"으로 맞춘다.
+- **N6 (참고) D-115가 기획서 변경 이력에 없다.** main의 PR #178이 기획서를 올리지 않았고(main 기획서 v14.50), 이 PR의 v14.51 행은 D-113·D-114만 적는다. 이 PR의 책임은 아니며, D-115는 결과를 바꾸지 않는 구현 결정이라 요구사항 행이 바뀌지 않는다. pm-lead가 다음 기획서 판에서 한 줄 더할지 정한다.
+- N3(갱신일)은 `8a9adca`로 해결(`docs/spec/autotrade-spec.md:13` 2026-10-19). N4는 그대로(참고).
+
+### 판정
+승인. 머지가 main 쪽 결정 행(D-112·D-115)과 코드를 보존했고, D-115 후속 반영이 D-115 문서와 일치한다. 점검표 B는 통과 또는 해당 없음이며 확인 못 함은 없다. N5는 막지 않는 권고다. 실전 경로를 건드리지 않아 risk-ops 검토 대상이 아니다.
