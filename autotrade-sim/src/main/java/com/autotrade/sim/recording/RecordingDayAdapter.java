@@ -4,6 +4,7 @@ import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.marketdata.recording.RecordedDayStream;
 import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.recording.RecordingMeta;

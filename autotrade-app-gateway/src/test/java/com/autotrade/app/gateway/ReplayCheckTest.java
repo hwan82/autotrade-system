@@ -10,12 +10,19 @@ import com.autotrade.domain.market.PriceLevel;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.recording.MarketEventRecorder;
+import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.recording.RecordingMeta;
+import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
 import com.autotrade.marketdata.symbols.SymbolNames;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,6 +36,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -379,18 +388,149 @@ class ReplayCheckTest {
         assertThat(err.toString(StandardCharsets.UTF_8)).contains("녹화 확인 실패").contains("읽는 사이에 바뀌었습니다");
     }
 
-    private static void dropLastLine(Path events) {
+    /**
+     * 1회차 종목 수집이 끝난 뒤 {@code change}를 한 번 부르는 정지 확인. {@link #recordDay()}가 9줄이고 확인 간격이 2라는 전제로
+     * 6번째 확인이다(시작 1 + 수집 2·4·6·8줄 4 + 수집 뒤 1). 전제가 바뀌면 바뀜이 일어나지 않아 시험이 실패한다.
+     */
+    private static ReplayCheck.StopCheck changeAfterFirstCollect(Runnable change) {
+        int[] calls = {0};
+        return () -> {
+            if (++calls[0] == 6) {
+                change.run();
+            }
+            return Optional.empty();
+        };
+    }
+
+    @Test
+    void 회차_안에서_건수가_같아도_메타가_바뀌면_결과_없이_실패한다() {
+        Path day = recordDay();
+        Path meta = day.resolve(RecordingLayout.META_FILE);
+        // 정상 종료 녹화: 줄 파일은 그대로라 해시 대조는 통과하고, 두 읽기의 메타만 다르다
+        ReplayCheck.StopCheck changesMeta = changeAfterFirstCollect(() -> rewrite(meta,
+                readString(meta).replace("본인 연구용, 외부 공유 금지", "바뀐 이용 조건")));
+
+        assertThatThrownBy(() -> ReplayCheck.check(day, SymbolNames.empty(), changesMeta, 2))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("읽는 사이에 바뀌었습니다");
+    }
+
+    @Test
+    void 회차_안에서_건수와_마지막_순번이_같아도_마지막_수신_시각이_바뀌면_결과_없이_실패한다() throws Exception {
+        Path day = recordDay();
+        Files.delete(day.resolve(RecordingLayout.META_FILE)); // 쓰이는 중인 녹화: 해시 대조 없이 읽는다
+        Path events = day.resolve(RecordingLayout.EVENTS_FILE);
+        Instant later = OPEN.plusSeconds(7 * 3600);
+        String replaced = new RecordingCodec().encode(9, "KIWOOM-WS",
+                new TradeTick(SAMSUNG, 9, later, later, new BigDecimal("71200"), 50));
+        ReplayCheck.StopCheck changesLastLine = changeAfterFirstCollect(() -> replaceLastLine(events, replaced));
+
+        assertThatThrownBy(() -> ReplayCheck.check(day, SymbolNames.empty(), changesLastLine, 2))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("읽는 사이에 바뀌었습니다");
+    }
+
+    @Test
+    void 구간_경계_첫_줄이_재기동_표시가_아닌_공백이면_표시_없는_경계로_적는다() throws Exception {
+        Instant t2 = OPEN.plusSeconds(4440);
+        String warning = "재기동 공백 표시 없음(D-065 이전 녹화): 구간 시작 10:14(seq 2)";
+
+        Path disconnected = legacyDay("a", new DataGap(SAMSUNG, 2, t2, t2, OPEN, t2, DataGap.GapReason.DISCONNECTED));
+        assertThat(ReplayCheck.check(disconnected).toMarkdown()).contains(warning);
+
+        Path restart = legacyDay("b", new DataGap(SAMSUNG, 2, t2, t2, OPEN, t2, DataGap.GapReason.RECORDER_RESTART));
+        assertThat(ReplayCheck.check(restart).toMarkdown()).doesNotContain("재기동 공백 표시 없음");
+    }
+
+    @Test
+    void 정상_종료_표시가_있는데_해시가_비고_gzip_끝이_잘렸으면_불완전이_아니라_읽기_실패다() throws Exception {
+        Path day = root.resolve("cut/KRX/2026-10-08");
+        Files.createDirectories(day);
+        RecordingCodec codec = new RecordingCodec();
+        String text = codec.encode(1, "K", new TradeTick(SAMSUNG, 1, OPEN, OPEN, new BigDecimal("71000"), 1)) + "\n"
+                + codec.encode(2, "K", new TradeTick(SAMSUNG, 2, OPEN, OPEN, new BigDecimal("71100"), 1)) + "\n";
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        GZIPOutputStream gz = new GZIPOutputStream(buf, true);
+        gz.write(text.getBytes(StandardCharsets.UTF_8));
+        gz.flush(); // 끝(트레일러)을 쓰기 전에 멈춘 파일
+        Files.write(day.resolve(RecordingLayout.EVENTS_FILE), buf.toByteArray());
+        PrintStream sink = sink();
+
+        writeMeta(day, List.of(new RecordingMeta.Segment(OPEN.toString(), "", 1)), false, "");
+        assertThat(ReplayCheck.check(day).verdict()).as("정상 종료 아님: 잘린 끝을 허용").isEqualTo(ReplayCheck.Verdict.INCOMPLETE);
+
+        writeMeta(day, List.of(new RecordingMeta.Segment(OPEN.toString(), OPEN.toString(), 1)), true, "");
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        assertThat(ReplayCheck.run(new String[] {day.toString()}, config(), ReplayCheck.StopCheck.NONE, SymbolNames.empty(),
+                sink, new PrintStream(err, true, StandardCharsets.UTF_8))).as("정상 종료 표시: 잘린 끝은 손상").isEqualTo(2);
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("녹화 확인 실패");
+    }
+
+    /** 두 줄짜리 이전 형식 녹화(구간 두 개, 두 번째 구간 첫 줄이 {@code boundary}), 정상 종료·해시 있음. */
+    private Path legacyDay(String name, DataGap boundary) throws Exception {
+        Path day = root.resolve(name + "/KRX/2026-10-08");
+        Files.createDirectories(day);
+        RecordingCodec codec = new RecordingCodec();
+        try (OutputStream out = new GZIPOutputStream(
+                Files.newOutputStream(day.resolve(RecordingLayout.EVENTS_FILE)))) {
+            out.write((codec.encode(1, "K", new TradeTick(SAMSUNG, 1, OPEN, OPEN, new BigDecimal("71000"), 1)) + "\n"
+                    + codec.encode(2, "K", boundary) + "\n").getBytes(StandardCharsets.UTF_8));
+        }
+        writeMeta(day, List.of(new RecordingMeta.Segment(OPEN.toString(), OPEN.toString(), 1),
+                new RecordingMeta.Segment(boundary.receivedAt().toString(), boundary.receivedAt().toString(), 2)), true,
+                Sha256.ofFile(day.resolve(RecordingLayout.EVENTS_FILE)));
+        return day;
+    }
+
+    private static void writeMeta(Path day, List<RecordingMeta.Segment> segments, boolean complete, String sha)
+            throws IOException {
+        RecordingMeta m = new RecordingMeta(RecordingCodec.FORMAT_VERSION, "KRX", "2026-10-08", "Asia/Seoul",
+                Map.of("K", "KRX_REALTIME"), "", segments, 2, 2, 0, 0, complete, sha);
+        new ObjectMapper().writeValue(day.resolve(RecordingLayout.META_FILE).toFile(), m);
+    }
+
+    private static String readString(Path p) {
+        try {
+            return Files.readString(p, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static void rewrite(Path p, String text) {
+        try {
+            Files.writeString(p, text, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** 녹화 파일의 마지막 줄을 {@code line}으로 바꾼다(줄 수·마지막 순번은 그대로). */
+    private static void replaceLastLine(Path events, String line) {
         try {
             String text;
-            try (java.io.InputStream in = new java.util.zip.GZIPInputStream(Files.newInputStream(events))) {
+            try (InputStream in = new GZIPInputStream(Files.newInputStream(events))) {
                 text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
             String body = text.substring(0, text.length() - 1);
-            try (java.io.OutputStream out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(events))) {
+            try (OutputStream out = new GZIPOutputStream(Files.newOutputStream(events))) {
+                out.write((body.substring(0, body.lastIndexOf('\n') + 1) + line + "\n").getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static void dropLastLine(Path events) {
+        try {
+            String text;
+            try (InputStream in = new GZIPInputStream(Files.newInputStream(events))) {
+                text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            String body = text.substring(0, text.length() - 1);
+            try (OutputStream out = new GZIPOutputStream(Files.newOutputStream(events))) {
                 out.write(body.substring(0, body.lastIndexOf('\n') + 1).getBytes(StandardCharsets.UTF_8));
             }
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 }
