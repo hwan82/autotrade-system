@@ -11,7 +11,10 @@
 ```powershell
 cd C:\2.Code\myproject\autotrade-system
 chcp 65001 > $null; $cfg = if ($env:AUTOTRADE_CONFIG_DIR) { $env:AUTOTRADE_CONFIG_DIR } else { Join-Path $HOME ".autotrade" }
+$id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else { "EXP-20261026-LIVE01" }
 ```
+
+`$id`는 날짜로 정한다(10-23까지 LIVE00, 10-24부터 LIVE01). 아래 명령은 이 두 줄을 붙여 넣은 창에서만 동작한다.
 
 ## 1. 처음 한 번(LIVE00 시작 전날 또는 첫날 08:30 전)
 
@@ -23,7 +26,7 @@ chcp 65001 > $null; $cfg = if ($env:AUTOTRADE_CONFIG_DIR) { $env:AUTOTRADE_CONFI
    git status --short   # 비어 있어야 결과의 코드 줄에 dirty가 붙지 않는다
    ```
 
-2. 게이트웨이 감시 종목(`watchlist.json`)을 10종목으로 바꾼다. 원래 파일은 `watchlist.json.before-stage6`로 남기고, `held`(보유) 칸은 그대로 둔다.
+2. 게이트웨이 감시 종목(`watchlist.json`)을 10종목으로 바꾼다. **기존 `candidates`(후보)는 모두 이 10종목으로 덮어쓴다**(2단계 3종목도 이 안에 있다). 원래 파일은 `watchlist.json.before-stage6`로 남기고, `held`(보유) 칸은 그대로 둔다. 게이트웨이는 기동 때만 읽으므로 켜져 있으면 다시 띄운다.
 
    ```powershell
    $wl = Join-Path $cfg "watchlist.json"
@@ -75,10 +78,9 @@ chcp 65001 > $null; $cfg = if ($env:AUTOTRADE_CONFIG_DIR) { $env:AUTOTRADE_CONFI
 .\gradlew :autotrade-app-lab:bootRun
 ```
 
-창 3 — 세션 시작. `$id`는 기간에 맞게 고른다(10-20~10-23은 LIVE00, 10-26부터는 LIVE01). 실험실을 다시 띄운 날에도 이 블록을 다시 붙여 넣는다(실험실은 세션을 자동으로 다시 열지 않는다).
+창 3 — 세션 시작(0장 두 줄 먼저). 실험실을 다시 띄운 뒤에도 이 블록을 다시 붙여 넣는다(실험실은 세션을 자동으로 다시 열지 않는다).
 
 ```powershell
-$id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else { "EXP-20261026-LIVE01" }
 $s = Invoke-RestMethod http://127.0.0.1:8480/api/session -SessionVariable web
 $h = @{ "X-CSRF-Token" = $s.csrfToken }
 $t0 = Get-Date
@@ -90,17 +92,19 @@ Invoke-RestMethod -Method Post -Headers $h -WebSession $web "http://127.0.0.1:84
 ```powershell
 $st = Invoke-RestMethod http://127.0.0.1:8480/api/live/status
 $st | Select-Object experimentId, restoring, feedState, feedReconnects, inboxDropped, stopReason | Format-List
-$st.session | Select-Object events, dataGaps, lastEventAt, journalDate, failures | Format-List
+$st.session | Select-Object events, dataGaps, lastEventAt, journalDate | Format-List
+$bad = @($st.session.failures | Where-Object { $_ }); "실패 계좌: $($bad.Count)"; $bad
 ```
 
 - `restoring`이 `False`로 바뀐 뒤 `feedState`가 `CONNECTED`, 장중에 `events`가 늘면 정상이다.
 - 되살리기 시간(재기동한 날만 적는다): `restoring`이 `False`가 된 뒤 `"{0:N0}초" -f ((Get-Date) - $t0).TotalSeconds`. 실험실 로그 `실시간 모의 세션 연결: … 되살리기 N초` 줄과 같은 값이다.
-- **바로 알릴 것**: `failures`가 비어 있지 않음(계좌 실패, 계획 4.1 I1), `stopReason`에 `시작 실패`·`호가 단위`·`기록` 문구, 장중인데 `events`가 몇 분째 그대로.
+- **바로 알릴 것**: `실패 계좌`가 0이 아님(계좌 실패, 계획 4.1 I1. `failures`는 계좌마다 한 칸이고 정상 계좌는 빈 칸이라 개수로 본다), `stopReason`에 `시작 실패`·`호가 단위`·`기록` 문구, 장중인데 `events`가 몇 분째 그대로.
 
 ### 2.3 15:40 뒤 마감
 
 1. 창 1(게이트웨이)에서 Ctrl+C. 정상 종료해야 녹화 `meta.json`에 정상 종료 표시가 남는다.
-2. 실험실은 켜 두어도 되고 꺼도 된다(끄면 다음 날 2.1 창 2·3을 다시).
+2. 실험실은 켜 두어도 되고 꺼도 된다(끄면 다음 날 2.1 창 2·3을 다시). 단 **운용 마지막 날(10-23, 12-18)은 끄지 않는다**. 끝내기(4장)는 세션이 열려 있어야 한다.
+   - LIVE00 기간(10-20~10-23)에는 하루 한 번 장중(예: 11시)에 창 2에서 Ctrl+C로 실험실을 끄고 다시 `bootRun` → 창 3 블록 → 2.2에서 되살리기 초를 적는다. 재기동 되살리기를 8주 전에 재 보려는 것이다(계획 3장).
 3. 하루 크기(LIVE00 동안 매일, 그 뒤로는 금요일만):
 
    ```powershell
@@ -111,12 +115,13 @@ $st.session | Select-Object events, dataGaps, lastEventAt, journalDate, failures
 ## 3. 주간 점검(매주 금요일 장 마감 뒤, 게이트웨이를 끈 다음)
 
 ```powershell
-$env:JAVA_TOOL_OPTIONS = "-Xlog:gc:file=$env:TEMP\weekly-gc-%p.log"
+$gc = Join-Path (Get-Location) "build\weekly-gc"; New-Item -ItemType Directory -Force $gc > $null   # 저장소 경로는 공백·한글이 없어야 한다(0장 가정)
+$env:JAVA_TOOL_OPTIONS = "-Xlog:gc:file=$gc\weekly-gc-%p.log"
 .\gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=$id
 "종료 코드: $LASTEXITCODE"
 Remove-Item Env:JAVA_TOOL_OPTIONS
-$max = 0; Get-ChildItem "$env:TEMP\weekly-gc-*.log" | Get-Content | ForEach-Object { if ($_ -match '(\d+)M->\d+M\(\d+M\)') { $max = [Math]::Max($max, [int]$matches[1]) } }
-"주간 점검 최대 힙 사용: ${max}MB"; Remove-Item "$env:TEMP\weekly-gc-*.log"
+$max = 0; Get-ChildItem "$gc\weekly-gc-*.log" | Get-Content | ForEach-Object { if ($_ -match '(\d+)M->\d+M\(\d+M\)') { $max = [Math]::Max($max, [int]$matches[1]) } }
+"주간 점검 최대 힙 사용: ${max}MB"; Remove-Item "$gc\weekly-gc-*.log"
 Get-ChildItem "experiments\$id\weekly"
 ```
 
@@ -125,6 +130,13 @@ Get-ChildItem "experiments\$id\weekly"
 - 결과 `experiments\<ID>\weekly\<날짜>.md`와 위 두 줄(종료 코드, 최대 힙)을 이 프로젝트 스레드에 올린다. Claude가 커밋하고 요약한다. 최대 힙 줄에는 Gradle 자체 메모리도 섞여 있어 조금 크게 나온다.
 
 ## 4. LIVE00 끝(10-23 금요일 장 마감 뒤, 3장 주간 점검 다음)
+
+끝내기는 실험실에 세션이 열려 있고 되살리기가 끝난 상태에서만 된다(아니면 409 오류, `live-detail.txt`가 생기지 않아 리플레이 확인을 못 한다). 실험실을 껐다면 먼저 2.1 창 2(실험실)와 창 3(세션 시작)을 다시 하고, 아래 첫 블록이 `준비됨`을 낼 때까지 기다린다.
+
+```powershell
+do { Start-Sleep 5; $st = Invoke-RestMethod http://127.0.0.1:8480/api/live/status; "restoring=$($st.restoring) 세션=$($st.experimentId)" } while ($st.restoring -or -not $st.session)
+"준비됨"
+```
 
 ```powershell
 $s = Invoke-RestMethod http://127.0.0.1:8480/api/session -SessionVariable web
@@ -143,7 +155,7 @@ Get-ChildItem experiments\EXP-20261020-LIVE00
 
 - 매 거래일 2장, 매주 금요일 3장. 11-19(목)은 수능일이라 10:00 개장·16:30 마감이다. 게이트웨이는 평소처럼 08:40 전에 켜고 16:40 뒤에 끈다.
 - PC를 못 켜는 날이 있으면 그날을 스레드에 적는다(인프라 공백은 사고가 아니다. 40거래일 중 36일 이상이 필요하다, 계획 4.1 I5).
-- 12-18 장 마감 뒤: 3장 주간 점검 → 4장과 같은 순서로 끝내기·리플레이 확인(`-Pexperiment=EXP-20261026-LIVE01`) → 결과 파일을 올린다. 판정 리포트는 Claude가 쓴다.
+- 12-18 장 마감 뒤: 3장 주간 점검 → 4장과 같은 순서(세션이 열려 있는지 먼저 확인)로 끝내기·리플레이 확인(`-Pexperiment=EXP-20261026-LIVE01`) → 결과 파일을 올린다. 판정 리포트는 Claude가 쓴다.
 
 ## 6. 하지 말 것
 
