@@ -578,6 +578,32 @@ class EngineMainTest {
     }
 
     @Test
+    void 기동_실패_원인에_긴_공백과_줄바꿈이_있어도_판정과_종료_코드와_한_줄_안내가_남는다() {
+        // PR #172 risk-ops 재검토 K4: 정규식 반복이 긴 공백·줄바꿈 묶음에서 StackOverflowError를 내면 exit를 부르지 못하고
+        // 안내 줄도 사라졌다. 수만 글자 묶음으로 세 경로(설정 오류 2, 프로그램 오류 1)와 접기 결과를 본다
+        String longRun = " ".repeat(100_000) + "\n".repeat(100_000) + "\u2028".repeat(100_000) + " \r\n".repeat(50_000);
+        assertThat(EngineMain.StartFailure.of(new IOException(longRun + "a" + longRun + "b" + longRun)).detail())
+                .isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a" + " ".repeat(100_000) + "b")).detail())
+                .isEqualTo("a" + " ".repeat(100_000) + "b");
+
+        List<Integer> exits = new ArrayList<>();
+        java.nio.file.InvalidPathException badPath = new java.nio.file.InvalidPathException("x", "앞" + longRun + "뒤");
+        String settings = captureErr(() -> assertThat(EngineMain.launch(() -> {
+            throw badPath;
+        }, FIXED, EngineMain::setup, exits::add)).isNull());
+        String programError = captureErr(() -> assertThat(EngineMain.launch(() -> ConfigPaths.in(dir), FIXED, n -> {
+            throw new IllegalStateException(longRun + "꾸리기" + longRun + "실패" + longRun);
+        }, exits::add)).isNull());
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_BAD_SETTINGS, EngineMain.EXIT_START_FAILED);
+        assertThat(settings).isEqualTo(EngineMain.StartFailure.SETTINGS_HEADLINE + "(실전 엔진이 뜨지 않았습니다): "
+                + "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): 앞 / 뒤: x" + System.lineSeparator());
+        assertThat(programError).isEqualTo(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE + "(실전 엔진이 뜨지 않았습니다): "
+                + "IllegalStateException: 꾸리기 / 실패" + System.lineSeparator());
+    }
+
+    @Test
     void 기동_실패_원인의_줄바꿈은_세_종류_모두_한_줄로_접는다() {
         assertThat(EngineMain.StartFailure.of(new EngineMain.EngineRefusal("a\nb")).detail()).isEqualTo("a / b");
         assertThat(EngineMain.StartFailure.of(new IOException("a\r\n\r\nb")).detail()).isEqualTo("a / b");

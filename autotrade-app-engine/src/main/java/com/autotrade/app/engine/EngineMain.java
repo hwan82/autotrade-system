@@ -34,7 +34,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 /**
  * 실전 매매 엔진(D-013 ①). 설정을 읽고 RealTradingGuard(모든 실전 계좌 OFF)와 실전 제어 명령 채널(ADR-006)을 띄운 뒤
@@ -279,12 +278,6 @@ public final class EngineMain {
         static final String PROGRAM_ERROR_HEADLINE =
                 "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 로그의 예외를 개발 쪽에 알려 주세요";
 
-        private static final Pattern LINE_BREAK = Pattern.compile("\\R");
-        // 공백과 줄바꿈이 섞인 묶음 하나를 " / " 하나로(U+2028처럼 \\s에 들지 않는 줄바꿈이 이어져도, PR #172 risk-ops K1)
-        private static final Pattern LINE_BREAK_RUN = Pattern.compile("(?:\\s*\\R)+\\s*");
-        // 줄바꿈이 있을 때 앞뒤의 공백·줄바꿈(U+0085 포함)을 걷는다
-        private static final Pattern EDGE_BREAKS = Pattern.compile("^(?:\\s|\\R)+|(?:\\s|\\R)+$");
-
         static StartFailure of(Exception e) {
             if (e instanceof EngineRefusal) {
                 return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, oneLine(e.getMessage()), false);
@@ -298,13 +291,59 @@ public final class EngineMain {
 
         /**
          * 원인 메시지의 줄바꿈을 " / "로 접어 로그 ERROR와 표준 오류가 늘 한 줄이게 한다(D-112, PR #169 독립 QA R2). 줄바꿈이 없으면
-         * 글자 그대로 둔다. 프로그램 오류의 예외 흐름(스택)에는 원래 메시지가 그대로 남는다.
+         * 글자 그대로 둔다. 줄바꿈이 있으면 앞뒤 공백·줄바꿈을 걷고, 줄바꿈이 든 공백·줄바꿈 묶음을 " / " 하나로 바꾼다. 프로그램 오류의
+         * 예외 흐름(스택)에는 원래 메시지가 그대로 남는다. 정규식 없이 한 번 훑는다: 긴 공백 묶음에서 정규식 반복이 재귀로
+         * {@link StackOverflowError}를 내면 판정·종료 코드·안내 줄이 모두 사라진다(PR #172 risk-ops 재검토 K4).
          */
         static String oneLine(String message) {
-            if (message == null || !LINE_BREAK.matcher(message).find()) {
-                return String.valueOf(message);
+            if (message == null) {
+                return "null";
             }
-            return LINE_BREAK_RUN.matcher(EDGE_BREAKS.matcher(message).replaceAll("")).replaceAll(" / ");
+            int start = 0;
+            int end = message.length();
+            boolean hasBreak = false;
+            for (int i = start; i < end && !hasBreak; i++) {
+                hasBreak = isLineBreak(message.charAt(i));
+            }
+            if (!hasBreak) {
+                return message;
+            }
+            while (start < end && isBlank(message.charAt(start))) {
+                start++;
+            }
+            while (end > start && isBlank(message.charAt(end - 1))) {
+                end--;
+            }
+            StringBuilder out = new StringBuilder(end - start);
+            int i = start;
+            while (i < end) {
+                if (!isBlank(message.charAt(i))) {
+                    out.append(message.charAt(i++));
+                    continue;
+                }
+                int runStart = i;
+                boolean runHasBreak = false;
+                while (i < end && isBlank(message.charAt(i))) {
+                    runHasBreak |= isLineBreak(message.charAt(i));
+                    i++;
+                }
+                if (runHasBreak) {
+                    out.append(" / ");
+                } else {
+                    out.append(message, runStart, i);
+                }
+            }
+            return out.toString();
+        }
+
+        /** 정규식 {@code \R}의 줄바꿈 글자({@code \r\n}은 두 글자 모두 해당). */
+        private static boolean isLineBreak(char c) {
+            return (c >= '\n' && c <= '\r') || c == '\u0085' || c == '\u2028' || c == '\u2029';
+        }
+
+        /** 줄바꿈이거나 정규식 {@code \s}의 공백(스페이스·탭). */
+        private static boolean isBlank(char c) {
+            return c == ' ' || c == '\t' || isLineBreak(c);
         }
 
         /** 로그(ERROR)와 표준 오류에 한 줄씩 남긴다. 프로그램 오류면 로그에 예외 흐름도 남긴다. */
