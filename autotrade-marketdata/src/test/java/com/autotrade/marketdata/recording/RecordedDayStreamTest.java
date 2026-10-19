@@ -34,7 +34,8 @@ import org.junit.jupiter.api.io.TempDir;
  * 줄 단위 읽기 {@link RecordedDayStream}과 그것으로 다시 읽는 리플레이 소스(D-117). 읽기 규칙 자체(순번·해시·잘림·깨진 머리)는
  * {@link RecordedDay#open}이 이것을 쓰므로 {@code RecordingReplayTest}가 함께 고정한다. 여기서는 줄을 쌓지 않는 쪽만의 약속을 본다:
  * 요약이 {@link RecordedDay}와 같고, 받는 쪽이 멈추면 그 뒤를 읽지 않고, 해시가 다르면 줄을 하나도 넘기지 않고, 줄 단위
- * 리플레이 소스가 읽은 녹화일로 만든 소스와 같은 이벤트를 낸다.
+ * 리플레이 소스가 읽은 녹화일로 만든 소스와 같은 이벤트를 낸다. 순번 끊김·가운데 줄 형식 오류·깨진 gzip 머리는 여기서도 직접 고정한다
+ * (sim 복제본 시험을 정리해도 남도록, architect R2).
  */
 class RecordedDayStreamTest {
 
@@ -197,6 +198,66 @@ class RecordedDayStreamTest {
 
         assertThat(after.eventCount()).isEqualTo(before.eventCount() - 1);
         assertThat(after).isNotEqualTo(before);
+    }
+
+    @Test
+    void 순번이_끊기면_거부한다() throws IOException {
+        Path dir = dayDir();
+        Files.createDirectories(dir);
+        writeEvents(dir, line(1), line(3));
+        assertThatThrownBy(() -> RecordedDayStream.read(dir, l -> { }))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("순번이 끊겼습니다: 기대 2, 실제 3");
+    }
+
+    @Test
+    void 가운데_줄_형식이_깨지면_정상_종료_여부와_상관없이_거부한다() throws IOException {
+        Path dir = dayDir();
+        Files.createDirectories(dir);
+        writeEvents(dir, line(1), "{깨진 줄", line(2));
+        assertThatThrownBy(() -> RecordedDayStream.read(dir, l -> { })).as("메타 없음(비정상 종료)")
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("2번째 줄 형식 오류");
+
+        writeMeta(dir, true, Sha256.ofFile(dir.resolve(RecordingLayout.EVENTS_FILE)));
+        assertThatThrownBy(() -> RecordedDayStream.read(dir, l -> { })).as("정상 종료, 해시 일치")
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("2번째 줄 형식 오류");
+    }
+
+    @Test
+    void 깨진_gzip_머리는_비정상_종료면_빈_녹화이고_정상_종료면_거부한다() throws IOException {
+        byte[][] broken = {new byte[0], {0x1f}, {0x1f, (byte) 0x8b, 8, 0}};
+        for (byte[] head : broken) {
+            Path dir = dayDir();
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), head);
+            Files.deleteIfExists(dir.resolve(RecordingLayout.META_FILE));
+            List<RecordingCodec.Line> seen = new ArrayList<>();
+            RecordedDayStream.Summary s = RecordedDayStream.read(dir, seen::add);
+            assertThat(seen).as("머리 %d바이트", head.length).isEmpty();
+            assertThat(s.truncated()).as("머리 %d바이트", head.length).isTrue();
+            assertThat(s.eventCount()).isZero();
+
+            // 정상 종료 표시가 있는데 해시가 비어 있으면 해시 대조 없이 읽다가 깨진 머리에서 거부한다
+            writeMeta(dir, true, "");
+            assertThatThrownBy(() -> RecordedDayStream.read(dir, l -> { })).as("머리 %d바이트", head.length)
+                    .isInstanceOf(java.io.UncheckedIOException.class);
+        }
+    }
+
+    private static String line(long seq) {
+        return new RecordingCodec().encode(seq, "K", new TradeTick(SAMSUNG, seq, OPEN, OPEN, new BigDecimal("71500"), 1));
+    }
+
+    private static void writeEvents(Path dir, String... lines) throws IOException {
+        try (OutputStream out = new GZIPOutputStream(Files.newOutputStream(dir.resolve(RecordingLayout.EVENTS_FILE)))) {
+            out.write((String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static void writeMeta(Path dir, boolean complete, String sha) throws IOException {
+        RecordingMeta m = new RecordingMeta(RecordingCodec.FORMAT_VERSION, "KRX", DAY.toString(), "Asia/Seoul",
+                Map.of("K", "KRX_REALTIME"), "", List.of(new RecordingMeta.Segment(OPEN.toString(), "", 1)), 2, 2, 0, 0,
+                complete, sha);
+        new com.fasterxml.jackson.databind.ObjectMapper().writeValue(dir.resolve(RecordingLayout.META_FILE).toFile(), m);
     }
 
     /** 녹화 파일의 마지막 줄을 지운다(쓰이는 중인 녹화가 읽는 사이 바뀐 경우를 흉내). */
