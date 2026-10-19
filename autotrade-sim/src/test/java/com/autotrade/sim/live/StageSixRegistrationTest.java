@@ -47,7 +47,7 @@ class StageSixRegistrationTest {
         assertThat(trial.blacklist()).isEqualTo(main.blacklist());
         assertThat(trial.seedCapital()).isEqualTo(main.seedCapital());
         assertThat(main.profiles().subList(0, 2)).containsExactly(
-                new RecordingPlan.ProfileRef("kr-bh-baseline", 1), new RecordingPlan.ProfileRef("kr-random-control", 1));
+                new RecordingPlan.ProfileRef("kr-bh-baseline", 2), new RecordingPlan.ProfileRef("kr-random-control", 1));
         assertThat(main.boards()).hasSize(10);
         // 블랙리스트 확인 종목은 받는 종목 안에 있어야 "체결 0건"이 뜻을 가진다(계획 4.1 I2)
         assertThat(main.blacklist()).containsExactly("035720");
