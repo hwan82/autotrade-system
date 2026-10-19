@@ -248,6 +248,27 @@ class WatchdogMainTest {
     }
 
     @Test
+    void 운영_배선은_알림_큐가_받았는지를_그대로_감시에_넘긴다() {
+        // PR #170 독립 QA Q1(변이 Q1: notifications::offer를 "넣고 늘 true"로 바꾸면 모든 시험이 통과했다). 감시는 큐가 억제해
+        // 받지 않은 결측 알림을 다음 결측 경고 때 다시 넣는데(D-111 결정 1), 배선이 받음 여부를 버리면 운영에서만 그 값이 채널에
+        // 끝까지 오지 않는다(PR #166 QA R1). 대상 이름은 점검 스레드가 쓰지 않는 것으로 골라 점검과 섞이지 않게 한다
+        Watchdog w = WatchdogMain.start(ConfigPaths.in(dir), fixed);
+        Alerts alerts = w.alerts();
+        String subject = "wiring-probe";
+        try {
+            assertThat(alerts.send(EventRoutes.READING_MISSING, subject, "감시가 자원 값을 읽지 못함", "cpu.system")).isTrue();
+            // 같은 대상·같은 종류는 10분 안에 큐가 억제한다(NotificationQueue.QUIET). 감시는 이 false를 보고 다시 넣을 표시를 세운다
+            assertThat(alerts.send(EventRoutes.READING_MISSING, subject, "감시가 자원 값을 읽지 못함", "cpu.system")).isFalse();
+            // 종류가 바뀌면 억제하지 않는다(받음 true가 늘 false로 바뀌는 변이도 잡는다)
+            assertThat(alerts.send(EventRoutes.READING_RECOVERED, subject, "감시가 자원 값을 다시 읽음", "cpu.system")).isTrue();
+        } finally {
+            w.close();
+        }
+        // 감시를 닫으면 큐도 닫혀 받지 않는다(PR #128 architect R3). 배선이 큐 반환값을 버리면 여기서도 true가 된다
+        assertThat(alerts.send(EventRoutes.READING_MISSING, subject + "-closed", "감시가 자원 값을 읽지 못함", "cpu.system")).isFalse();
+    }
+
+    @Test
     void 알림_설정_값을_이름대로_옮기고_시간대와_재동의_문구를_넘긴다() {
         // PR #128 architect R1: 문자열 값이 여럿이라 자리가 바뀌어도 컴파일된다. 값마다 다르게 넣어 제자리에 갔는지 본다
         RuntimeConfig.Notification n = new RuntimeConfig.Notification(
