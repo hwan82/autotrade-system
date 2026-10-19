@@ -8,7 +8,6 @@ import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.feed.FeedClient;
 import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.recording.EventSequences;
-import com.autotrade.marketdata.recording.RecordedDay;
 import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.recording.RecordingMeta;
@@ -16,11 +15,11 @@ import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.metrics.RunMetrics;
-import com.autotrade.sim.recording.RecordedMarketDataSet;
+import com.autotrade.sim.recording.RecordedDayStream;
 import com.autotrade.sim.recording.RecordingExperiment;
+import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.run.CodeVersion;
-import com.autotrade.sim.run.InMemoryMarketDataSet;
-import com.autotrade.sim.run.MarketDataSet;
+import com.autotrade.sim.run.MarketEventStream;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
@@ -63,7 +62,8 @@ import java.util.function.Consumer;
  *       영향이다(SIM-13).</li>
  * </ol>
  *
- * <p>무거우므로(녹화를 하루씩 다 읽고 리플레이를 두 번 돈다) 실험 명령({@code runLiveWeeklyCheck}, D-063 장 시간 보호·정지
+ * <p>메모리는 기간 길이와 상관없다(D-115): 기록과 녹화를 날마다 줄 단위로 읽고 버리며, 계좌 대조도 날마다 디스크에서 다시 읽는다.
+ * 대신 같은 파일을 여러 번 푼다. 무거우므로(녹화를 하루씩 다 읽고 리플레이를 두 번 돈다) 실험 명령({@code runLiveWeeklyCheck}, D-063 장 시간 보호·정지
  * 요청 확인)으로만 돌린다. 세션이 열려 있어도 돌 수 있다: 파일을 읽기 전후 해시가 다르면(아직 쓰이는 중) 그날을 거부한다.
  * 결과는 이벤트 내용 없이 건수와 성과만 담으므로 커밋해도 된다(시세 재배포 아님, ADR-003 4장).
  */
@@ -184,18 +184,19 @@ public final class LiveWeeklyCheck {
         }
         LocalDate weekFrom = end.minusDays(6).isBefore(plan.from()) ? plan.from() : end.minusDays(6);
 
-        // 날마다 대조한다. 계좌 대조용 녹화 이벤트(boards·운용 기간)는 여기서 모아 둔다(녹화를 두 번 읽지 않게)
+        // 날마다 대조한다. 기록과 녹화를 줄 단위로 읽고 날마다 버린다(D-115). 계좌 대조용 녹화(boards·운용 기간)는 날짜와 파일
+        // 해시만 남겨 두고 계좌 대조 때 같은 파일인지 확인하며 다시 읽는다
         List<DayRow> rows = new ArrayList<>();
-        List<MarketEvent> recordedForReplay = new ArrayList<>();
+        BoardsRecording recordedForReplay = new BoardsRecording(setup);
         List<String> skipAccounts = new ArrayList<>();
         RecordingCodec codec = new RecordingCodec();
         for (LocalDate d : days) {
             gate.check();
             Path rDir = recordings.dayDir(plan.market(), d);
             Path jDir = journal.dayDir(plan.market(), d);
-            RecordedDay jDay = Files.isRegularFile(jDir.resolve(RecordingLayout.EVENTS_FILE)) ? openStable(jDir) : null;
-            RecordedDay rDay = Files.isRegularFile(rDir.resolve(RecordingLayout.EVENTS_FILE)) ? openStable(rDir) : null;
-            DayRow row = compareDay(setup, codec, d, jDay, rDay, recordedForReplay);
+            Path j = Files.isRegularFile(jDir.resolve(RecordingLayout.EVENTS_FILE)) ? jDir : null;
+            Path r = Files.isRegularFile(rDir.resolve(RecordingLayout.EVENTS_FILE)) ? rDir : null;
+            DayRow row = compareDay(setup, codec, d, j, r, recordedForReplay);
             rows.add(row);
             if (!row.recordingPresent()) {
                 skipAccounts.add(d + " 녹화 없음");
@@ -210,20 +211,14 @@ public final class LiveWeeklyCheck {
             accounts = "계좌 대조를 하지 않았습니다: " + String.join(", ", skipAccounts)
                     + ". 운용 시작부터 모든 기록일의 녹화가 있어야 같은 조건으로 비교할 수 있습니다.\n";
         } else {
-            String offTick = null;
-            for (MarketEvent e : recordedForReplay) {
-                Optional<BigDecimal> p = RecordingExperiment.offStockTick(setup.rules(), e);
-                if (p.isPresent()) {
-                    offTick = e.symbol().code() + " " + p.get().toPlainString();
-                    break;
-                }
-            }
+            String offTick = recordedForReplay.firstOffTick;
             if (offTick != null) {
                 accounts = "계좌 대조를 하지 않았습니다: 녹화에 주식 호가 단위에 맞지 않는 가격이 있습니다(" + offTick
                         + "). 실시간 세션도 이 가격에서 멈춥니다(D-075 4번).\n";
             } else {
                 gate.check();
-                accounts = compareAccounts(setup, journal, liveDays, days.size(), recordedForReplay, end, code, log, gate);
+                accounts = compareAccounts(setup, journal, liveDays, days.size(), recordedForReplay.stream(
+                        "REC-BOARDS-" + plan.id() + "-" + liveDays.get(0) + ".." + end, gate), end, code, log, gate);
                 compared = true;
             }
         }
@@ -250,18 +245,19 @@ public final class LiveWeeklyCheck {
         return out;
     }
 
-    /** 읽는 동안 파일이 바뀌면(세션·게이트웨이가 아직 쓰는 중) 거부한다. */
-    private static RecordedDay openStable(Path dir) {
+    private static String fingerprintOf(Path dir) {
         try {
-            String before = fingerprint(dir);
-            RecordedDay day = RecordedDay.open(dir);
-            if (!before.equals(fingerprint(dir))) {
-                throw new IllegalStateException("아직 쓰이는 중입니다(읽는 동안 파일이 바뀜). 장이 끝나고 수신이 멈춘 뒤 다시 돌리세요: "
-                        + dir);
-            }
-            return day;
+            return fingerprint(dir);
         } catch (IOException e) {
             throw new UncheckedIOException("기록을 읽을 수 없습니다: " + dir, e);
+        }
+    }
+
+    /** 읽는 동안 파일이 바뀌면(세션·게이트웨이가 아직 쓰는 중) 거부한다. */
+    private static void ensureStable(Path dir, String before) {
+        if (!before.equals(fingerprintOf(dir))) {
+            throw new IllegalStateException("아직 쓰이는 중입니다(읽는 동안 파일이 바뀜). 장이 끝나고 수신이 멈춘 뒤 다시 돌리세요: "
+                    + dir);
         }
     }
 
@@ -287,84 +283,114 @@ public final class LiveWeeklyCheck {
         }
     }
 
-    static DayRow compareDay(LiveSetup setup, RecordingCodec codec, LocalDate date, RecordedDay jDay, RecordedDay rDay,
-            List<MarketEvent> recordedForReplay) {
+    /**
+     * 하루 대조. 기록과 녹화를 메모리에 올리지 않고 줄 단위로 읽는다(D-115): 기록을 한 번 읽어 공백·세션 구간·줄 열쇠 수를 모으고,
+     * 녹화를 읽으며 녹화 줄마다 기록과 맞추고(녹화 순서), 기록을 다시 읽으며 기록 줄마다 녹화와 맞춘다(기록 순서). 같은 열쇠가 여러
+     * 번이면 앞에서부터 짝을 지으므로 목록으로 맞추던 때와 같은 줄이 빠짐·남음으로 나온다. 열쇠는 줄 내용의 SHA-256 앞 128비트다.
+     * 읽기 전후로 파일 해시(events·meta)가 다르면 거부한다.
+     *
+     * @param jDir 같은 날 입력 기록 폴더, 없으면 null
+     * @param rDir 같은 날 게이트웨이 녹화 폴더, 없으면 null
+     * @param replay 계좌 대조용 녹화 기록. 녹화가 있으면 이 날을 더한다
+     */
+    static DayRow compareDay(LiveSetup setup, RecordingCodec codec, LocalDate date, Path jDir, Path rDir,
+            BoardsRecording replay) {
         Map<String, Long> labGaps = new LinkedHashMap<>();
         LAB_GAP_SOURCES.forEach(s -> labGaps.put(s, 0L));
         List<Gap> ownGaps = new ArrayList<>();
-        List<Map.Entry<String, Seen>> jEntries = new ArrayList<>();
         Set<List<Instant>> reconnects = new TreeSet<>((a, b) -> {
             int c = a.get(0).compareTo(b.get(0));
             return c != 0 ? c : a.get(1).compareTo(b.get(1));
         });
-        long forwarded = 0;
-        List<Span> spans = jDay == null ? List.of() : sessionSpans(jDay);
-        List<RecordingCodec.Line> jLines = jDay == null ? List.of() : jDay.lines();
-        for (RecordingCodec.Line l : jLines) {
-            MarketEvent e = l.event();
-            if (e instanceof DataGap g && labGaps.containsKey(l.sourceId())) {
-                labGaps.merge(l.sourceId(), 1L, Long::sum);
-                ownGaps.add(new Gap(l.sourceId(), g));
-                if (l.sourceId().equals(FeedClient.SOURCE_ID)) {
-                    reconnects.add(List.of(g.gapStart(), g.gapEnd()));
+        long[] forwarded = {0};
+        Map<Key, Integer> jCount = new HashMap<>();
+        String jBefore = jDir == null ? null : fingerprintOf(jDir);
+        RecordedDayStream.Summary jDay = null;
+        List<Span> spans = List.of();
+        if (jDir != null) {
+            SpanBuilder spanBuilder = new SpanBuilder(RecordedDayStream.readMeta(jDir));
+            jDay = RecordedDayStream.read(jDir, l -> {
+                spanBuilder.add(l);
+                MarketEvent e = l.event();
+                if (e instanceof DataGap g && labGaps.containsKey(l.sourceId())) {
+                    labGaps.merge(l.sourceId(), 1L, Long::sum);
+                    ownGaps.add(new Gap(l.sourceId(), g));
+                    if (l.sourceId().equals(FeedClient.SOURCE_ID)) {
+                        reconnects.add(List.of(g.gapStart(), g.gapEnd()));
+                    }
+                    return;
                 }
-                continue;
-            }
-            if (e instanceof DataGap) {
-                forwarded++;
-            }
-            jEntries.add(Map.entry(key(codec, l), new Seen(e.symbol(), e.receivedAt())));
+                if (e instanceof DataGap) {
+                    forwarded[0]++;
+                }
+                jCount.merge(key(codec, l), 1, Integer::sum);
+            });
+            spans = spanBuilder.spans(jDay.meta());
         }
+        long jLines = jDay == null ? 0 : jDay.eventCount();
         boolean jComplete = jDay != null && jDay.meta().map(RecordingMeta::complete).orElse(false);
-        if (rDay == null) {
-            return new DayRow(date, jDay != null, jLines.size(), 0, 0, Map.of(), 0, 0, labGaps, forwarded,
+        if (rDir == null) {
+            if (jDir != null) {
+                ensureStable(jDir, jBefore);
+            }
+            return new DayRow(date, jDay != null, jLines, 0, 0, Map.of(), 0, 0, labGaps, forwarded[0],
                     reconnects.size(), jComplete, false, false);
         }
         List<Gap> recorderGaps = new ArrayList<>();
-        List<Map.Entry<String, Seen>> rEntries = new ArrayList<>();
-        for (RecordingCodec.Line l : rDay.lines()) {
-            MarketEvent e = l.event();
-            if (!setup.onBoards(e) || !setup.inPlan(e)) {
-                continue;
-            }
-            if (e instanceof DataGap g && l.sourceId().equals(RECORDER_SOURCE)) {
-                recorderGaps.add(new Gap(l.sourceId(), g));
-            } else {
-                rEntries.add(Map.entry(key(codec, l), new Seen(e.symbol(), e.receivedAt())));
-            }
-            recordedForReplay.add(EventSequences.withSequence(e, recordedForReplay.size() + 1L));
-        }
-        Map<String, Integer> jCount = counts(jEntries);
-        Map<String, Integer> rCount = counts(rEntries);
-        long matched = 0;
+        Map<Key, Integer> rCount = new HashMap<>();
+        long[] rEntries = {0};
+        long[] matched = {0};
         Map<String, Long> missing = new LinkedHashMap<>();
         missing.put(OUTSIDE_SESSION, 0L);
         LAB_GAP_SOURCES.forEach(s -> missing.put(s, 0L));
         missing.put(UNEXPLAINED, 0L);
-        for (Map.Entry<String, Seen> r : rEntries) {
-            if (take(jCount, r.getKey())) {
-                matched++;
-                continue;
+        List<Span> daySpans = spans;
+        String rBefore = fingerprintOf(rDir);
+        BoardsRecording.Day replayDay = replay.startDay(rDir, rBefore);
+        RecordedDayStream.Summary rDay = RecordedDayStream.read(rDir, l -> {
+            MarketEvent e = l.event();
+            if (!setup.onBoards(e) || !setup.inPlan(e)) {
+                return;
             }
-            missing.merge(missingCause(r.getValue(), spans, ownGaps), 1L, Long::sum);
-        }
-        long extraInGap = 0;
-        long extraUnexplained = 0;
-        for (Map.Entry<String, Seen> j : jEntries) {
-            if (take(rCount, j.getKey())) {
-                continue;
+            replayDay.add(e);
+            if (e instanceof DataGap g && l.sourceId().equals(RECORDER_SOURCE)) {
+                recorderGaps.add(new Gap(l.sourceId(), g));
+                return;
             }
-            Seen s = j.getValue();
-            boolean inGap = recorderGaps.stream().anyMatch(g -> g.covers(s.symbol(), s.receivedAt(),
-                    g.gap().reason() == DataGap.GapReason.RECORDER_RESTART));
-            if (inGap) {
-                extraInGap++;
+            rEntries[0]++;
+            Key k = key(codec, l);
+            rCount.merge(k, 1, Integer::sum);
+            if (take(jCount, k)) {
+                matched[0]++;
             } else {
-                extraUnexplained++;
+                missing.merge(missingCause(new Seen(e.symbol(), e.receivedAt()), daySpans, ownGaps), 1L, Long::sum);
             }
+        });
+        ensureStable(rDir, rBefore);
+        long[] extraInGap = {0};
+        long[] extraUnexplained = {0};
+        if (jDir != null) {
+            RecordedDayStream.read(jDir, l -> {
+                if (l.event() instanceof DataGap && labGaps.containsKey(l.sourceId())) {
+                    return;
+                }
+                if (take(rCount, key(codec, l))) {
+                    return;
+                }
+                MarketEvent e = l.event();
+                boolean inGap = recorderGaps.stream().anyMatch(g -> g.covers(e.symbol(), e.receivedAt(),
+                        g.gap().reason() == DataGap.GapReason.RECORDER_RESTART));
+                if (inGap) {
+                    extraInGap[0]++;
+                } else {
+                    extraUnexplained[0]++;
+                }
+            });
+            ensureStable(jDir, jBefore);
         }
-        return new DayRow(date, jDay != null, jLines.size(), rEntries.size(), matched, missing, extraInGap, extraUnexplained,
-                labGaps, forwarded, reconnects.size(), jComplete, true, rDay.meta().map(RecordingMeta::complete).orElse(false));
+        return new DayRow(date, jDay != null, jLines, rEntries[0], matched[0], missing, extraInGap[0], extraUnexplained[0],
+                labGaps, forwarded[0], reconnects.size(), jComplete, true,
+                rDay.meta().map(RecordingMeta::complete).orElse(false));
     }
 
     /**
@@ -390,77 +416,85 @@ public final class LiveWeeklyCheck {
      * 세션이 그날 기록을 열고 있던 구간들: 기록 메타의 구간(이 프로세스가 그날 파일을 연 시각 ~ 닫은 시각). 시작은 그 구간 첫 줄
      * 수신 시각과 비교해 이른 쪽(메타 시각은 실험실 시계로 첫 줄을 받은 뒤에 찍힘)으로 잡는다. 닫힌 시각이 없는 구간(비정상 종료,
      * 아직 쓰는 중)은 그 구간 마지막 줄 수신 시각에서 끝낸다. 메타가 없으면 그날 첫 줄 ~ 마지막 줄 하나로 본다.
+     * 구간 k의 줄은 순번이 [구간 k 첫 순번, 구간 k+1 첫 순번)인 줄이다. 줄을 하나씩 받아 구간마다 수신 시각 최소·최대를 센다.
      */
-    static List<Span> sessionSpans(RecordedDay day) {
-        List<RecordingCodec.Line> lines = day.lines();
-        List<RecordingMeta.Segment> segs = day.meta().map(RecordingMeta::segments).orElse(List.of());
-        List<Span> out = new ArrayList<>();
-        if (segs.isEmpty()) {
-            if (!lines.isEmpty()) {
-                out.add(new Span(minRx(lines, 0, lines.size()), maxRx(lines, 0, lines.size())));
+    static final class SpanBuilder {
+        private final List<RecordingMeta.Segment> segs;
+        private final Instant[] min;
+        private final Instant[] max;
+        private Instant dayMin;
+        private Instant dayMax;
+
+        SpanBuilder(Optional<RecordingMeta> meta) {
+            this.segs = meta.map(RecordingMeta::segments).orElse(List.of());
+            this.min = new Instant[segs.size()];
+            this.max = new Instant[segs.size()];
+        }
+
+        void add(RecordingCodec.Line l) {
+            Instant t = l.event().receivedAt();
+            dayMin = dayMin == null || t.isBefore(dayMin) ? t : dayMin;
+            dayMax = dayMax == null || t.isAfter(dayMax) ? t : dayMax;
+            for (int k = 0; k < segs.size(); k++) {
+                long nextFirst = k + 1 < segs.size() ? segs.get(k + 1).firstSeq() : Long.MAX_VALUE;
+                if (l.seq() >= segs.get(k).firstSeq() && l.seq() < nextFirst) {
+                    min[k] = min[k] == null || t.isBefore(min[k]) ? t : min[k];
+                    max[k] = max[k] == null || t.isAfter(max[k]) ? t : max[k];
+                }
+            }
+        }
+
+        /** @param meta 다 읽은 뒤의 메타(구간을 만들 때 쓴 것과 같아야 한다) */
+        List<Span> spans(Optional<RecordingMeta> meta) {
+            if (!meta.map(RecordingMeta::segments).orElse(List.of()).equals(segs)) {
+                throw new IllegalStateException("아직 쓰이는 중입니다(읽는 동안 meta.json이 바뀜)");
+            }
+            List<Span> out = new ArrayList<>();
+            if (segs.isEmpty()) {
+                if (dayMin != null) {
+                    out.add(new Span(dayMin, dayMax));
+                }
+                return out;
+            }
+            for (int k = 0; k < segs.size(); k++) {
+                RecordingMeta.Segment seg = segs.get(k);
+                Instant start = Instant.parse(seg.startedAt());
+                if (min[k] != null && min[k].isBefore(start)) {
+                    start = min[k];
+                }
+                Instant end;
+                if (!seg.endedAt().isEmpty()) {
+                    end = Instant.parse(seg.endedAt());
+                } else if (max[k] != null) {
+                    end = max[k];
+                } else {
+                    end = start;
+                }
+                out.add(new Span(start, end.isBefore(start) ? start : end));
             }
             return out;
         }
-        for (int k = 0; k < segs.size(); k++) {
-            RecordingMeta.Segment seg = segs.get(k);
-            long nextFirst = k + 1 < segs.size() ? segs.get(k + 1).firstSeq() : Long.MAX_VALUE;
-            int from = 0;
-            while (from < lines.size() && lines.get(from).seq() < seg.firstSeq()) {
-                from++;
-            }
-            int to = from;
-            while (to < lines.size() && lines.get(to).seq() < nextFirst) {
-                to++;
-            }
-            Instant start = Instant.parse(seg.startedAt());
-            if (from < to && minRx(lines, from, to).isBefore(start)) {
-                start = minRx(lines, from, to);
-            }
-            Instant end;
-            if (!seg.endedAt().isEmpty()) {
-                end = Instant.parse(seg.endedAt());
-            } else if (from < to) {
-                end = maxRx(lines, from, to);
-            } else {
-                end = start;
-            }
-            out.add(new Span(start, end.isBefore(start) ? start : end));
-        }
-        return out;
     }
 
-    private static Instant minRx(List<RecordingCodec.Line> lines, int from, int to) {
-        Instant m = lines.get(from).event().receivedAt();
-        for (int i = from + 1; i < to; i++) {
-            Instant t = lines.get(i).event().receivedAt();
-            m = t.isBefore(m) ? t : m;
-        }
-        return m;
-    }
-
-    private static Instant maxRx(List<RecordingCodec.Line> lines, int from, int to) {
-        Instant m = lines.get(from).event().receivedAt();
-        for (int i = from + 1; i < to; i++) {
-            Instant t = lines.get(i).event().receivedAt();
-            m = t.isAfter(m) ? t : m;
-        }
-        return m;
-    }
+    /** 줄 열쇠의 SHA-256 앞 128비트. 같은 날 줄 수백만 개를 문자열로 들지 않으려고 줄인다(겹칠 확률은 무시할 만큼 작다 `[추론]`). */
+    record Key(long hi, long lo) {}
 
     /** 줄을 맞추는 열쇠: 원래 소스, 소스 순번, 내용(녹화 순번 빼고). 전달은 녹화와 같은 줄 형식이라 같은 이벤트면 같다. */
-    private static String key(RecordingCodec codec, RecordingCodec.Line l) {
-        return codec.encode(0, l.sourceId(), EventSequences.withSequence(l.event(), l.sourceSequence()));
+    static Key key(RecordingCodec codec, RecordingCodec.Line l) {
+        String text = codec.encode(0, l.sourceId(), EventSequences.withSequence(l.event(), l.sourceSequence()));
+        byte[] h = SHA256.get().digest(text.getBytes(StandardCharsets.UTF_8));
+        return new Key(java.nio.ByteBuffer.wrap(h, 0, 8).getLong(), java.nio.ByteBuffer.wrap(h, 8, 8).getLong());
     }
 
-    private static Map<String, Integer> counts(List<Map.Entry<String, Seen>> entries) {
-        Map<String, Integer> out = new HashMap<>();
-        for (Map.Entry<String, Seen> e : entries) {
-            out.merge(e.getKey(), 1, Integer::sum);
+    private static final ThreadLocal<java.security.MessageDigest> SHA256 = ThreadLocal.withInitial(() -> {
+        try {
+            return java.security.MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
-        return out;
-    }
+    });
 
-    private static boolean take(Map<String, Integer> counts, String key) {
+    private static boolean take(Map<Key, Integer> counts, Key key) {
         Integer n = counts.get(key);
         if (n == null || n == 0) {
             return false;
@@ -469,15 +503,108 @@ public final class LiveWeeklyCheck {
         return true;
     }
 
+    /**
+     * 계좌 대조용 녹화: 녹화가 있는 날마다 boards·운용 기간 줄. 대조 때는 날짜·파일 해시·줄 수와 첫 호가 단위 위반만 남기고,
+     * 계좌 대조 때 {@link #stream}이 같은 파일인지 확인하며 다시 읽는다. 이벤트 순번은 날짜 → 녹화 순번 순서의 위치(1부터)다.
+     */
+    static final class BoardsRecording {
+        private final LiveSetup setup;
+        private final List<Day> days = new ArrayList<>();
+        private long count;
+        String firstOffTick;
+
+        BoardsRecording(LiveSetup setup) {
+            this.setup = setup;
+        }
+
+        Day startDay(Path dir, String fingerprint) {
+            Day d = new Day(dir, fingerprint);
+            days.add(d);
+            return d;
+        }
+
+        long count() {
+            return count;
+        }
+
+        final class Day {
+            final Path dir;
+            final String fingerprint;
+            long events;
+
+            Day(Path dir, String fingerprint) {
+                this.dir = dir;
+                this.fingerprint = fingerprint;
+            }
+
+            void add(MarketEvent e) {
+                events++;
+                count++;
+                if (firstOffTick == null) {
+                    RecordingExperiment.offStockTick(setup.rules(), e)
+                            .ifPresent(p -> firstOffTick = e.symbol().code() + " " + p.toPlainString());
+                }
+            }
+        }
+
+        MarketEventStream stream(String version, RunGate gate) {
+            Market market = setup.plan().market();
+            List<Day> fixed = List.copyOf(days);
+            long total = count;
+            return new MarketEventStream() {
+                @Override
+                public String version() {
+                    return version;
+                }
+
+                @Override
+                public Market market() {
+                    return market;
+                }
+
+                @Override
+                public long eventCount() {
+                    return total;
+                }
+
+                @Override
+                public void forEach(Consumer<MarketEvent> sink) {
+                    long[] seq = {0};
+                    for (Day d : fixed) {
+                        gate.check();
+                        if (!d.fingerprint.equals(fingerprintOf(d.dir))) {
+                            throw new IllegalStateException("녹화가 대조한 뒤 바뀌었습니다: " + d.dir);
+                        }
+                        long[] n = {0};
+                        RecordedDayStream.read(d.dir, l -> {
+                            MarketEvent e = l.event();
+                            if (!setup.onBoards(e) || !setup.inPlan(e)) {
+                                return;
+                            }
+                            if (e.symbol().market() != market) {
+                                throw new IllegalArgumentException("다른 시장의 이벤트가 섞여 있습니다: " + e.symbol());
+                            }
+                            n[0]++;
+                            sink.accept(EventSequences.withSequence(e, ++seq[0]));
+                        });
+                        ensureStable(d.dir, d.fingerprint);
+                        if (n[0] != d.events) {
+                            throw new IllegalStateException("녹화가 대조한 뒤 바뀌었습니다: " + d.dir);
+                        }
+                    }
+                }
+            };
+        }
+    }
+
     private static String compareAccounts(LiveSetup setup, RecordingLayout journal, List<LocalDate> days, int checkedDays,
-            List<MarketEvent> recorded, LocalDate end, CodeVersion code, Consumer<String> log, RunGate gate) {
+            MarketEventStream rec, LocalDate end, CodeVersion code, Consumer<String> log, RunGate gate) {
         List<Path> dirs = days.stream().map(d -> journal.dayDir(setup.plan().market(), d)).toList();
-        RecordedMarketDataSet live = RecordedMarketDataSet.fromDirs(setup.plan().market(), dirs);
-        MarketDataSet rec = new InMemoryMarketDataSet("REC-BOARDS-" + setup.plan().id() + "-" + days.get(0) + ".." + end,
-                setup.plan().market(), recorded);
-        log.accept("계좌 대조: 입력 기록 리플레이(이벤트 " + live.events().size() + ")");
+        // 날마다 디스크에서 다시 읽는다(D-115). 목록으로 모으던 때(RecordedMarketDataSet)와 같은 이벤트·같은 버전이다
+        StreamedRecordingDataSet live = StreamedRecordingDataSet.open(setup.plan().market(), dirs, gate::check, e -> { });
+        log.accept("계좌 대조: 입력 기록 리플레이(이벤트 " + live.eventCount() + ")");
         SimulationReport a = replay(setup, live, end, code, gate);
-        log.accept("계좌 대조: 같은 날 녹화 리플레이(이벤트 " + rec.events().size() + ")");
+        log.accept("계좌 대조: 같은 날 녹화 리플레이(이벤트 " + rec.eventCount() + ")");
         SimulationReport b = replay(setup, rec, end, code, gate);
         int diff = LiveReplayCheck.firstDifference(LiveReplayCheck.withoutCodeLine(ReportWriter.render(a)),
                 LiveReplayCheck.withoutCodeLine(ReportWriter.render(b)));
@@ -485,7 +612,7 @@ public final class LiveWeeklyCheck {
         sb.append("- 기간: ").append(setup.plan().from()).append(" ~ ").append(end).append(" (점검일 ").append(checkedDays)
                 .append("일 누계, 그중 입력 기록 있는 날 ").append(days.size())
                 .append("일. 기록 없는 날의 녹화도 녹화 리플레이에 든다)\n");
-        sb.append("- 이벤트: 입력 기록 ").append(live.events().size()).append(", 녹화(boards) ").append(rec.events().size())
+        sb.append("- 이벤트: 입력 기록 ").append(live.eventCount()).append(", 녹화(boards) ").append(rec.eventCount())
                 .append('\n');
         sb.append("- 상세 보고서: ").append(diff < 0 ? "같음(체결 원장까지 일치)"
                 : "다름(code 줄 뺀 " + (diff + 1) + "번째 줄부터)").append("\n\n");
@@ -509,7 +636,7 @@ public final class LiveWeeklyCheck {
         return sb.toString();
     }
 
-    private static SimulationReport replay(LiveSetup setup, MarketDataSet data, LocalDate end, CodeVersion code,
+    private static SimulationReport replay(LiveSetup setup, MarketEventStream data, LocalDate end, CodeVersion code,
             RunGate gate) {
         return new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(), setup.risk(),
                 setup.execution(), code, 1, setup.benchmark(), null, gate)

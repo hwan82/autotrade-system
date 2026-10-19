@@ -4,6 +4,7 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 실험 입력 시세: 불변 스냅샷 하나(D-019, SIM-10). 실행기는 이 목록을 한 번 읽어 모든 Run에 같은 순서로 준다.
@@ -16,20 +17,33 @@ import java.util.List;
  *   <li>2단계 녹화(ADR-003 시세)는 {@code RecordedMarketDataSet}이 이 계약에 맞춘다(ADR-004 4장, D-068).</li>
  * </ul>
  */
-public interface MarketDataSet {
+public interface MarketDataSet extends MarketEventStream {
 
     /** 데이터 스냅샷 ID. {@code ExperimentSpec#dataSnapshotVersion}과 같아야 한다. */
+    @Override
     String version();
 
+    @Override
     Market market();
 
     List<MarketEvent> events();
+
+    @Override
+    default long eventCount() {
+        return events().size();
+    }
+
+    @Override
+    default void forEach(Consumer<MarketEvent> sink) {
+        events().forEach(sink);
+    }
 
     /**
      * 이벤트 시각이 실제 거래소 시각인가(D-069). 그렇지 않은 데이터(일봉 경로처럼 칸 시각을 합성한 것)는 가상 거래소가 매매
      * 단계(단일가·장 밖)를 보지 않고 모든 이벤트를 접속 매매로 체결한다. 합성 시각은 그날 실제 개장 시각을 따르지 않고(10:00 개장일에도
      * 09:00 칸), 캘린더 수록 범위 밖 과거도 있기 때문이다. 기본 true.
      */
+    @Override
     default boolean exchangeTimed() {
         return true;
     }

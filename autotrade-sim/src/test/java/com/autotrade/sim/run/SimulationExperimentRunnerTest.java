@@ -24,6 +24,7 @@ import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.recording.RecordedMarketDataSet;
+import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.testing.FixtureEvents;
 import com.autotrade.sim.testing.FixtureRecordings;
 import com.autotrade.sim.testing.FixtureStrategies;
@@ -243,13 +244,143 @@ class SimulationExperimentRunnerTest {
         }
     }
 
+    /**
+     * D-115: 목록이 아닌 입력({@link MarketEventStream})은 모든 Run을 한 번 읽기에 함께 진행한다. Run별 결과와 상세 보고서가
+     * 목록 입력과 바이트 단위로 같아야 한다(골든, 계좌 실패 격리, 기간 자르기, 선정 없음).
+     */
+    @Test
+    void 목록이_아닌_입력도_같은_골든과_일치한다() throws IOException {
+        Streamed streamed = new Streamed(DATA);
+        String actual = ReportWriter.render(runner(streamed, 2).runDetailed(spec(List.of(MKT_HOLD, LIMIT_MAKER, PROBE))));
+        assertThat(actual).isEqualTo(read(GOLDEN));
+        // 두 번 읽는다(순서·기간 확인, 그다음 모든 Run 함께 진행). 이벤트 수와 상관없이 목록을 만들지 않는다
+        assertThat(streamed.reads).isEqualTo(2);
+    }
+
+    @Test
+    void 녹화를_날마다_다시_읽는_입력도_같은_골든과_일치한다(@TempDir Path root) throws IOException {
+        FixtureRecordings.record(root, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        RecordingLayout layout = new RecordingLayout(root);
+        List<Path> dirs = List.of(layout.dayDir(Market.KRX, FROM), layout.dayDir(Market.KRX, TO));
+        int[] dayChecks = {0};
+        StreamedRecordingDataSet streamed = StreamedRecordingDataSet.open(Market.KRX, dirs, () -> dayChecks[0]++, e -> { });
+        assertThat(streamed.version()).isEqualTo(RecordedMarketDataSet.fromDirs(Market.KRX, dirs).version());
+
+        String actual = ReportWriter.render(runner(streamed, 2).runDetailed(spec(streamed, List.of(MKT_HOLD, LIMIT_MAKER, PROBE))));
+        assertThat(actual).isEqualTo(read(GOLDEN));
+        assertThat(dayChecks[0]).as("열 때 한 번, 실행기가 두 번 읽을 때 날마다 정지 확인").isEqualTo(6);
+    }
+
+    @Test
+    void 목록이_아닌_입력에서도_한_계좌의_실패는_그_계좌만_멈춘다() {
+        ExperimentSpec spec = spec(List.of(MKT_HOLD, BOOM, LIMIT_MAKER, profile("nope", "x", "1")));
+        SimulationReport list = runner(3).runDetailed(spec);
+        SimulationReport streamed = runner(new Streamed(DATA), 1).runDetailed(spec);
+
+        assertThat(streamed.result().runs()).extracting(rr -> rr.status())
+                .containsExactly(RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.COMPLETED, RunStatus.FAILED);
+        assertThat(ReportWriter.render(streamed)).isEqualTo(ReportWriter.render(list));
+    }
+
+    @Test
+    void 목록이_아닌_입력도_실험_기간_밖_이벤트를_같게_뺀다() {
+        for (LocalDate[] range : new LocalDate[][] {{FROM, FROM}, {TO, TO}, {TO.plusDays(1), TO.plusDays(3)}}) {
+            ExperimentSpec spec = ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD"), range[0], range[1], 7,
+                    Money.of(10_000_000, Money.KRW), COST.id(), DATA.version(), ClockMode.REPLAY,
+                    List.of(MKT_HOLD, LIMIT_MAKER, PROBE));
+            assertThat(ReportWriter.render(runner(new Streamed(DATA), 1).runDetailed(spec)))
+                    .as(range[0] + " ~ " + range[1]).isEqualTo(ReportWriter.render(runner(1).runDetailed(spec)));
+        }
+    }
+
+    @Test
+    void 두_번째_읽기가_첫_번째와_다르면_결과_없이_실패한다() {
+        Streamed shrinking = new Streamed(DATA) {
+            @Override
+            public void forEach(java.util.function.Consumer<MarketEvent> sink) {
+                reads++;
+                List<MarketEvent> events = reads == 1 ? EVENTS : EVENTS.subList(0, EVENTS.size() - 1);
+                events.forEach(sink);
+            }
+        };
+        assertThatThrownBy(() -> runner(shrinking, 1).runDetailed(spec(List.of(MKT_HOLD))))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("두 번째 읽기");
+        Streamed unordered = new Streamed(DATA) {
+            @Override
+            public void forEach(java.util.function.Consumer<MarketEvent> sink) {
+                sink.accept(EVENTS.get(1));
+                sink.accept(EVENTS.get(0));
+            }
+        };
+        assertThatThrownBy(() -> runner(unordered, 1).runDetailed(spec(List.of(MKT_HOLD))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("오름차순");
+    }
+
+    @Test
+    void 목록이_아닌_입력도_정지_확인에서_멈추면_결과_없이_끝난다() {
+        // 첫 번째 읽기의 거래일 확인(2일), 선정 전 확인, Run 시작 전(1) 뒤 Run 안 거래일 바뀜에서 멈춘다
+        for (int stopAt = 1; stopAt <= 6; stopAt++) {
+            int limit = stopAt;
+            int[] asked = {0};
+            RunGate gate = () -> ++asked[0] >= limit ? java.util.Optional.of("정지 요청") : java.util.Optional.empty();
+            SimulationExperimentRunner r = new SimulationExperimentRunner(new Streamed(DATA), TestKrxRules.INSTANCE, COST,
+                    new FixtureStrategies(), RiskChain.builder(BlacklistSnapshot.EMPTY).build(), ExecutionSettings.defaults(),
+                    new CodeVersion("test", false), 1, SAMSUNG, null, gate);
+            if (limit <= 5) {
+                assertThatThrownBy(() -> r.runDetailed(spec(List.of(MKT_HOLD))))
+                        .as("정지 확인 " + limit + "번째").isInstanceOf(ExperimentStoppedException.class);
+            } else {
+                assertThat(r.runDetailed(spec(List.of(MKT_HOLD))).result().runs()).hasSize(1);
+            }
+        }
+    }
+
+    @Test
+    void 목록이_아닌_입력은_예열을_받지_않는다() {
+        SimulationExperimentRunner r = new SimulationExperimentRunner(new Streamed(DATA), TestKrxRules.INSTANCE, COST,
+                new FixtureStrategies(), RiskChain.builder(BlacklistSnapshot.EMPTY).build(), ExecutionSettings.defaults(),
+                new CodeVersion("test", false), 1, SAMSUNG, null, RunGate.NONE, 1);
+        assertThatThrownBy(() -> r.runDetailed(spec(List.of(MKT_HOLD)))).hasMessageContaining("예열");
+    }
+
+    /** 목록 입력을 감싸 {@link MarketDataSet}이 아닌 입력으로 만든다(실행기가 목록 경로를 못 타게). 읽은 횟수를 센다. */
+    private static class Streamed implements MarketEventStream {
+        private final MarketDataSet inner;
+        int reads;
+
+        Streamed(MarketDataSet inner) {
+            this.inner = inner;
+        }
+
+        @Override
+        public String version() {
+            return inner.version();
+        }
+
+        @Override
+        public Market market() {
+            return inner.market();
+        }
+
+        @Override
+        public long eventCount() {
+            return inner.events().size();
+        }
+
+        @Override
+        public void forEach(java.util.function.Consumer<MarketEvent> sink) {
+            reads++;
+            inner.events().forEach(sink);
+        }
+    }
+
     // ---- 도우미 ----
 
     private static SimulationExperimentRunner runner(int parallelism) {
         return runner(DATA, parallelism);
     }
 
-    private static SimulationExperimentRunner runner(MarketDataSet data, int parallelism) {
+    private static SimulationExperimentRunner runner(MarketEventStream data, int parallelism) {
         return new SimulationExperimentRunner(data, TestKrxRules.INSTANCE, COST, new FixtureStrategies(),
                 RiskChain.builder(BlacklistSnapshot.of(List.of(new BlacklistEntry(HYNIX, BlacklistType.MANUAL, "테스트"))))
                         .build(),
@@ -261,7 +392,7 @@ class SimulationExperimentRunnerTest {
         return spec(DATA, profiles);
     }
 
-    private static ExperimentSpec spec(MarketDataSet data, List<StrategyProfile> profiles) {
+    private static ExperimentSpec spec(MarketEventStream data, List<StrategyProfile> profiles) {
         return ExperimentSpec.ofProfiles(new ExperimentId("EXP-20261008-GOLD"), FROM, TO, 7, Money.of(10_000_000, Money.KRW),
                 COST.id(), data.version(), ClockMode.REPLAY, profiles);
     }

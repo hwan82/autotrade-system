@@ -1,11 +1,11 @@
 package com.autotrade.sim.live;
 
-import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.recording.RecordedMarketDataSet;
 import com.autotrade.sim.recording.RecordingExperiment;
+import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ExperimentStoppedException;
 import com.autotrade.sim.run.ReportWriter;
@@ -33,7 +33,8 @@ import java.util.function.Consumer;
  * 상세 보고서({@value LiveSession#LIVE_DETAIL_FILE})와 바이트로 같은지 본다. 같은 입력·같은 코드라 같아야 하고, 다르면 실시간
  * 경로의 결함이다(실시간 대 리플레이 차이 0이 이 단계의 합격선). 결과는 녹화 실험(D-069)과 같은 세 파일로 쓴다.
  *
- * <p>입력 기록 전체를 메모리에 올려 다시 돌리므로 무겁다. 그래서 실험실이 아니라 실험 실행 명령
+ * <p>입력 기록을 날마다 디스크에서 다시 읽어 돌린다(D-115: 메모리는 기간 길이와 상관없고, 대신 기록을 세 번 푼다). 그래도 무거워서
+ * 실험실이 아니라 실험 실행 명령
  * ({@code runLiveReplayCheck}, 장 시간 보호·정지 요청 확인 D-063)으로만 돌린다.
  */
 public final class LiveReplayCheck {
@@ -85,13 +86,15 @@ public final class LiveReplayCheck {
         if (days.isEmpty()) {
             throw new IllegalArgumentException("입력 기록이 없습니다: " + sessionDir.resolve(LiveSession.JOURNAL_DIR));
         }
-        RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(plan.market(), days);
-        for (MarketEvent e : data.events()) {
+        // 날마다 디스크에서 다시 읽는다(D-115). 기간 전체를 메모리에 올리지 않는다. 호가 단위 검사와 종목 모으기는 첫 읽기에서 한다
+        TreeSet<Symbol> symbols = new TreeSet<>();
+        StreamedRecordingDataSet data = StreamedRecordingDataSet.open(plan.market(), days, gate::check, e -> {
             RecordingExperiment.offStockTick(setup.rules(), e).ifPresent(price -> {
                 throw new IllegalArgumentException("입력 기록에 주식 호가 단위에 맞지 않는 가격이 있습니다: " + e.symbol().code() + " "
                         + price.toPlainString() + " (sequence " + e.sequence() + ")");
             });
-        }
+            symbols.add(e.symbol());
+        });
         for (RecordedMarketDataSet.DayInfo d : data.days()) {
             log.accept("기록일 " + d.date() + ": 줄 " + d.recordedEvents() + ", 정상 종료 " + d.complete() + ", 구간 "
                     + d.segments());
@@ -108,10 +111,6 @@ public final class LiveReplayCheck {
                         + codeLine(liveDetail) + ")"
                 : "다름(code 줄 뺀 " + (diff + 1) + "번째 줄부터. 실시간 " + codeLine(liveDetail) + ")";
         log.accept("실시간 대 리플레이: " + determinism);
-        TreeSet<Symbol> symbols = new TreeSet<>();
-        for (MarketEvent e : data.events()) {
-            symbols.add(e.symbol());
-        }
         Map<String, String> files = new LinkedHashMap<>();
         files.put("inputs.yaml", "# 실시간 모의(D-076). 입력은 실험실 세션의 입력 기록(설정 폴더, 저장소 밖)\nclock-mode: REALTIME\n"
                 + RecordingExperiment.inputs(setup.asRecordingPlan(), data, symbols, setup.cost(), setup.execution(),
