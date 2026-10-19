@@ -1,0 +1,35 @@
+# 실시간 모의 등록 파일(사전 등록, D-076·D-113). 운용 전에 main에 커밋하고 운용 중 고치지 않는다. 바꾸려면 새 실험 ID를 쓴다.
+# 6단계 시험 운용(본 운용 LIVE01 전 4거래일). 성과 판정에 쓰지 않는다. 사용자 PC(Windows)에서 소켓·되살리기·주간 점검·끝내기·
+# 리플레이 확인이 끝까지 도는지, 하루 디스크·주간 점검 메모리가 얼마인지 잰다. 계획: docs/strategy/stage-6-plan.md 3장.
+# 프로필·boards·블랙리스트는 LIVE01과 같다(같은 조건에서 미리 잰다).
+id: "EXP-20261020-LIVE00"
+question: "LIVE01과 같은 프로필·종목으로 사용자 PC에서 실시간 모의 세션이 시작·재기동·주간 점검·끝내기·리플레이 확인까지 실패 없이 도는가, 하루 입력 기록 크기와 주간 점검 메모리는 얼마인가(시험 운용, 성과 비교에 쓰지 않는다)"
+input: "live"
+market: "KRX"
+from: "2026-10-20"
+to: "2026-10-23"
+seed: "20261020"
+seed-capital: "10000000"
+benchmark: "005930"
+profiles:
+  - "kr-bh-baseline@2"
+  - "kr-random-control@1"
+  - "kr-orb-30@1"
+  - "kr-vwap-reclaim@1"
+  - "kr-pdh-breakout@1"
+  - "kr-volume-surge@1"
+  - "kr-book-imbalance@1"
+  - "kr-pullback@1"
+boards:
+  - "005930 KOSPI"
+  - "000660 KOSPI"
+  - "035420 KOSPI"
+  - "005380 KOSPI"
+  - "373220 KOSPI"
+  - "068270 KOSPI"
+  - "105560 KOSPI"
+  - "035720 KOSPI"
+  - "247540 KOSDAQ"
+  - "028300 KOSDAQ"
+blacklist:
+  - "035720"

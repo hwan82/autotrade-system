@@ -2,6 +2,7 @@
 
 - 근거: [D-076](../decisions/D-076-live-feed-and-session.md), [ADR-010](../adr/ADR-010-live-feed-and-session.md)
 - 대상: 장중에 게이트웨이 실시간 시세로 실험실의 모의 계좌 여러 개를 돌리고, 끝난 뒤 리플레이와 같은지 확인한다. 실전 주문은 없다(게이트웨이는 주문 API를 부르지 않음, MD-01).
+- 실제 운용 등록과 날짜별 명령: 시험 운용 `EXP-20261020-LIVE00`, 본 운용 `EXP-20261026-LIVE01`([D-113](../decisions/D-113-stage-6-live-operation.md)). 장 시작 전 복사·붙여넣기 순서는 [6단계 시작 점검표](stage-6-start-checklist.md), 판정 기준은 [6단계 계획](../strategy/stage-6-plan.md) 4장. 아래 예시의 `EXP-20261015-LIVE01`은 형식 설명용이다.
 - 실험실 화면의 **실시간 모의** 메뉴(http://127.0.0.1:8480/#/live)에서 등록 파일을 골라 시작·멈춤·끝내기를 하고, 계좌별 상태와 최근 공백을 본다(3초마다 갱신). 아래 PowerShell API 호출은 화면 없이 할 때 쓴다.
 
 ## 1. 운용 전(장 시작 전날까지)
