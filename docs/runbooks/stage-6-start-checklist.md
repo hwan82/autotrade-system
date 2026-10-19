@@ -117,8 +117,10 @@ $bad = @($st.session.failures | Where-Object { $_ }); "실패 계좌: $($bad.Cou
 ```powershell
 $gc = Join-Path (Get-Location) "build\weekly-gc"; New-Item -ItemType Directory -Force $gc > $null   # 저장소 경로는 공백·한글이 없어야 한다(0장 가정)
 $env:JAVA_TOOL_OPTIONS = "-Xlog:gc:file=$gc\weekly-gc-%p.log"
+$t0 = Get-Date
 .\gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=$id
 "종료 코드: $LASTEXITCODE"
+"걸린 시간: {0:N0}분" -f ((Get-Date) - $t0).TotalMinutes
 Remove-Item Env:JAVA_TOOL_OPTIONS
 $max = 0; Get-ChildItem "$gc\weekly-gc-*.log" | Get-Content | ForEach-Object { if ($_ -match '(\d+)M->\d+M\(\d+M\)') { $max = [Math]::Max($max, [int]$matches[1]) } }
 "주간 점검 최대 힙 사용: ${max}MB"; Remove-Item "$gc\weekly-gc-*.log"
@@ -126,8 +128,9 @@ Get-ChildItem "experiments\$id\weekly"
 ```
 
 - 종료 코드 0: 설명되지 않는 차이가 없다. 2: "설명 없음"이 있다(계획 4.1 I4, 바로 알린다). 4: 장 시간 보호·정지 요청(장 마감 뒤에 다시).
-- `OutOfMemoryError`로 멈추면 힙이 모자란 것이다(계획 5장 T1, 알려진 문제). PC 메모리가 넉넉하면 `-Pheap=8g`를 붙여 한 번 더 돌리고, 안 되면 그대로 알린다. 입력 기록과 녹화는 디스크에 남으므로 고친 뒤 몰아서 돌릴 수 있다.
-- 결과 `experiments\<ID>\weekly\<날짜>.md`와 위 두 줄(종료 코드, 최대 힙)을 이 프로젝트 스레드에 올린다. Claude가 커밋하고 요약한다. 최대 힙 줄에는 Gradle 자체 메모리도 섞여 있어 조금 크게 나온다.
+- 걸리는 시간: 매주 운용 시작일부터 다시 읽어 주마다 길어진다. 첫 주 약 20분, 8주차 약 2~3시간 `[추론]`(계획 7장, D-115). 힙은 기간과 상관없다. 도중에 끄지 말고 PC가 잠들지 않게 둔다.
+- `OutOfMemoryError`로 멈추면 D-115 뒤에는 예상 밖이다. `-Pheap=8g`를 붙여 한 번 더 돌리고 결과와 함께 알린다. 입력 기록과 녹화는 디스크에 남으므로 고친 뒤 몰아서 돌릴 수 있다.
+- 결과 `experiments\<ID>\weekly\<날짜>.md`와 위 세 줄(종료 코드, 걸린 시간, 최대 힙)을 이 프로젝트 스레드에 올린다. Claude가 커밋하고 요약한다. 최대 힙 줄에는 Gradle 자체 메모리도 섞여 있어 조금 크게 나온다.
 
 ## 4. LIVE00 끝(10-23 금요일 장 마감 뒤, 3장 주간 점검 다음)
 
