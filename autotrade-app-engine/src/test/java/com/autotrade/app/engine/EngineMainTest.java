@@ -442,13 +442,14 @@ class EngineMainTest {
             public void close() {}
         };
         IllegalStateException codeBug = new IllegalStateException("꾸리기 실패");
+        java.nio.file.InvalidPathException badPath = new java.nio.file.InvalidPathException("\"C:\\x\"", "Illegal char <\">");
         jul.addHandler(handler);
         try {
             captureErr(() -> EngineMain.launch(() -> paths, FIXED, n -> {
                 throw codeBug;
             }, exits::add));
             captureErr(() -> EngineMain.launch(() -> {
-                throw new java.nio.file.InvalidPathException("\"C:\\x\"", "Illegal char <\">");
+                throw badPath;
             }, FIXED, EngineMain::setup, exits::add));
             try (EngineMain.Engine first = EngineMain.start(paths, FIXED)) {
                 captureErr(() -> EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add));
@@ -469,6 +470,14 @@ class EngineMainTest {
         assertThat(errors.get(1).getThrown()).isNull(); // 설정 오류는 한 줄만
         assertThat(errors.get(2).getMessage()).startsWith(EngineMain.StartFailure.CHANNEL_HEADLINE);
         assertThat(errors.get(2).getThrown()).isNull(); // 명령 채널 실패도 한 줄만
+        // PR #165 독립 QA Q1(변이 N5·N6 생존): ERROR 줄에 실제 원인이 실린다. 콘솔을 못 본 운영자(예약 실행)는
+        // runbook대로 로그 ERROR 줄만 보고 원인을 찾는다(D-107 4번). 첫머리만 보면 원인이 빠져도 통과하므로 원인 글자까지 본다
+        assertThat(errors.get(0).getMessage())
+                .isEqualTo(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE + ": IllegalStateException: 꾸리기 실패");
+        assertThat(errors.get(1).getMessage()).isEqualTo(EngineMain.StartFailure.SETTINGS_HEADLINE
+                + ": 설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): " + badPath.getMessage());
+        assertThat(errors.get(2).getMessage()).startsWith(EngineMain.StartFailure.CHANNEL_HEADLINE + ": ")
+                .contains("다른 실전 엔진이 이미 실행 중입니다");
     }
 
     @Test
@@ -494,6 +503,8 @@ class EngineMainTest {
                 + "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): ");
         assertThat(channel).startsWith("실전 제어 명령 채널을 열지 못해 기동을 중단합니다(실전 엔진이 뜨지 않았습니다): ");
         assertThat(List.of(programError, settings, channel)).allSatisfy(err -> assertThat(err).doesNotContain(")("));
+        // PR #165 독립 QA Q2(변이 N9 생존): 표준 오류는 한 줄이다(D-107 4번). 예외 toString·스택이 콘솔로 더 나가지 않는다
+        assertThat(List.of(programError, settings, channel)).allSatisfy(err -> assertThat(err.lines()).hasSize(1));
     }
 
     @Test
