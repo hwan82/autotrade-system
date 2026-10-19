@@ -280,7 +280,10 @@ public final class EngineMain {
                 "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 로그의 예외를 개발 쪽에 알려 주세요";
 
         private static final Pattern LINE_BREAK = Pattern.compile("\\R");
-        private static final Pattern LINE_BREAK_RUN = Pattern.compile("\\s*\\R\\s*");
+        // 공백과 줄바꿈이 섞인 묶음 하나를 " / " 하나로(U+2028처럼 \\s에 들지 않는 줄바꿈이 이어져도, PR #172 risk-ops K1)
+        private static final Pattern LINE_BREAK_RUN = Pattern.compile("(?:\\s*\\R)+\\s*");
+        // 줄바꿈이 있을 때 앞뒤의 공백·줄바꿈(U+0085 포함)을 걷는다
+        private static final Pattern EDGE_BREAKS = Pattern.compile("^(?:\\s|\\R)+|(?:\\s|\\R)+$");
 
         static StartFailure of(Exception e) {
             if (e instanceof EngineRefusal) {
@@ -301,7 +304,7 @@ public final class EngineMain {
             if (message == null || !LINE_BREAK.matcher(message).find()) {
                 return String.valueOf(message);
             }
-            return LINE_BREAK_RUN.matcher(message.strip()).replaceAll(" / ");
+            return LINE_BREAK_RUN.matcher(EDGE_BREAKS.matcher(message).replaceAll("")).replaceAll(" / ");
         }
 
         /** 로그(ERROR)와 표준 오류에 한 줄씩 남긴다. 프로그램 오류면 로그에 예외 흐름도 남긴다. */

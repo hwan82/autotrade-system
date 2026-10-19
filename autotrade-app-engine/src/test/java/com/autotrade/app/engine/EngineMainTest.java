@@ -583,6 +583,11 @@ class EngineMainTest {
         assertThat(EngineMain.StartFailure.of(new IOException("a\r\n\r\nb")).detail()).isEqualTo("a / b");
         assertThat(EngineMain.StartFailure.of(new IllegalStateException("a\u2028b")).detail())
                 .isEqualTo("IllegalStateException: a / b");
+        // \s에 들지 않는 유니코드 줄바꿈이 이어지거나 끝에 있어도 구분자는 하나, 끝에 남지 않는다(PR #172 risk-ops K1·architect N2)
+        assertThat(EngineMain.StartFailure.of(new IOException("a\u2028\u2028b")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a\u2029 \u0085\nb")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("\u2029a\nb\u0085")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a\u000Bb\fc")).detail()).isEqualTo("a / b / c");
         // 줄바꿈이 없는 원인은 글자 그대로다(앞뒤 공백도 바꾸지 않는다)
         assertThat(EngineMain.StartFailure.of(new IOException(" a  b ")).detail()).isEqualTo(" a  b ");
         assertThat(EngineMain.StartFailure.of(new IOException((String) null)).detail()).isEqualTo("null");
