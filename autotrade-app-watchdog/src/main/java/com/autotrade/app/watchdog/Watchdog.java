@@ -413,6 +413,11 @@ final class Watchdog implements AutoCloseable {
         return notifications;
     }
 
+    /** 운영 배선 시험용(PR #170 QA Q1). 감시가 알림을 넣는 곳. 운영은 알림 큐가 받았는지를 그대로 돌려준다(D-111 결정 1). */
+    Alerts alerts() {
+        return alerts;
+    }
+
     /** 점검을 멈추고 자기 하트비트 파일을 지운다. 정지 요청 파일은 그대로 둔다(다음 감시가 이어받음). */
     @Override
     public synchronized void close() {
