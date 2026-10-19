@@ -16,7 +16,7 @@ $id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else
 
 `$id`는 날짜로 정한다(10-23까지 LIVE00, 10-24부터 LIVE01). 아래 명령은 이 두 줄을 붙여 넣은 창에서만 동작한다.
 
-게이트웨이 창은 하나 더 확인한다. bat 실행 파일은 `JAVA_HOME`의 Java를 쓰고 프로그램은 Java 21로 빌드되어 있다. 아래 결과가 `21`로 시작하지 않으면 1장 0번을 먼저 한다(`UnsupportedClassVersionError ... class file version 65.0 ... up to 61.0`이 그 증상이다).
+게이트웨이 창은 하나 더 확인한다. bat 실행 파일은 `JAVA_HOME`의 Java를 쓰고 프로그램은 Java 21로 빌드되어 있다. 아래 출력의 버전 번호가 `21`이 아니거나 명령이 오류를 내면(`JAVA_HOME`이 비어 있음) 1장 0번을 먼저 한다(`UnsupportedClassVersionError ... class file version 65.0 ... up to 61.0`이 그 증상이다).
 
 ```powershell
 & "$env:JAVA_HOME\bin\java" -version
@@ -95,7 +95,7 @@ $id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else
 창 3 — 세션 시작(0장 두 줄 먼저). 실험실을 다시 띄운 뒤에도 이 블록을 다시 붙여 넣는다(실험실은 세션을 자동으로 다시 열지 않는다).
 
 ```powershell
-$s = Invoke-RestMethod http://127.0.0.1:8480/api/session -SessionVariable web
+do { try { $s = Invoke-RestMethod http://127.0.0.1:8480/api/session -SessionVariable web; $ok = $true } catch { "실험실 기다리는 중..."; $ok = $false; Start-Sleep 5 } } until ($ok)   # 창 2가 다 뜰 때까지(처음엔 1~3분)
 $h = @{ "X-CSRF-Token" = $s.csrfToken }
 $t0 = Get-Date
 Invoke-RestMethod -Method Post -Headers $h -WebSession $web "http://127.0.0.1:8480/api/live/sessions/$id/start"
