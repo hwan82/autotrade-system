@@ -137,7 +137,7 @@ public final class LiveReplayCheck {
         return out;
     }
 
-    private static List<Path> journalDays(LiveSetup setup, Path sessionDir) {
+    static List<Path> journalDays(LiveSetup setup, Path sessionDir) {
         com.autotrade.marketdata.recording.RecordingLayout layout =
                 new com.autotrade.marketdata.recording.RecordingLayout(sessionDir.resolve(LiveSession.JOURNAL_DIR));
         java.util.ArrayList<Path> out = new java.util.ArrayList<>();
@@ -151,7 +151,7 @@ public final class LiveReplayCheck {
     }
 
     /** 실험실이 세션을 열고 있으면(기록이 아직 쓰이는 중) 거부한다. */
-    private static void ensureSessionClosed(Path sessionDir) {
+    static void ensureSessionClosed(Path sessionDir) {
         Path lockFile = sessionDir.resolve(LiveSession.LOCK_FILE);
         if (!Files.exists(lockFile)) {
             return;

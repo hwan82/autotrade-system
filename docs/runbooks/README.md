@@ -32,9 +32,10 @@
 | `runWalkForwardStudy` | 일봉 워크포워드 판정(통과·탈락·보류) | `experiments/<ID>/study.yaml` | [4단계 워크포워드](stage-4-walkforward.md) |
 | `runRecordingExperiment` | 장중 프로필을 실녹화 위에서 실행 | `experiments/<ID>/experiment.yaml`(`input: recording`) | [D-069](../decisions/D-069-session-phases-recording-experiment.md) |
 | `runLiveReplayCheck` | 실시간 모의 세션 결과를 리플레이와 대조 | 끝낸 세션의 `live-detail.txt` | [6단계 실시간 모의](stage-6-live-session.md) 4장 |
+| `runLiveJudgement` | 6단계 장중 승격 후보 기준 L1~L11 계산(±20% 변형·지연·대조군·녹화 대조), `judgement.md` | 끝낸 세션의 `live-detail.txt`, 같은 날 게이트웨이 녹화 | [D-116](../decisions/D-116-stage-6-recording-judgement.md) |
 | `runStrategyStudy` | 합성 시세 비교(4단계 첫 실험 재현용) | 없음 | `autotrade-app-experiment/build.gradle.kts` 주석 |
 
-옵션: `-PallowDuringSession`(다섯 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드 실험만).
+옵션: `-PallowDuringSession`(위 표의 `runStrategyStudy` 밖 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드 실험만).
 
 ## 2. 하루 흐름 (거래일 기준, 서울 시각)
 
@@ -59,6 +60,7 @@
 | 수집기 | 완료 | 오류(키·형식·네트워크) | 사용법 오류 | 하루 호출 한도. **다음 날 같은 명령 다시** | 장 시간 보호·정지 요청·디스크 부족. **구간이 끝난 뒤 같은 명령 다시** | [수집기](collector.md) 4장 |
 | 실험 명령 | 완료 | 입력 오류(같은 실험 ID가 이미 실행 중일 때 포함, D-089) | Run 실패나 결정론 불일치(결과를 판정에 쓰지 않음) | 실험실에서 취소(결과 파일 없음, D-089) | 장 시간 보호·정지 요청으로 멈춤(결과 파일 없음, 취소와 겹치면 4가 이김) | `ExperimentMain` 주석, [4단계 워크포워드](stage-4-walkforward.md) 5장 |
 | `runLiveReplayCheck` | 실시간과 리플레이 같음(합격) | 입력 오류 | 실시간 경로 결함이나 실패 계좌 | 실험실에서 취소 | 장 시간 보호·정지 요청 | [6단계 실시간 모의](stage-6-live-session.md) 4장 |
+| `runLiveJudgement` | 판정함(후보 0개 포함, `judgement.md`) | 입력 오류(세션이 열려 있음, 실시간 보고서 없음 등) | 무사고 I1~I3이 깨짐(판정 파일은 씀, 1장을 본다) | 실험실에서 취소 | 장 시간 보호·정지 요청 | [D-116](../decisions/D-116-stage-6-recording-judgement.md) |
 | `replayCheck` | 두 번 같고 녹화 완전 | 두 결과 다름 | 녹화를 읽지 못함·입력 오류 | 같지만 녹화 불완전(다른 날 다시 녹화) | 장 시간 보호·정지 요청으로 멈춤(보고서 없음, D-085). **구간이 끝난 뒤 같은 명령 다시** | [2단계 녹화](stage-2-real-recording.md) 7번 |
 | `kiwoomDaily` | 표 작성 | - | 설정·인자 오류나 조회 실패 | - | - | `KiwoomDailyMain` 주석 |
 | `symbolMaster` | 성공 | 받은 파일 검증 실패(파일을 쓰지 않음) | 내려받기·읽기·쓰기 실패(기존 `KRX.csv`는 그대로) | - | - | `SymbolMasterUpdate` 주석 |
