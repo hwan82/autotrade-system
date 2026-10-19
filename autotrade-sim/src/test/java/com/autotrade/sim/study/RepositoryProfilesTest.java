@@ -39,7 +39,10 @@ class RepositoryProfilesTest {
             StrategyProfile p = ProfileYaml.parse(Files.readString(f, StandardCharsets.UTF_8), f.toString());
             factory.validate(p);
             String key = p.id() + "@" + p.version();
-            if (p.style() == TradingStyle.SWING && !SWING_WITHOUT_MAX_HOLD.contains(key)) {
+            // 기준선(buy-and-hold)은 보유 기간 검사 예외다(기획서 STR-18 "기준선(`buy-and-hold`)은 예외로 둔다"). 이 로직은
+            // exit.* 키를 받지 않는다(모르는 키 거절). 6단계 기준선 kr-bh-baseline@2(D-113)가 여기에 든다.
+            boolean baseline = "buy-and-hold".equals(p.parameters().get("logic"));
+            if (p.style() == TradingStyle.SWING && !baseline && !SWING_WITHOUT_MAX_HOLD.contains(key)) {
                 assertThat(p.parameters()).as(key + ": 새 스윙 프로필은 exit.max-hold-days(2~20) 필수")
                         .containsKey("exit.max-hold-days");
             }

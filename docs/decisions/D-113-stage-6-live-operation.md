@@ -31,6 +31,8 @@
 
 되돌릴 조건: LIVE00 하루 크기로 계산한 8주 디스크가 여유 하한(20GB)을 넘기면 LIVE01 boards를 줄여 다시 등록한다. LIVE01에서 대부분 프로필이 30건에 못 미치면 기준을 낮추지 않고 boards·기간을 늘린 새 등록을 사용자에게 묻는다.
 
+- 기준선 v2는 SWING이지만 `exit.max-hold-days`가 없다. `RepositoryProfilesTest`의 "새 스윙 버전은 최대 보유일 필수" 검사에서 `logic: buy-and-hold`를 버전 목록 대신 조건으로 뺀다(기획서 STR-18 "기준선(`buy-and-hold`)은 예외", 이 로직은 `exit.*` 키를 받지 않고 끝까지 들고 가는 것이 정의다. PR #175 strategy-researcher 재검토 M2). 예외 목록 `SWING_WITHOUT_MAX_HOLD`는 늘리지 않는다.
+
 ## 위험과 한계
 
 - **점검 명령 메모리(차단 위험)**: `RecordedMarketDataSet`이 모든 날을 메모리에 올리고 `LiveWeeklyCheck`가 운용 시작부터 녹화 이벤트를 쌓는다 `[사실]`. 호가 이벤트 하나가 힙 약 1.6KB `[사실]`(컨테이너 실측)라 10종목 8주는 기본 힙 4GB를 크게 넘는다 `[추론]`. sim-engine 후속 T1(하루씩 읽기)이 LIVE01 첫 주간 점검(10-30) 전에 필요하다. 늦어도 운용(세션·녹화)은 계속되고 점검만 미뤄진다.
