@@ -508,6 +508,118 @@ class EngineMainTest {
     }
 
     @Test
+    void 기동_실패_표준_오류는_첫머리부터_줄_끝까지_정해진_한_줄이다() throws Exception {
+        // PR #169 독립 QA Q1(변이 P3 줄 끝 없음, P8 원인 뒤 덧붙임 생존): 첫머리·줄 개수만 보면 줄 끝이 빠지거나 원인 뒤에
+        // 다른 글자가 붙어도 통과하므로, 세 경우 모두 표준 오류 전체를 줄 끝까지 글자로 고정한다(D-107 4번)
+        ConfigPaths paths = ConfigPaths.in(dir);
+        List<Integer> exits = new ArrayList<>();
+        java.nio.file.InvalidPathException badPath = new java.nio.file.InvalidPathException("\"C:\\x\"", "Illegal char <\">");
+        String programError = captureErr(() -> EngineMain.launch(() -> paths, FIXED, CHANNEL_NAME_BUG, exits::add));
+        String settings = captureErr(() -> EngineMain.launch(() -> {
+            throw badPath;
+        }, FIXED, EngineMain::setup, exits::add));
+        String channel;
+        try (EngineMain.Engine first = EngineMain.start(paths, FIXED)) {
+            channel = captureErr(() -> EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add));
+            assertThat(first.server().socket()).exists();
+        }
+
+        String nl = System.lineSeparator();
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED, EngineMain.EXIT_BAD_SETTINGS,
+                EngineMain.EXIT_START_FAILED);
+        assertThat(programError).isEqualTo("실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 "
+                + "로그의 예외를 개발 쪽에 알려 주세요(실전 엔진이 뜨지 않았습니다): "
+                + "IllegalArgumentException: 외부 채널 이름과 꾸린 채널 이름이 다르다: kakao / kakao-x" + nl);
+        assertThat(settings).isEqualTo("실전 엔진 설정이 틀려 기동하지 않습니다(실전 엔진이 뜨지 않았습니다): "
+                + "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): " + badPath.getMessage() + nl);
+        assertThat(channel).isEqualTo("실전 제어 명령 채널을 열지 못해 기동을 중단합니다(실전 엔진이 뜨지 않았습니다): "
+                + "다른 실전 엔진이 이미 실행 중입니다(" + com.autotrade.control.ControlServer.LOCK_FILE + " 잠금)" + nl);
+    }
+
+    @Test
+    void 기동_실패_원인에_줄바꿈이_있어도_로그_ERROR와_표준_오류는_한_줄이고_예외_흐름은_원문을_남긴다() {
+        // PR #169 독립 QA R2(D-107 남은 한계): 원인 메시지의 줄바꿈을 " / "로 접어, 로그를 줄 단위로 걸러 보는 운영자도
+        // 원인 전체를 ERROR 한 줄에서 본다(D-112). 프로그램 오류의 예외 흐름(스택)에는 원래 메시지가 그대로 남는다
+        List<Integer> exits = new ArrayList<>();
+        IllegalStateException codeBug = new IllegalStateException("첫 줄\n둘째 줄\r\n  셋째 줄\r");
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger("com.autotrade." + EngineMain.PROCESS);
+        List<java.util.logging.LogRecord> records = new ArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                records.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        jul.addHandler(handler);
+        String err;
+        try {
+            err = captureErr(() -> assertThat(EngineMain.launch(() -> ConfigPaths.in(dir), FIXED, n -> {
+                throw codeBug;
+            }, exits::add)).isNull());
+        } finally {
+            jul.removeHandler(handler);
+        }
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED);
+        String detail = "IllegalStateException: 첫 줄 / 둘째 줄 / 셋째 줄";
+        assertThat(err).isEqualTo(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE + "(실전 엔진이 뜨지 않았습니다): " + detail
+                + System.lineSeparator());
+        List<java.util.logging.LogRecord> errors = records.stream()
+                .filter(r -> r.getLevel() == java.util.logging.Level.SEVERE).toList();
+        assertThat(errors).hasSize(1);
+        assertThat(errors.get(0).getMessage()).isEqualTo(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE + ": " + detail);
+        assertThat(errors.get(0).getThrown()).isSameAs(codeBug).hasMessage("첫 줄\n둘째 줄\r\n  셋째 줄\r");
+    }
+
+    @Test
+    void 기동_실패_원인에_긴_공백과_줄바꿈이_있어도_판정과_종료_코드와_한_줄_안내가_남는다() {
+        // PR #172 risk-ops 재검토 K4: 정규식 반복이 긴 공백·줄바꿈 묶음에서 StackOverflowError를 내면 exit를 부르지 못하고
+        // 안내 줄도 사라졌다. 수만 글자 묶음으로 세 경로(설정 오류 2, 프로그램 오류 1)와 접기 결과를 본다
+        String longRun = " ".repeat(100_000) + "\n".repeat(100_000) + "\u2028".repeat(100_000) + " \r\n".repeat(50_000);
+        assertThat(EngineMain.StartFailure.of(new IOException(longRun + "a" + longRun + "b" + longRun)).detail())
+                .isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a" + " ".repeat(100_000) + "b")).detail())
+                .isEqualTo("a" + " ".repeat(100_000) + "b");
+
+        List<Integer> exits = new ArrayList<>();
+        java.nio.file.InvalidPathException badPath = new java.nio.file.InvalidPathException("x", "앞" + longRun + "뒤");
+        String settings = captureErr(() -> assertThat(EngineMain.launch(() -> {
+            throw badPath;
+        }, FIXED, EngineMain::setup, exits::add)).isNull());
+        String programError = captureErr(() -> assertThat(EngineMain.launch(() -> ConfigPaths.in(dir), FIXED, n -> {
+            throw new IllegalStateException(longRun + "꾸리기" + longRun + "실패" + longRun);
+        }, exits::add)).isNull());
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_BAD_SETTINGS, EngineMain.EXIT_START_FAILED);
+        assertThat(settings).isEqualTo(EngineMain.StartFailure.SETTINGS_HEADLINE + "(실전 엔진이 뜨지 않았습니다): "
+                + "설정 폴더 경로가 틀렸습니다(autotrade.config-dir 또는 AUTOTRADE_CONFIG_DIR): 앞 / 뒤: x" + System.lineSeparator());
+        assertThat(programError).isEqualTo(EngineMain.StartFailure.PROGRAM_ERROR_HEADLINE + "(실전 엔진이 뜨지 않았습니다): "
+                + "IllegalStateException: 꾸리기 / 실패" + System.lineSeparator());
+    }
+
+    @Test
+    void 기동_실패_원인의_줄바꿈은_세_종류_모두_한_줄로_접는다() {
+        assertThat(EngineMain.StartFailure.of(new EngineMain.EngineRefusal("a\nb")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a\r\n\r\nb")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IllegalStateException("a\u2028b")).detail())
+                .isEqualTo("IllegalStateException: a / b");
+        // \s에 들지 않는 유니코드 줄바꿈이 이어지거나 끝에 있어도 구분자는 하나, 끝에 남지 않는다(PR #172 risk-ops K1·architect N2)
+        assertThat(EngineMain.StartFailure.of(new IOException("a\u2028\u2028b")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a\u2029 \u0085\nb")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("\u2029a\nb\u0085")).detail()).isEqualTo("a / b");
+        assertThat(EngineMain.StartFailure.of(new IOException("a\u000Bb\fc")).detail()).isEqualTo("a / b / c");
+        // 줄바꿈이 없는 원인은 글자 그대로다(앞뒤 공백도 바꾸지 않는다)
+        assertThat(EngineMain.StartFailure.of(new IOException(" a  b ")).detail()).isEqualTo(" a  b ");
+        assertThat(EngineMain.StartFailure.of(new IOException((String) null)).detail()).isEqualTo("null");
+    }
+
+    @Test
     void 프로그램_오류만_예외_흐름을_남기는_종류로_판정한다() {
         assertThat(EngineMain.StartFailure.of(new IllegalStateException("x")).programError()).isTrue();
         assertThat(EngineMain.StartFailure.of(new IOException("x")).programError()).isFalse();
