@@ -5,22 +5,15 @@ import com.autotrade.domain.market.InstrumentStatusChanged;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.OrderBookSnapshot;
-import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.recording.RecordedDay;
-import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
-import com.autotrade.marketdata.recording.RecordingMeta;
-import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.sim.run.MarketDataSet;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,8 +21,6 @@ import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
-import java.util.SortedSet;
-import java.util.TreeSet;
 
 /**
  * 2단계 시세 녹화(ADR-003 2.3, {@link RecordedDay})를 리플레이 실행기 입력({@link MarketDataSet})으로 바꾼 것(ADR-004 4장, D-068).
@@ -49,10 +40,11 @@ import java.util.TreeSet;
  * <p><b>버전</b>: {@value #ADAPTER_VERSION}, 시장, 날짜 범위와, 읽은 녹화 파일들의 SHA-256을 이어 해시한 값이다. 같은 파일이면
  * 같은 버전이고 같은 이벤트다. 녹화가 아직 쓰이는 중이면(읽기 전후 파일 해시가 다름) 열지 않는다.
  *
- * <p>모든 녹화일을 메모리에 올린다(하루 50만 건대 × 날 수 `[가정]`). 날 수가 많아 메모리가 모자라면 날짜별로 읽어 오는
- * 목록으로 바꾼다(후속). 불변이고 여러 Run이 동시에 읽어도 된다.
+ * <p>모든 녹화일을 메모리에 올린다(3종목 하루 약 53만 건, 호가 이벤트 하나 힙 약 1.6KB). 여러 날·여러 종목이면 메모리가
+ * 모자라므로 날마다 디스크에서 다시 읽는 {@link StreamedRecordingDataSet}을 쓴다(D-115, 같은 규칙 {@link RecordingDayAdapter}라
+ * 같은 이벤트·같은 버전). 불변이고 여러 Run이 동시에 읽어도 된다.
  */
-public final class RecordedMarketDataSet implements MarketDataSet {
+public final class RecordedMarketDataSet implements MarketDataSet, RecordingInput {
 
     /** 녹화 → 이벤트 변환 규칙 버전. 순번 매기기·공백 끼워 넣기 규칙을 바꾸면 올린다(같은 녹화라도 결과가 달라진다). */
     public static final String ADAPTER_VERSION = "REC-ADAPTER-V1";
@@ -108,79 +100,40 @@ public final class RecordedMarketDataSet implements MarketDataSet {
         if (dayDirs.isEmpty()) {
             throw new IllegalArgumentException("녹화일이 없습니다");
         }
-        MessageDigest versionHash = sha256();
-        versionHash.update((ADAPTER_VERSION + "|" + market + "\n").getBytes(StandardCharsets.UTF_8));
+        MessageDigest versionHash = versionHash(market);
         List<MarketEvent> events = new ArrayList<>();
         List<DayInfo> days = new ArrayList<>();
-        long[] seqs = new long[1024];
+        long[][] seqs = {new long[1024]};
         int[] dayStart = new int[dayDirs.size() + 1];
         LocalDate prevDate = null;
         for (int di = 0; di < dayDirs.size(); di++) {
-            Path dir = dayDirs.get(di);
-            String before = fileSha(dir);
-            RecordedDay day = RecordedDay.open(dir);
-            String after = fileSha(dir);
-            if (!before.equals(after)) {
-                throw new IllegalStateException("녹화가 아직 쓰이는 중입니다(읽는 동안 파일이 바뀜): " + dir);
-            }
-            LocalDate date = dateOf(day);
-            String dayMarket = day.meta().map(RecordingMeta::market).orElse(dir.getParent().getFileName().toString());
-            if (!dayMarket.equals(market.name())) {
-                throw new IllegalArgumentException("다른 시장의 녹화입니다: " + dir + " (" + dayMarket + ")");
-            }
-            if (prevDate != null && !date.isAfter(prevDate)) {
-                throw new IllegalArgumentException("녹화일이 날짜 오름차순이 아닙니다: " + prevDate + " -> " + date);
-            }
-            prevDate = date;
-            versionHash.update((date + "|" + after + "\n").getBytes(StandardCharsets.UTF_8));
-
             dayStart[di] = events.size();
-            List<RecordingCodec.Line> lines = day.lines();
-            List<RecordingMeta.Segment> unmarked = day.unmarkedRestarts();
-            int nextBoundary = 0;
-            int inserted = 0;
-            SortedSet<Symbol> seen = new TreeSet<>();
-            for (int i = 0; i < lines.size(); i++) {
-                RecordingCodec.Line line = lines.get(i);
-                if (nextBoundary < unmarked.size() && unmarked.get(nextBoundary).firstSeq() == line.seq()) {
-                    // 공백 표시 없는 구간 경계(D-065 이전 녹화): 녹화기와 같은 규칙으로 앞 구간 종목마다 공백을 넣는다.
-                    // 줄 없이 끝난 구간이 끼면 같은 firstSeq 경계가 여럿이다. 녹화기는 이벤트를 받은 마지막 기동에서만
-                    // 공백을 쓰고 그 직전 구간 끝으로 시작을 잡으므로, 한 번만 넣고 마지막 경계로 시작을 잡는다
-                    RecordingMeta.Segment boundary = unmarked.get(nextBoundary);
-                    while (nextBoundary + 1 < unmarked.size() && unmarked.get(nextBoundary + 1).firstSeq() == line.seq()) {
-                        boundary = unmarked.get(++nextBoundary);
-                    }
-                    Instant resumed = line.event().receivedAt();
-                    Instant start = lastAlive(day.meta().orElseThrow().segments(), boundary,
-                            lines.get(i - 1).event().receivedAt());
-                    if (start.isAfter(resumed)) {
-                        start = resumed;
-                    }
-                    for (Symbol s : seen) {
-                        seqs = add(events, seqs, new DataGap(s, events.size() + 1L, resumed, resumed, start, resumed,
-                                DataGap.GapReason.RECORDER_RESTART), 0);
-                        inserted++;
-                    }
-                    nextBoundary++;
-                }
-                MarketEvent e = line.event();
-                if (e.symbol().market() != market) {
-                    throw new IllegalArgumentException("녹화에 다른 시장 이벤트가 있습니다: " + dir + " seq " + line.seq());
-                }
-                seen.add(e.symbol());
-                seqs = add(events, seqs, withSequence(e, events.size() + 1L), line.seq());
-            }
-            if (nextBoundary != unmarked.size()) {
-                throw new IllegalStateException("공백 표시 없는 구간 경계를 녹화에서 찾지 못했습니다: " + dir);
-            }
-            days.add(new DayInfo(date, after, day.eventCount(), day.meta().map(RecordingMeta::complete).orElse(false),
-                    day.truncated(), day.meta().map(m -> m.segments().size()).orElse(0),
-                    unmarked.stream().map(RecordingMeta.Segment::firstSeq).toList(), inserted));
+            DayInfo info = RecordingDayAdapter.read(market, dayDirs.get(di), events.size(), prevDate,
+                    (e, recordingSeq) -> seqs[0] = add(events, seqs[0], e, recordingSeq)).info();
+            addDay(versionHash, info);
+            days.add(info);
+            prevDate = info.date();
         }
         dayStart[dayDirs.size()] = events.size();
+        String version = version(market, days, versionHash);
+        return new RecordedMarketDataSet(version, market, events, days, Arrays.copyOf(seqs[0], events.size()), dayStart);
+    }
+
+    /** 버전 해시의 시작: 어댑터 규칙 버전과 시장. */
+    static MessageDigest versionHash(Market market) {
+        MessageDigest versionHash = sha256();
+        versionHash.update((ADAPTER_VERSION + "|" + market + "\n").getBytes(StandardCharsets.UTF_8));
+        return versionHash;
+    }
+
+    /** 버전 해시에 녹화일 하나(날짜, 파일 해시)를 더한다. */
+    static void addDay(MessageDigest versionHash, DayInfo info) {
+        versionHash.update((info.date() + "|" + info.fileSha256() + "\n").getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String version(Market market, List<DayInfo> days, MessageDigest versionHash) {
         String hash = HexFormat.of().formatHex(versionHash.digest()).substring(0, 16);
-        String version = "REC-" + market + "-" + days.get(0).date() + ".." + days.get(days.size() - 1).date() + "-" + hash;
-        return new RecordedMarketDataSet(version, market, events, days, Arrays.copyOf(seqs, events.size()), dayStart);
+        return "REC-" + market + "-" + days.get(0).date() + ".." + days.get(days.size() - 1).date() + "-" + hash;
     }
 
     @Override
@@ -198,7 +151,13 @@ public final class RecordedMarketDataSet implements MarketDataSet {
         return events;
     }
 
+    @Override
+    public long eventCount() {
+        return events.size();
+    }
+
     /** 읽은 녹화일, 날짜 오름차순. */
+    @Override
     public List<DayInfo> days() {
         return days;
     }
@@ -245,34 +204,6 @@ public final class RecordedMarketDataSet implements MarketDataSet {
         out[events.size()] = recordingSeq;
         events.add(e);
         return out;
-    }
-
-    /** 앞 프로세스가 살아 있던 마지막 시각: 경계 바로 앞 구간의 끝(정상 종료 시각)과 경계 직전 줄 수신 시각 중 늦은 쪽. */
-    private static Instant lastAlive(List<RecordingMeta.Segment> segments, RecordingMeta.Segment boundary, Instant lastRx) {
-        int idx = segments.indexOf(boundary);
-        Instant alive = lastRx;
-        if (idx > 0 && !segments.get(idx - 1).endedAt().isEmpty()) {
-            Instant ended = Instant.parse(segments.get(idx - 1).endedAt());
-            alive = ended.isAfter(alive) ? ended : alive;
-        }
-        return alive;
-    }
-
-    private static LocalDate dateOf(RecordedDay day) {
-        String text = day.meta().map(RecordingMeta::date).orElse(day.dir().getFileName().toString());
-        LocalDate date = LocalDate.parse(text);
-        if (!date.toString().equals(day.dir().getFileName().toString())) {
-            throw new IllegalStateException("녹화 폴더 이름과 meta.json 날짜가 다릅니다: " + day.dir() + " (" + text + ")");
-        }
-        return date;
-    }
-
-    private static String fileSha(Path dir) {
-        try {
-            return Sha256.ofFile(dir.resolve(RecordingLayout.EVENTS_FILE));
-        } catch (IOException e) {
-            throw new UncheckedIOException("녹화 파일을 읽을 수 없습니다: " + dir, e);
-        }
     }
 
     private static MessageDigest sha256() {

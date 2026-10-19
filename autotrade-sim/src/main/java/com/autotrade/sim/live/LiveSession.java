@@ -12,6 +12,7 @@ import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.recording.RecordedMarketDataSet;
+import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
@@ -176,9 +177,11 @@ public final class LiveSession implements AutoCloseable {
     }
 
     /**
-     * 입력 기록이 있으면 처음부터 다시 돌린다(기록에는 쓰지 않음). 메모리를 아끼려고 기록일 하나씩 읽는다. 녹화 어댑터는 날짜마다
+     * 입력 기록이 있으면 처음부터 다시 돌린다(기록에는 쓰지 않음). 메모리를 아끼려고 기록일 하나씩, 그날도 줄 단위로 읽어 바로 계좌에
+     * 준다(D-115: 10종목 하루치도 힙에 올리지 않는다). 읽다가 기록이 깨졌거나 범위 밖 이벤트가 나오면 세션을 열지 않는다(되살리던
+     * 계좌는 버린다). 녹화 어댑터는 날짜마다
      * 따로 처리하고 순번만 이어 매기므로, 하루씩 읽어 앞 날짜 이벤트 수만큼 순번을 밀면 전체를 한 번에 읽은 것과 같다
-     * (리플레이 확인이 쓰는 {@link RecordedMarketDataSet#fromDirs} 전체 읽기와 같은 순번).
+     * (리플레이 확인이 쓰는 {@link StreamedRecordingDataSet}·{@link RecordedMarketDataSet#fromDirs} 전체 읽기와 같은 순번).
      */
     private void restore(Consumer<String> log, Runnable beforeEachDay) {
         List<Path> days = journalDays();
@@ -190,17 +193,17 @@ public final class LiveSession implements AutoCloseable {
         Path lastWithLines = null;
         for (Path day : days) {
             beforeEachDay.run();
-            RecordedMarketDataSet data = RecordedMarketDataSet.fromDirs(setup.plan().market(), List.of(day));
-            if (!data.events().isEmpty()) {
-                lastWithLines = day;
-            }
-            for (MarketEvent e : data.events()) {
+            long dayOffset = offset;
+            StreamedRecordingDataSet data = StreamedRecordingDataSet.open(setup.plan().market(), List.of(day), () -> { }, e -> {
                 if (!inPlan(e)) {
                     throw new IllegalStateException("입력 기록에 운용 범위 밖 이벤트가 있습니다: " + day + " seq " + e.sequence());
                 }
-                step(EventSequences.withSequence(e, offset + e.sequence()));
+                step(EventSequences.withSequence(e, dayOffset + e.sequence()));
+            });
+            if (data.eventCount() > 0) {
+                lastWithLines = day;
             }
-            offset += data.events().size();
+            offset += data.eventCount();
         }
         restored = position;
         // 다음 날로 넘어가 이어 받으면 앞 날 나머지가 빠진 것을 공백으로 남긴다(같은 날이면 기록기가 이미 남긴다).

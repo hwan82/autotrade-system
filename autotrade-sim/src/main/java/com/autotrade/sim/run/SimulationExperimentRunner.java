@@ -57,7 +57,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class SimulationExperimentRunner implements ExperimentRunner {
 
-    private final MarketDataSet data;
+    private final MarketEventStream data;
     private final MarketRules rules;
     private final CostModel cost;
     private final StrategyFactory strategies;
@@ -86,7 +86,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      * @param benchmark 매수 후 보유 비교 종목. 없으면 null
      */
     public SimulationExperimentRunner(
-            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            MarketEventStream data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark) {
         this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, null);
     }
@@ -95,7 +95,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      * @param selections 선정 있는 조합의 날짜별 선정 결과 공급자. 선정 없는 실험만 돌리면 null이어도 된다
      */
     public SimulationExperimentRunner(
-            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            MarketEventStream data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
             SelectionSource selections) {
         this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, selections, RunGate.NONE);
@@ -106,7 +106,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      *     않고 {@link ExperimentStoppedException}을 던진다. 결과에는 영향이 없다
      */
     public SimulationExperimentRunner(
-            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            MarketEventStream data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
             SelectionSource selections, RunGate gate) {
         this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, selections, gate, 0);
@@ -119,7 +119,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      *     거래일이 없으면 실험을 시작하지 않는다. 0이면 이전과 같다. 비용 표 검사({@code cost.covers})는 거래 구간에만 한다
      */
     public SimulationExperimentRunner(
-            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            MarketEventStream data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
             SelectionSource selections, RunGate gate, int warmupDays) {
         this(data, rules, cost, strategies, risk, execution, code, parallelism, benchmark, selections, gate, warmupDays,
@@ -134,7 +134,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      *     다를 수 있다)
      */
     public SimulationExperimentRunner(
-            MarketDataSet data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
+            MarketEventStream data, MarketRules rules, CostModel cost, StrategyFactory strategies, RiskChain risk,
             ExecutionSettings execution, CodeVersion code, int parallelism, Symbol benchmark,
             SelectionSource selections, RunGate gate, int warmupDays, boolean settleAtWindowEnd) {
         this.settleAtWindowEnd = settleAtWindowEnd;
@@ -174,7 +174,11 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
      */
     public SimulationReport runDetailed(ExperimentSpec spec) {
         Objects.requireNonNull(spec, "spec");
-        Slice slice = validateAndSlice(spec);
+        validate(spec);
+        if (!(data instanceof MarketDataSet list)) {
+            return runStreamed(spec);
+        }
+        Slice slice = slice(spec, list);
         List<MarketEvent> events = slice.events();
         List<MarketEvent> warmup = slice.warmup();
         BigDecimal benchmarkReturn = benchmarkReturn(events);
@@ -312,7 +316,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         }
     }
 
-    private Slice validateAndSlice(ExperimentSpec spec) {
+    private void validate(ExperimentSpec spec) {
         if (spec.combinations().size() > MAX_COMBINATIONS) {
             throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size()
                     + " > " + MAX_COMBINATIONS);
@@ -338,10 +342,13 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException(
                     "실험 기간이 비용 표 밖입니다(SIM-07): " + spec.from() + " ~ " + spec.to() + ", " + cost.id());
         }
-        List<MarketEvent> all = data.events();
-        List<LocalDate> days = data.tradingDays();
+    }
+
+    private Slice slice(ExperimentSpec spec, MarketDataSet list) {
+        List<MarketEvent> all = list.events();
+        List<LocalDate> days = list.tradingDays();
         if (!days.isEmpty()) {
-            return sliceByDayIndex(spec, all, days);
+            return sliceByDayIndex(spec, list, all, days);
         }
         // 기간 안 이벤트가 이어져 있으면(거래일이 sequence 순으로 느는 보통의 경우) 복사하지 않고 그 구간만 넘긴다.
         // 일봉 데이터셋(DailyBarMarketDataSet)은 이벤트를 읽을 때 만들므로 복사하면 메모리가 이벤트 수에 비례해진다.
@@ -413,7 +420,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     }
 
     /** 데이터셋이 거래일 색인을 주면 이벤트를 훑지 않고 자른다(sequence 순서는 데이터셋이 보장). */
-    private Slice sliceByDayIndex(ExperimentSpec spec, List<MarketEvent> all, List<LocalDate> days) {
+    private Slice sliceByDayIndex(ExperimentSpec spec, MarketDataSet list, List<MarketEvent> all, List<LocalDate> days) {
         int fromIdx = lowerBound(days, spec.from());
         int toIdx = lowerBound(days, spec.to().plusDays(1));
         List<MarketEvent> warmup = List.of();
@@ -423,10 +430,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                         + "일뿐인데 " + warmupDays + "일이 필요합니다");
             }
             warmup = Collections.unmodifiableList(
-                    all.subList(data.firstEventIndex(fromIdx - warmupDays), data.firstEventIndex(fromIdx)));
+                    all.subList(list.firstEventIndex(fromIdx - warmupDays), list.firstEventIndex(fromIdx)));
         }
         List<MarketEvent> events = fromIdx >= toIdx ? List.of()
-                : Collections.unmodifiableList(all.subList(data.firstEventIndex(fromIdx), data.firstEventIndex(toIdx)));
+                : Collections.unmodifiableList(all.subList(list.firstEventIndex(fromIdx), list.firstEventIndex(toIdx)));
         return new Slice(warmup, events);
     }
 
@@ -490,6 +497,163 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             stopped.compareAndSet(null, e);
             throw stopped.get();
         }
+    }
+
+    /**
+     * 목록이 아닌 입력({@link MarketEventStream}, D-115): 이벤트를 메모리에 모으지 않고 두 번 읽는다. 첫 번째 읽기로 순서를
+     * 확인하고 실험 기간 안 이벤트의 거래일·첫 수신 시각·벤치마크 수익률을 구한다. 두 번째 읽기에서 이벤트 하나마다 모든 Run을
+     * 조합 순서대로 한 걸음씩 진행한다. Run은 서로 아무것도 공유하지 않으므로(클래스 설명) 목록 입력에서 Run을 따로 도는 것과
+     * Run별 결과가 같다. 그래서 병렬 실행 수({@code parallelism})는 쓰지 않는다(한 스레드). 예열({@code warmupDays})은 목록
+     * 입력만 받는다.
+     *
+     * <p>정지 확인(D-063)은 목록 입력과 같은 자리(Run 시작 전, Run 안에서 거래일이 바뀔 때)에 더해 첫 번째 읽기의 거래일이 바뀔
+     * 때도 묻는다. 입력이 읽는 도중 바뀌어 예외가 나면 Run 실패가 아니라 실험 전체를 멈춘다(결과 없음).
+     */
+    private SimulationReport runStreamed(ExperimentSpec spec) {
+        if (warmupDays > 0) {
+            throw new IllegalArgumentException("예열 거래일은 목록 데이터셋(MarketDataSet)만 받습니다: " + data.version());
+        }
+        StreamScan scan = scanStream(spec);
+        BigDecimal benchmarkReturn = scan.benchmarkReturn();
+        gate.check(); // 선정 일정 계산 전(목록 입력과 같음)
+        SelectionSchedule schedule = spec.hasSelections()
+                ? SelectionSchedule.compute(spec.combinations(), scan.dates, selections, gate::check)
+                : SelectionSchedule.empty();
+        List<Combination> combinations = spec.combinations();
+        int n = combinations.size();
+        Progress progress = new Progress(gate, spec.id().value(), n, scan.dayChanges);
+        progress.started();
+        AtomicReference<ExperimentStoppedException> stopped = new AtomicReference<>();
+        Instant start = scan.firstReceivedAt != null ? scan.firstReceivedAt
+                : spec.from().atStartOfDay(rules.zone()).toInstant();
+        RunStepper[] runs = new RunStepper[n];
+        RunReport[] reports = new RunReport[n];
+        for (int i = 0; i < n; i++) {
+            checkGate(stopped);
+            progress.runStarted();
+            runs[i] = new RunStepper(spec, i, rules, cost, execution, strategies, risk, data.exchangeTimed(), schedule);
+            try {
+                runs[i].begin(start, List.of());
+            } catch (ExperimentStoppedException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                reports[i] = runs[i].failed(e); // 계좌 격리: 이 Run만 실패
+            }
+        }
+        List<DataGap> gaps = new ArrayList<>();
+        long[] seen = {0};
+        long[] prev = {Long.MIN_VALUE};
+        data.forEach(e -> {
+            if (e.sequence() <= prev[0]) {
+                throw new IllegalStateException("두 번째 읽기의 이벤트 순서가 다릅니다(sequence " + e.sequence() + "): "
+                        + data.version());
+            }
+            prev[0] = e.sequence();
+            if (!inWindow(spec, e)) {
+                return;
+            }
+            seen[0]++;
+            for (int i = 0; i < n; i++) {
+                if (reports[i] != null) {
+                    continue;
+                }
+                int index = i;
+                try {
+                    runs[i].onEvent(e, () -> {
+                        progress.dayClosed(index);
+                        checkGate(stopped);
+                    });
+                } catch (ExperimentStoppedException x) {
+                    throw x; // Run 실패가 아니라 실험 전체 정지다(결과에 남기지 않음)
+                } catch (RuntimeException x) {
+                    reports[i] = runs[i].failed(x); // 계좌 격리: 이 Run만 실패로 끝낸다. 다른 Run은 계속 돈다
+                }
+            }
+            if (e instanceof DataGap g) {
+                gaps.add(g);
+            }
+        });
+        if (seen[0] != scan.count) {
+            throw new IllegalStateException("두 번째 읽기의 실험 기간 이벤트 수가 다릅니다: " + scan.count + " -> " + seen[0]
+                    + " (" + data.version() + ")");
+        }
+        List<RunReport> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            if (reports[i] == null) {
+                try {
+                    reports[i] = runs[i].finish(benchmarkReturn, settleAtWindowEnd);
+                } catch (ExperimentStoppedException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    reports[i] = runs[i].failed(e);
+                }
+            }
+            progress.runFinished(i, reports[i].summary().status() == RunStatus.FAILED);
+            out.add(reports[i]);
+        }
+        List<RunResult> summaries = out.stream().map(RunReport::summary).toList();
+        ExperimentResult result = new ExperimentResult(spec.id(), code.commit(), code.dirty(),
+                cost.tableHash(spec.from(), spec.to()), execution.id(), summaries);
+        progress.finished();
+        return new SimulationReport(result, out, gaps);
+    }
+
+    private boolean inWindow(ExperimentSpec spec, MarketEvent e) {
+        LocalDate d = rules.tradingDate(e.exchangeTime());
+        return !d.isBefore(spec.from()) && !d.isAfter(spec.to());
+    }
+
+    /** 첫 번째 읽기 결과. 값은 목록 입력에서 같은 기간을 자른 이벤트로 구한 것과 같다. */
+    private final class StreamScan {
+        long count;
+        Instant firstReceivedAt;
+        /** {@link #tradingDayCount}와 같은 방식(거래일이 바뀐 횟수 + 1). */
+        int dayChanges;
+        LocalDate lastDay;
+        final TreeSet<LocalDate> dates = new TreeSet<>();
+        BigDecimal benchmarkFirst;
+        BigDecimal benchmarkLast;
+
+        BigDecimal benchmarkReturn() {
+            return benchmark == null || benchmarkFirst == null ? null
+                    : benchmarkLast.divide(benchmarkFirst, MathContext.DECIMAL128).subtract(BigDecimal.ONE);
+        }
+    }
+
+    private StreamScan scanStream(ExperimentSpec spec) {
+        StreamScan scan = new StreamScan();
+        long[] prev = {Long.MIN_VALUE};
+        LocalDate[] readDay = {null};
+        data.forEach(e -> {
+            if (e.sequence() <= prev[0]) {
+                throw new IllegalArgumentException("시세 이벤트가 sequence 오름차순이 아닙니다: " + e.sequence());
+            }
+            prev[0] = e.sequence();
+            LocalDate d = rules.tradingDate(e.exchangeTime());
+            if (!d.equals(readDay[0])) {
+                gate.check(); // 읽기가 길다(여러 날 녹화). 거래일마다 정지 확인
+                readDay[0] = d;
+            }
+            if (d.isBefore(spec.from()) || d.isAfter(spec.to())) {
+                return;
+            }
+            scan.count++;
+            if (scan.firstReceivedAt == null) {
+                scan.firstReceivedAt = e.receivedAt();
+            }
+            if (!d.equals(scan.lastDay)) {
+                scan.dayChanges++;
+                scan.lastDay = d;
+            }
+            scan.dates.add(d);
+            if (benchmark != null && e instanceof TradeTick t && t.symbol().equals(benchmark)) {
+                if (scan.benchmarkFirst == null) {
+                    scan.benchmarkFirst = t.price();
+                }
+                scan.benchmarkLast = t.price();
+            }
+        });
+        return scan;
     }
 
     private RunReport runOne(
