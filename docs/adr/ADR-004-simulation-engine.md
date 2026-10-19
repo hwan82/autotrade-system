@@ -61,13 +61,15 @@
 
 ### 2.4 실험 실행기 (`run.SimulationExperimentRunner`)
 
-- 입력: `MarketDataSet`(불변 이벤트 목록과 스냅샷 ID. 구현은 테스트용 `InMemoryMarketDataSet`, 일봉 `DailyBarMarketDataSet`(D-061), 2단계 녹화 `RecordedMarketDataSet`(D-068)), `MarketRules`, `CostModel`, `StrategyFactory`, `RiskChain`(D-032, 승인만 하는 정책은 넣을 수 없음), `ExecutionSettings`, `CodeVersion`, 병렬 수, 벤치마크 종목(선택).
+- 입력: `MarketEventStream`(D-115) 또는 그것을 상속한 `MarketDataSet`(불변 이벤트 목록과 스냅샷 ID. 구현은 테스트용 `InMemoryMarketDataSet`, 일봉 `DailyBarMarketDataSet`(D-061), 2단계 녹화 `RecordedMarketDataSet`(D-068)), `MarketRules`, `CostModel`, `StrategyFactory`, `RiskChain`(D-032, 승인만 하는 정책은 넣을 수 없음), `ExecutionSettings`, `CodeVersion`, 병렬 수, 벤치마크 종목(선택).
+- 입력 계약 `run.MarketEventStream`([D-115](../decisions/D-115-stream-recordings-in-live-checks.md)): `version()`·`market()`·`eventCount()`·`forEach(sink)`. `forEach`는 부를 때마다 같은 이벤트를 같은 순서로 넘겨야 하고, 그 사이 원본이 바뀌었으면 예외를 던진다. 실행기는 입력 쪽 예외를 Run 실패가 아니라 실험 실패로 올린다. `MarketDataSet`은 이 계약을 상속하고 `events()` 목록으로 기본 구현한다.
+- 목록이 아닌 입력의 실행 방식(D-115): 입력을 두 번 읽는다. 첫 읽기에서 sequence 오름차순을 확인하고 기간 안 이벤트의 건수·거래일·첫 수신 시각·벤치마크 가격을 구한다. 두 번째 읽기에서 이벤트마다 모든 Run을 조합 순서대로 `RunStepper`로 한 걸음씩 진행한다(Run은 아무것도 공유하지 않으므로 Run별 결과는 목록 입력과 같다). 두 번째 읽기의 순서나 기간 안 건수가 첫 읽기와 다르면 결과 없이 실패한다. 병렬 수는 쓰지 않고(한 스레드), 예열(`warmupDays > 0`)은 거부한다. 정지 확인(`RunGate.check`)은 첫 읽기 거래일마다·선정 전·Run 시작 전·Run 안 거래일 마감마다 한다. 목록 입력(`MarketDataSet`)은 이전과 같은 경로(병렬·예열 포함)로 돈다.
 - 시작 검증(어기면 Run 없이 `IllegalArgumentException`): `clockMode == REPLAY`(실시간 모의는 6단계), 데이터 스냅샷 ID 일치, 비용 모델 ID 일치, 시장 일치, 비용 표 범위, 이벤트 sequence 오름차순.
 - Run마다 새로 만드는 것: `VirtualAccount`, `VirtualExchange`, `ReplayClock`, `Strategy`, 멱등 키 발급기. 공유하는 것은 불변 입력과 스레드 안전 계약을 가진 팩토리·정책뿐이다. 그래서 병렬 수가 결과에 영향을 주지 않는다(테스트로 확인).
 - 이벤트 처리 순서: (거래일이 바뀌면 전날 마감) → 시계 이동 → 거래소가 기존 주문 체결 → 전략 신호 → 신호마다 키 발급 → `RiskChain` → 거래소 접수.
 - 거래일 마감: 남은 주문 취소, 자산 곡선 한 점(평가 가격은 마지막 체결가, 없으면 최우선 매수 호가, 없으면 원가), 계좌 불변식 검사(SIM-15, `LedgerCheck`). 위반이면 그 Run만 FAILED.
 - 녹화 실험 명령(`recording.RecordingExperiment`, D-069): `runRecordingExperiment`가 등록 파일(`input: "recording"`)의 기간·프로필·소속부·제외 종목으로 실녹화를 실제 `KrxMarketRules` 위에서 돌리고, `inputs.yaml`에 녹화일별 입력 품질(`DayInfo`)과 `detail.txt` SHA-256을 남긴다.
-- 녹화 입력(`recording.RecordedMarketDataSet`, D-068): 기간 안 녹화일을 날짜 오름차순으로 잇는다. sequence는 녹화일 → 녹화 순번 순의 데이터셋 위치(1부터)이고 `origin(sequence)`가 (녹화일, 녹화 순번)을 돌려준다(끼워 넣은 줄은 0). 리플레이 소스의 "sequence = 녹화 순번"(ADR-003 2.4)은 그대로다. 공백 표시 없는 이전 녹화의 재기동 경계에는 녹화기와 같은 규칙으로 `RECORDER_RESTART` 공백을 끼운다. 버전은 `REC-<시장>-<첫 날>..<끝 날>-<해시 16자>`(어댑터 버전 `REC-ADAPTER-V1`, 시장, 날짜별 events 파일 SHA-256)이고, 읽는 동안 파일이 바뀌면 열지 않는다.
+- 녹화 입력(`recording.RecordedMarketDataSet`, D-068): 기간 안 녹화일을 날짜 오름차순으로 잇는다. sequence는 녹화일 → 녹화 순번 순의 데이터셋 위치(1부터)이고 `origin(sequence)`가 (녹화일, 녹화 순번)을 돌려준다(끼워 넣은 줄은 0). 리플레이 소스의 "sequence = 녹화 순번"(ADR-003 2.4)은 그대로다. 공백 표시 없는 이전 녹화의 재기동 경계에는 녹화기와 같은 규칙으로 `RECORDER_RESTART` 공백을 끼운다. 버전은 `REC-<시장>-<첫 날>..<끝 날>-<해시 16자>`(어댑터 버전 `REC-ADAPTER-V1`, 시장, 날짜별 events 파일 SHA-256)이고, 읽는 동안 파일이 바뀌면 열지 않는다. 날마다 다시 읽는 입력 `recording.StreamedRecordingDataSet`(D-115)은 같은 어댑터(`RecordingDayAdapter`)로 같은 이벤트·같은 버전·같은 녹화일 기록을 만들되 목록을 들지 않는다. 열 때 한 번 읽어 버전·건수를 정하고, `forEach` 때마다 그날 파일 해시를 먼저 확인한 뒤 다시 읽고, 다르면 그날 이벤트를 넘기기 전에 실패한다. 6단계 주간 점검·리플레이 확인·실시간 세션 되살리기가 이 입력을 쓴다.
 - Run 한 개의 단계(시작·이벤트 처리·거래일 마감·끝 정리·실패 기록)는 `run.RunStepper`에 있다. 리플레이 실행기와 실험실 실시간 모의 세션(`live.LiveSession`, D-076, [ADR-010](ADR-010-live-feed-and-session.md))이 같은 코드를 쓴다. 실행기의 `clockMode == REPLAY` 검사는 그대로이고, 실시간 세션은 실행기를 거치지 않고 입력 기록 순번으로 `RunStepper`를 직접 움직인다(실시간 결과 = 입력 기록 리플레이, `runLiveReplayCheck`).
 - 식별자: `runId = accountId = <실험ID>-A01, -A02 …`(프로필 목록 순서).
 - Run 시드: `SHA-256("run-seed-v1|" + randomSeed + "|" + profileHash)` 앞 8바이트(big-endian long). 바꾸면 접두어 버전을 올린다.
@@ -100,6 +102,7 @@
 | 선택 | 대안 | 판단 |
 |---|---|---|
 | 실행기 입력 = 불변 이벤트 목록(`MarketDataSet`) | A. Run마다 `MarketDataSource`를 구독 | 버림. 계좌 수만큼 리플레이가 돌고, 소스 스레드 모델이 결과 순서에 끼어든다. B(채택)는 한 번 읽고 같은 목록을 모든 Run이 독립적으로 순회해 결정론과 병렬화가 쉽다. 실시간 모의(6단계)는 같은 처리 순서를 라이브 이벤트에 붙이는 별도 실행기로 한다 |
+| 목록이 아닌 입력(`MarketEventStream`)은 두 번 읽고 모든 Run을 함께 진행([D-115](../decisions/D-115-stream-recordings-in-live-checks.md)) | A. 하루씩만 목록으로 올려 바꿔 끼움(D-115 ②), B. 목록처럼 보이는 지연 목록으로 Run마다 디스크를 다시 읽음(D-115 ③), C. 계좌 대조를 주 단위 창으로(D-115 ④) | A는 10종목 하루치도 수 GB `[추론]`라 버림. B는 실행기를 안 바꾸지만 계좌 수만큼 전 기간을 다시 풀어 훨씬 느려 버림. C는 "운용 시작부터 누계" 비교(D-088)를 바꾸고 하루 대조의 메모리 문제가 남아 버림. 채택안은 한 스레드라 계좌가 많은 실험은 느리다. 그래서 목록 입력 경로(병렬·예열)를 그대로 두고 6단계 점검 명령만 이 입력을 쓴다. 되돌릴 조건: 계좌 수가 많은 실험이 이 경로를 써야 해 병렬이 필요해지면(두 번째 읽기를 Run 묶음별로 나누는 방식 검토), 또는 다른 실험 명령을 이 입력으로 옮길 때 선정 있는 조합 골든 대조를 먼저 더한다 |
 | 지정가 대기: 앞선 잔량 모델 | A. 지정가 닿으면 즉시 전량 체결 | 버림. 대기 주문 체결을 크게 과대평가한다(team-design.md 3장 "앞선 잔량 소멸 후 체결"과도 다름) |
 | 우리 주문의 시장 영향은 스냅샷 사이에 이어지지 않음 | A. 먹은 잔량을 다음 스냅샷까지 빼 둠 | 버림(이번 판). 다음 스냅샷은 이미 실제 시장 상태라 차감 기준이 모호하고, 개인 계좌 규모(시드 1,000만 원)에서는 영향이 작다 `[추론]`. 큰 주문 전략이 나오면 되돌린다 |
 | 호가 기반 체결에 고정 슬리피지를 더하지 않음 | A. D-021 0.15%를 항상 더함 | 버림. 호가를 먹는 가격에 이미 스프레드·충격이 들어 있어 이중 계산이다. 고정 슬리피지는 호가 없는 데이터에만 쓴다(D-025) |
