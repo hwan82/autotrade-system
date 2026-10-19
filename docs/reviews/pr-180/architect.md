@@ -40,3 +40,42 @@
 
 ## 판정
 수정 필요(R1)
+
+## 재검토 2026-10-19
+- 대상: PR #180 / 커밋 ec074cd / `git diff origin/main...HEAD` 전체(merge-base 59e225a = origin/main). 앞 검토 뒤 커밋: b5eee81(strategy-researcher 원문), ec074cd(수정). 수정 커밋 11파일 +267 −39
+- 점검표: B
+- 직접 실행한 것:
+  - `git pull` 후 `./gradlew build --no-daemon -q` → **종료 코드 0**.
+  - 시험 XML 집계: 전 모듈 실패 0·오류 0·건너뜀 0. `autotrade-sim` 346건(앞 342 + 4), `autotrade-architecture-test` 46건. `LiveJudgeCriteriaTest` 13, `LiveJudgementTest` 12(이번 실행 14:44Z), `ExperimentGateTest` 21(새 시험 `녹화_판정도_정지_요청과_장_시간에는_시작하지_않는다`·`녹화_판정_인자가_틀리면_입력_오류다` 포함, Gradle이 같은 입력의 결과를 재사용).
+  - `LiveJudgementTest#l11ReplaysOnlyJournalDays`는 `Assumptions.assumeTrue`를 쓰므로 건너뛰었는지 XML을 봤다 → `<skipped>` 없음, 실행됨(0.993s).
+  - 수정 diff 추가 줄 `double`/`now()`/`new Random`/비밀값 단어 검색 → 0건. 보호 경로 대조 → 새로 바뀐 `autotrade-ui/.../jobs.js`·`autotrade-sim/.../ExperimentJobStatus.java`도 보호 경로 밖.
+
+### R1 확인
+- (a) ExperimentGateTest.java:222-237: `live-judge`가 장 시간 보호 구간이면 4, 정지 요청이 있으면 해제 옵션이 있어도 4, 실험 폴더에 `experiment.yaml`만 남음. 형제 명령과 같은 형태.
+- (b) ExperimentGateTest.java:239-261: 인자 부족·`../EXP`·모르는 옵션·값 없는 `--recordings-dir`·등록 없음·해석 실패 → 1, 파일 1개 그대로.
+- (c) `LiveJudgementTest#mainExitCodes`: `LiveJudgeMain.run`이 실시간 보고서 없음 1(파일 없음), 정상 0(파일 있음), 실시간 보고서를 바꾸면 2(파일 씀, I3 "다름").
+- 이 시험이 실제 결함을 찾았다: `ExperimentJobStatus.COMMANDS`(ExperimentJobStatus.java:59, :93에서 검사)에 `live-judge`가 없어 명령이 작업 시작에서 실패했을 것이다. 앞 검토가 놓친 것이다. 고침은 목록에 값 하나를 더한 것이고 기존 값과 상태 파일 형식은 그대로다(실험실 쪽 읽기와 하위 호환). 실험실 작업 화면 이름(jobs.js:13)도 더했다(ui-dev 영역의 표시 문자열 한 줄, 동작 변화 없음).
+- R1 해결.
+
+### 다른 수정(이번에 함께 본 것)
+- N3: 보고서에서 묶음 수를 뺐고, 1·2·4묶음 보고서를 치환 없이 바이트 비교한다(LiveJudgementTest.java:148-150). 해결.
+- N4: runbooks/README.md:38 문구를 "`runStrategyStudy` 밖 명령 모두"로. 해결.
+- N1: 대조군 시드 21m − 1(`LiveJudgement.nullSeeds`, 시험 `controlSeedsLeaveAMarginOverTheMinimum`으로 N + 1 − m = 20m 고정). 여유가 결과를 보기 전에 고정돼 사후 표본 늘리기가 아니다. 해결.
+- strategy-researcher M1(L11 입력 기록일만): `recording`이 `journalDates`만 돈다(LiveJudgement.java:362-372), 기록일에 녹화가 없으면 판정 불가. 시험 `l11ReplaysOnlyJournalDays`(기간 안·기록 없는 날 녹화를 더해도 보고서 바이트 같음). 코드 쪽은 맞다.
+- strategy-researcher M2(L5 미달 → 판정 불가): LiveJudgeCriteria.java:128-132, 시험 `l5_short_sample_is_not_available_not_fail`. D-114의 수치(30건)는 그대로이고 합성만 D-066 2번·D-072와 맞춘 것이라 확정 결정과 충돌하지 않는다고 본다 `[추론]`. 판정 기준의 타당성은 strategy-researcher 재검토 몫이다.
+- 대조군 L1~L6 통과 표시(LiveJudgement.java:517-524), 다중 비교·진입 일치 한계 문구: 렌더만 바뀜. 대조군 인덱스는 `roles`가 항상 정해 두므로 null이 될 수 없다.
+- 남은 N2(묶음 순서대로 `get`)는 고치지 않았다. 결과에 영향이 없는 대기 시간 문제라 막지 않는다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 직접 `./gradlew build` 실행, 종료 코드 0, 전 모듈 실패·오류·건너뜀 0 |
+| B2 | 통과 | 새 의존 없음. `ExperimentJobStatus`는 `autotrade-sim` 기존 클래스, jobs.js는 UI 정적 파일. ArchUnit 46건 통과 |
+| B3 | 통과 | 앞 검토의 ADR-004·D-116·runbook 그대로, D-116이 이번 수정(시드 수·L11 날짜·L5)을 반영. `COMMANDS` 값 추가는 상태 파일 명령 이름 열거에 새 명령을 더한 것이라 D-116 결정 1번(새 명령)의 일부로 본다. 설정 키·스키마·REST 변경 없음 |
+| B4 | 통과 | 묶음 수와 보고서 바이트 일치(치환 없이), 레인 대 단독 일치 시험 그대로 통과. 시스템 시계·시드 없는 난수 없음 |
+| B5 | 통과 | 바뀐 계산 없음(L5는 판정 분류만). 모두 `BigDecimal` |
+| B6 | 통과 | R1 (a)(b)(c) 시험 추가, 새 동작(L5·L11 날짜·시드 수)마다 시험. 삭제·비활성화 없음(`LiveJudgementTest`에서 바뀐 단언은 레인 수·문구 기대값 갱신과 치환 제거로 더 엄격해짐). assume 시험이 실제로 실행됨을 확인 |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·리스크 한도·장애 대응·보호 테스트 변경 없음 |
+| B8 | 통과 | 추가 줄 비밀값 단어 0건 |
+
+### 판정
+승인
