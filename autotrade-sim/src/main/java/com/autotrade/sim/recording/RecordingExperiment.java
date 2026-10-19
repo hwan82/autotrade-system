@@ -232,7 +232,7 @@ public final class RecordingExperiment {
         return out;
     }
 
-    public static String inputs(RecordingPlan plan, RecordedMarketDataSet data, TreeSet<Symbol> symbols, CostModel cost,
+    public static String inputs(RecordingPlan plan, RecordingInput data, TreeSet<Symbol> symbols, CostModel cost,
             ExecutionSettings execution, BlacklistSnapshot blacklist, SimulationReport report, String determinism,
             String detail) {
         StringBuilder sb = new StringBuilder();
@@ -243,7 +243,7 @@ public final class RecordingExperiment {
         sb.append("data-set: \"").append(data.version()).append("\"\n");
         sb.append("adapter: ").append(RecordedMarketDataSet.ADAPTER_VERSION).append('\n');
         sb.append("market: ").append(plan.market()).append('\n');
-        sb.append("events: ").append(data.events().size()).append('\n');
+        sb.append("events: ").append(data.eventCount()).append('\n');
         sb.append("symbols: \"").append(String.join(",", symbols.stream().map(Symbol::code).toList())).append("\"\n");
         sb.append("recording-days:\n");
         for (RecordedMarketDataSet.DayInfo d : data.days()) {
@@ -274,14 +274,14 @@ public final class RecordingExperiment {
         return sb.toString();
     }
 
-    public static String results(RecordingPlan plan, RecordedMarketDataSet data, CostModel cost, ExecutionSettings execution,
+    public static String results(RecordingPlan plan, RecordingInput data, CostModel cost, ExecutionSettings execution,
             BlacklistSnapshot blacklist, SimulationReport report, String determinism) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 결과\n\n");
         sb.append("- 질문: ").append(plan.question()).append('\n');
         sb.append("- 기간: ").append(plan.from()).append(" ~ ").append(plan.to()).append(" (녹화일 ").append(data.days().size())
                 .append("일), 시드 ").append(plan.seed()).append(", 계좌별 시드머니 ").append(plan.seedCapital()).append('\n');
-        sb.append("- 데이터: `").append(data.version()).append("`, 이벤트 ").append(data.events().size()).append(", 시세 공백 ")
+        sb.append("- 데이터: `").append(data.version()).append("`, 이벤트 ").append(data.eventCount()).append(", 시세 공백 ")
                 .append(report.dataGaps().size()).append('\n');
         sb.append("- 비용 `").append(cost.id()).append("`, 체결 `").append(execution.id()).append("`, 블랙리스트 ")
                 .append(blacklist.size()).append("종목, 벤치마크 ").append(plan.benchmark().orElse("없음")).append('\n');

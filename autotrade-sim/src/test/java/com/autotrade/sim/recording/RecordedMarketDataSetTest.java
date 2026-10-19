@@ -161,6 +161,80 @@ class RecordedMarketDataSetTest {
                 .hasMessageContaining("오름차순");
     }
 
+    /**
+     * D-115: 날마다 다시 읽는 입력은 목록 입력과 같은 규칙이라 이벤트·sequence·버전·녹화일 기록이 모두 같다. 이틀치, 녹화기가
+     * 남긴 재기동 공백, 공백 표시 없는 이전 녹화, 줄 없이 끝난 구간이 낀 이전 녹화를 본다.
+     */
+    @Test
+    void 날마다_다시_읽는_입력은_목록_입력과_이벤트와_버전이_같다() throws IOException {
+        Path plain = root.resolve("plain");
+        FixtureRecordings.record(plain, Market.KRX, ZONE, EVENTS);
+        assertStreamedSame(List.of(new RecordingLayout(plain).dayDir(Market.KRX, D1),
+                new RecordingLayout(plain).dayDir(Market.KRX, D2)));
+
+        Path marked = root.resolve("marked");
+        recordDay1WithRestart(marked);
+        assertStreamedSame(List.of(new RecordingLayout(marked).dayDir(Market.KRX, D1)));
+
+        Path legacyRoot = root.resolve("legacy");
+        writeLegacyCopy(new RecordingLayout(marked).dayDir(Market.KRX, D1), new RecordingLayout(legacyRoot).dayDir(Market.KRX, D1),
+                segs -> segs);
+        assertStreamedSame(List.of(new RecordingLayout(legacyRoot).dayDir(Market.KRX, D1)));
+
+        Path emptySeg = root.resolve("empty-segment");
+        Instant lastRx = EVENTS.get(12).receivedAt();
+        writeLegacyCopy(new RecordingLayout(marked).dayDir(Market.KRX, D1), new RecordingLayout(emptySeg).dayDir(Market.KRX, D1),
+                segs -> List.of(segs.get(0),
+                        new RecordingMeta.Segment(lastRx.plusSeconds(5).toString(), lastRx.plusSeconds(10).toString(), 14),
+                        segs.get(1)));
+        assertStreamedSame(List.of(new RecordingLayout(emptySeg).dayDir(Market.KRX, D1)));
+    }
+
+    @Test
+    void 날마다_다시_읽는_입력은_연_뒤_파일이_바뀌면_그날_이벤트를_넘기기_전에_멈춘다() throws IOException {
+        FixtureRecordings.record(root, Market.KRX, ZONE, EVENTS);
+        RecordingLayout layout = new RecordingLayout(root);
+        List<Path> dirs = List.of(layout.dayDir(Market.KRX, D1), layout.dayDir(Market.KRX, D2));
+        StreamedRecordingDataSet ds = StreamedRecordingDataSet.open(Market.KRX, dirs, () -> { }, e -> { });
+        Path day2 = layout.dayDir(Market.KRX, D2).resolve(RecordingLayout.EVENTS_FILE);
+        Files.write(day2, Files.readAllBytes(layout.dayDir(Market.KRX, D1).resolve(RecordingLayout.EVENTS_FILE)));
+
+        List<MarketEvent> seen = new java.util.ArrayList<>();
+        assertThatThrownBy(() -> ds.forEach(seen::add)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("바뀌었습니다");
+        assertThat(seen).as("1일차만 넘기고 2일차는 읽기 전에 멈춤").hasSize(14);
+    }
+
+    @Test
+    void 날마다_다시_읽는_입력도_날짜가_거꾸로거나_다른_시장이면_열지_않는다() {
+        FixtureRecordings.record(root, Market.KRX, ZONE, EVENTS);
+        RecordingLayout layout = new RecordingLayout(root);
+        assertThatThrownBy(() -> StreamedRecordingDataSet.open(Market.US, List.of(layout.dayDir(Market.KRX, D1)), () -> { },
+                e -> { })).hasMessageContaining("다른 시장");
+        assertThatThrownBy(() -> StreamedRecordingDataSet.open(Market.KRX,
+                List.of(layout.dayDir(Market.KRX, D2), layout.dayDir(Market.KRX, D1)), () -> { }, e -> { }))
+                .hasMessageContaining("오름차순");
+        assertThatThrownBy(() -> StreamedRecordingDataSet.open(Market.KRX, List.of(), () -> { }, e -> { }))
+                .hasMessageContaining("녹화일이 없습니다");
+    }
+
+    private static void assertStreamedSame(List<Path> dirs) {
+        RecordedMarketDataSet list = RecordedMarketDataSet.fromDirs(Market.KRX, dirs);
+        List<MarketEvent> opened = new java.util.ArrayList<>();
+        StreamedRecordingDataSet streamed = StreamedRecordingDataSet.open(Market.KRX, dirs, () -> { }, opened::add);
+        List<MarketEvent> first = new java.util.ArrayList<>();
+        streamed.forEach(first::add);
+        List<MarketEvent> second = new java.util.ArrayList<>();
+        streamed.forEach(second::add);
+
+        assertThat(opened).isEqualTo(list.events());
+        assertThat(first).isEqualTo(list.events());
+        assertThat(second).isEqualTo(list.events());
+        assertThat(streamed.version()).isEqualTo(list.version());
+        assertThat(streamed.days()).isEqualTo(list.days());
+        assertThat(streamed.eventCount()).isEqualTo(list.eventCount());
+    }
+
     /** 골든 1일차(14줄)를 녹화기 두 번 기동으로 녹화한다: 앞 13줄(두 종목) → 재기동 → 마지막 1줄. */
     private static void recordDay1WithRestart(Path at) {
         List<MarketEvent> day1 = EVENTS.subList(0, 14);

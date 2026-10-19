@@ -11,6 +11,7 @@ import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.feed.FeedClient;
 import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.recording.JournalWriter;
+import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ExperimentStoppedException;
@@ -87,6 +88,11 @@ class LiveWeeklyCheckTest {
 
     /** 게이트웨이 녹화: 이틀치 시세에 boards 밖 종목(카카오)이 섞인다. 녹화기와 같은 줄 형식. */
     private List<MarketEvent> recordGateway(List<LocalDate> days) {
+        return recordGateway(days, -1);
+    }
+
+    /** {@code twiceAt}번째 이벤트는 같은 줄로 두 번 녹화한다(음수면 없음). */
+    private List<MarketEvent> recordGateway(List<LocalDate> days, int twiceAt) {
         List<MarketEvent> events = LiveSessionTest.twoDays().stream()
                 .filter(e -> days.contains(e.receivedAt().atZone(SEOUL).toLocalDate())).toList();
         JournalWriter w = new JournalWriter(new RecordingLayout(recordings), Market.KRX, SEOUL, Map.of(SRC, "테스트 녹화"),
@@ -95,6 +101,9 @@ class LiveWeeklyCheckTest {
         for (int i = 0; i < events.size(); i++) {
             MarketEvent e = events.get(i);
             w.append(SRC, e, e.receivedAt());
+            if (i == twiceAt) {
+                w.append(SRC, e, e.receivedAt());
+            }
             if (i % 50 == 0) {
                 w.append(SRC, new TradeTick(KAKAO, ++seq, e.exchangeTime(), e.receivedAt(), new BigDecimal("40000"), 1),
                         e.receivedAt());
@@ -393,5 +402,56 @@ class LiveWeeklyCheckTest {
         assertThatThrownBy(() -> LiveWeeklyCheck.runAndWrite(experimentDir, REPO, sessions, recordings, snapshots, Optional.empty(),
                 new CodeVersion("c", false), m -> { }, stopOnSecond)).isInstanceOf(ExperimentStoppedException.class);
         assertThat(experimentDir.resolve(LiveWeeklyCheck.WEEKLY_DIR)).doesNotExist();
+    }
+
+    @Test
+    void sameLineSeveralTimesIsMatchedByCountLikeTheOldListComparison() {
+        // 같은 내용 줄(같은 열쇠)이 여러 번 나오면 몇 번 나왔는지로 짝 짓는다(D-115 128비트 열쇠). 녹화에 두 번 있고 기록에 한 번
+        // 있으면 빠짐 1, 기록에 두 번 있고 녹화에 한 번 있으면 남음 1이다. 예전 목록 대조(문자열 열쇠의 개수 맞추기)와 같은 수다
+        List<MarketEvent> events = recordGateway(List.of(DAY1), 10);
+        try (LiveSession s = open()) {
+            for (int i = 0; i < events.size(); i++) {
+                MarketEvent e = events.get(i);
+                clock.now = e.receivedAt();
+                s.accept(SRC, e);
+                if (i == 20) {
+                    s.accept(SRC, e);
+                }
+            }
+        }
+
+        LiveWeeklyCheck.Outcome out = check(Optional.empty());
+
+        LiveWeeklyCheck.DayRow r = out.days().get(0);
+        assertThat(r.recordedEvents()).isEqualTo(events.size() + 1);
+        assertThat(r.journalLines()).isEqualTo(events.size() + 1);
+        assertThat(r.matched()).isEqualTo(events.size());
+        assertThat(r.missing()).containsEntry(LiveWeeklyCheck.UNEXPLAINED, 1L);
+        assertThat(r.missingTotal()).isEqualTo(1);
+        assertThat(r.extraUnexplained()).isEqualTo(1);
+        assertThat(r.extraInRecorderGap()).isZero();
+        assertThat(out.defect()).isTrue();
+    }
+
+    @Test
+    void recordingChangedAfterTheDayComparisonIsRejectedBeforeAnyEventReachesTheReplay() throws Exception {
+        // 하루 대조 때 남긴 파일 지문과 계좌 대조 때 다시 읽는 파일이 다르면, 이벤트를 넘기기 전에 거부한다(D-115)
+        recordGateway(List.of(DAY1));
+        Path dir = new RecordingLayout(recordings).dayDir(Market.KRX, DAY1);
+        LiveSetup setup = LiveSetup.of(plan, REPO);
+        LiveWeeklyCheck.BoardsRecording replay = new LiveWeeklyCheck.BoardsRecording(setup);
+        LiveWeeklyCheck.DayRow row = LiveWeeklyCheck.compareDay(setup, new RecordingCodec(), DAY1, null, dir, replay);
+        assertThat(replay.count()).isEqualTo(row.recordedEvents()).isPositive();
+
+        List<MarketEvent> first = new java.util.ArrayList<>();
+        replay.stream("v", RunGate.NONE).forEach(first::add);
+        assertThat(first).hasSize((int) replay.count());
+
+        Path file = dir.resolve(RecordingLayout.EVENTS_FILE);
+        Files.write(file, new byte[] {0}, java.nio.file.StandardOpenOption.APPEND);
+        List<MarketEvent> second = new java.util.ArrayList<>();
+        assertThatThrownBy(() -> replay.stream("v", RunGate.NONE).forEach(second::add))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("녹화가 대조한 뒤 바뀌었습니다");
+        assertThat(second).isEmpty();
     }
 }
