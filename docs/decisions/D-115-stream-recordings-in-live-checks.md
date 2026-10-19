@@ -64,3 +64,7 @@
 - **6단계 스레드(PR #175 후속)**: `docs/strategy/stage-6-plan.md` 5장 T1 행을 "D-115로 처리"로, 6장 또는 7장에 주간 점검 예상 시간(위)을 적는다. `docs/runbooks/stage-6-live-session.md` 주간 점검 절에 "힙은 기간과 상관없음, 시간은 기간에 비례"를 적는다. 이 PR은 두 파일을 고치지 않는다(6단계 스레드 몫).
 - 다른 실험 명령(`runRecordingExperiment` 등)은 여전히 목록 입력이다. 녹화 기간이 길어지면 같은 입력(`StreamedRecordingDataSet`)으로 바꾼다. 그 전에 목록이 아닌 입력 경로에서 선정 있는 조합(`spec.hasSelections()`)의 골든 대조를 더한다(지금 이 경로를 쓰는 6단계 점검 명령은 선정 없이 돌아 닿지 않음, architect N1).
 - 실행기 입력 계약과 실행 방식은 [ADR-004](../adr/ADR-004-simulation-engine.md) 2.4·3장에 반영했다(architect R1).
+
+## 후속 반영
+
+- marketdata로 옮기기와 게이트웨이 `replayCheck` 줄 단위: [D-117](D-117-marketdata-streamed-recording-read.md). sim `RecordedDayStream` 삭제는 D-117 후속.

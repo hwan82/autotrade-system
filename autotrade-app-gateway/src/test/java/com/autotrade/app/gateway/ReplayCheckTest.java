@@ -347,4 +347,50 @@ class ReplayCheckTest {
         ReplayCheck.check(day, SymbolNames.empty(), counting);
         assertThat(calls[0]).isEqualTo(4); // 기본 간격(50,000줄)에서는 회차마다 시작·수집 뒤 2번
     }
+
+    @Test
+    void 회차_안에서_녹화가_바뀌면_결과_없이_실패하고_2를_돌려준다() throws Exception {
+        Path day = recordDay();
+        Files.delete(day.resolve(RecordingLayout.META_FILE)); // 쓰이는 중인 녹화: 해시 대조 없이 읽는다
+        Path events = day.resolve(RecordingLayout.EVENTS_FILE);
+        byte[] original = Files.readAllBytes(events);
+        int[] calls = {0};
+        int[] at = {6};
+        // 1회차 종목 수집이 끝난 뒤의 확인(간격 2줄이면 6번째)에서 마지막 줄을 지운다: 리플레이 읽기가 수집 읽기와 다른 녹화를 본다
+        ReplayCheck.StopCheck changesFile = () -> {
+            if (++calls[0] == at[0]) {
+                dropLastLine(events);
+            }
+            return Optional.empty();
+        };
+
+        assertThatThrownBy(() -> ReplayCheck.check(day, SymbolNames.empty(), changesFile, 2))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("읽는 사이에 바뀌었습니다");
+
+        Files.write(events, original);
+        calls[0] = 0;
+        at[0] = 2; // 기본 간격(5만 줄)이면 시작(1) 다음 수집 뒤 확인이 2번째
+        Path report = root.resolve("report.md");
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        int code = ReplayCheck.run(new String[] {day.toString(), report.toString()}, config(), changesFile,
+                SymbolNames.empty(), sink(), new PrintStream(err, true, StandardCharsets.UTF_8));
+        assertThat(code).isEqualTo(2);
+        assertThat(report).doesNotExist();
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("녹화 확인 실패").contains("읽는 사이에 바뀌었습니다");
+    }
+
+    private static void dropLastLine(Path events) {
+        try {
+            String text;
+            try (java.io.InputStream in = new java.util.zip.GZIPInputStream(Files.newInputStream(events))) {
+                text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            String body = text.substring(0, text.length() - 1);
+            try (java.io.OutputStream out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(events))) {
+                out.write(body.substring(0, body.lastIndexOf('\n') + 1).getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
 }
