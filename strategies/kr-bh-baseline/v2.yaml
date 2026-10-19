@@ -1,0 +1,14 @@
+# 전략 프로필(ADR-005 4장). 저장된 버전 파일은 고치지 않는다. 바꾸려면 새 버전을 만든다.
+id: "kr-bh-baseline"
+version: 2
+market: "KRX"
+style: "SWING"
+based-on: "kr-bh-baseline@1"
+created-at: "2026-10-19T00:00:00Z"
+note: "6단계 실시간 모의(D-113)용. v1은 slots 4라 boards 10종목 중 먼저 호가가 온 4종목만 사서 바구니가 도착 순서에 달렸다. slots를 boards 수와 같게 해 모든 종목을 한 번씩 시도한다(PR #175 strategy-researcher M1)"
+parameters:
+  hypothesis: "국내 유니버스를 첫날 같은 금액으로 사서 끝까지 들고 가면, 판단 없이 시장 흐름만 받은 비용 차감 후 기준 성과가 나온\
+    다"
+  logic: "buy-and-hold"
+  sizing.cash-buffer-pct: "1"
+  sizing.slots: "10"
