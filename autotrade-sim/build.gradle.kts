@@ -8,9 +8,6 @@ dependencies {
     api(project(":autotrade-selection"))
     implementation(project(":autotrade-marketdata"))
     implementation(project(":autotrade-risk"))
-    // 녹화 meta.json을 줄 단위 읽기(RecordedDayStream, D-115)에서 읽는다. marketdata가 이미 런타임에 넣는 같은 라이브러리다
-    implementation(platform(libs.jackson.bom))
-    implementation(libs.jackson.databind)
 }
 
 // 골든 스냅샷 갱신: ./gradlew :autotrade-sim:test -Dgolden.update=true (갱신 후 diff를 손 계산과 대조해 커밋)

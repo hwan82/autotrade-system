@@ -53,3 +53,8 @@
 
 - **sim-engine(“6단계 녹화 판정 명령” PR 머지 뒤)**: sim `RecordedDayStream`을 지우고 import를 marketdata 것으로 바꾼다. sim `RecordedDayStreamTest`를 정리하기 전에 거기서만 고정하던 규칙(순번 끊김 거부, 깨진 gzip 머리, 정상 종료 녹화 가운데 줄 형식 오류 거부)이 marketdata 시험에 있는지 확인한다(이 PR에서 marketdata `RecordedDayStreamTest`에 옮겨 둠, architect R2). 같은 이름 클래스가 두 모듈에 있는 동안 IDE 자동 import에 주의한다(architect R3). sim `build.gradle.kts`의 `jackson-databind`(D-115에서 더함)를 뺀다.
 - **data-engineer(녹화 쓰기 경로, 실전 관련)**: `DayWriter` 재기동이 그날 녹화를 통째로 올리지 않게(요약은 줄 단위로, 다시 쓰기는 읽으며 바로 tmp 파일에) 바꾼다. 장중 재기동 메모리를 실측한 뒤 판단한다.
+
+## 후속 반영
+
+- sim 복제본 정리(PR #179 머지 뒤 PR): sim `RecordedDayStream`·sim `RecordedDayStreamTest`를 지우고 `LiveWeeklyCheck`·`RecordingDayAdapter`가 marketdata `RecordedDayStream`을 쓴다. sim `build.gradle.kts`의 `jackson-databind`를 뺐다. 지운 sim 시험이 고정하던 규칙(정상 종료·재기동·표시 없는 경계·잘린 마지막 줄·깨진 gzip 머리·순번 끊김·해시 불일치·받는 쪽 예외)은 marketdata `RecordedDayStreamTest`·`RecordingReplayTest`에 있다.
+- 독립 QA(PR #179) 권고: Q1은 gateway `ReplayCheckTest`에 시험 셋(건수가 같아도 메타가 바뀌면 실패, 건수·마지막 순번이 같아도 마지막 수신 시각이 바뀌면 실패, 구간 경계 첫 줄이 재기동 표시가 아닌 공백이면 표시 없는 경계로 적음). Q2는 같은 파일에 정상 종료 표시가 있는데 해시가 비고 gzip 끝이 잘렸으면 종료 코드 2(정상 종료 아님이면 불완전)를 고정했다. 세 변이(M2 요약 비교를 건수만, M9 재기동 표시 판정에서 사유 검사 뺌, M12 정상 종료에도 gzip 끝 허용)를 손으로 넣어 각각 이 시험이 잡는지 확인했다(개발 쪽 직접 실행).
