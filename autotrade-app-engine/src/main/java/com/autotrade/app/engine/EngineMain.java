@@ -34,6 +34,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * 실전 매매 엔진(D-013 ①). 설정을 읽고 RealTradingGuard(모든 실전 계좌 OFF)와 실전 제어 명령 채널(ADR-006)을 띄운 뒤
@@ -278,15 +279,29 @@ public final class EngineMain {
         static final String PROGRAM_ERROR_HEADLINE =
                 "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 로그의 예외를 개발 쪽에 알려 주세요";
 
+        private static final Pattern LINE_BREAK = Pattern.compile("\\R");
+        private static final Pattern LINE_BREAK_RUN = Pattern.compile("\\s*\\R\\s*");
+
         static StartFailure of(Exception e) {
             if (e instanceof EngineRefusal) {
-                return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, e.getMessage(), false);
+                return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, oneLine(e.getMessage()), false);
             }
             if (e instanceof IOException) {
-                return new StartFailure(EXIT_START_FAILED, CHANNEL_HEADLINE, e.getMessage(), false);
+                return new StartFailure(EXIT_START_FAILED, CHANNEL_HEADLINE, oneLine(e.getMessage()), false);
             }
-            return new StartFailure(EXIT_START_FAILED, PROGRAM_ERROR_HEADLINE, e.getClass().getSimpleName() + ": " + e.getMessage(),
-                    true);
+            return new StartFailure(EXIT_START_FAILED, PROGRAM_ERROR_HEADLINE,
+                    e.getClass().getSimpleName() + ": " + oneLine(e.getMessage()), true);
+        }
+
+        /**
+         * 원인 메시지의 줄바꿈을 " / "로 접어 로그 ERROR와 표준 오류가 늘 한 줄이게 한다(D-112, PR #169 독립 QA R2). 줄바꿈이 없으면
+         * 글자 그대로 둔다. 프로그램 오류의 예외 흐름(스택)에는 원래 메시지가 그대로 남는다.
+         */
+        static String oneLine(String message) {
+            if (message == null || !LINE_BREAK.matcher(message).find()) {
+                return String.valueOf(message);
+            }
+            return LINE_BREAK_RUN.matcher(message.strip()).replaceAll(" / ");
         }
 
         /** 로그(ERROR)와 표준 오류에 한 줄씩 남긴다. 프로그램 오류면 로그에 예외 흐름도 남긴다. */
