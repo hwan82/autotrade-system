@@ -71,7 +71,8 @@
    - 종료 코드 0이면 실시간 결과와 입력 기록 리플레이가 같다(합격). `inputs.yaml`, `results.md`, `detail.txt`가 등록 파일 옆에 생긴다.
    - 2면 실시간 경로 결함이거나 실패한 계좌가 있다. `results.md`를 보고 알린다.
    - 장 시간에는 시작하지 않는다(D-063). 꼭 필요하면 `-PallowDuringSession`.
-3. 결과 세 파일과 `live-detail.txt`는 커밋한다. 입력 기록(설정 폴더)은 커밋하지 않는다(녹화와 같은 재배포 금지).
+3. 리플레이 확인이 0으로 끝나면 녹화 판정(D-116): `./gradlew :autotrade-app-experiment:runLiveJudgement -Pexperiment=EXP-20261015-LIVE01` → `experiments/<ID>/judgement.md`. 장중 승격 기준 L1~L11(D-114)을 계산한다. 종료 코드 0 판정함(후보 0개 포함), 1 입력 오류, 2 무사고 I1~I3 깨짐(파일은 씀), 3 취소, 4 장 시간 보호·정지 요청. LIVE01(10종목 40일)은 4코어에서 약 1.5~2시간 `[추론]`이다. 이 결과로 판정 리포트를 쓴다.
+4. 결과 세 파일, `live-detail.txt`, `judgement.md`는 커밋한다. 입력 기록(설정 폴더)은 커밋하지 않는다(녹화와 같은 재배포 금지).
 
 ## 5. 첫 운용일 확인 항목(Windows `[가정]` 확인)
 
