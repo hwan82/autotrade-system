@@ -517,6 +517,27 @@ public final class LiveWeeklyCheck {
             this.setup = setup;
         }
 
+        /**
+         * 녹화일들을 한 번 읽어 계좌 대조용 녹화를 만든다(6단계 녹화 판정 L11, D-116). 주간 점검 하루 대조({@link #compareDay})가
+         * 더하는 것과 같은 줄(boards·운용 기간, 녹화기 공백 포함)을 같은 순서로 더하고, 읽는 동안 파일이 바뀌면 거부한다.
+         */
+        static BoardsRecording read(LiveSetup setup, List<Path> dirs, RunGate gate) {
+            BoardsRecording out = new BoardsRecording(setup);
+            for (Path dir : dirs) {
+                gate.check();
+                String before = fingerprintOf(dir);
+                Day day = out.startDay(dir, before);
+                RecordedDayStream.read(dir, l -> {
+                    MarketEvent e = l.event();
+                    if (setup.onBoards(e) && setup.inPlan(e)) {
+                        day.add(e);
+                    }
+                });
+                ensureStable(dir, before);
+            }
+            return out;
+        }
+
         Day startDay(Path dir, String fingerprint) {
             Day d = new Day(dir, fingerprint);
             days.add(d);
