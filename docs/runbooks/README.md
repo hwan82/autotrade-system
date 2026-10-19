@@ -35,7 +35,7 @@
 | `runLiveJudgement` | 6단계 장중 승격 후보 기준 L1~L11 계산(±20% 변형·지연·대조군·녹화 대조), `judgement.md` | 끝낸 세션의 `live-detail.txt`, 같은 날 게이트웨이 녹화 | [D-116](../decisions/D-116-stage-6-recording-judgement.md) |
 | `runStrategyStudy` | 합성 시세 비교(4단계 첫 실험 재현용) | 없음 | `autotrade-app-experiment/build.gradle.kts` 주석 |
 
-옵션: `-PallowDuringSession`(다섯 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드 실험만).
+옵션: `-PallowDuringSession`(위 표의 `runStrategyStudy` 밖 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드 실험만).
 
 ## 2. 하루 흐름 (거래일 기준, 서울 시각)
 

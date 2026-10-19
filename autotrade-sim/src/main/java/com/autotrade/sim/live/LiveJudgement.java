@@ -57,7 +57,7 @@ import java.util.function.Consumer;
  *   <li>BASE: 등록 파일 그대로(기본 지연 0.5초)</li>
  *   <li>PERTURB: 판정 대상 프로필마다 {@code study.key-param} ×0.8·×1.2(L7, 4단계 C7과 같은 변형 규칙)</li>
  *   <li>L0·L1500·L2000: 판정 대상 프로필을 주문 지연 0·1.5·2초로(STR-13. L9는 2초)</li>
- *   <li>NULL1~NULLN: 무작위 대조군을 시드 = 실험 시드 + i로(L10, N = 20m − 1)</li>
+ *   <li>NULL1~NULLN: 무작위 대조군을 시드 = 실험 시드 + i로(L10, N = 21m − 1: 판정 가능한 최소 20m − 1에 여유 m)</li>
  *   <li>REC: 등록 파일 그대로 같은 날 게이트웨이 녹화(boards만)로(L11, 주간 점검 계좌 대조와 같은 입력)</li>
  * </ul>
  * 입력 기록 레인들은 실행기의 레인 경로({@link SimulationExperimentRunner#runLanes})로 기록을 한 번 읽어 함께 돈다. 레인을 몇 묶음으로
@@ -134,7 +134,9 @@ public final class LiveJudgement {
 
         ScreeningThresholds t = ScreeningThresholds.defaults();
         int m = roles.judged().size();
-        int nullSeeds = 20 * m - 1; // L10 판정이 가능한 가장 작은 N(N + 1 = 20m)
+        // L10 판정이 가능한 가장 작은 N(N + 1 = 20m)에 판정 대상 수만큼 여유를 둔다: 대조군 몇 개가 실패하거나 왕복 0건이어도
+        // 모든 계좌의 L10이 판정 불가로 떨어지지 않게(PR #180 strategy-researcher R1, 결과를 보기 전에 고정)
+        int nullSeeds = nullSeeds(m);
         Plan lanes = lanes(setup, roles, journal.version(), nullSeeds, log);
         gate.check();
         // 묶음 수 + 녹화 리플레이 한 번(D-098 명령 전체 진행률)
@@ -157,8 +159,7 @@ public final class LiveJudgement {
         Recording rec = recording(setup, recordingsRoot, journalDates, code, gate, log);
 
         Judged judged = judge(setup, roles, lanes, byId, rec, t, m);
-        String report = render(setup, code, journal, lanes, byId, rec, judged, diff, codeLine(liveDetail), t, m, nullSeeds,
-                groups.size());
+        String report = render(setup, code, journal, lanes, byId, rec, judged, diff, codeLine(liveDetail), t, m, nullSeeds);
         Map<String, String> verdicts = new LinkedHashMap<>();
         judged.judgements().forEach((k, v) -> verdicts.put(k, v.verdict().label()));
         return new Outcome(judged.incident() || diff >= 0, verdicts, report);
@@ -343,6 +344,11 @@ public final class LiveJudgement {
                 setup.execution(), code, 1, setup.benchmark(), null, gate);
     }
 
+    /** 대조군 시드 수: 21m − 1(판정 가능한 최소 20m − 1에 여유 m). */
+    static int nullSeeds(int m) {
+        return 21 * m - 1;
+    }
+
     /** 녹화 리플레이(L11). 돌리지 못했으면 {@code report}가 null이고 이유가 {@code note}. */
     record Recording(SimulationReport report, String note, long events, int days) {
     }
@@ -354,12 +360,13 @@ public final class LiveJudgement {
         LocalDate end = journalDates.get(journalDates.size() - 1);
         List<String> missing = new ArrayList<>();
         List<Path> dirs = new ArrayList<>();
-        Set<LocalDate> withJournal = new TreeSet<>(journalDates);
-        for (LocalDate d = plan.from(); !d.isAfter(end); d = d.plusDays(1)) {
+        // 입력 기록이 있는 날(실험실이 실제로 운용한 날)만 돌린다. 게이트웨이만 켜진 날을 넣으면 운용일 결손(I5)이 L11 괴리로
+        // 들어간다(PR #180 strategy-researcher M1). 주간 점검 계좌 대조는 운용 기간 전체 녹화라 날짜 집합이 다를 수 있다.
+        for (LocalDate d : journalDates) {
             Path dir = layout.dayDir(plan.market(), d);
             if (Files.isRegularFile(dir.resolve(RecordingLayout.EVENTS_FILE))) {
                 dirs.add(dir);
-            } else if (withJournal.contains(d)) {
+            } else {
                 missing.add(d.toString());
             }
         }
@@ -374,7 +381,7 @@ public final class LiveJudgement {
             log.accept("L11: " + note);
             return new Recording(null, note, boards.count(), dirs.size());
         }
-        // 주간 점검 계좌 대조와 같은 입력·같은 데이터 버전(D-088)
+        // 주간 점검 계좌 대조와 같은 읽기(boards·운용 기간 종목, D-088). 날짜는 입력 기록일만
         MarketEventStream stream = boards.stream("REC-BOARDS-" + plan.id() + "-" + journalDates.get(0) + ".." + end, gate);
         log.accept("녹화 리플레이(L11): 녹화 " + dirs.size() + "일, 이벤트 " + stream.eventCount());
         SimulationReport r = runner(setup, stream, code, gate).runDetailed(setup.spec(ClockMode.REPLAY, stream.version()));
@@ -453,7 +460,7 @@ public final class LiveJudgement {
 
     static String render(LiveSetup setup, CodeVersion code, StreamedRecordingDataSet journal, Plan lanes,
             Map<String, SimulationReport> byId, Recording rec, Judged judged, int diff, String liveCode,
-            ScreeningThresholds t, int m, int nullSeeds, int groups) {
+            ScreeningThresholds t, int m, int nullSeeds) {
         LivePlan plan = setup.plan();
         BigDecimal seed = plan.seedCapital().amount();
         SimulationReport base = byId.get(lanes.base().spec().id().value());
@@ -462,6 +469,8 @@ public final class LiveJudgement {
         sb.append("# ").append(plan.id()).append(" 녹화 판정(6단계 T2, D-116)\n\n");
         sb.append("> 장중 승격 후보 기준 L1~L11(D-114, 6단계 계획 4.2)을 입력 기록으로 계산한 결과. ")
                 .append("명령 `runLiveJudgement`가 쓴다. 고치지 않는다(다시 돌리면 같은 내용이 나온다).\n");
+        sb.append("> 다중 비교 보정(본페로니 0.05/m)은 L10에만 있다. 나머지 항목은 계좌마다 따로 본 기준이라 판정 대상이 많을수록 ")
+                .append("우연히 통과하는 계좌가 생길 수 있다.\n");
         sb.append("> 이 결과는 투자 자문이 아니며, 후보도 표본 외 재검증을 거친 뒤 실전 적용은 사용자가 정한다.\n\n");
         sb.append("- 기간: ").append(plan.from()).append(" ~ ").append(plan.to()).append(", 입력 기록 ")
                 .append(journal.days().size()).append("일(").append(journal.days().get(0).date()).append(" ~ ")
@@ -472,12 +481,12 @@ public final class LiveJudgement {
         sb.append("- 데이터 버전: ").append(journal.version()).append('\n');
         sb.append("- 비용: ").append(setup.cost().id()).append(", 체결: ").append(setup.execution().id()).append('\n');
         int runs = lanes.all().stream().mapToInt(l -> l.spec().combinations().size()).sum();
-        sb.append("- 돌린 것: 입력 기록 레인 ").append(lanes.all().size()).append("개(Run ").append(runs).append("개, ")
-                .append(groups).append("묶음), 녹화 리플레이 ")
+        sb.append("- 돌린 것: 입력 기록 레인 ").append(lanes.all().size()).append("개(Run ").append(runs).append("개), 녹화 리플레이 ")
                 .append(rec.report() == null ? "없음(" + rec.note() + ")" : rec.days() + "일 이벤트 " + rec.events())
                 .append('\n');
         sb.append("- 판정 대상 m = ").append(m).append(", 대조군 시드 N = ").append(nullSeeds).append(" (실험 시드 + 1 ~ + ")
-                .append(nullSeeds).append("), L10 문턱 0.05/m = ").append(LiveJudgeCriteria.alpha(m).setScale(5,
+                .append(nullSeeds).append(", 판정 가능 최소 ").append(20 * m - 1).append("에 여유 ").append(m)
+                .append("), L10 문턱 0.05/m = ").append(LiveJudgeCriteria.alpha(m).setScale(5,
                         RoundingMode.HALF_EVEN).toPlainString()).append("\n\n");
 
         sb.append("## 1. 무사고(I1~I3)\n\n");
@@ -505,7 +514,15 @@ public final class LiveJudgement {
             sb.append(" |\n");
         }
         sb.append("\n- ○ 통과, ✕ 탈락, ? 판정 불가. 판정: 탈락이 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 보류, 모두 통과면 후보.\n");
-        sb.append("- 기준선·대조군은 같은 기준의 참고다(대조군이 L1~L6을 통과하면 기준이 느슨하다는 신호, 6단계 계획 4.2).\n\n");
+        sb.append("- 기준선·대조군은 같은 기준의 참고다(대조군이 L1~L6을 통과하면 기준이 느슨하다는 신호, 6단계 계획 4.2).\n");
+        RunReport controlRun = base.runs().get(roles.control());
+        LiveJudgeCriteria.Judgement control = judged.judgements().get(controlRun.summary().accountId().value());
+        if (control.checks().stream().filter(c -> List.of("L1", "L2", "L3", "L4", "L5", "L6").contains(c.code()))
+                .allMatch(c -> c.outcome() == Check.Outcome.PASS)) {
+            sb.append("- **대조군 ").append(controlRun.summary().accountId()).append("이 L1~L6을 모두 통과했다. 기준이 느슨하다는 신호다. ")
+                    .append("후보가 있어도 결과를 사용자와 함께 다시 본다(6단계 계획 4.2).**\n");
+        }
+        sb.append('\n');
 
         sb.append("## 3. 항목별 근거\n\n");
         for (int i = 0; i < base.runs().size(); i++) {
@@ -613,6 +630,8 @@ public final class LiveJudgement {
             }
             sb.append("\n- 진입 일치율·체결가 괴리는 참고(D-066 4번 정의를 장중에 옮김: 진입(종목, 거래일) 중 녹화에도 있는 비율, 맞은 것의 ")
                     .append("첫 진입 체결가 차 평균). 판정은 D-114 L11(총수익률 차·체결 수 차)로만 한다.\n");
+            sb.append("- 진입 일치는 (종목, 거래일)마다 첫 진입만 맞춘다. 하루에 같은 종목을 여러 번 드나드는 프로필은 일치율이 실제보다 ")
+                    .append("높게 나올 수 있다.\n");
         }
         sb.append('\n');
 

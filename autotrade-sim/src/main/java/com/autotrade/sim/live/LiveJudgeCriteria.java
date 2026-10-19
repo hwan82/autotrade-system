@@ -33,7 +33,7 @@ import java.util.TreeMap;
  *   <tr><td>L2</td><td>PF ≥ 1.3</td></tr>
  *   <tr><td>L3</td><td>MDD ≤ 20%</td></tr>
  *   <tr><td>L4</td><td>샤프 ≥ 1.0(관측 20거래일 미만이면 판정 불가)</td></tr>
- *   <tr><td>L5</td><td>왕복 ≥ 30</td></tr>
+ *   <tr><td>L5</td><td>왕복 ≥ 30(미달이면 표본 부족으로 판정 불가)</td></tr>
  *   <tr><td>L6</td><td>앞 4주(운용 시작일부터 28일 미만)와 뒤 4주 각각 순손익 &gt; 0</td></tr>
  *   <tr><td>L7</td><td>study.key-param ±20% 변형이 원래 총수익률의 50% 이상이고 PF ≥ 1.0(원래가 손실이면 탈락)</td></tr>
  *   <tr><td>L8</td><td>가장 좋은 한 주(월요일 시작)를 빼도 순손익 &gt; 0</td></tr>
@@ -125,8 +125,11 @@ final class LiveJudgeCriteria {
                         "관측 " + ev.base().equityCurve().size() + "거래일(20일 미만이거나 변동 없음)")
                 : ScreeningCriteria.threshold("L4", "샤프 ≥ " + t.minSharpe(), m.sharpe(), t.minSharpe(), true,
                         ScreeningCriteria.num(m.sharpe())));
-        checks.add(new Check("L5", "왕복 ≥ " + t.minRoundTrips(),
-                m.roundTripCount() >= t.minRoundTrips() ? Check.Outcome.PASS : Check.Outcome.FAIL, m.roundTripCount() + "건"));
+        // 표본이 모자라면 판정하지 않는다(D-066 2번·D-072와 같음). 다른 탈락이 없으면 보류(PR #180 strategy-researcher M2)
+        checks.add(m.roundTripCount() >= t.minRoundTrips()
+                ? new Check("L5", "왕복 ≥ " + t.minRoundTrips(), Check.Outcome.PASS, m.roundTripCount() + "건")
+                : new Check("L5", "왕복 ≥ " + t.minRoundTrips(), Check.Outcome.NOT_AVAILABLE,
+                        m.roundTripCount() + "건(표본 부족, 판정 불가)"));
         checks.add(l6(ev.base(), ev.seed(), ev.from()));
         checks.add(l7(m, ev.perturbed(), t));
         checks.add(l8(ev.base(), ev.seed()));

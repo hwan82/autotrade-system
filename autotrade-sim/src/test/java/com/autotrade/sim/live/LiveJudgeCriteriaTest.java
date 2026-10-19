@@ -200,6 +200,21 @@ class LiveJudgeCriteriaTest {
         });
     }
 
+    @Test
+    void l5_short_sample_is_not_available_not_fail() {
+        // 표본 부족은 판정하지 않는다(PR #180 strategy-researcher M2): 29건 판정 불가, 30건 통과
+        Check short29 = l5(29);
+        assertThat(short29.outcome()).isEqualTo(Check.Outcome.NOT_AVAILABLE);
+        assertThat(short29.detail()).isEqualTo("29건(표본 부족, 판정 불가)");
+        assertThat(l5(30).outcome()).isEqualTo(Check.Outcome.PASS);
+    }
+
+    private static Check l5(int trips) {
+        RunReport base = run(metrics("0.10", "2", trips * 2, trips), List.of());
+        return LiveJudgeCriteria.evaluate(new LiveJudgeCriteria.Evidence(base, null, null, null, List.of(), 6, null, SEED,
+                FROM, T)).checks().stream().filter(c -> c.code().equals("L5")).findFirst().orElseThrow();
+    }
+
     // ---- 도우미 ----
 
     private static final StrategyProfile PROFILE = new StrategyProfile("kr-test", 1, Market.KRX, TradingStyle.INTRADAY,

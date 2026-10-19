@@ -130,9 +130,10 @@ class LiveJudgementTest {
         String r = four.report();
         assertThat(r).contains("- I3 실시간 = 입력 기록 리플레이: 같음")
                 .contains("- I1 실패한 계좌 0개, I2 블랙리스트 종목 체결 0건")
-                .contains("판정 대상 m = 2, 대조군 시드 N = 39")
-                // 레인: BASE 4 + PERTURB 4 + 지연 3 × 2 + 대조군 39 = Run 53
-                .contains("입력 기록 레인 44개(Run 53개, 4묶음)")
+                .contains("판정 대상 m = 2, 대조군 시드 N = 41 (실험 시드 + 1 ~ + 41, 판정 가능 최소 39에 여유 2)")
+                // 레인: BASE 4 + PERTURB 4 + 지연 3 × 2 + 대조군 41(21m − 1) = Run 55
+                .contains("입력 기록 레인 46개(Run 55개), ")
+                .contains("다중 비교 보정(본페로니 0.05/m)은 L10에만 있다")
                 .contains("| " + ID + "-A03 | kr-orb-30@1 | 판정 대상 | **")
                 .contains("| " + ID + "-A01 | kr-bh-baseline@1 | 기준선 | (참고) ")
                 .contains("- L4 샤프 ≥ 1.0: 판정 불가")
@@ -144,9 +145,9 @@ class LiveJudgementTest {
         assertThat(r).contains("- L11 실시간 대 녹화: 수익률 차 ≤ 2.00%p, 체결 수 차 ≤ 10.00%: 통과");
         assertThat(r).doesNotContain("- L11 실시간 대 녹화: 수익률 차 ≤ 2.00%p, 체결 수 차 ≤ 10.00%: 탈락");
 
-        // 묶음 수(스레드 수)는 결과에 영향이 없다
-        assertThat(judge(parallel(1)).report().replace("1묶음", "4묶음")).isEqualTo(r);
-        assertThat(judge(parallel(2)).report().replace("2묶음", "4묶음")).isEqualTo(r);
+        // 묶음 수(스레드 수)는 결과에 영향이 없다(보고서에 묶음 수를 쓰지 않아 바이트로 같음, PR #180 architect N3)
+        assertThat(judge(parallel(1)).report()).isEqualTo(r);
+        assertThat(judge(parallel(2)).report()).isEqualTo(r);
     }
 
     @Test
@@ -187,6 +188,46 @@ class LiveJudgementTest {
         assertThat(java.util.Arrays.stream(runs).max().getAsInt() - java.util.Arrays.stream(runs).min().getAsInt())
                 .isLessThanOrEqualTo(4);
         assertThat(LiveJudgement.groups(lanes.all(), 100)).hasSize(lanes.all().size());
+    }
+
+    @Test
+    void controlSeedsLeaveAMarginOverTheMinimum() {
+        // 판정 가능한 최소 20m − 1에 판정 대상 수만큼 여유(PR #180 strategy-researcher R1): m = 6이면 125
+        assertThat(LiveJudgement.nullSeeds(6)).isEqualTo(125);
+        assertThat(LiveJudgement.nullSeeds(2)).isEqualTo(41);
+        for (int m = 1; m <= 8; m++) {
+            assertThat(LiveJudgement.nullSeeds(m) + 1 - m).isEqualTo(20 * m);
+        }
+    }
+
+    @Test
+    void l11ReplaysOnlyJournalDays() throws Exception {
+        // 운용 기간을 하루 앞당겨 10-13을 기간 안에 둔다(입력 기록은 10-14·10-15)
+        Path yaml = experimentDir.resolve("experiment.yaml");
+        String moved = Files.readString(yaml).replace("from: \"2026-10-14\"", "from: \"2026-10-13\"");
+        Files.writeString(yaml, moved, StandardCharsets.UTF_8);
+        plan = LivePlan.parse(moved, "experiment.yaml");
+        operate(true);
+        // 실험실은 꺼져 있고 게이트웨이만 켜진 날(운용 기간 안, 입력 기록 없음)의 녹화는 L11에 넣지 않는다(PR #180 strategy-researcher M1)
+        Path day = recordings.resolve("KRX").resolve("2026-10-15");
+        Path extra = recordings.resolve("KRX").resolve("2026-10-13");
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isDirectory(day), "녹화 폴더 구조: " + day);
+        LiveJudgement.Outcome before = judge(parallel(2));
+        copyTree(day, extra);
+        assertThat(judge(parallel(2)).report()).isEqualTo(before.report()).contains("녹화 리플레이 2일");
+    }
+
+    private static void copyTree(Path from, Path to) throws Exception {
+        try (var files = Files.walk(from)) {
+            for (Path f : (Iterable<Path>) files::iterator) {
+                Path t = to.resolve(from.relativize(f).toString());
+                if (Files.isDirectory(f)) {
+                    Files.createDirectories(t);
+                } else {
+                    Files.copy(f, t);
+                }
+            }
+        }
     }
 
     @Test
@@ -237,6 +278,44 @@ class LiveJudgementTest {
             assertThatThrownBy(() -> judge(RunGate.NONE)).hasMessageContaining("실험실이 이 세션을 열고 있습니다");
         } finally {
             open.close();
+        }
+    }
+
+    /** 명령 본체의 종료 코드: 판정함 0, 무사고 조건이 깨지면 2(파일은 씀), 입력이 없으면 1(PR #180 architect R1 (c)). */
+    @Test
+    void mainExitCodes() throws Exception {
+        copyProfiles(List.of("kr-bh-baseline", "kr-random-control", "kr-orb-30", "kr-vwap-reclaim"));
+        String[] args = {tmp.toString(), "judge-commit", "false", ID, "--sessions-dir", sessions.toString(),
+                "--recordings-dir", recordings.toString()};
+
+        assertThat(LiveJudgeMain.run(args, tmp.resolve("config"), parallel(2))).isEqualTo(1); // live-detail.txt 없음
+        assertThat(experimentDir.resolve(LiveJudgement.FILE)).doesNotExist();
+
+        operate(true);
+        assertThat(LiveJudgeMain.run(args, tmp.resolve("config"), parallel(2))).isEqualTo(0);
+        assertThat(experimentDir.resolve(LiveJudgement.FILE)).exists();
+
+        Path live = experimentDir.resolve(LiveSession.LIVE_DETAIL_FILE);
+        Files.writeString(live, Files.readString(live).replaceFirst("status=COMPLETED", "status=FAILED"), StandardCharsets.UTF_8);
+        Files.delete(experimentDir.resolve(LiveJudgement.FILE));
+        assertThat(LiveJudgeMain.run(args, tmp.resolve("config"), parallel(2))).isEqualTo(2);
+        assertThat(Files.readString(experimentDir.resolve(LiveJudgement.FILE))).contains("**다름**");
+    }
+
+    /** 명령은 저장소 루트 하나로 등록 파일과 프로필을 함께 찾으므로 시험 루트에 프로필을 옮겨 둔다. */
+    private void copyProfiles(List<String> names) throws Exception {
+        for (String name : names) {
+            Path from = REPO.resolve("strategies").resolve(name);
+            try (var files = Files.walk(from)) {
+                for (Path f : (Iterable<Path>) files::iterator) {
+                    Path to = tmp.resolve("strategies").resolve(name).resolve(from.relativize(f).toString());
+                    if (Files.isDirectory(f)) {
+                        Files.createDirectories(to);
+                    } else {
+                        Files.copy(f, to);
+                    }
+                }
+            }
         }
     }
 
