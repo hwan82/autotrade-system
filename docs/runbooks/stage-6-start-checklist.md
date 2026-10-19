@@ -134,8 +134,8 @@ Get-ChildItem "experiments\$id\weekly"
 끝내기는 실험실에 세션이 열려 있고 되살리기가 끝난 상태에서만 된다(아니면 409 오류, `live-detail.txt`가 생기지 않아 리플레이 확인을 못 한다). 실험실을 껐다면 먼저 2.1 창 2(실험실)와 창 3(세션 시작)을 다시 하고, 아래 첫 블록이 `준비됨`을 낼 때까지 기다린다.
 
 ```powershell
-do { Start-Sleep 5; $st = Invoke-RestMethod http://127.0.0.1:8480/api/live/status; "restoring=$($st.restoring) 세션=$($st.experimentId)" } while ($st.restoring -or -not $st.session)
-"준비됨"
+do { Start-Sleep 5; $st = Invoke-RestMethod http://127.0.0.1:8480/api/live/status; "restoring=$($st.restoring) 세션=$($st.experimentId) 멈춘 이유=$($st.stopReason)" } while (($st.restoring -or -not $st.session) -and -not $st.stopReason)
+if ($st.stopReason) { "멈춤: $($st.stopReason) — 끝내지 말고 이 줄을 스레드에 올린다" } else { "준비됨" }
 ```
 
 ```powershell
