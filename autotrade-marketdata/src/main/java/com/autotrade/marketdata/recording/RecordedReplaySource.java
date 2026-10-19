@@ -5,13 +5,16 @@ import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.MarketDataSource;
 import com.autotrade.marketdata.MarketEventListener;
 import com.autotrade.marketdata.Subscription;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 
 /**
  * 녹화일 리플레이(MD-06, ADR-003 2.4). 같은 녹화를 몇 번 돌려도 이벤트 순서와 값이 같다.
@@ -19,18 +22,38 @@ import java.util.TreeSet;
  * <p>푸시 소스지만 스스로 스레드를 만들지 않는다. {@link #subscribe}로 수신자를 등록한 뒤 {@link #replay()}를 부르면
  * 호출한 스레드에서 녹화 순번 순서대로 전달한다. 시계({@code ReplayClock})는 수신자가 이벤트의 {@code receivedAt}으로 옮긴다.
  * 이벤트의 {@code sequence}는 녹화 순번이다.
+ *
+ * <p>읽은 녹화일({@link RecordedDay})로 만들면 그 줄을 보내고, {@link #streaming(Path)}로 만들면 {@link #replay()}마다 녹화
+ * 폴더를 {@link RecordedDayStream}으로 줄 단위로 다시 읽어 보낸다(하루를 메모리에 올리지 않음, D-117). 다시 읽을 때마다 같은
+ * 검사(순번 연속, 정상 종료 녹화의 SHA-256)를 거치고, 검사에 걸리면 그 앞 줄은 이미 보냈을 수 있다.
  */
 public final class RecordedReplaySource implements MarketDataSource {
 
+    /** 읽은 녹화일. 줄 단위로 다시 읽는 소스면 null. */
     private final RecordedDay day;
+    private final Path dir;
     private final String sourceId;
     private final List<Sub> subs = new ArrayList<>();
 
     public RecordedReplaySource(RecordedDay day) {
-        this.day = Objects.requireNonNull(day, "day");
-        String date = day.meta().map(RecordingMeta::date).orElse(day.dir().getFileName().toString());
-        String market = day.meta().map(RecordingMeta::market).orElse(day.dir().getParent().getFileName().toString());
+        this(Objects.requireNonNull(day, "day"), day.dir(), day.meta());
+    }
+
+    private RecordedReplaySource(RecordedDay day, Path dir, Optional<RecordingMeta> meta) {
+        this.day = day;
+        this.dir = dir;
+        String date = meta.map(RecordingMeta::date).orElse(dir.getFileName().toString());
+        String market = meta.map(RecordingMeta::market).orElse(dir.getParent().getFileName().toString());
         this.sourceId = "REPLAY-" + market + "-" + date;
+    }
+
+    /**
+     * 녹화일 폴더를 {@link #replay()}마다 줄 단위로 다시 읽는 소스. 만들 때는 메타만 읽는다(형식 버전이 다르면 예외).
+     * 소스 이름은 읽은 녹화일로 만든 것과 같다.
+     */
+    public static RecordedReplaySource streaming(Path dayDir) {
+        Objects.requireNonNull(dayDir, "dayDir");
+        return new RecordedReplaySource(null, dayDir, RecordedDayStream.readMeta(dayDir));
     }
 
     @Override
@@ -51,31 +74,44 @@ public final class RecordedReplaySource implements MarketDataSource {
         return sub;
     }
 
-    /** 등록된 수신자에게 녹화 전체를 순서대로 보낸다. 몇 번 불러도 같은 결과다. */
-    public void replay() {
+    /**
+     * 등록된 수신자에게 녹화 전체를 순서대로 보낸다. 몇 번 불러도 같은 결과다.
+     *
+     * @return 이번에 보낸 녹화의 요약. 줄 단위로 다시 읽는 소스면 이번 읽기의 요약이라, 읽는 사이 파일이 바뀌었는지
+     *         부르는 쪽이 앞 요약과 견줄 수 있다
+     */
+    public RecordedDayStream.Summary replay() {
         List<Sub> snapshot;
         synchronized (this) {
             snapshot = List.copyOf(subs);
         }
-        for (RecordingCodec.Line line : day.lines()) {
+        return forEachLine(line -> {
             MarketEvent e = line.event();
             for (Sub s : snapshot) {
                 if (!s.closed && s.symbols.contains(e.symbol())) {
                     s.listener.onEvent(e);
                 }
             }
-        }
+        });
     }
 
     /** 편의: 주어진 종목의 이벤트 목록. */
     public List<MarketEvent> events(Set<Symbol> symbols) {
         List<MarketEvent> out = new ArrayList<>();
-        for (RecordingCodec.Line line : day.lines()) {
+        forEachLine(line -> {
             if (symbols.contains(line.event().symbol())) {
                 out.add(line.event());
             }
-        }
+        });
         return out;
+    }
+
+    private RecordedDayStream.Summary forEachLine(Consumer<RecordingCodec.Line> sink) {
+        if (day == null) {
+            return RecordedDayStream.read(dir, sink);
+        }
+        day.lines().forEach(sink);
+        return day.summary();
     }
 
     private final class Sub implements Subscription {

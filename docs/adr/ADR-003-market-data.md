@@ -85,8 +85,9 @@
 
 ### 2.4 리플레이 (MD-06)
 
-- `RecordedDay.open(dir)`은 정상 종료 파일이면 SHA-256을 확인하고, `seq`가 1부터 빈틈 없는지 검사한다. 정상 종료가 아니면 깨진 꼬리만 버리고 연다.
-- `RecordedReplaySource`는 `MarketDataSource`를 구현한다. 구독 후 `replay()`가 호출 스레드에서 `seq` 순서로 동기 재생한다. 시계는 사용하지 않는다(재생 속도 조절은 3단계 실험 실행기 몫).
+- `RecordedDayStream.read(dir, sink)`는 녹화일 하나를 줄을 쌓지 않고 `seq` 순서로 넘기고 요약(`Summary`)을 돌려준다. 정상 종료 파일이면 줄을 넘기기 전에 SHA-256을 확인하고, `seq`가 1부터 빈틈 없는지 검사한다. 정상 종료가 아니면 깨진 꼬리만 버린다. 녹화 읽기 규칙은 여기 한 곳에만 있다([D-117](../decisions/D-117-marketdata-streamed-recording-read.md)).
+- `RecordedDay.open(dir)`은 `RecordedDayStream`으로 읽은 줄을 목록으로 든다(하루치). 여러 날이나 큰 하루를 읽는 쪽은 `RecordedDayStream`을 쓴다.
+- `RecordedReplaySource`는 `MarketDataSource`를 구현한다. 구독 후 `replay()`가 호출 스레드에서 `seq` 순서로 동기 재생하고 보낸 녹화의 요약을 돌려준다. 시계는 사용하지 않는다(재생 속도 조절은 3단계 실험 실행기 몫). `RecordedReplaySource.streaming(dir)`는 `replay()`마다 녹화를 줄 단위로 다시 읽는다(게이트웨이 `replayCheck`가 쓴다, D-117).
 - **완료 기준 테스트**: `RecordingReplayTest`가 녹화기로 하루치를 기록하고, 같은 녹화일을 두 번 리플레이해 이벤트 순서와 값이 완전히 같음을 확인한다. 중단 후 이어 쓰기, 깨진 꼬리, 공백 기록, 종목 필터도 같이 검사한다.
 
 ### 2.5 거래소 캘린더와 시장 규칙 (MD-08)

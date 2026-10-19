@@ -10,9 +10,8 @@ import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.calendar.CalendarCoverageException;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.calendar.TradingSession;
-import com.autotrade.marketdata.recording.RecordedDay;
+import com.autotrade.marketdata.recording.RecordedDayStream;
 import com.autotrade.marketdata.recording.RecordedReplaySource;
-import com.autotrade.marketdata.recording.RecordingCodec;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.recording.RecordingMeta;
 import com.autotrade.marketdata.symbols.SymbolNameFiles;
@@ -47,7 +46,8 @@ import java.util.TreeSet;
  * <ul>
  *   <li>같은 녹화일을 디스크에서 두 번 따로 읽어 리플레이하고, 두 결과(순서와 값)의 SHA-256이 같은지 본다.
  *       해시는 이벤트 레코드의 문자열 표현으로 만들어 같은 실행 안의 두 회차 비교에만 쓴다.</li>
- *   <li>메타 {@code eventsSha256}과 파일의 일치는 정상 종료된 녹화에서만 {@link RecordedDay#open}이 검사한다.
+ *   <li>메타 {@code eventsSha256}과 파일의 일치는 정상 종료된 녹화에서만 {@link RecordedDayStream}이 줄을 넘기기 전에
+ *       검사한다(녹화일을 줄 단위로 읽는다, D-117).
  *       정상 종료가 아니거나, 마지막 줄이 잘렸거나, 0건이면 두 회차가 같아도 "불완전"으로 판정한다.</li>
  *   <li>원본 대조용으로 종목별 체결 요약을 낸다. 시가·고가·저가·종가·수량은 정규장(캘린더 구간, 종가 단일가 체결을 위해
  *       마감 뒤 1분까지 포함 {@code [가정]}) 체결만 집계하고, 그 밖의 체결(시간외 등)은 건수와 수량을 따로 적는다.</li>
@@ -177,7 +177,10 @@ public final class ReplayCheck {
         }
     }
 
-    /** 녹화일 하나를 두 번 리플레이해 비교하고 종목별 요약을 만든다. 회차마다 녹화를 따로 읽고, 이벤트 목록은 들고 있지 않는다. */
+    /**
+     * 녹화일 하나를 두 번 리플레이해 비교하고 종목별 요약을 만든다. 회차마다 녹화를 따로 줄 단위로 읽고, 줄·이벤트 목록은
+     * 들고 있지 않는다(힙은 종목 수에만 따른다, D-117).
+     */
     static Report check(Path dayDir) {
         return check(dayDir, SymbolNames.empty());
     }
@@ -214,24 +217,28 @@ public final class ReplayCheck {
     private record Run(Optional<RecordingMeta> meta, boolean truncated, long eventCount, long gapCount, String digest,
             long replayed, Map<Symbol, SymbolSummary> symbols, List<RecordingMeta.Segment> unmarkedRestarts) {}
 
+    /**
+     * 한 회차. 녹화를 두 번 줄 단위로 읽는다(하루를 메모리에 올리지 않음, D-117): 첫 읽기로 종목을 모으고, 두 번째 읽기로
+     * 리플레이 소스가 이벤트를 보낸다. 두 읽기의 요약(메타·건수·잘림·마지막 순번 등)이 다르면 읽는 사이 녹화가 바뀐 것이라
+     * 결과 없이 멈춘다.
+     */
     private static Run replayOnce(Path dayDir, Optional<TradingSession> session, StopCheck gate, int checkEvery) {
         ensureNotStopped(gate);
-        RecordedDay day = RecordedDay.open(dayDir);
         Set<Symbol> symbols = new TreeSet<>();
-        long read = 0;
-        for (RecordingCodec.Line line : day.lines()) {
+        long[] read = {0};
+        RecordedDayStream.Summary day = RecordedDayStream.read(dayDir, line -> {
             symbols.add(line.event().symbol());
-            if (++read % checkEvery == 0) {
+            if (++read[0] % checkEvery == 0) {
                 ensureNotStopped(gate);
             }
-        }
+        });
         ensureNotStopped(gate);
         ZoneId zone = day.meta().map(m -> ZoneId.of(m.zone()))
                 .orElse(session.map(TradingSession::zone).orElse(ZoneId.of("UTC")));
         Map<Symbol, SymbolSummary> summaries = new TreeMap<>();
         MessageDigest sha = sha256();
         long[] count = {0};
-        RecordedReplaySource source = new RecordedReplaySource(day);
+        RecordedReplaySource source = RecordedReplaySource.streaming(dayDir);
         source.subscribe(symbols, e -> {
             if (++count[0] % checkEvery == 0) {
                 ensureNotStopped(gate);
@@ -239,7 +246,10 @@ public final class ReplayCheck {
             sha.update((e + "\n").getBytes(StandardCharsets.UTF_8));
             summaries.computeIfAbsent(e.symbol(), s -> new SymbolSummary(zone, session)).add(e);
         });
-        source.replay();
+        RecordedDayStream.Summary replayed = source.replay();
+        if (!replayed.equals(day)) {
+            throw new IllegalStateException("녹화가 읽는 사이에 바뀌었습니다(아직 쓰이는 중일 수 있음): " + dayDir);
+        }
         return new Run(day.meta(), day.truncated(), day.eventCount(), day.gapCount(),
                 HexFormat.of().formatHex(sha.digest()), count[0], summaries, day.unmarkedRestarts());
     }
@@ -336,7 +346,7 @@ public final class ReplayCheck {
             return meta.map(RecordingMeta::complete).orElse(false);
         }
 
-        /** {@link RecordedDay#open}이 파일 해시를 메타와 대조했는지. */
+        /** {@link RecordedDayStream}이 파일 해시를 메타와 대조했는지. */
         boolean hashVerified() {
             return complete() && !meta.get().eventsSha256().isEmpty();
         }

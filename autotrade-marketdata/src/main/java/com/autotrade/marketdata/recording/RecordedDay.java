@@ -1,41 +1,19 @@
 package com.autotrade.marketdata.recording;
 
 import com.autotrade.domain.market.DataGap;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.BufferedReader;
-import java.io.EOFException;
-import java.io.FilterInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.ZipException;
 
 /**
- * 녹화일 하나를 읽은 결과. 전부 메모리에 올린다(하루치, 감시 종목 수백 개 기준 `[가정]`; 커지면 스트리밍 읽기로 바꾼다).
- *
- * <p>검사
- * <ul>
- *   <li>순번은 1부터 빈틈없이 1씩 늘어야 한다. 아니면 파일 손상으로 보고 예외.</li>
- *   <li>메타가 {@code complete}이면 SHA-256이 맞아야 한다. 아니면 예외.</li>
- *   <li>정상 종료가 아니면(메타 없음 또는 미완료) 끝나지 않은 gzip 멤버를 풀린 바이트 끝까지 읽고, 마지막 잘린 줄은 버리고
- *       {@link #truncated()}로 알린다.</li>
- * </ul>
+ * 녹화일 하나를 읽은 결과. 전부 메모리에 올린다(하루치). 여러 날이나 종목이 많은 날을 읽는 쪽은 줄을 쌓지 않는
+ * {@link RecordedDayStream}을 쓴다. 읽기와 검사 규칙(순번 연속, 정상 종료 녹화의 SHA-256, 비정상 종료의 잘린 마지막 줄)은
+ * {@link RecordedDayStream} 한 곳에 있다(D-117).
  */
 public final class RecordedDay {
-
-    private static final ObjectMapper META_MAPPER =
-            new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     private final Path dir;
     private final Optional<RecordingMeta> meta;
@@ -49,129 +27,11 @@ public final class RecordedDay {
         this.truncated = truncated;
     }
 
+    /** 녹화일 하나를 다 읽어 올린다. 읽기와 검사는 {@link RecordedDayStream#read}가 한다. */
     public static RecordedDay open(Path dir) {
-        Path events = dir.resolve(RecordingLayout.EVENTS_FILE);
-        Path metaFile = dir.resolve(RecordingLayout.META_FILE);
-        try {
-            Optional<RecordingMeta> meta = Files.exists(metaFile)
-                    ? Optional.of(META_MAPPER.readValue(metaFile.toFile(), RecordingMeta.class))
-                    : Optional.empty();
-            if (meta.isPresent() && meta.get().formatVersion() != RecordingCodec.FORMAT_VERSION) {
-                throw new IllegalStateException("지원하지 않는 녹화 형식 버전: " + meta.get().formatVersion());
-            }
-            boolean complete = meta.map(RecordingMeta::complete).orElse(false);
-            if (complete && !meta.get().eventsSha256().isEmpty()) {
-                String actual = Sha256.ofFile(events);
-                if (!actual.equals(meta.get().eventsSha256())) {
-                    throw new IllegalStateException("녹화 파일 SHA-256이 메타와 다릅니다: " + dir);
-                }
-            }
-            List<RecordingCodec.Line> lines = new ArrayList<>();
-            boolean truncated = readLines(events, lines, complete);
-            return new RecordedDay(dir, meta, lines, truncated);
-        } catch (IOException e) {
-            throw new UncheckedIOException("녹화를 읽을 수 없습니다: " + dir, e);
-        }
-    }
-
-    private static boolean readLines(Path events, List<RecordingCodec.Line> out, boolean complete) throws IOException {
-        RecordingCodec codec = new RecordingCodec();
-        boolean truncated = false;
-        List<String> raw = new ArrayList<>();
-        try (InputStream file = Files.newInputStream(events)) {
-            GZIPInputStream gzip;
-            try {
-                gzip = new GZIPInputStream(file, 64 * 1024);
-            } catch (EOFException | ZipException e) {
-                // gzip 머리도 다 쓰기 전에 멈춘 녹화(빈 파일, 깨진 머리): 읽을 줄이 없다
-                if (complete) {
-                    throw e;
-                }
-                return true;
-            }
-            EndTolerantInputStream gz = new EndTolerantInputStream(gzip, !complete);
-            BufferedReader r = new BufferedReader(new InputStreamReader(gz, StandardCharsets.UTF_8));
-            String line;
-            while ((line = r.readLine()) != null) {
-                raw.add(line);
-            }
-            truncated = gz.cutShort();
-        }
-        long expected = 1;
-        for (int i = 0; i < raw.size(); i++) {
-            RecordingCodec.Line l;
-            try {
-                l = codec.decode(raw.get(i));
-            } catch (RuntimeException e) {
-                if (!complete && i == raw.size() - 1) {
-                    truncated = true;
-                    break;
-                }
-                throw new IllegalStateException("녹화 " + (i + 1) + "번째 줄 형식 오류", e);
-            }
-            if (l.seq() != expected) {
-                throw new IllegalStateException("녹화 순번이 끊겼습니다: 기대 " + expected + ", 실제 " + l.seq());
-            }
-            expected++;
-            out.add(l);
-        }
-        return truncated;
-    }
-
-    /**
-     * 끝나지 않은 gzip 멤버(비정상 종료)를 파일 끝으로 읽는다. 끝에서 나는 {@link EOFException}·{@link ZipException}을
-     * 리더 위로 올리면 디코더·버퍼가 이미 받은 글자를 줄로 돌려주지 못하고 버린다(QA H-4: 끝 수십 줄 손실).
-     * 바이트 단위에서 끝으로 바꾸면 그 앞까지 풀린 바이트는 모두 줄이 되고, 잘린 마지막 줄은 형식 검사에서 걸러진다.
-     */
-    private static final class EndTolerantInputStream extends FilterInputStream {
-        private final boolean tolerate;
-        private boolean cutShort;
-
-        EndTolerantInputStream(InputStream in, boolean tolerate) {
-            super(in);
-            this.tolerate = tolerate;
-        }
-
-        @Override
-        public int read() throws IOException {
-            if (cutShort) {
-                return -1;
-            }
-            try {
-                return super.read();
-            } catch (EOFException | ZipException e) {
-                return cut(e);
-            }
-        }
-
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            if (cutShort) {
-                return -1;
-            }
-            try {
-                return super.read(b, off, len);
-            } catch (EOFException | ZipException e) {
-                return cut(e);
-            }
-        }
-
-        @Override
-        public int available() throws IOException {
-            return cutShort ? 0 : super.available();
-        }
-
-        private int cut(IOException e) throws IOException {
-            if (!tolerate) {
-                throw e;
-            }
-            cutShort = true;
-            return -1;
-        }
-
-        boolean cutShort() {
-            return cutShort;
-        }
+        List<RecordingCodec.Line> lines = new ArrayList<>();
+        RecordedDayStream.Summary summary = RecordedDayStream.read(dir, lines::add);
+        return new RecordedDay(dir, summary.meta(), lines, summary.truncated());
     }
 
     public Path dir() {
@@ -228,6 +88,12 @@ public final class RecordedDay {
             }
         }
         return out;
+    }
+
+    /** 줄 단위로 읽었을 때와 같은 요약({@link RecordedDayStream#read}의 반환값과 같다). */
+    public RecordedDayStream.Summary summary() {
+        return new RecordedDayStream.Summary(dir, meta, truncated, eventCount(), gapCount(), lastSeq(), unmarkedRestarts(),
+                lastReceivedAt());
     }
 
     public Instant lastReceivedAt() {
