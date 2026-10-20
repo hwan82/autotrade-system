@@ -4,6 +4,7 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.daily.SnapshotFiles;
 import com.autotrade.marketdata.daily.SnapshotManifest;
+import com.autotrade.sim.selection.SnapshotHeap;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -26,8 +27,6 @@ import java.util.stream.Stream;
  */
 public final class CollectionFreshness {
 
-    /** 일봉 스냅샷 하위 폴더 이름(수집기 {@code CollectorMain}, ADR-008 2.4). */
-    public static final String KRX_DAILY = "krx-daily";
     /**
      * 허용하는 뒤처짐(거래일 수). 수집기는 장 마감 뒤에 돌리고 주간 점검도 마지막 거래일 장 마감 뒤에 돌리므로, 점검 마지막 날 하루는
      * 아직 수집 전일 수 있다 `[가정]`. 둘째 거래일부터는 수집이 멈췄거나 돌리지 않은 것이다.
@@ -103,7 +102,7 @@ public final class CollectionFreshness {
         if (market != Market.KRX) {
             return new Status(Kind.NOT_APPLICABLE, root, null, null, List.of(), false, List.of(), List.of(), false);
         }
-        Path dir = root.resolve(KRX_DAILY);
+        Path dir = root.resolve(SnapshotHeap.KRX_DAILY);
         List<String> unreadable = new ArrayList<>();
         List<String> noCoverage = new ArrayList<>();
         String bestId = null;
@@ -117,7 +116,7 @@ public final class CollectionFreshness {
             }
             for (Path child : children) {
                 String name = child.getFileName().toString();
-                if (!name.startsWith(KRX_DAILY + "-") || !Files.isRegularFile(child.resolve(SnapshotManifest.FILE_NAME))) {
+                if (!name.startsWith(SnapshotHeap.KRX_DAILY + "-") || !Files.isRegularFile(child.resolve(SnapshotManifest.FILE_NAME))) {
                     continue; // 쓰는 중인 임시 폴더 등
                 }
                 LocalDate last;
@@ -181,7 +180,7 @@ public final class CollectionFreshness {
         if (s.kind() == Kind.NOT_APPLICABLE) {
             return sb.toString();
         }
-        sb.append("- 스냅샷 폴더: `").append(KRX_DAILY).append("/` (`-PsnapshotsDir`로 바꿈)\n");
+        sb.append("- 스냅샷 폴더: `").append(SnapshotHeap.KRX_DAILY).append("/` (`-PsnapshotsDir`로 바꿈)\n");
         if (s.snapshotId() != null) {
             sb.append("- 최근 스냅샷: `").append(s.snapshotId()).append("`\n");
             sb.append("- 수집 안 된 거래일: ").append(s.behind().isEmpty() ? "없음" : join(s.behind())).append('\n');

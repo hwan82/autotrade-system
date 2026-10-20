@@ -23,6 +23,7 @@ import com.autotrade.sim.run.RunStepper;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
 import com.autotrade.sim.selection.IntradayTracker;
+import com.autotrade.sim.selection.SelectionCandidates;
 import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.selection.SelectionDays;
 import com.autotrade.sim.selection.SelectionSchedule;
@@ -502,7 +503,7 @@ public final class LiveSession implements AutoCloseable {
             }
             return new IntradayStatus(st.selection(), st.selectionHash(), st.at().toString(), "RANKED",
                     r.candidates().candidates(),
-                    r.candidates().excludedCodes(com.autotrade.sim.selection.SelectionCandidates.Exclusion.BLACKLISTED),
+                    r.candidates().excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED),
                     r.candidates().selectedCount(), r.activeFrom(), r.contentHash());
         }
     }

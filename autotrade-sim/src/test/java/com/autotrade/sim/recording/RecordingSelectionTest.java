@@ -15,6 +15,7 @@ import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.RunSelectionDay;
 import com.autotrade.sim.selection.SelectionFixtures;
 import com.autotrade.sim.selection.SessionSelections;
+import com.autotrade.sim.selection.SnapshotHeap;
 import com.autotrade.sim.testing.FixtureEvents;
 import com.autotrade.sim.testing.FixtureRecordings;
 import com.autotrade.sim.testing.TestKrxRules;
@@ -169,11 +170,69 @@ class RecordingSelectionTest {
     void selectionPreparationChecksTheHeapBeforeReadingTheSnapshot() {
         // architect PR #197 R4: 녹화 데이터와 같은 힙에 일봉 전체를 올리기 전에 보고, 늘릴 힙을 알려 준다
         long gib = 1024L * 1024 * 1024;
-        com.autotrade.sim.selection.SnapshotHeap.requireFits(1_000_000, 3 * gib, "s");
-        assertThatThrownBy(() -> com.autotrade.sim.selection.SnapshotHeap.requireFits(3_750_000, 3 * gib, "krx-daily-x"))
+        SnapshotHeap.requireFits(1_000_000, 3 * gib, "s");
+        assertThatThrownBy(() -> SnapshotHeap.requireFits(3_750_000, 3 * gib, "krx-daily-x"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("krx-daily-x")
                 .hasMessageContaining("-Pheap=8g");
-        assertThat(com.autotrade.sim.selection.SnapshotHeap.suggestedHeapGib(1)).isEqualTo(1);
+        assertThat(SnapshotHeap.suggestedHeapGib(1)).isEqualTo(1);
+    }
+
+    @Test
+    void recordingExperimentChecksTheHeapBeforeReadingTheSnapshot() throws IOException {
+        // architect PR #199 R3: 녹화 실험이 일봉 스냅샷을 읽기 전에 힙 검사를 부른다(작은 힙을 주입해 확인)
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        Path snapshots = snapshots();
+        RecordingPlan plan = RecordingPlan.parse(BASE + SELECTIONS, "x");
+        assertThat(SnapshotHeap.dailyBarRows(snapshots, SNAPSHOT)).isPositive();
+        assertThatThrownBy(() -> RecordingExperiment.run(plan, Path.of(".."), recordings, snapshots,
+                new CodeVersion("t", false), false, m -> { }, RunGate.NONE, () -> 1024L))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(SNAPSHOT).hasMessageContaining("-Pheap=");
+        // 같은 입력이라도 힙이 넉넉하면 돈다
+        assertThat(RecordingExperiment.run(plan, Path.of(".."), recordings, snapshots, new CodeVersion("t", false), false,
+                m -> { }, RunGate.NONE, () -> 1L << 40).report().runs()).hasSize(3);
+    }
+
+    @Test
+    void preOpenAndIntradaySelectionsTogetherKeepBothInputsAndResults() throws IOException {
+        // architect PR #200 R3: 장전 선정과 장중 순위 선정이 한 등록에 함께 있으면 두 경로가 각자 결과를 남기고 서로 섞이지 않는다
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        Path snapshots = snapshots();
+        String mixed = """
+                selections:
+                  - "kr-intraday-hot@1 x kr-random-control@1"
+                  - "kr-intraday-open-momentum@1 x kr-random-control@1"
+                selection-input:
+                  daily: "%s"
+                """.formatted(SNAPSHOT);
+        Path dir = experiment("mixed", BASE + mixed);
+        RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, Path.of(".."), recordings, snapshots,
+                new CodeVersion("test", false), true, m -> { }, RunGate.NONE);
+        assertThat(out.report().runs()).hasSize(4);
+        RunReport hot = out.report().runs().get(2);
+        RunReport momentum = out.report().runs().get(3);
+        // 장전 선정 계좌는 장전 선정만 있는 실험과 같은 날 같은 후보·같은 체결
+        RecordingExperiment.Outcome daily = RecordingExperiment.runAndWrite(experiment("mixed-daily", BASE + SELECTIONS),
+                Path.of(".."), recordings, snapshots, new CodeVersion("test", false), false, m -> { }, RunGate.NONE);
+        assertThat(hot.selectionDays()).isEqualTo(daily.report().runs().get(2).selectionDays());
+        assertThat(hot.fills()).isEqualTo(daily.report().runs().get(2).fills());
+        assertThat(hot.selectionDays()).allSatisfy(d -> assertThat(d.selection().activeFrom()).isZero());
+        // 장중 순위 계좌는 순위 시각 이후 후보만
+        assertThat(momentum.selectionDays()).isNotEmpty()
+                .allSatisfy(d -> assertThat(d.selection().activeFrom()).isPositive());
+        assertThat(momentum.fills()).filteredOn(f -> f.fill().side() == Side.BUY).allSatisfy(f -> {
+            RunSelectionDay d = momentum.selectionDays().stream()
+                    .filter(x -> x.selection().date().equals(f.fill().exchangeDate())).findFirst().orElseThrow();
+            assertThat(d.selection().symbols()).contains(f.fill().symbol());
+            assertThat(f.fill().signalEventSeq()).isGreaterThanOrEqualTo(d.selection().activeFrom());
+        });
+        assertThat(out.files().get("inputs.yaml")).contains("determinism: \"같음(").contains("selection-input:")
+                .contains("  daily: \"" + SNAPSHOT + "\"").contains("intraday-selections:").contains("active-from-seq: ");
+        assertThat(out.files().get("results.md")).contains("## 선정(D-124)").contains("## 장중 순위 선정(D-127)");
+        assertThat(out.files()).containsKey(SessionSelections.DIR + "/" + D1 + "/" + SessionSelections.APPLIED_FILE);
+        assertThat(out.files().keySet()).filteredOn(k -> k.endsWith(".intraday.json"))
+                .hasSize(momentum.selectionDays().size());
     }
 
     @Test

@@ -11,7 +11,10 @@ import java.nio.file.Path;
  */
 public final class SnapshotHeap {
 
-    /** 일봉 스냅샷 하위 폴더 이름(수집기, ADR-008). */
+    /**
+     * 일봉 스냅샷 하위 폴더 이름(수집기 {@code CollectorMain}, ADR-008 2.4). sim 안에서 이 값을 쓰는 곳은 모두 이 상수를 본다(수집
+     * 점검 {@code CollectionFreshness}, 조합 실험 입력 {@code SnapshotInputs}, architect PR #199 R4).
+     */
     public static final String KRX_DAILY = "krx-daily";
 
     /**

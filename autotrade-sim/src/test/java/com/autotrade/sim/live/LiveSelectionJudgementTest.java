@@ -154,6 +154,9 @@ class LiveSelectionJudgementTest {
                 .contains("## 9. 선정(D-124)")
                 .contains("| " + D1 + " | kr-intraday-hot@1 | APPLIED | 005930 | 035720 | - | 1/2 |")
                 .contains("| " + D2 + " | kr-intraday-hot@1 | SELECTION_MISSING(MISSING) |");
+        // L10 줄의 N·k는 그 계좌 선정 묶음 분포로 계산했다(strategy-researcher PR #199 R5)
+        assertL10UsesGroupDistribution(r, ID + "-A04", ID + "-S1-NULL1");
+        assertL10UsesGroupDistribution(r, ID + "-A03", ID + "-NULL1");
         // 같은 이벤트를 녹화했으므로 선정 계좌도 녹화 리플레이가 실시간과 같다(REC 레인도 같은 적용 기록을 읽음)
         assertThat(r.substring(r.indexOf("### " + ID + "-A04 "), r.indexOf("### " + ID + "-A05 ")))
                 .contains("- L11 실시간 대 녹화: 수익률 차 ≤ 2.00%p, 체결 수 차 ≤ 10.00%: 통과");
@@ -228,5 +231,23 @@ class LiveSelectionJudgementTest {
         Files.delete(files.appliedFile(D1));
         assertThatThrownBy(() -> judge(2)).isInstanceOf(IllegalStateException.class).hasMessageContaining("적용 기록")
                 .hasMessageContaining(D1.toString());
+    }
+
+    /**
+     * 계좌의 L10 줄(3장)이 쓴 대조군 수 N이 그 계좌 선정 묶음의 분포 요약(6장, 시드 레인 {@code firstNullLane}으로 시작하는 절)의
+     * "왕복당 순손익을 쓴 대조군 N개"와 같은지 본다(strategy-researcher PR #199 R5). 묶음 연결이 바뀌면 다른 묶음의 N이 들어가 깨진다.
+     */
+    static void assertL10UsesGroupDistribution(String report, String account, String firstNullLane) {
+        String six = report.substring(report.indexOf("## 6. 무작위 대조군 분포(L10)"), report.indexOf("## 7. "));
+        int header = six.indexOf("시드 레인 " + firstNullLane + " ~");
+        String group = header < 0 ? six : six.substring(header);
+        java.util.regex.Matcher n = java.util.regex.Pattern.compile("왕복당 순손익을 쓴 대조군 (\\d+)개").matcher(group);
+        assertThat(n.find()).as("분포 요약 " + firstNullLane).isTrue();
+        String three = report.substring(report.indexOf("## 3. 항목별 근거"), report.indexOf("## 4. "));
+        String section = three.substring(three.indexOf("### " + account + " "));
+        int next = section.indexOf("\n### ", 1);
+        String l10 = (next < 0 ? section : section.substring(0, next)).lines().filter(l -> l.startsWith("- L10 "))
+                .findFirst().orElseThrow();
+        assertThat(l10).as(account).containsAnyOf("/" + n.group(1) + ", p=", "N=" + n.group(1) + ",");
     }
 }
