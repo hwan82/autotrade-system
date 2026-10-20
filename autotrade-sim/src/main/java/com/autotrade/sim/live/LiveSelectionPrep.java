@@ -172,14 +172,15 @@ public final class LiveSelectionPrep {
             financials = f;
         }
         // 공시 latest는 마지막 수집 시각이 가장 늦은 공시 스냅샷이다. 그 스냅샷이 T 전날까지를 담는지는 선정 계산이 유형·구간마다
-        // 본다(못 담으면 STALE_INPUT, ADR-014 6장). 스냅샷이 아예 없으면 그날은 입력을 기다리는 것이라 STALE_INPUT으로 남긴다
+        // 본다(못 담으면 STALE_INPUT, ADR-014 6장). 스냅샷이 아예 없으면 공시 없이 계산을 이어 간다: 공시 조건 선정만 계산기가
+        // STALE_INPUT으로 실패하고 같은 등록의 다른 선정은 그대로 만든다("그날 그 묶음"만 0, architect PR #206 R1). 입력 키에 공시
+        // 칸이 없으므로 공시 스냅샷이 생기면 키가 달라져 다시 계산한다
         Optional<String> disclosures = sel.disclosures();
         if (disclosures.isPresent() && disclosures.get().equals(RegisteredSelections.LATEST)) {
-            Optional<String> d = latestDisclosures(snapshotsRoot);
-            if (d.isEmpty()) {
-                return problem(id, files, date, daily, SelectionInvalidReason.STALE_INPUT, "읽을 수 있는 공시 스냅샷이 없음", log);
+            disclosures = latestDisclosures(snapshotsRoot);
+            if (disclosures.isEmpty()) {
+                log.accept("선정 준비 " + id + " " + date + ": 읽을 수 있는 공시 스냅샷이 없어 공시 조건 선정은 STALE_INPUT");
             }
-            disclosures = d;
         }
         // 같은 입력 스냅샷으로 이미 계산에 실패했으면 다시 읽지 않는다: 같은 입력이면 같은 실패이고, 실패한 날 장 밖 동안 5분마다
         // 일봉 전체를 다시 올리면 실험실 힙·디스크를 세션과 나눠 쓴다(architect PR #197 R2). 새 스냅샷이 나오면 다시 계산한다

@@ -413,15 +413,34 @@ class LiveSelectionSessionTest {
     }
 
     @Test
-    void disclosurePreparationWithoutAnySnapshotIsStale() throws Exception {
-        LivePlan plan = LivePlan.parse(newsYaml("latest"), "x");
+    void missingDisclosureSnapshotStopsOnlyTheDisclosureSelection() throws Exception {
+        // architect PR #206 R1: 공시 스냅샷이 없으면 공시 조건 선정 (라)만 STALE_INPUT이고, 같은 등록의 (다)는 그대로 만든다.
+        // 그 뒤 공시 스냅샷이 생기면 입력 키가 달라져 (라)를 다시 계산한다
+        String both = newsYaml("latest").replace("  - \"kr-intraday-news@1 x kr-random-control@1\"\n",
+                "  - \"kr-intraday-news@1 x kr-random-control@1\"\n  - \"kr-intraday-hot@1 x kr-random-control@1\"\n");
+        LivePlan plan = LivePlan.parse(both, "x");
+        SelectionProfile news = SelectionFixtures.intradayNews(REPO);
+        Path sessions = tmp.resolve("live-sessions");
         Path snapshots = SelectionFixtures.dailySnapshot(tmp.resolve("snapshots"), "krx-daily-live-0001", D1, false);
-        LiveSelectionPrep.Report r = LiveSelectionPrep.prepare(plan, REPO, tmp.resolve("live-sessions"), snapshots, D1,
-                PRODUCER, RunGate.NONE, rows -> true, m -> { });
-        assertThat(r.outcomes()).singleElement().satisfies(o -> {
+        LiveSelectionPrep.Report r = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D1, PRODUCER, RunGate.NONE,
+                rows -> true, m -> { });
+        assertThat(r.disclosuresSnapshot()).isEmpty();
+        assertThat(r.outcomes()).hasSize(2);
+        assertThat(r.outcomes()).filteredOn(o -> o.selection().equals(news.key())).singleElement().satisfies(o -> {
             assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
-            assertThat(o.detail()).contains("공시 스냅샷이 없음");
+            assertThat(o.detail()).contains("공시 입력이 없습니다");
         });
+        assertThat(r.outcomes()).filteredOn(o -> o.selection().equals(hot.key())).singleElement()
+                .satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.WRITTEN));
+
+        SelectionFixtures.disclosureSnapshot(snapshots, "dart-disclosures-live-0001", LocalDate.of(2026, 1, 1),
+                D1.minusDays(1), D1.minusDays(1), List.of("005930"), "2026-10-13T22:00:00Z");
+        LiveSelectionPrep.Report again = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D1, PRODUCER,
+                RunGate.NONE, rows -> true, m -> { });
+        assertThat(again.ready()).isTrue();
+        assertThat(again.disclosuresSnapshot()).isEqualTo("dart-disclosures-live-0001");
+        assertThat(again.outcomes()).filteredOn(o -> o.selection().equals(news.key())).singleElement()
+                .satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.WRITTEN));
     }
 
     @Test
