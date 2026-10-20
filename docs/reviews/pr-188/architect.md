@@ -26,3 +26,12 @@
 
 ## 판정
 수정 필요(B3: ADR-005 5장 API 표와 ADR-010 2.4 엔드포인트 목록에 `GET /api/live/runs/{runId}/fills`·`/rejections` 추가)
+
+## 추가 커밋 반영 2026-10-20
+- 대상: 커밋 0ab1834618b5dc88cfa12d997f45dd8767209330(live.js 3줄), 검토 시점 HEAD de962266 기준 `git diff origin/main...HEAD` 전체
+- 직접 실행한 것: `./gradlew build` → BUILD SUCCESSFUL(20개 작업 실행), `node --check pages/live.js` → 오류 없음
+- 내용: 계좌 상세 `body.replaceChildren(...[ … ].filter(Boolean))`로 실패가 없을 때 `null`이 글자로 들어가던 것을 고침(experiments.js:377·414의 기존 패턴과 같음), 거래일 타일 설명을 `RunStepper.Progress.tradingDay`의 뜻("마지막으로 처리한 이벤트의 거래일", RunStepper.java Progress Javadoc)과 맞춤. 화면 문구·DOM만 바뀌고 API·계약·sim 코드 변경 없음
+- 점검표 영향: B1 통과(위 빌드), B2·B4·B5·B7·B8 변동 없음, B6 변동 없음(UI JS는 자동 테스트 대상 아님, 문법 검사만 함), **B3는 여전히 실패**(ADR-005 5장·ADR-010 2.4에 새 GET 2개 미기재)
+
+### 판정
+수정 필요(B3: ADR-005 5장 API 표와 ADR-010 2.4 엔드포인트 목록에 `GET /api/live/runs/{runId}/fills`·`/rejections` 추가)
