@@ -31,6 +31,7 @@ final class Tape {
 
     static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
     static final Symbol A = Symbol.krx("900001");
+    static final Symbol B = Symbol.krx("900002");
     static final MarketRules KRX = new MarketRules() {
         @Override
         public Market market() {
@@ -59,6 +60,10 @@ final class Tape {
     private Money cash = Money.of(10_000_000, Money.KRW);
     private final TreeMap<Symbol, Position> positions = new TreeMap<>();
     private final Set<Symbol> open = new HashSet<>();
+    /** 실행기가 신규 진입을 받지 않는 종목(선정 밖, D-130). */
+    private final Set<Symbol> refused = new HashSet<>();
+    /** {@link StrategyContext#admitsEntry}가 불린 횟수. */
+    private int admitAsks;
 
     Tape(Strategy strategy) {
         this.strategy = strategy;
@@ -93,14 +98,32 @@ final class Tape {
         return this;
     }
 
+    /** 실행기가 이 종목의 신규 진입을 받지 않게 한다(선정 밖 종목 흉내). */
+    Tape refuse(Symbol s) {
+        refused.add(s);
+        return this;
+    }
+
+    int admitAsks() {
+        return admitAsks;
+    }
+
     List<TradeSignal> trade(String time, long price, long qty) {
+        return trade(A, time, price, qty);
+    }
+
+    List<TradeSignal> trade(Symbol s, String time, long price, long qty) {
         Instant t = at(time);
-        return feed(new TradeTick(A, ++seq, t, t, BigDecimal.valueOf(price), qty));
+        return feed(new TradeTick(s, ++seq, t, t, BigDecimal.valueOf(price), qty));
     }
 
     List<TradeSignal> book(String time, long bid, long ask, long bidQty, long askQty) {
+        return book(A, time, bid, ask, bidQty, askQty);
+    }
+
+    List<TradeSignal> book(Symbol s, String time, long bid, long ask, long bidQty, long askQty) {
         Instant t = at(time);
-        return feed(new OrderBookSnapshot(A, ++seq, t, t,
+        return feed(new OrderBookSnapshot(s, ++seq, t, t,
                 List.of(new PriceLevel(BigDecimal.valueOf(ask), askQty)),
                 List.of(new PriceLevel(BigDecimal.valueOf(bid), bidQty))));
     }
@@ -126,6 +149,12 @@ final class Tape {
             @Override
             public boolean hasOpenOrder(Symbol symbol) {
                 return open.contains(symbol);
+            }
+
+            @Override
+            public boolean admitsEntry(Symbol symbol) {
+                admitAsks++;
+                return !refused.contains(symbol);
             }
         });
     }
