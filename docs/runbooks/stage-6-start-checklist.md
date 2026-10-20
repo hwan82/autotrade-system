@@ -215,7 +215,7 @@ $t0 = Get-Date
 
 4. LIVE01 첫날(10-26) 게이트웨이를 켠 뒤 창 1 로그에 `구독 거절`이 나오면 **09:00 전에** 게이트웨이를 Ctrl+C로 끄고 `Copy-Item "$wl.before-wide" $wl -Force`로 10종목으로 되돌린 뒤 다시 켠다. 그 로그 줄을 스레드에 올린다(키는 나오지 않는다). LIVE01 결과를 지키는 쪽이 먼저다.
 
-   거절 줄 없이 일부 종목만 빠질 수도 있어(risk-ops PR #195 N1), 첫날 **09:30쯤** 새 PowerShell 창에서 LIVE01 10종목이 그날 녹화에 모두 들어왔는지 한 번 본다. 쓰는 중인 파일을 읽기만 한다.
+   거절 줄 없이 일부 종목만 빠질 수도 있어(risk-ops PR #195 N1), 첫날 **09:30쯤** 새 PowerShell 창에서 LIVE01 10종목이 그날 녹화에 모두 들어왔는지 한 번 본다. 쓰는 중인 파일을 읽기만 한다. 게이트웨이를 다시 켜는 중에는 돌리지 않는다(읽는 몇 초 동안 녹화 파일 이름 바꾸기가 막힐 수 있다, architect PR #195 n2).
 
    ```powershell
    chcp 65001 > $null; $cfg = if ($env:AUTOTRADE_CONFIG_DIR) { $env:AUTOTRADE_CONFIG_DIR } else { Join-Path $HOME ".autotrade" }
