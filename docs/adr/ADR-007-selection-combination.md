@@ -55,7 +55,7 @@ parameters:
 |---|---|---|
 | `hypothesis` | O | 가설 1문장(STR-02) |
 | `refresh` | O | 단타용 `PRE_OPEN_DAILY`·`INTRADAY_AT`, 스윙·중기용 `POST_CLOSE_DAILY`·`POST_CLOSE_WEEKLY`. 규칙은 "단타 ⇔ 단타용 갱신 주기 집합"(2026-10-20 개정, [D-127](../decisions/D-127-intraday-at-selection.md). 처음에는 "단타 ⇔ `PRE_OPEN_DAILY`"). 스타일과 맞지 않으면 검증 실패 |
-| `at` | `INTRADAY_AT`만 O | 장중 순위 시각 `HH:MM`(거래소 현지, KRX 09:01~15:20, 미국 09:31~16:00). 다른 갱신 주기에 주면 검증 실패(D-127) |
+| `at` | `INTRADAY_AT`만 O | 장중 순위 시각 `HH:MM`(거래소 현지, KRX 09:01~14:30, 미국 09:31~15:00). 다른 갱신 주기에 주면 검증 실패(D-127) |
 | `max-symbols` | O | 1 이상 정수. 선정 결과 종목 수 상한 |
 | `filter.*` | | 하드 필터(STR-10) |
 | `gate.<2자리 순번>.*` | | 자격 조건(모두 AND, STR-15) |

@@ -1,0 +1,17 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# (마) kr-intraday-open-momentum@1의 대조 선정(strategy-researcher PR #200 M1, D-127). 같은 09:30 순위 시각에 그날 09:30 전 체결이
+# 있는 boards 전 종목을 고른다(순위로 거르지 않음). 같은 매매지표를 붙여 "09:30부터 들어간다"는 효과를 (마)와 똑같이 갖게 하고,
+# 두 계좌의 차이를 (마)의 선정 효과로 읽는다. max-symbols 200은 키움 구독 상한(D-122 watchlist 최대) 이상이라 자르지 않는다.
+id: "kr-intraday-open-all"
+version: 1
+market: "KRX"
+style: "INTRADAY"
+created-at: "2026-10-20T00:00:00Z"
+parameters:
+  hypothesis: "대조 선정: 그날 09:30 전 체결이 있는 boards 전 종목. (마) kr-intraday-open-momentum@1과 같은 매매지표·같은 진입 시각으로 비교해 (마)의 선정 효과만 떼어 본다"
+  refresh: "INTRADAY_AT"
+  at: "09:30"
+  max-symbols: "200"
+  gate.01.metric: "session-turnover"
+  gate.01.op: "GT"
+  gate.01.value: "0"

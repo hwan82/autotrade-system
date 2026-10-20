@@ -11,6 +11,7 @@ import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.selection.profile.SelectionRefresh;
 import com.autotrade.selection.result.SessionSelectionResult;
 import com.autotrade.selection.result.SelectionResult;
+import com.autotrade.sim.exchange.VirtualExchange;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -35,7 +36,8 @@ import java.util.TreeSet;
  * <p>규칙(선정 프로필 하나, 거래일 D)
  * <ul>
  *   <li><b>모으기</b>: D의 체결 중 거래소 시각이 정규장이고 {@code at} 전인 boards 종목 체결을 종목마다 요약한다. D의 정규장 안에서
- *       끝나고 {@code at} 전에 시작한 시세 누락({@link DataGap})이 있던 종목은 표시한다(값을 믿을 수 없음).</li>
+ *       [정규장 시작, {@code at})과 겹치는 시세 누락({@link DataGap})이 있던 종목은 표시한다(값을 믿을 수 없음). 그날 첫 이벤트가 개장 +
+ *       60초 뒤면(장중에 처음 받기 시작) boards 전 종목을 표시한다.</li>
  *   <li><b>순위 시각</b>: D의 이벤트 중 누락 표시가 아니고 거래소 시각이 {@code at} 이상인 첫 이벤트가 오면, 그 이벤트를 모으기 전에
  *       그때까지 모은 것으로 순위를 매긴다. 그 뒤에 오는 {@code at} 전 체결은 넣지 않는다(그 순간 알 수 없었던 정보, 미래 정보 0건).
  *       그 이벤트의 순번부터 후보에 신규 진입을 허용한다.</li>
@@ -106,6 +108,11 @@ public final class IntradayTracker implements SelectionDays {
             today = d;
             windows.clear();
             byAt.keySet().forEach(t -> windows.put(t, new Window()));
+            if (universe.rules().isRegularSession(e.exchangeTime().minus(VirtualExchange.AUCTION_PRINT_GRACE))) {
+                // 그날 첫 관측이 개장 + 60초 뒤(녹화·세션을 장중에 처음 열었음): 장 초반 체결을 못 받았으니 재기동 공백이 붙은 날과
+                // 같게 boards 전 종목을 누락으로 본다(strategy-researcher PR #200 M2). 늦은 구간만으로 매긴 순위를 정상 결과로 남기지 않는다
+                windows.values().forEach(w -> w.gapped.addAll(universe.boards()));
+            }
         }
         LocalTime local = e.exchangeTime().atZone(universe.rules().zone()).toLocalTime();
         for (Map.Entry<LocalTime, List<String>> g : byAt.entrySet()) {
@@ -131,12 +138,21 @@ public final class IntradayTracker implements SelectionDays {
                 w.stats.merge(code, SessionStats.of(t.price(), t.quantity()),
                         (a, b) -> a.plus(t.price(), t.quantity()));
             }
-        } else if (e instanceof DataGap g && universe.rules().isRegularSession(g.gapEnd())
-                && universe.rules().tradingDate(g.gapEnd()).equals(today)
-                && g.gapStart().atZone(universe.rules().zone()).toLocalTime().isBefore(at)) {
-            // 구간(정규장 시작 ~ at 전)과 겹치는 누락만 표시한다. at 뒤에 시작한 누락은 순위 값과 상관없다
+        } else if (e instanceof DataGap g && overlapsWindow(g, at)) {
             w.gapped.add(code);
         }
+    }
+
+    /**
+     * 누락이 그날 [정규장 시작, {@code at})과 겹치는지(strategy-researcher PR #200 R2). 시작이 {@code at} 전(전날 시작 포함)이고, 끝이 그날
+     * 정규장 안이거나 {@code at} 이상(장 마감 뒤에 다시 붙은 경우 포함)이면 겹친다. 정규장 시작 전에 끝난 누락은 구간 밖이다.
+     */
+    private boolean overlapsWindow(DataGap g, LocalTime at) {
+        java.time.Instant atInstant = today.atTime(at).atZone(universe.rules().zone()).toInstant();
+        if (!g.gapStart().isBefore(atInstant) || universe.rules().tradingDate(g.gapEnd()).isBefore(today)) {
+            return false;
+        }
+        return !g.gapEnd().isBefore(atInstant) || universe.rules().isRegularSession(g.gapEnd());
     }
 
     private void rank(List<String> hashes, Window w, LocalDate d, long sequence) {

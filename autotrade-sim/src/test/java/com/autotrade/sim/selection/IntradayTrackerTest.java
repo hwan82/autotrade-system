@@ -176,6 +176,47 @@ class IntradayTrackerTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("시장");
     }
 
+    @Test
+    void dayFirstObservedAfterOpenGraceMarksEveryBoardSymbolAsGap() {
+        // strategy-researcher PR #200 M2: 그날 첫 이벤트가 개장 + 60초 뒤면 장 초반 체결을 못 받은 날이라 전 종목 SESSION_GAP
+        IntradayTracker late = tracker();
+        late.onEvent(trade("005930", 1, at(D1, 9, 5, 0), 100, 10));
+        late.onEvent(trade("005930", 2, at(D1, 9, 10, 0), 103, 10));
+        late.onEvent(trade("005930", 3, at(D1, 9, 30, 0), 103, 1));
+        assertThat(late.ranked()).singleElement().satisfies(r -> {
+            assertThat(r.result().selected()).isEmpty();
+            assertThat(evaluation(r, "005930").reasons()).containsExactly("SESSION_GAP");
+        });
+        // 개장 + 60초 안(09:00:59)에 처음 받았으면 정상으로 계산한다
+        IntradayTracker onTime = tracker();
+        onTime.onEvent(trade("005930", 1, at(D1, 9, 0, 59), 100, 10));
+        onTime.onEvent(trade("005930", 2, at(D1, 9, 10, 0), 103, 10));
+        onTime.onEvent(trade("005930", 3, at(D1, 9, 30, 0), 103, 1));
+        assertThat(onTime.ranked().get(0).result().selected()).extracting(SelectionResult.Selected::code)
+                .containsExactly("005930");
+    }
+
+    @Test
+    void gapOverlappingWindowMarksSymbolEvenIfItEndsAfterClose() {
+        // strategy-researcher PR #200 R2: [개장, at)과 겹치면 끝이 장 마감 뒤여도 표시, 개장 전에 끝난 누락과 at 뒤에 시작한 누락은 표시 안 함
+        IntradayTracker t = tracker();
+        t.onEvent(trade("005930", 1, at(D1, 8, 40, 0), 100, 1));
+        t.onEvent(new DataGap(Symbol.krx("000660"), 2, at(D1, 8, 50, 0), at(D1, 8, 50, 0), at(D1, 8, 30, 0),
+                at(D1, 8, 50, 0), DataGap.GapReason.DISCONNECTED)); // 개장 전에 끝남
+        t.onEvent(new DataGap(Symbol.krx("051910"), 3, at(D1, 9, 5, 0), at(D1, 9, 5, 0), at(D1, 9, 4, 0),
+                at(D1, 16, 0, 0), DataGap.GapReason.DISCONNECTED)); // 장 마감 뒤에 끝남
+        for (String code : List.of("005930", "000660", "051910")) {
+            t.onEvent(trade(code, 10, at(D1, 9, 0, 30), 100, 10));
+            t.onEvent(trade(code, 11, at(D1, 9, 20, 0), 103, 10));
+        }
+        t.onEvent(trade("005930", 20, at(D1, 9, 30, 0), 103, 1));
+        assertThat(t.ranked()).singleElement().satisfies(r -> {
+            assertThat(evaluation(r, "051910").reasons()).containsExactly("SESSION_GAP");
+            assertThat(r.result().selected()).extracting(SelectionResult.Selected::code)
+                    .containsExactlyInAnyOrder("005930", "000660");
+        });
+    }
+
     private static SelectionResult.Evaluation evaluation(IntradayTracker.Ranked r, String code) {
         return r.result().evaluations().stream().filter(e -> e.code().equals(code)).findFirst().orElseThrow();
     }

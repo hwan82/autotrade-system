@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  *   <li>{@code refresh}(필수): {@link SelectionRefresh} 이름. 스타일과 맞아야 한다</li>
  *   <li>{@code max-symbols}(필수): 1 이상 정수. 선정 결과 종목 수 상한</li>
  *   <li>{@code at}({@link SelectionRefresh#INTRADAY_AT}만 필수, 다른 갱신 주기에는 거부): 장중 순위 시각 {@code HH:mm}(거래소 현지).
- *       정규장 시작 뒤 ~ 접속 매매 끝 이내(KRX 09:01~15:20, 미국 09:31~16:00)여야 한다(D-127)</li>
+ *       정규장 시작 뒤 ~ 접속 매매 끝 이내(KRX 09:01~14:30, 미국 09:31~15:00)여야 한다(D-127)</li>
  * </ul>
  *
  * <p>{@link #selectionHash()}는 전략 프로필 해시와 같은 길이 접두 인코딩의 SHA-256이고, 첫 줄에
@@ -142,9 +142,10 @@ public record SelectionProfile(
             throw new IllegalArgumentException("INTRADAY_AT 선정에는 at(HH:mm, 거래소 현지 시각)이 필요합니다: " + value + " (" + id + ")");
         }
         LocalTime at = LocalTime.parse(value);
-        // 정규장 시작 뒤 ~ 접속 매매 끝(KRX는 15:20부터 종가 단일가). 특수일 개장 지연은 실행 때 정규장 판정으로 다룬다
+        // 정규장 시작 뒤 ~ 단타 장 마감 청산(예시 전략 exit.eod-time 15:10)보다 40분 넘게 앞(순위 뒤 진입할 구간을 남김,
+        // strategy-researcher PR #200 R1). 특수일 개장 지연은 실행 때 정규장 판정으로 다룬다
         LocalTime first = market == Market.KRX ? LocalTime.of(9, 1) : LocalTime.of(9, 31);
-        LocalTime last = market == Market.KRX ? LocalTime.of(15, 20) : LocalTime.of(16, 0);
+        LocalTime last = market == Market.KRX ? LocalTime.of(14, 30) : LocalTime.of(15, 0);
         if (at.isBefore(first) || at.isAfter(last)) {
             throw new IllegalArgumentException("at은 " + first + " ~ " + last + " 사이여야 합니다: " + value + " (" + id + ")");
         }

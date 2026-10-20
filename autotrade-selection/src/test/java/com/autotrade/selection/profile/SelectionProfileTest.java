@@ -88,14 +88,14 @@ class SelectionProfileTest {
                 .hasMessageContaining("INTRADAY_AT");
         assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt(null)))
                 .hasMessageContaining("at");
-        for (String bad : new String[] {"9:30", "09:30:00", "24:00", "09:00", "15:21", "08:59"}) {
+        for (String bad : new String[] {"9:30", "09:30:00", "24:00", "09:00", "14:31", "15:20", "08:59"}) {
             assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt(bad)))
                     .as(bad).hasMessageContaining("at");
         }
         assertThat(new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt("09:01")).at())
                 .contains(java.time.LocalTime.of(9, 1));
-        assertThat(new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt("15:20")).at())
-                .contains(java.time.LocalTime.of(15, 20));
+        assertThat(new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt("14:30")).at())
+                .contains(java.time.LocalTime.of(14, 30));
         assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.US, TradingStyle.INTRADAY, intradayAt("09:30")))
                 .hasMessageContaining("at");
         // 다른 갱신 주기에는 at을 받지 않는다(해시에만 섞인 키가 결과를 어긋나게 하지 않게)
