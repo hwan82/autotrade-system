@@ -209,6 +209,30 @@ class LiveJudgeCriteriaTest {
         assertThat(l5(30).outcome()).isEqualTo(Check.Outcome.PASS);
     }
 
+    @Test
+    void l5_short_sample_does_not_hide_another_fail() {
+        // 표본 부족(판정 불가)과 다른 탈락이 겹치면 탈락이다(PR #180 strategy-researcher n2):
+        // 왕복 29건 + PF 0.5(L2 탈락) → 탈락, 같은 29건에 PF 2면 탈락 없이 보류
+        LiveJudgeCriteria.Judgement weak = judge(run(metrics("0.10", "0.5", 58, 29), List.of()));
+        assertThat(outcome(weak, "L5")).isEqualTo(Check.Outcome.NOT_AVAILABLE);
+        assertThat(outcome(weak, "L2")).isEqualTo(Check.Outcome.FAIL);
+        assertThat(weak.verdict()).isEqualTo(LiveJudgeCriteria.Verdict.FAIL);
+
+        LiveJudgeCriteria.Judgement fine = judge(run(metrics("0.10", "2", 58, 29), List.of()));
+        assertThat(outcome(fine, "L5")).isEqualTo(Check.Outcome.NOT_AVAILABLE);
+        assertThat(fine.checks()).noneMatch(c -> c.outcome() == Check.Outcome.FAIL);
+        assertThat(fine.verdict()).isEqualTo(LiveJudgeCriteria.Verdict.HOLD);
+    }
+
+    private static LiveJudgeCriteria.Judgement judge(RunReport base) {
+        return LiveJudgeCriteria.evaluate(new LiveJudgeCriteria.Evidence(base, null, null, null, List.of(), 6, null, SEED,
+                FROM, T));
+    }
+
+    private static Check.Outcome outcome(LiveJudgeCriteria.Judgement j, String code) {
+        return j.checks().stream().filter(c -> c.code().equals(code)).findFirst().orElseThrow().outcome();
+    }
+
     private static Check l5(int trips) {
         RunReport base = run(metrics("0.10", "2", trips * 2, trips), List.of());
         return LiveJudgeCriteria.evaluate(new LiveJudgeCriteria.Evidence(base, null, null, null, List.of(), 6, null, SEED,

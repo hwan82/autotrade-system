@@ -328,4 +328,92 @@ class LiveJudgementTest {
                 new CodeVersion("c", false), m -> { }, stopLater)).isInstanceOf(ExperimentStoppedException.class);
         assertThat(experimentDir.resolve(LiveJudgement.FILE)).doesNotExist();
     }
+
+    @Test
+    void run_all_returns_results_in_task_order_whatever_finishes_first() throws Exception {
+        java.util.concurrent.CountDownLatch secondDone = new java.util.concurrent.CountDownLatch(1);
+        List<java.util.concurrent.Callable<String>> tasks = List.of(() -> {
+            // 첫 작업은 둘째가 끝난 뒤에 끝난다
+            assertThat(secondDone.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            return "G1";
+        }, () -> {
+            secondDone.countDown();
+            return "G2";
+        });
+        assertThat(LiveJudgement.runAll(tasks, "T", () -> { })).containsExactly("G1", "G2");
+    }
+
+    @Test
+    void run_all_raises_a_later_group_failure_without_waiting_for_earlier_groups() {
+        // PR #180 architect N2: 뒤 묶음이 먼저 실패하면 앞 묶음이 끝날 때까지 기다리지 않는다. 앞 묶음은 판정 문처럼
+        // 멈춤 신호를 확인 지점에서 보고 멈춘다(실행기는 스레드 중단을 보지 않으므로 취소만으로는 멈추지 않는다)
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
+        RunGate gate = LiveJudgement.abortable(RunGate.NONE, failed);
+        java.util.concurrent.atomic.AtomicBoolean ranToEnd = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicBoolean stoppedByGate = new java.util.concurrent.atomic.AtomicBoolean();
+        List<java.util.concurrent.Callable<String>> tasks = List.of(() -> {
+            for (int i = 0; i < 4_000; i++) { // 확인 지점 사이 5ms, 멈추지 않으면 20초
+                try {
+                    gate.check();
+                } catch (ExperimentStoppedException e) {
+                    stoppedByGate.set(true);
+                    throw e;
+                }
+                sleepUninterruptibly(5);
+            }
+            ranToEnd.set(true);
+            return "G1";
+        }, () -> {
+            throw new IllegalArgumentException("G2 입력 오류");
+        });
+        assertThatThrownBy(() -> LiveJudgement.runAll(tasks, "T", () -> failed.set(true)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("G2 입력 오류");
+        assertThat(stoppedByGate).isTrue();
+        assertThat(ranToEnd).isFalse();
+    }
+
+    @Test
+    void abortable_gate_stops_once_failed_and_otherwise_follows_the_original_gate() {
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
+        AtomicInteger planned = new AtomicInteger();
+        RunGate original = new RunGate() {
+            @Override
+            public Optional<String> stopReason() {
+                return Optional.empty();
+            }
+
+            @Override
+            public void onExperimentsPlanned(int count) {
+                planned.set(count);
+            }
+
+            @Override
+            public int maxParallelRuns() {
+                return 3;
+            }
+        };
+        RunGate gate = LiveJudgement.abortable(original, failed);
+        gate.check();
+        assertThat(gate.stopReason()).isEmpty();
+        assertThat(gate.maxParallelRuns()).isEqualTo(3);
+        gate.onExperimentsPlanned(7);
+        assertThat(planned).hasValue(7);
+
+        failed.set(true);
+        assertThat(gate.stopReason()).contains("다른 판정 묶음이 실패해 멈춤");
+        assertThatThrownBy(gate::check).isInstanceOf(ExperimentStoppedException.class);
+
+        // 원래 문의 멈춤·취소는 그대로 따른다
+        RunGate stopping = LiveJudgement.abortable(() -> Optional.of("장 시간"),
+                new java.util.concurrent.atomic.AtomicBoolean());
+        assertThatThrownBy(stopping::check).isInstanceOf(ExperimentStoppedException.class).hasMessageContaining("장 시간");
+    }
+
+    private static void sleepUninterruptibly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            // 취소의 스레드 중단은 무시한다(실제 실행기와 같게)
+        }
+    }
 }

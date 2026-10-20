@@ -4,6 +4,7 @@ import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.feed.FeedClient;
 import com.autotrade.marketdata.feed.FeedServer;
@@ -14,6 +15,7 @@ import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.marketdata.recording.RecordingMeta;
 import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.sim.ClockMode;
+import com.autotrade.sim.exchange.MidpointTrades;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.recording.RecordingExperiment;
@@ -103,18 +105,34 @@ public final class LiveWeeklyCheck {
      * @param reconnects 받는 쪽 재연결 횟수(FEED-CLIENT 공백의 서로 다른 구간 수)
      * @param journalPresent 같은 날 입력 기록이 있는지(없으면 실험실이 그날 세션을 열지 않았고, 녹화 줄은 모두 빠짐이다)
      * @param recordingPresent 같은 날 녹화가 있는지(없으면 대조 칸은 비어 있다)
+     * @param midpoints 입력 기록의 boards 체결 틱을 종목별로 센 중간가 체결 수(D-118, 참고). 기록이 없으면 비어 있다
      */
     public record DayRow(LocalDate date, boolean journalPresent, long journalLines, long recordedEvents, long matched, Map<String, Long> missing,
             long extraInRecorderGap, long extraUnexplained, Map<String, Long> labGaps, long forwardedGaps, int reconnects,
-            boolean journalComplete, boolean recordingPresent, boolean recordingComplete) {
+            boolean journalComplete, boolean recordingPresent, boolean recordingComplete, Map<Symbol, MidpointCount> midpoints) {
         public DayRow {
             Objects.requireNonNull(date, "date");
             missing = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(missing));
             labGaps = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(labGaps));
+            midpoints = java.util.Collections.unmodifiableMap(new java.util.TreeMap<>(midpoints));
         }
 
         public long missingTotal() {
             return missing.values().stream().mapToLong(Long::longValue).sum();
+        }
+    }
+
+    /**
+     * 한 종목의 체결 틱 중 중간가 체결(호가 단위의 정확한 반 칸, D-118 {@code MidpointTrades})의 수와 거래량. 반 칸 체결은
+     * 신호·거래량·평가에는 쓰고 지정가·단일가 체결에는 쓰지 않으므로(BOOK-V6), 비중이 크면 지정가 프로필의 체결률과 거래량 신호
+     * 해석에 참고한다(PR #184 strategy-researcher R2). 판정 기준은 아니다.
+     */
+    public record MidpointCount(long ticks, long volume, long midpointTicks, long midpointVolume) {
+        static final MidpointCount ZERO = new MidpointCount(0, 0, 0, 0);
+
+        MidpointCount plus(MidpointCount o) {
+            return new MidpointCount(ticks + o.ticks, volume + o.volume, midpointTicks + o.midpointTicks,
+                    midpointVolume + o.midpointVolume);
         }
     }
 
@@ -303,6 +321,7 @@ public final class LiveWeeklyCheck {
             return c != 0 ? c : a.get(1).compareTo(b.get(1));
         });
         long[] forwarded = {0};
+        Map<Symbol, MidpointCount> midpoints = new java.util.TreeMap<>();
         Map<Key, Integer> jCount = new HashMap<>();
         String jBefore = jDir == null ? null : fingerprintOf(jDir);
         RecordedDayStream.Summary jDay = null;
@@ -323,6 +342,11 @@ public final class LiveWeeklyCheck {
                 if (e instanceof DataGap) {
                     forwarded[0]++;
                 }
+                if (e instanceof TradeTick t && setup.onBoards(e) && setup.inPlan(e)) {
+                    boolean mid = MidpointTrades.isMidpoint(setup.rules(), t.symbol(), t.price());
+                    midpoints.merge(t.symbol(), new MidpointCount(1, t.quantity(), mid ? 1 : 0, mid ? t.quantity() : 0),
+                            MidpointCount::plus);
+                }
                 jCount.merge(key(codec, l), 1, Integer::sum);
             });
             spans = spanBuilder.spans(jDay.meta());
@@ -334,7 +358,7 @@ public final class LiveWeeklyCheck {
                 ensureStable(jDir, jBefore);
             }
             return new DayRow(date, jDay != null, jLines, 0, 0, Map.of(), 0, 0, labGaps, forwarded[0],
-                    reconnects.size(), jComplete, false, false);
+                    reconnects.size(), jComplete, false, false, midpoints);
         }
         List<Gap> recorderGaps = new ArrayList<>();
         Map<Key, Integer> rCount = new HashMap<>();
@@ -390,7 +414,7 @@ public final class LiveWeeklyCheck {
         }
         return new DayRow(date, jDay != null, jLines, rEntries[0], matched[0], missing, extraInGap[0], extraUnexplained[0],
                 labGaps, forwarded[0], reconnects.size(), jComplete, true,
-                rDay.meta().map(RecordingMeta::complete).orElse(false));
+                rDay.meta().map(RecordingMeta::complete).orElse(false), midpoints);
     }
 
     /**
@@ -727,7 +751,38 @@ public final class LiveWeeklyCheck {
                 .append("성과이고 투자 자문이 아니다.\n\n");
         sb.append(accounts);
         sb.append(CollectionFreshness.render(collection));
+        renderMidpoints(sb, week);
         return sb.toString();
+    }
+
+    /** 5장: 이번 주 입력 기록의 종목별 중간가 체결(D-118). 참고 값이고 판정·종료 코드에 넣지 않는다. */
+    private static void renderMidpoints(StringBuilder sb, List<DayRow> week) {
+        Map<Symbol, MidpointCount> total = new java.util.TreeMap<>();
+        for (DayRow r : week) {
+            r.midpoints().forEach((s, c) -> total.merge(s, c, MidpointCount::plus));
+        }
+        sb.append("\n## 5. 중간가 체결(이번 주, 입력 기록, 참고)\n\n");
+        sb.append("호가 단위의 정확한 반 칸 체결(D-118). 신호·거래량·평가에는 쓰고 지정가·단일가 체결에는 쓰지 않는다(BOOK-V6). ")
+                .append("비중이 크면 지정가 프로필 체결률과 거래량 신호를 해석할 때 참고한다. 판정 기준이 아니다.\n\n");
+        if (total.isEmpty()) {
+            sb.append("이번 주 입력 기록에 boards 체결 틱이 없습니다.\n");
+            return;
+        }
+        sb.append("| 종목 | 체결 틱 | 중간가 틱 | 틱 비중 | 거래량 | 중간가 거래량 | 거래량 비중 |\n");
+        sb.append("|---|---:|---:|---:|---:|---:|---:|\n");
+        total.forEach((s, c) -> sb.append("| ").append(s.code()).append(" | ").append(c.ticks()).append(" | ")
+                .append(c.midpointTicks()).append(" | ").append(share(c.midpointTicks(), c.ticks())).append(" | ")
+                .append(c.volume()).append(" | ").append(c.midpointVolume()).append(" | ")
+                .append(share(c.midpointVolume(), c.volume())).append(" |\n"));
+    }
+
+    /** 백분율 소수 둘째 자리(반올림 HALF_EVEN). 분모가 0이면 "-". */
+    static String share(long part, long whole) {
+        if (whole == 0) {
+            return "-";
+        }
+        return BigDecimal.valueOf(part).multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(whole), 2, RoundingMode.HALF_EVEN).toPlainString() + "%";
     }
 
     private static List<String> missingKeys() {

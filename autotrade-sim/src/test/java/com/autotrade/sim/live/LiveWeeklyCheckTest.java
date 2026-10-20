@@ -454,4 +454,59 @@ class LiveWeeklyCheckTest {
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("녹화가 대조한 뒤 바뀌었습니다");
         assertThat(second).isEmpty();
     }
+
+    @Test
+    void midpointTradeTicksAreCountedPerSymbolFromTheJournal() {
+        // PR #184 strategy-researcher R2: 반 칸 체결(D-118)의 종목별 틱 수·거래량 비중을 참고 값으로 남긴다
+        List<MarketEvent> base = LiveSessionTest.twoDays().stream()
+                .filter(e -> e.receivedAt().atZone(SEOUL).toLocalDate().equals(DAY1)).toList();
+        List<MarketEvent> events = new java.util.ArrayList<>();
+        long samsungTicks = 0;
+        long samsungVolume = 0;
+        long midVolume = 0;
+        boolean replaced = false;
+        for (MarketEvent e : base) {
+            if (e instanceof TradeTick t && t.symbol().equals(SAMSUNG)) {
+                samsungTicks++;
+                samsungVolume += t.quantity();
+                if (!replaced) {
+                    // 삼성전자 6만 원대 호가 단위 100원의 반 칸 위(…50원)
+                    e = new TradeTick(t.symbol(), t.sequence(), t.exchangeTime(), t.receivedAt(), t.price().add(new BigDecimal("50")),
+                            t.quantity());
+                    midVolume = t.quantity();
+                    replaced = true;
+                }
+            }
+            events.add(e);
+        }
+        JournalWriter w = new JournalWriter(new RecordingLayout(recordings), Market.KRX, SEOUL, Map.of(SRC, "테스트 녹화"),
+                "테스트");
+        for (MarketEvent e : events) {
+            w.append(SRC, e, e.receivedAt());
+        }
+        w.close(events.get(events.size() - 1).receivedAt());
+        try (LiveSession s = open()) {
+            for (MarketEvent e : events) {
+                clock.now = e.receivedAt();
+                s.accept(SRC, e);
+            }
+        }
+
+        LiveWeeklyCheck.Outcome out = check(Optional.empty());
+
+        assertThat(out.defect()).isFalse();
+        LiveWeeklyCheck.MidpointCount c = out.days().get(0).midpoints().get(SAMSUNG);
+        assertThat(c).isEqualTo(new LiveWeeklyCheck.MidpointCount(samsungTicks, samsungVolume, 1, midVolume));
+        assertThat(out.days().get(0).midpoints().get(HYNIX).midpointTicks()).isZero();
+        assertThat(out.report()).contains("## 5. 중간가 체결(이번 주, 입력 기록, 참고)")
+                .contains("| 005930 | " + samsungTicks + " | 1 | " + LiveWeeklyCheck.share(1, samsungTicks) + " | "
+                        + samsungVolume + " | " + midVolume + " | " + LiveWeeklyCheck.share(midVolume, samsungVolume) + " |");
+    }
+
+    @Test
+    void shareIsAPercentWithTwoDecimals() {
+        assertThat(LiveWeeklyCheck.share(1, 3)).isEqualTo("33.33%");
+        assertThat(LiveWeeklyCheck.share(2, 3)).isEqualTo("66.67%");
+        assertThat(LiveWeeklyCheck.share(0, 0)).isEqualTo("-");
+    }
 }
