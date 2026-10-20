@@ -145,14 +145,49 @@ public final class SessionSelections {
 
     /** 준비 작업이 결과를 못 만든 사유를 남긴다(다시 시도하면 덮어씀). 결과 파일이 생기면 결과가 이긴다. */
     public void writeProblem(LocalDate date, String selectionHash, SelectionInvalidReason reason, String detail) {
+        writeProblem(date, selectionHash, reason, detail, null);
+    }
+
+    /**
+     * @param inputs 계산에 쓴 입력 스냅샷 키(같은 키로 다시 계산해도 같은 실패라 준비 작업이 건너뛴다, architect PR #197 R2).
+     *     스냅샷을 읽기 전 사유(최신 스냅샷이 기준일을 덮지 않음 등)는 null
+     */
+    public void writeProblem(LocalDate date, String selectionHash, SelectionInvalidReason reason, String detail,
+            String inputs) {
         ObjectNode n = JSON.createObjectNode();
         n.put("reason", reason.name());
         n.put("detail", trim(detail));
+        if (inputs != null) {
+            n.put("inputs", inputs);
+        }
         try {
             writeAtomic(problemFile(date, selectionHash), JSON.writeValueAsString(n) + "\n", true);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * 그날 그 선정의 사유 파일(결과 파일이 없을 때만). 읽을 수 없으면 빈 값(다시 계산하게 둔다).
+     *
+     * @return 사유와, 계산에 쓴 입력 스냅샷 키(없으면 빈 문자열)
+     */
+    public Optional<Problem> readProblem(LocalDate date, String selectionHash) {
+        Path problem = problemFile(date, selectionHash);
+        if (hasResult(date, selectionHash) || !Files.isRegularFile(problem)) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode n = JSON.readTree(Files.readString(problem, StandardCharsets.UTF_8));
+            return Optional.of(new Problem(SelectionInvalidReason.valueOf(n.get("reason").asText()),
+                    n.path("detail").asText(""), n.path("inputs").asText("")));
+        } catch (IOException | RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** 준비 작업 사유 파일 내용. {@code inputs}는 계산에 쓴 입력 스냅샷 키(스냅샷을 읽기 전 사유면 빈 문자열). */
+    public record Problem(SelectionInvalidReason reason, String detail, String inputs) {
     }
 
     /** 그날 적용 기록. 없으면 빈 값. @throws IllegalStateException 적용 기록이 깨졌을 때 */
