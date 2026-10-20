@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -139,8 +140,7 @@ public final class SessionSelections {
         if (Files.exists(target)) {
             return false;
         }
-        writeAtomic(target, SelectionResultFile.write(result, producer), false);
-        return true;
+        return writeAtomic(target, SelectionResultFile.write(result, producer), false);
     }
 
     /** 준비 작업이 결과를 못 만든 사유를 남긴다(다시 시도하면 덮어씀). 결과 파일이 생기면 결과가 이긴다. */
@@ -189,7 +189,10 @@ public final class SessionSelections {
             return existing.get();
         }
         Applied a = judge(date);
-        writeAtomic(appliedFile(date), a.toJson(), false);
+        if (!writeAtomic(appliedFile(date), a.toJson(), false)) {
+            // 그 사이 다른 쪽이 먼저 썼으면 먼저 쓴 기록을 따른다
+            return readApplied(date).orElseThrow();
+        }
         appliedCache.put(date, a);
         return a;
     }
@@ -333,7 +336,13 @@ public final class SessionSelections {
         }
     }
 
-    private static void writeAtomic(Path target, String text, boolean replace) {
+    /**
+     * 임시 파일에 다 쓰고 강제로 내린 뒤 제자리에 놓는다. {@code replace}가 아니면 하드 링크로 놓아 이미 있는 파일을 덮어쓰지 않는다
+     * (확인과 놓기 사이에 다른 쪽이 먼저 놓아도 먼저 놓은 쪽이 남는다, architect PR #197 R1).
+     *
+     * @return 놓았으면 true, {@code replace}가 아니고 이미 있었으면 false
+     */
+    private static boolean writeAtomic(Path target, String text, boolean replace) {
         Path dir = target.getParent();
         Path tmp = null;
         try {
@@ -343,12 +352,25 @@ public final class SessionSelections {
                 ch.write(java.nio.ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8)));
                 ch.force(true);
             }
-            if (!replace && Files.exists(target)) {
-                Files.delete(tmp);
-                return;
+            if (replace) {
+                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                tmp = null;
+                return true;
             }
-            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            tmp = null;
+            try {
+                Files.createLink(target, tmp);
+                return true;
+            } catch (FileAlreadyExistsException e) {
+                return false;
+            } catch (UnsupportedOperationException e) {
+                // 하드 링크를 못 만드는 파일 시스템: 있으면 놓지 않고, 없으면 이름 바꾸기(좁은 경합은 남음)
+                if (Files.exists(target)) {
+                    return false;
+                }
+                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
+                tmp = null;
+                return true;
+            }
         } catch (IOException e) {
             throw new UncheckedIOException("선정 파일을 쓸 수 없습니다: " + DIR + "/" + dir.getFileName() + "/"
                     + target.getFileName(), e);
