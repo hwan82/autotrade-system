@@ -35,3 +35,29 @@
 
 ### 판정
 수정 필요(B3: ADR-005 5장 API 표와 ADR-010 2.4 엔드포인트 목록에 `GET /api/live/runs/{runId}/fills`·`/rejections` 추가)
+
+## 재검토 2026-10-20
+- 대상: PR #188 / HEAD 0cad0cbcc71ee92b6157a39928ed42b0ba60dd19 / `git diff origin/main...HEAD` 전체(049c4e8, 0ab1834, 0cad0cb, 검토 원문 커밋 2개)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build` → BUILD SUCCESSFUL(20개 작업 실행)
+  - `./gradlew :autotrade-app-lab:test --rerun` → 성공, 결과 XML 250건 중 실패·오류·건너뜀 0. 새 `RejectionPageTest#filterNarrowsRowsButCountsStayWholeAndOrderIsKept` 통과
+  - ADR 문구를 코드와 대조: `Page` 레코드 필드 `items, page, size, total`(Page.java:8), page 음수·size 1~200 밖은 `ApiException.badRequest` → 400 `INVALID`(Page.java:18-23, ApiException.java:25-26), 404는 `NOT_FOUND`(ApiException.java:21-22, LiveSessionController.java:81-84), `RejectionPage(page, counts)`(ExperimentViews.java:230)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드·재실행 결과 |
+| B2 | 통과 | 0cad0cb는 문서와 app-lab 테스트 하나만 바꿈. 모듈 의존 변경 없음, ArchitectureTest·ModuleOwnershipTest 통과(빌드에 포함) |
+| B3 | 통과 | ADR-005 5장 표에 `GET /api/live/runs/{runId}/fills?page=&size=`·`/rejections?stage=&code=&page=&size=` 두 행 추가(docs/adr/ADR-005-ui-dashboard.md:120-121): 최근 것부터, 응답 모양, 실험 계좌 API와 같은 행, 사본만 읽음, 404 조건 3가지, 400 조건, 쪽 밀림 한계. 위 대조대로 코드와 일치. ADR-010 2.4 엔드포인트 목록에 두 경로와 화면 `#/live/runs/<계좌>` 추가(docs/adr/ADR-010-live-feed-and-session.md:49). D-120·결정 색인·기획서 v14.56은 앞 검토대로 있음 |
+| B4 | 통과 | 앞 검토와 같음. 새 커밋은 결과 계산 코드를 건드리지 않음 |
+| B5 | 통과 | 금액 계산 변경 없음 |
+| B6 | 통과 | 앞 R1 중 거절 쪽 반영: `RejectionPageTest`가 뒤집은 목록(실시간 API가 넘기는 모양)을 거르면 행 수만 줄고 최근 것부터 순서(22, 21)를 지키며 `counts`는 거르기 전 전체(RISK:BLACKLIST 3, EXCHANGE:INSUFFICIENT_CASH 1, 건수 내림차순)임을 고정. 체결 쪽 최근 것부터는 컨트롤러의 `a.fills().reversed()` 한 줄(LiveSessionController.java:66)이며 단위 시험은 없음 → 남은 권고(차단 아님). 지우거나 끈 테스트 없음 |
+| B7 | 해당 없음 | 실전 주문 경로·RealTradingGuard·블랙리스트 처리 코드·리스크 한도·장애 대응·보호 경로 변경 없음(protected-paths.txt 대조). 테스트의 "BLACKLIST"는 거절 기록 표시용 문자열일 뿐 |
+| B8 | 통과 | 비밀값 없음 |
+
+## 점검표 밖 발견
+- R2(쪽 밀림)는 ADR-005 두 행에 한계로 적힘. 커서 방식은 필요해지면 후속으로 둔 것에 동의한다.
+- 남은 권고: 체결 목록 최근 것부터를 고정하는 시험(체결이 있는 세션의 컨트롤러 또는 `fillPage`에 뒤집은 목록을 넘기는 시험). 차단하지 않는다.
+
+## 판정
+승인
