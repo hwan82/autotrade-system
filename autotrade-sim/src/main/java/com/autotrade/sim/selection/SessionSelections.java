@@ -372,6 +372,76 @@ public final class SessionSelections {
     }
 
     /**
+     * 그날 선정마다 지금 폴더에 놓인 것(화면의 "다음 거래일 준비" 표, 읽기만 한다). 실험실을 다시 띄워 마지막 준비 결과가 메모리에 없어도
+     * 준비 작업이 남긴 사유 파일(입력 스냅샷 키 포함, D-126 R2)이 보이게 한다. 읽을 수 없는 파일은 예외 없이 상태로 보인다.
+     *
+     * @return 선정 해시순
+     */
+    public List<Prepared> prepared(LocalDate date) {
+        Optional<Applied> applied = appliedQuietly(date);
+        boolean appliedBroken = applied.isEmpty() && Files.exists(appliedFile(date));
+        List<Prepared> out = new ArrayList<>();
+        for (Map.Entry<String, SelectionProfile> e : selections.entrySet()) {
+            String hash = e.getKey();
+            String key = e.getValue().key();
+            if (applied.isPresent()) {
+                Item it = applied.get().item(hash);
+                if (it == null) {
+                    out.add(new Prepared(key, Prepared.State.APPLIED_UNREADABLE, null, "적용 기록에 이 선정이 없음", ""));
+                } else {
+                    out.add(it.applied() ? new Prepared(key, Prepared.State.APPLIED, null, "", "")
+                            : new Prepared(key, Prepared.State.APPLIED_MISSING, it.reason(), it.detail(), ""));
+                }
+            } else if (appliedBroken) {
+                out.add(new Prepared(key, Prepared.State.APPLIED_UNREADABLE, null, "적용 기록을 읽을 수 없음", ""));
+            } else if (hasResult(date, hash)) {
+                out.add(new Prepared(key, Prepared.State.READY, null, "", ""));
+            } else if (Files.isRegularFile(problemFile(date, hash))) {
+                Optional<Problem> p = readProblem(date, hash);
+                out.add(p.isPresent()
+                        ? new Prepared(key, Prepared.State.PROBLEM, p.get().reason(), p.get().detail(), p.get().inputs())
+                        : new Prepared(key, Prepared.State.PROBLEM, null, "사유 파일을 읽을 수 없음", ""));
+            } else {
+                out.add(new Prepared(key, Prepared.State.NONE, null, "", ""));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 선정 하나의 그날 파일 상태(화면용).
+     *
+     * @param selection 선정 프로필 {@code id@버전}
+     * @param reason 사유(사유 파일이나 적용 기록에 있을 때만)
+     * @param inputs 사유 파일의 입력 스냅샷 키(같은 키면 준비 작업이 다시 계산하지 않음). 없으면 빈 문자열
+     */
+    public record Prepared(String selection, State state, SelectionInvalidReason reason, String detail, String inputs) {
+
+        /** 파일 상태. 화면에 이 이름 그대로 보인다. */
+        public enum State {
+            /** 그날 적용 기록이 있고 이 선정을 적용했다. */
+            APPLIED,
+            /** 그날 적용 기록이 있고 이 선정은 {@code SELECTION_MISSING}이다. */
+            APPLIED_MISSING,
+            /** 적용 기록이 있지만 읽을 수 없거나 이 선정이 없다(세션은 열 때 확인에서 걸린다). */
+            APPLIED_UNREADABLE,
+            /** 결과 파일이 있다(아직 적용 전). */
+            READY,
+            /** 결과 파일 없이 준비 작업 사유 파일만 있다. */
+            PROBLEM,
+            /** 아무 파일도 없다(아직 준비하지 않음). */
+            NONE
+        }
+
+        public Prepared {
+            Objects.requireNonNull(selection, "selection");
+            Objects.requireNonNull(state, "state");
+            detail = detail == null ? "" : detail;
+            inputs = inputs == null ? "" : inputs;
+        }
+    }
+
+    /**
      * 임시 파일에 다 쓰고 강제로 내린 뒤 제자리에 놓는다. {@code replace}가 아니면 하드 링크로 놓아 이미 있는 파일을 덮어쓰지 않는다
      * (확인과 놓기 사이에 다른 쪽이 먼저 놓아도 먼저 놓은 쪽이 남는다, architect PR #197 R1).
      *

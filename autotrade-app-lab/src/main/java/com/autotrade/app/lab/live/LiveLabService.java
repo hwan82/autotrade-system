@@ -322,19 +322,56 @@ public class LiveLabService implements AutoCloseable {
     public synchronized View status() {
         if (running == null) {
             return new View("", "", List.of(), false, Optional.empty(), ConnectionState.CLOSED, "", 0, 0, 0,
-                    lastStopReason, lastStopKind, Optional.empty());
+                    lastStopReason, lastStopKind, Optional.empty(), false, Optional.empty());
         }
         Running r = running;
         String market = r.plan.market().name();
         List<String> profiles = accounts(r.plan);
         if (r.session == null) {
             return new View(r.plan.id().value(), market, profiles, true, Optional.empty(), ConnectionState.NEW, "", 0, 0,
-                    0, "", StopKind.NONE, Optional.ofNullable(r.lastPrep));
+                    0, "", StopKind.NONE, Optional.ofNullable(r.lastPrep), LiveSelectionPrep.hasSelections(r.plan),
+                    Optional.empty());
         }
         String reason = r.session.status().stopReason();
         return new View(r.plan.id().value(), market, profiles, false, Optional.of(r.session.status()), r.client.state(),
                 r.client.lastError(), r.client.reconnectCount(), r.inbox.size(), r.inboxDropped.get(), reason,
-                reason.isEmpty() ? StopKind.NONE : StopKind.PROBLEM, Optional.ofNullable(r.lastPrep));
+                reason.isEmpty() ? StopKind.NONE : StopKind.PROBLEM, Optional.ofNullable(r.lastPrep),
+                LiveSelectionPrep.hasSelections(r.plan), nextDay(r));
+    }
+
+    /**
+     * 준비 스레드가 지금 준비할 거래일의 파일 상태(읽기만, D-124·D-126). 마지막 준비 결과는 메모리에만 있어 실험실을 다시 띄우면
+     * 사라지지만, 준비 작업이 남긴 사유 파일은 남으므로 화면이 그것을 보인다. 장전 선정이 없거나 그날이 운용 기간 밖이거나 캘린더
+     * 범위 밖이면 빈 값(화면은 멈추지 않는다).
+     */
+    private Optional<NextDay> nextDay(Running r) {
+        Optional<com.autotrade.sim.selection.SessionSelections> files = r.session.selectionFiles();
+        if (files.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            if (r.calendar == null) {
+                r.calendar = ExchangeCalendar.bundled(r.plan.market());
+            }
+            java.time.LocalDate date = LiveSelectionPrep.targetDate(r.calendar, clock.instant());
+            if (date.isBefore(r.plan.from()) || date.isAfter(r.plan.to())) {
+                return Optional.empty();
+            }
+            return Optional.of(new NextDay(date, files.get().prepared(date)));
+        } catch (RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 다음 거래일(준비 스레드가 지금 준비할 거래일 T) 선정마다 세션 폴더에 놓인 파일 상태.
+     *
+     * @param items 선정 해시순
+     */
+    public record NextDay(java.time.LocalDate date, List<com.autotrade.sim.selection.SessionSelections.Prepared> items) {
+        public NextDay {
+            items = List.copyOf(items);
+        }
     }
 
     /**
@@ -385,11 +422,13 @@ public class LiveLabService implements AutoCloseable {
      * @param stopReason 마지막 멈춘 이유(감시 정지 요청, 디스크 부족, 기록 실패, 시작 실패 등)
      * @param stopKind {@code stopReason}의 종류. 세션이 도는 중에는 세션이 스스로 멈췄을 때만 {@link StopKind#PROBLEM}
      * @param prepare 선정 조합 계좌가 있으면 마지막 선정 준비 결과(D-124). 아직 준비하지 않았으면 비어 있다
+     * @param dailySelections 장전 선정 조합 계좌가 있어 준비 스레드가 돈다("지금 준비" 버튼). 장중 순위 선정(D-127)만 있으면 false
+     * @param nextDay 다음 거래일 선정 파일 상태(장전 선정이 있고 연결된 세션만). 실험실을 다시 띄워도 준비 사유 파일이 보인다
      */
     public record View(String experimentId, String market, List<String> profiles, boolean restoring,
             Optional<LiveSession.Status> session, ConnectionState feedState, String feedError, long feedReconnects,
             int inboxQueued, long inboxDropped, String stopReason, StopKind stopKind,
-            Optional<LiveSelectionPrep.Report> prepare) {
+            Optional<LiveSelectionPrep.Report> prepare, boolean dailySelections, Optional<NextDay> nextDay) {
         public View {
             profiles = List.copyOf(profiles);
         }
@@ -552,6 +591,8 @@ public class LiveLabService implements AutoCloseable {
         private Thread prep;
         private volatile boolean prepRequested;
         private volatile LiveSelectionPrep.Report lastPrep;
+        /** 화면의 다음 거래일 계산용 캘린더(처음 볼 때 한 번 읽음, 서비스 잠금 안에서만). */
+        private ExchangeCalendar calendar;
         private volatile boolean halted;
         private volatile boolean cancelled;
         /** 되살리기 정지 점검이 세션 열기를 멈춘 사유(되살리기 스레드만 쓰고 읽음). */

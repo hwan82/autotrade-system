@@ -59,7 +59,7 @@
 
 7. **장중 순위 선정 계좌가 있는 등록(`refresh: INTRADAY_AT`, [D-127](../decisions/D-127-intraday-at-selection.md))만**: 준비 작업도 `selection-input`도 없다. 그날 `at`(예 09:30) 전에 받은 boards 체결로 실험실이 순위를 매긴다.
    - 세션을 **정규장 시작(09:00) 전에** 열어 둔다. 그날 처음 받는 이벤트가 09:01(개장 + 60초) 뒤이거나(장중에 처음 열었음), 09:00 ~ `at` 사이에 다시 띄워 재기동 공백이 붙으면 boards 전 종목이 누락으로 보여 그날 그 계좌는 후보 0(신규 진입 0건)이다. `at` 뒤 재기동은 입력 기록으로 순위를 되살려 그대로 이어 간다.
-   - 상태 `GET /api/live/status`의 `session.intraday`가 `at` 전에는 `AWAITING`, 뒤에는 `RANKED`(후보·적용 시작 순번)인지 본다.
+   - 실험실 화면 `#/live`의 "선정 조합 · 장중 순위 선정" 표(또는 상태 `GET /api/live/status`의 `session.intraday`)가 `at` 전에는 `AWAITING`, 뒤에는 `RANKED`(후보·적용 시작 순번)인지 본다. "시세 누락" 칸이 `SESSION_GAP n/n`(모든 종목)이면 그날은 장 초반 시세를 못 받아 신규 진입이 없다.
    - 녹화 판정(`runLiveJudgement`)은 아직 이 계좌를 받지 않는다(D-127 후속).
 
 ## 3. 운용 중

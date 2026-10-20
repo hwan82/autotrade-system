@@ -22,6 +22,7 @@ import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.RunStepper;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.selection.calc.SessionSelectionCalculator;
 import com.autotrade.sim.selection.IntradayTracker;
 import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.selection.SelectionDays;
@@ -415,6 +416,14 @@ public final class LiveSession implements AutoCloseable {
         return selections != null;
     }
 
+    /**
+     * 장전 선정의 고정 파일 폴더(화면의 다음 거래일 준비 표, 읽기만). 세션 잠금을 잡지 않는다: 처리 스레드를 기다리게 하지 않고, 파일
+     * 읽기는 {@link SessionSelections}가 스스로 안전하게 한다. 장전 선정 계좌가 없으면 빈 값.
+     */
+    public Optional<SessionSelections> selectionFiles() {
+        return Optional.ofNullable(selections);
+    }
+
     /** 그날 적용 기록(화면용). 선정 계좌가 없거나 적용 기록이 없으면 빈 값. */
     public synchronized Optional<SessionSelections.Applied> appliedSelections(LocalDate date) {
         return selections == null ? Optional.empty() : selections.appliedQuietly(date);
@@ -485,9 +494,12 @@ public final class LiveSession implements AutoCloseable {
      * @param blacklisted 선정됐지만 blacklist라 뺀 종목
      * @param selectedCount 선정 종목 수(뺀 종목 포함)
      * @param activeFrom 순위를 매긴 이벤트 순번(이 이벤트부터 후보에 신규 진입). 순위 전이면 0
+     * @param universe 순위를 매긴 종목 수(boards). 순위 전이면 0
+     * @param sessionGap 시세 누락({@code SESSION_GAP})으로 순위에서 뺀 종목 수. 순위 전이면 0
      */
     public record IntradayStatus(String selection, String selectionHash, String at, String state, List<String> candidates,
-            List<String> blacklisted, int selectedCount, long activeFrom, String resultHash) {
+            List<String> blacklisted, int selectedCount, long activeFrom, String resultHash, int universe,
+            int sessionGap) {
 
         public IntradayStatus {
             candidates = List.copyOf(candidates);
@@ -498,12 +510,14 @@ public final class LiveSession implements AutoCloseable {
             IntradayTracker.Ranked r = st.ranked();
             if (r == null) {
                 return new IntradayStatus(st.selection(), st.selectionHash(), st.at().toString(), "AWAITING", List.of(),
-                        List.of(), 0, 0, null);
+                        List.of(), 0, 0, null, 0, 0);
             }
             return new IntradayStatus(st.selection(), st.selectionHash(), st.at().toString(), "RANKED",
                     r.candidates().candidates(),
                     r.candidates().excludedCodes(com.autotrade.sim.selection.SelectionCandidates.Exclusion.BLACKLISTED),
-                    r.candidates().selectedCount(), r.activeFrom(), r.contentHash());
+                    r.candidates().selectedCount(), r.activeFrom(), r.contentHash(), r.result().universe(),
+                    (int) r.result().evaluations().stream()
+                            .filter(e -> e.reasons().contains(SessionSelectionCalculator.SESSION_GAP)).count());
         }
     }
 
