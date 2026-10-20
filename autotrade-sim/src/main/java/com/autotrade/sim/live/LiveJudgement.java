@@ -1,5 +1,7 @@
 package com.autotrade.sim.live;
 
+import com.autotrade.domain.market.Market;
+import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.sim.ClockMode;
@@ -317,15 +319,17 @@ public final class LiveJudgement {
 
     private static Map<String, SimulationReport> runGroups(LiveSetup setup, MarketEventStream journal,
             List<List<Lane>> groups, CodeVersion code, String id, RunGate gate) {
-        // 한 묶음이 실패하면 나머지 묶음도 다음 확인 지점(Run 시작, 거래일 바뀜)에서 멈추게 한다. 실행기는 스레드 중단을 보지
-        // 않으므로 취소만으로는 남은 묶음이 끝까지 돈다(PR #180 architect N2)
+        // 한 묶음이 실패하면 나머지 묶음도 멈추게 한다. 실행기는 스레드 중단을 보지 않으므로 취소만으로는 남은 묶음이 끝까지
+        // 돈다(PR #180 architect N2). 문은 Run 시작·거래일 바뀜에서만 확인되므로, 기록 읽기도 이벤트마다 실패 표시를 보게 해
+        // 한 거래일을 더 돌거나 Run이 모두 끝난 묶음이 남은 기록을 끝까지 읽지 않게 한다(PR #185 architect N1)
         AtomicBoolean failed = new AtomicBoolean();
         RunGate shared = abortable(gate, failed);
+        MarketEventStream stoppable = abortable(journal, failed);
         List<Callable<List<SimulationReport>>> tasks = new ArrayList<>();
         for (int g = 0; g < groups.size(); g++) {
             List<Lane> group = groups.get(g);
             String progressId = id + "-JUDGE-G" + (g + 1);
-            tasks.add(() -> runner(setup, journal, code, shared).runLanes(group, progressId));
+            tasks.add(() -> runner(setup, stoppable, code, shared).runLanes(group, progressId));
         }
         Map<String, SimulationReport> out = new LinkedHashMap<>();
         for (List<SimulationReport> reports : runAll(tasks, id, () -> failed.set(true))) {
@@ -408,6 +412,45 @@ public final class LiveJudgement {
             @Override
             public int maxParallelRuns() {
                 return gate.maxParallelRuns();
+            }
+        };
+    }
+
+    /**
+     * 이벤트를 넘기기 전마다 {@code failed}를 보고, 서 있으면 {@link ExperimentStoppedException}을 던지는 기록 읽기. 그 밖에는
+     * 원래 읽기를 그대로 따른다(같은 이벤트, 같은 순서, 같은 버전). 실패 표시는 먼저 실패한 묶음이 세우고 그 예외가 명령까지
+     * 올라가므로, 여기서 던진 예외는 결과에 들어가지 않는다. 판정 결과에는 영향이 없다(실패가 없으면 아무것도 바꾸지 않음).
+     */
+    static MarketEventStream abortable(MarketEventStream data, AtomicBoolean failed) {
+        return new MarketEventStream() {
+            @Override
+            public String version() {
+                return data.version();
+            }
+
+            @Override
+            public Market market() {
+                return data.market();
+            }
+
+            @Override
+            public boolean exchangeTimed() {
+                return data.exchangeTimed();
+            }
+
+            @Override
+            public long eventCount() {
+                return data.eventCount();
+            }
+
+            @Override
+            public void forEach(Consumer<MarketEvent> sink) {
+                data.forEach(e -> {
+                    if (failed.get()) {
+                        throw new ExperimentStoppedException("다른 판정 묶음이 실패해 멈춤");
+                    }
+                    sink.accept(e);
+                });
             }
         };
     }

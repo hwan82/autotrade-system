@@ -1,5 +1,6 @@
 package com.autotrade.sim.live;
 
+import com.autotrade.domain.SessionPhase;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
@@ -126,15 +127,28 @@ public final class LiveWeeklyCheck {
      * 한 종목의 체결 틱 중 중간가 체결(호가 단위의 정확한 반 칸, D-118 {@code MidpointTrades})의 수와 거래량. 반 칸 체결은
      * 신호·거래량·평가에는 쓰고 지정가·단일가 체결에는 쓰지 않으므로(BOOK-V6), 비중이 크면 지정가 프로필의 체결률과 거래량 신호
      * 해석에 참고한다(PR #184 strategy-researcher R2). 판정 기준은 아니다.
+     *
+     * <p>앞 네 값은 정규장 접속 매매 체결 틱만 센다(PR #185 architect N2): 매매 단계({@code MarketRules#sessionPhase})가 접속
+     * 매매이고, 시가 단일가로 여는 시장(KRX)은 그 종목 그날 첫 정규장 체결(시가 단일가 체결)을 뺀다. 가상 거래소가 반 칸 틱을
+     * 지정가 체결 근거에서 빼는 대상이 접속 매매이므로 비중을 그 분모로 본다. 빠진 체결 틱(장전·장후 시간외, 단일가 접수 구간,
+     * 장 마감 뒤 종가 단일가 체결, 시가 단일가 체결)은 {@code otherTicks}·{@code otherMidpointTicks}로 따로 센다.
      */
-    public record MidpointCount(long ticks, long volume, long midpointTicks, long midpointVolume) {
-        static final MidpointCount ZERO = new MidpointCount(0, 0, 0, 0);
+    public record MidpointCount(long ticks, long volume, long midpointTicks, long midpointVolume, long otherTicks,
+            long otherMidpointTicks) {
+        static final MidpointCount ZERO = new MidpointCount(0, 0, 0, 0, 0, 0);
 
         MidpointCount plus(MidpointCount o) {
             return new MidpointCount(ticks + o.ticks, volume + o.volume, midpointTicks + o.midpointTicks,
-                    midpointVolume + o.midpointVolume);
+                    midpointVolume + o.midpointVolume, otherTicks + o.otherTicks, otherMidpointTicks + o.otherMidpointTicks);
         }
     }
+
+    /**
+     * 사용자 PC에 BOOK-V6(D-118)이 들어간 첫 거래일. 그 전 코드는 반 칸 체결 틱을 받기 전에 거절해 세션을 멈췄으므로 입력 기록에
+     * 남지 않았다(PR #184 검토 S3). 이 날짜 이하인 기록 날짜는 5장에 "중간가 0은 증거가 아님"으로 적는다(PR #185
+     * strategy-researcher R1). EXP-20261020-LIVE00 첫날이 09:18에 멈춘 뒤 같은 날 D-118로 재기동했으므로 그날은 두 구간이 섞인다.
+     */
+    static final LocalDate BOOK_V6_FIRST_DAY = LocalDate.of(2026, 10, 20);
 
     /**
      * 점검 결과.
@@ -322,6 +336,7 @@ public final class LiveWeeklyCheck {
         });
         long[] forwarded = {0};
         Map<Symbol, MidpointCount> midpoints = new java.util.TreeMap<>();
+        Set<Symbol> openingPrinted = new java.util.HashSet<>();
         Map<Key, Integer> jCount = new HashMap<>();
         String jBefore = jDir == null ? null : fingerprintOf(jDir);
         RecordedDayStream.Summary jDay = null;
@@ -344,8 +359,11 @@ public final class LiveWeeklyCheck {
                 }
                 if (e instanceof TradeTick t && setup.onBoards(e) && setup.inPlan(e)) {
                     boolean mid = MidpointTrades.isMidpoint(setup.rules(), t.symbol(), t.price());
-                    midpoints.merge(t.symbol(), new MidpointCount(1, t.quantity(), mid ? 1 : 0, mid ? t.quantity() : 0),
-                            MidpointCount::plus);
+                    boolean continuous = setup.rules().sessionPhase(t.exchangeTime()) == SessionPhase.CONTINUOUS
+                            && (!setup.rules().opensWithAuction() || !openingPrinted.add(t.symbol()));
+                    midpoints.merge(t.symbol(), continuous
+                            ? new MidpointCount(1, t.quantity(), mid ? 1 : 0, mid ? t.quantity() : 0, 0, 0)
+                            : new MidpointCount(0, 0, 0, 0, 1, mid ? 1 : 0), MidpointCount::plus);
                 }
                 jCount.merge(key(codec, l), 1, Integer::sum);
             });
@@ -763,17 +781,35 @@ public final class LiveWeeklyCheck {
         }
         sb.append("\n## 5. 중간가 체결(이번 주, 입력 기록, 참고)\n\n");
         sb.append("호가 단위의 정확한 반 칸 체결(D-118). 신호·거래량·평가에는 쓰고 지정가·단일가 체결에는 쓰지 않는다(BOOK-V6). ")
-                .append("비중이 크면 지정가 프로필 체결률과 거래량 신호를 해석할 때 참고한다. 판정 기준이 아니다.\n\n");
+                .append("비중이 크면 지정가 프로필 체결률과 거래량 신호를 해석할 때 참고한다. 판정 기준이 아니다. ")
+                .append("체결 틱·거래량·비중은 정규장 접속 매매 체결만 센다(시가 단일가 체결 제외). 시간외·단일가 체결 틱은 ")
+                .append("마지막 두 칸에 따로 적는다.\n\n");
+        List<LocalDate> beforeV6 = week.stream().filter(DayRow::journalPresent).map(DayRow::date)
+                .filter(d -> !d.isAfter(BOOK_V6_FIRST_DAY)).toList();
+        if (!beforeV6.isEmpty()) {
+            sb.append("D-118(BOOK-V6) 이전 코드가 쓴 구간이 있는 기록 날짜: ")
+                    .append(String.join(", ", beforeV6.stream().map(LocalDate::toString).toList()))
+                    .append(". 그 코드는 중간가 틱을 받기 전에 거절해 기록에 남기지 않았으므로, 이 날짜의 중간가 0이나 낮은 비중은 ")
+                    .append("중간가 체결이 없었다는 증거가 아니다.\n\n");
+        }
         if (total.isEmpty()) {
             sb.append("이번 주 입력 기록에 boards 체결 틱이 없습니다.\n");
             return;
         }
-        sb.append("| 종목 | 체결 틱 | 중간가 틱 | 틱 비중 | 거래량 | 중간가 거래량 | 거래량 비중 |\n");
-        sb.append("|---|---:|---:|---:|---:|---:|---:|\n");
-        total.forEach((s, c) -> sb.append("| ").append(s.code()).append(" | ").append(c.ticks()).append(" | ")
+        sb.append("| 종목 | 체결 틱 | 중간가 틱 | 틱 비중 | 거래량 | 중간가 거래량 | 거래량 비중 | 시간외·단일가 체결 틱 | ")
+                .append("그중 중간가 |\n");
+        sb.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        total.forEach((s, c) -> midpointRow(sb, s.code(), c));
+        MidpointCount sum = total.values().stream().reduce(MidpointCount.ZERO, MidpointCount::plus);
+        midpointRow(sb, "합계", sum);
+    }
+
+    private static void midpointRow(StringBuilder sb, String label, MidpointCount c) {
+        sb.append("| ").append(label).append(" | ").append(c.ticks()).append(" | ")
                 .append(c.midpointTicks()).append(" | ").append(share(c.midpointTicks(), c.ticks())).append(" | ")
                 .append(c.volume()).append(" | ").append(c.midpointVolume()).append(" | ")
-                .append(share(c.midpointVolume(), c.volume())).append(" |\n"));
+                .append(share(c.midpointVolume(), c.volume())).append(" | ").append(c.otherTicks()).append(" | ")
+                .append(c.otherMidpointTicks()).append(" |\n");
     }
 
     /** 백분율 소수 둘째 자리(반올림 HALF_EVEN). 분모가 0이면 "-". */

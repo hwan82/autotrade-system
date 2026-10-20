@@ -103,6 +103,30 @@ class LiveSessionControllerTest {
     }
 
     @Test
+    void accountActivityIsNewestFirst() {
+        // PR #188 architect 남은 권고: 세션은 체결·거절을 오래된 것부터 쌓고 API는 최근 것부터 준다
+        com.autotrade.sim.run.RunReport run = com.autotrade.app.lab.experiment.SampleReports.krx("EXP-TEST-LIVE04", 5)
+                .report().runs().get(0);
+        com.autotrade.sim.live.LiveSession.RunActivity a = new com.autotrade.sim.live.LiveSession.RunActivity(run.summary().runId(), run.fills(), run.rejections());
+        int n = run.fills().size();
+        assertThat(n).isGreaterThan(2);
+
+        var first = LiveSessionController.fillPage(a, 0, 2, com.autotrade.marketdata.symbols.SymbolNames.empty());
+        assertThat(first.total()).isEqualTo(n);
+        assertThat(first.items()).extracting(com.autotrade.app.lab.experiment.ExperimentViews.FillRow::fillEventSeq)
+                .containsExactly(run.fills().get(n - 1).fill().fillEventSeq(), run.fills().get(n - 2).fill().fillEventSeq());
+        var last = LiveSessionController.fillPage(a, (n - 1) / 2, 2, com.autotrade.marketdata.symbols.SymbolNames.empty());
+        assertThat(last.items()).last().extracting(com.autotrade.app.lab.experiment.ExperimentViews.FillRow::fillEventSeq)
+                .isEqualTo(run.fills().get(0).fill().fillEventSeq());
+
+        var rejections = LiveSessionController.rejectionPage(a, null, null, 0, 50,
+                com.autotrade.marketdata.symbols.SymbolNames.empty());
+        assertThat(rejections.page().items()).extracting(com.autotrade.app.lab.experiment.ExperimentViews.RejectionRow::eventSeq)
+                .containsExactlyElementsOf(run.rejections().reversed().stream()
+                        .map(com.autotrade.sim.run.OrderRejection::eventSeq).toList());
+    }
+
+    @Test
     void reportWriteFailureIsReportNotWrittenWithoutAbsolutePath() throws Exception {
         String id = "EXP-TEST-LIVE03";
         Path dir = Files.createDirectories(experiments.resolve(id));

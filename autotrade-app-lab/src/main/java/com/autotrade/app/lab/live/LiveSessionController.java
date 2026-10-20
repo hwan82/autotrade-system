@@ -62,7 +62,11 @@ public class LiveSessionController {
     @GetMapping("/runs/{runId}/fills")
     public Page<ExperimentViews.FillRow> fills(@PathVariable String runId,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-        LiveSession.RunActivity a = activity(runId);
+        return fillPage(activity(runId), page, size, names);
+    }
+
+    /** 계좌 체결 한 쪽, 최근 것부터(세션은 오래된 것부터 쌓는다). 시험이 순서를 고정한다(PR #188 architect 남은 권고). */
+    static Page<ExperimentViews.FillRow> fillPage(LiveSession.RunActivity a, int page, int size, SymbolNames names) {
         return ExperimentViews.fillPage(a.fills().reversed(), page, size, names);
     }
 
@@ -74,7 +78,12 @@ public class LiveSessionController {
     public ExperimentViews.RejectionPage rejections(@PathVariable String runId,
             @RequestParam(required = false) String stage, @RequestParam(required = false) String code,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-        LiveSession.RunActivity a = activity(runId);
+        return rejectionPage(activity(runId), stage, code, page, size, names);
+    }
+
+    /** 계좌 거절 한 쪽, 최근 것부터. 사유별 건수는 거르기 전 전체다. */
+    static ExperimentViews.RejectionPage rejectionPage(LiveSession.RunActivity a, String stage, String code, int page,
+            int size, SymbolNames names) {
         return ExperimentViews.rejectionPage(a.rejections().reversed(), stage, code, page, size, names);
     }
 
