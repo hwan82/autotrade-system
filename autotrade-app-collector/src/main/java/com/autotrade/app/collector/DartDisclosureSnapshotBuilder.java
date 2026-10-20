@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -43,6 +44,13 @@ final class DartDisclosureSnapshotBuilder {
 
     private DartDisclosureSnapshotBuilder() {}
 
+    /** 접수일 비트 위치의 기준(2000-01-01). */
+    private static final long BASE = LocalDate.of(2000, 1, 1).toEpochDay();
+
+    private static int day(LocalDate d) {
+        return (int) (d.toEpochDay() - BASE);
+    }
+
     /** KRX 종목 이력 한 구간(이름 대조용). {@code to}가 null이면 진행 중. */
     record Listing(String code, String name, LocalDate from, LocalDate to) {
 
@@ -63,11 +71,15 @@ final class DartDisclosureSnapshotBuilder {
      * @param unmapped 못 붙인 행 수({@code <유형>|<corp_cls>} → 건수)
      * @param byYear 접수 연도 → {전체 행, 못 붙인 행}(법인 구분 E 포함, 생존편향 점검, PR #196 strategy-researcher M2)
      * @param prefixes 보고서명 대괄호 머리말(예 {@code [기재정정]}) → 건수. 선정에서 세지 않는 행이다(같은 리뷰 m1)
-     * @param delisted 수집 구간 안에 상장폐지된 KRX 종목 이력 구간 수
-     * @param delistedWithDisclosure 그중 상장 구간 안 접수 공시가 하나라도 그 종목 코드로 붙은 구간 수
+     * @param delisted 수집 구간 안에 상장폐지된 종목 수. 종목 코드 단위: 그 코드의 이력 구간이 모두 닫혔고(이름·소속부 변경으로
+     *     닫힌 구간은 열린 구간이 뒤따르므로 빠짐) 마지막 끝날이 수집 첫날 이후(PR #196 strategy-researcher N1)
+     * @param delistedWithDisclosure 그중 상장 기간(첫 시작일~마지막 끝날, 날짜 단위) 안 접수 공시가 그 코드로 하나라도 붙은 종목 수
+     * @param listed 기준선: 열린 구간이 있는(상장 유지) 종목 수
+     * @param listedWithDisclosure 그중 상장 기간 안 접수 공시가 하나라도 붙은 종목 수
      */
     record Stats(Map<String, Long> rowsByType, Map<String, Long> bySource, Map<String, Long> unmapped, long rows,
-            Map<Integer, long[]> byYear, Map<String, Long> prefixes, long delisted, long delistedWithDisclosure) {}
+            Map<Integer, long[]> byYear, Map<String, Long> prefixes, long delisted, long delistedWithDisclosure,
+            long listed, long listedWithDisclosure) {}
 
     /**
      * @param windows 유형 → 창 파일(시작일 순, {@link DartDisclosureCollector#windowFiles})
@@ -89,7 +101,7 @@ final class DartDisclosureSnapshotBuilder {
         Map<String, Long> unmapped = new TreeMap<>();
         Map<Integer, long[]> byYear = new TreeMap<>();
         Map<String, Long> prefixes = new TreeMap<>();
-        Map<String, java.util.BitSet> mappedYears = new HashMap<>(); // 종목 코드 → 공시가 붙은 접수 연도(2000년 기준 비트)
+        Map<String, java.util.BitSet> mappedDays = new HashMap<>(); // 종목 코드 → 공시가 붙은 접수일(에포크 일 − BASE 비트)
         LocalDate first = null;
         for (List<Path> files : windows.values()) {
             for (Path f : files) {
@@ -116,7 +128,7 @@ final class DartDisclosureSnapshotBuilder {
                         unmapped.merge(type + "|" + (cls.isEmpty() ? "-" : cls), 1L, Long::sum);
                         y[1]++;
                     } else {
-                        mappedYears.computeIfAbsent(mapped[0], k -> new java.util.BitSet()).set(date.getYear() - 2000);
+                        mappedDays.computeIfAbsent(mapped[0], k -> new java.util.BitSet()).set(day(date));
                     }
                     String name = n.path("report_nm").asText().strip();
                     int close = name.indexOf(']');
@@ -138,20 +150,44 @@ final class DartDisclosureSnapshotBuilder {
                 total++;
             }
         }
-        long delisted = 0;
-        long delistedWith = 0;
+        // 종목 코드 단위 상장 기간: 첫 시작일, 마지막 끝날(열린 구간이 하나라도 있으면 null = 상장 유지)
+        Map<String, LocalDate[]> spans = new TreeMap<>();
+        Set<String> open = new HashSet<>();
         for (Listing l : krx) {
-            if (l.to() == null || first == null || l.to().isBefore(first)) {
-                continue;
-            }
-            delisted++;
-            java.util.BitSet years = mappedYears.get(l.code());
-            int lo = Math.max(l.from().getYear(), first.getYear()) - 2000;
-            if (years != null && lo >= 0 && years.nextSetBit(lo) >= 0 && years.nextSetBit(lo) <= l.to().getYear() - 2000) {
-                delistedWith++;
+            LocalDate[] sp = spans.computeIfAbsent(l.code(), k -> new LocalDate[] {l.from(), l.to()});
+            sp[0] = l.from().isBefore(sp[0]) ? l.from() : sp[0];
+            if (l.to() == null) {
+                open.add(l.code());
+            } else if (sp[1] == null || l.to().isAfter(sp[1])) {
+                sp[1] = l.to();
             }
         }
-        return new Stats(rowsByType, bySource, unmapped, total, byYear, prefixes, delisted, delistedWith);
+        long delisted = 0;
+        long delistedWith = 0;
+        long listed = 0;
+        long listedWith = 0;
+        for (Map.Entry<String, LocalDate[]> e : spans.entrySet()) {
+            if (first == null) {
+                break;
+            }
+            boolean isOpen = open.contains(e.getKey());
+            LocalDate from = e.getValue()[0].isBefore(first) ? first : e.getValue()[0];
+            LocalDate to = isOpen ? null : e.getValue()[1];
+            if (to != null && to.isBefore(first)) {
+                continue; // 수집 구간 전에 폐지
+            }
+            java.util.BitSet days = mappedDays.get(e.getKey());
+            int hit = days == null ? -1 : days.nextSetBit(Math.max(0, day(from)));
+            boolean with = hit >= 0 && (to == null || hit <= day(to));
+            if (isOpen) {
+                listed++;
+                listedWith += with ? 1 : 0;
+            } else {
+                delisted++;
+                delistedWith += with ? 1 : 0;
+            }
+        }
+        return new Stats(rowsByType, bySource, unmapped, total, byYear, prefixes, delisted, delistedWith, listed, listedWith);
     }
 
     /** 고유번호 → 종목 코드 → 그 코드가 나온 첫·마지막 접수일. */

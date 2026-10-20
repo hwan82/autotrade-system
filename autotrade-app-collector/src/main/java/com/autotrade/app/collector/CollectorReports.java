@@ -158,10 +158,12 @@ final class CollectorReports {
             sb.append("수집 구간 안에 상장폐지된 KRX 종목 이력이 없거나 KRX 스냅샷을 읽지 않았습니다. 확인하지 못했습니다.\n");
         } else {
             sb.append("| 항목 | 값 |\n|---|---|\n");
-            row(sb, "수집 구간 안에 상장폐지된 KRX 종목 구간", s.delisted());
-            row(sb, "그중 상장 구간 안 공시가 종목 코드로 붙은 구간", s.delistedWithDisclosure() + " ("
-                    + String.format(java.util.Locale.ROOT, "%.1f", 100.0 * s.delistedWithDisclosure() / s.delisted()) + "%)");
-            sb.append("\n이 비율이 상장 중인 종목보다 크게 낮으면 상장폐지 회사 공시가 0건으로 세져 (라) 같은 공시 조건 선정에서 "
+            row(sb, "수집 구간 안에 상장폐지된 종목(코드 단위)", s.delisted());
+            row(sb, "그중 상장 기간 안 공시가 종목 코드로 붙은 종목", s.delistedWithDisclosure() + " (" + pct(s.delistedWithDisclosure(), s.delisted()) + ")");
+            row(sb, "기준선: 상장 유지 종목", s.listed());
+            row(sb, "그중 수집 구간 안 공시가 붙은 종목", s.listedWithDisclosure() + " (" + pct(s.listedWithDisclosure(), s.listed()) + ")");
+            sb.append("\n상장폐지 = 같은 종목 코드의 이력 구간이 모두 닫힌 종목(이름·소속부 변경으로 닫힌 구간은 상장 유지로 셈). "
+                    + "상장 기간은 날짜 단위로 대조한다. 폐지 종목 비율이 상장 유지 종목 비율보다 크게 낮으면 상장폐지 회사 공시가 0건으로 세져 (라) 같은 공시 조건 선정에서 "
                     + "체계적으로 빠집니다. 확인 전에는 과거 구간 공시 선정 결과를 선정 엣지 근거로 쓰지 않습니다(runbook collector.md 4장).\n");
         }
         sb.append("\n## 접수 연도별 못 붙인 행\n\n| 연도 | 행 | 못 붙임 | 비율 |\n|---|---|---|---|\n");
@@ -181,6 +183,10 @@ final class CollectorReports {
         Path out = dir.resolve(m.snapshotId() + ".md");
         Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
         return out;
+    }
+
+    private static String pct(long a, long b) {
+        return b == 0 ? "-" : String.format(java.util.Locale.ROOT, "%.1f%%", 100.0 * a / b);
     }
 
     /**

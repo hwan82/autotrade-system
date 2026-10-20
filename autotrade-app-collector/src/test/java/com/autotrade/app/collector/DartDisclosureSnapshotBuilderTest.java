@@ -72,6 +72,27 @@ class DartDisclosureSnapshotBuilderTest {
         // 수집 구간(2026-08-01~) 안 상장폐지: 222222(이름 대조로 공시 붙음)·555555(공시 없음). 444444는 2011년 폐지라 밖
         assertThat(s.delisted()).isEqualTo(2);
         assertThat(s.delistedWithDisclosure()).isEqualTo(1);
+        // 기준선: 상장 유지 333331·333332(이름이 겹쳐 공시가 안 붙음)
+        assertThat(s.listed()).isEqualTo(2);
+        assertThat(s.listedWithDisclosure()).isZero();
+    }
+
+    @Test
+    void 상장폐지는_종목_코드_단위로_보고_상장_기간은_날짜로_대조한다() throws IOException {
+        Map<String, List<Path>> windows = Map.of("B", List.of(window("B", "2026-08-01_2026-09-30.json",
+                "Y;00000006;666666;새이름;보고;20260805000001;20260805",
+                "Y;00000007;777777;늦은공시;보고;20260903000001;20260903")));
+        List<DartDisclosureSnapshotBuilder.Listing> krx = List.of(
+                // 이름 변경: 닫힌 구간 뒤에 열린 구간이 이어지므로 상장 유지
+                new DartDisclosureSnapshotBuilder.Listing("666666", "옛이름", LocalDate.of(2010, 1, 4), LocalDate.of(2026, 8, 15)),
+                new DartDisclosureSnapshotBuilder.Listing("666666", "새이름", LocalDate.of(2026, 8, 16), null),
+                // 2026-08-20 폐지, 공시는 같은 해 폐지 뒤(09-03)라 상장 기간 안이 아님
+                new DartDisclosureSnapshotBuilder.Listing("777777", "늦은공시", LocalDate.of(2010, 1, 4), LocalDate.of(2026, 8, 20)));
+        DartDisclosureSnapshotBuilder.Stats s = DartDisclosureSnapshotBuilder.build(windows, krx, r -> { });
+        assertThat(s.delisted()).isEqualTo(1);
+        assertThat(s.delistedWithDisclosure()).isZero();
+        assertThat(s.listed()).isEqualTo(1);
+        assertThat(s.listedWithDisclosure()).isEqualTo(1);
     }
 
     @Test
