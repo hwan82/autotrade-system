@@ -408,13 +408,14 @@ public final class SelectionCalculator {
     }
 
     /**
-     * c 수정 거래량 ÷ (c 앞 w거래일 수정 거래량 합 ÷ w). w+1거래일 중 하루라도 일봉이 없거나 <b>거래량 0인 날</b>(거래정지일은
+     * c 수정 거래량 ÷ (c 앞 w거래일 수정 거래량 합 ÷ w). w+1거래일 중 하루라도 일봉이 없거나 <b>거래량 0 이하인 날</b>(거래정지일은
      * 거래량 0 일봉으로 저장됨, ADR-008)이 있으면 {@code NO_DATA}다. 정지일이 평균에 들어가면 배율이 20 ÷ (20 − k)배로 부풀어
-     * 재개 뒤 평소 거래량만으로 급증 조건을 넘기 때문이다(PR #193 strategy-researcher M1).
+     * 재개 뒤 평소 거래량만으로 급증 조건을 넘기 때문이다(PR #193 strategy-researcher M1). 음수 거래량 행은 품질 검사가 경고로만
+     * 남겨 적재되므로 같은 결측으로 막아 분모가 0 이하가 되지 않게 한다(PR #193 architect-2 F1).
      */
     private Value volumeSpike(Context ctx, int w) {
         List<DailyBar> bars = ctx.lastBars(w + 1);
-        if (bars == null || bars.stream().anyMatch(b -> b.volume() == 0)) {
+        if (bars == null || bars.stream().anyMatch(b -> b.volume() <= 0)) {
             return Value.missing(NO_DATA, false);
         }
         BigDecimal prior = BigDecimal.ZERO;

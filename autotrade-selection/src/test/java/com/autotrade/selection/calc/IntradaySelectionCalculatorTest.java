@@ -181,7 +181,7 @@ class IntradaySelectionCalculatorTest {
     void 거래량_급증은_c_하루를_앞_구간_평균과_비교한다() {
         FixtureData d = new FixtureData();
         d.stock("700010").stock("700020").stock("700030").stock("700040").stock("700050").stock("700060")
-                .stock("700070");
+                .stock("700070").stock("700080");
         List<LocalDate> w = d.days.lastN(C, 4);
         long[] vols = {100, 200, 300};
         for (int i = 0; i < 3; i++) {
@@ -192,6 +192,7 @@ class IntradaySelectionCalculatorTest {
             d.bar("700050", w.get(i), "10000", 100, "1");
             d.bar("700060", w.get(i), "10000", i == 1 ? 0 : 100, "1"); // 앞 구간 하루 거래정지
             d.bar("700070", w.get(i), "10000", 100, "1");
+            d.bar("700080", w.get(i), "10000", i == 0 ? -200 : 100, "1"); // 음수 거래량 행(앞 구간 합 0)
         }
         d.bar("700010", C, "10000", 500, "1");
         d.bar("700020", C, "10000", 2_000_006L, "0.123456789");
@@ -200,6 +201,7 @@ class IntradaySelectionCalculatorTest {
         d.removeBar("700040", w.get(0)); // 앞 구간 하루 결측
         d.bar("700060", C, "10000", 500, "1");
         d.bar("700070", C, "10000", 0, "1"); // c 거래정지
+        d.bar("700080", C, "10000", 500, "1");
         // 700050: c 일봉 없음
         SelectionResult r = new SelectionCalculator(d).calculate(intraday("volume-spike", "3", "GE", "2"), T);
         assertThat(eval(r, "700010").values()).containsEntry("gate.01", "2.5");
@@ -210,6 +212,7 @@ class IntradaySelectionCalculatorTest {
         assertThat(eval(r, "700050").reasons()).containsExactly("GATE_01_NO_DATA");
         assertThat(eval(r, "700060").reasons()).as("앞 구간 거래정지일").containsExactly("GATE_01_NO_DATA");
         assertThat(eval(r, "700070").reasons()).as("c 거래정지").containsExactly("GATE_01_NO_DATA");
+        assertThat(eval(r, "700080").reasons()).as("음수 거래량 행: 0으로 나누지 않고 결측").containsExactly("GATE_01_NO_DATA");
     }
 
     @Test
