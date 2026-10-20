@@ -99,6 +99,8 @@ class SnapshotDisclosuresTest {
         assertThatThrownBy(() -> SnapshotDisclosures.load(dir)).hasMessageContaining("날짜가 없습니다");
         write(ROWS, "pblntf_ty,from,to\n", null);
         assertThatThrownBy(() -> SnapshotDisclosures.load(dir)).hasMessageContaining("수집 유형이 없습니다");
+        write(ROWS, "pblntf_ty,from,to\nB,2026-01-01,2026-03-31\nB,2026-03-31,2026-04-30\nI,2026-01-01,2026-03-31\n", null);
+        assertThatThrownBy(() -> SnapshotDisclosures.load(dir)).hasMessageContaining("수집 구간이 겹칩니다");
     }
 
     @Test

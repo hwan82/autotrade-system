@@ -49,7 +49,7 @@
 - 전일 거래대금 = `avg-turnover`의 `window: 1`(c 종가 × 거래량 근사). KRX 응답의 실제 거래대금(`ACC_TRDVAL`)은 지금 수집하지 않는다 `[사실]`(`KrxOpenApiClient` 필드 목록). 근사와 실제 값의 차이(장중 가격 변동 반영 여부)가 순위를 흔들 수 있어, 수집 필드 추가를 data-engineer 변경 제안으로 남긴다(6장 후속 F1). 추가되면 새 지표 `turnover`로 넣고 기존 `avg-turnover`는 그대로 둔다(해시 불변).
 - 전일 등락률 = `return`의 `window: 1`. 상한가 근접 제외는 `return` `LE` 값으로 표현한다.
 - (D-123에서 바뀜: 공시 건수도 "접수일 < T", 구간 [w거래일 첫날, T−1]. 아래 문단은 처음 설계 기록) 공시 시점 규칙 "접수일 ≤ c"는 재무 규칙 "접수일 < T"(selection-catalog 1장)보다 엄격하다. c와 T 사이 휴장일에 접수된 공시는 재무에서는 쓰이고 공시 건수에서는 다음 선정으로 넘어간다. 공시 건수는 "그 구간에 소식이 있었나"를 세는 지표라 구간 귀속을 거래일 단위로 맞췄다(architect F5).
-- 상장폐지 회사의 공시 행에 `stock_code`가 비어 있으면 그 종목 공시가 0건이 되어 생존편향이 생긴다. 수집 때 `corp_code` → 종목 코드를 OpenDART 고유번호 파일과 KRX 종목 이력으로 이어 붙이고, 이어 붙이지 못한 행 수를 manifest에 남긴다. `stock_code`가 비는지는 OpenDART 원문으로 확인하지 못해 `[가정]`이다(strategy-researcher m4).
+- 상장폐지 회사의 공시 행에 `stock_code`가 비어 있으면 그 종목 공시가 0건이 되어 생존편향이 생긴다. 수집 때 `corp_code` → 종목 코드를 OpenDART 고유번호 파일과 KRX 종목 이력으로 이어 붙이고, 이어 붙이지 못한 행 수를 manifest에 남긴다(구현은 고유번호 파일 대신 같은 고유번호의 다른 공시 행을 쓰고, 건수는 manifest가 아니라 품질 리포트에 남긴다. D-123 5번). `stock_code`가 비는지는 OpenDART 원문으로 확인하지 못해 `[가정]`이다(strategy-researcher m4).
 - 프로필 키 `gate.<nn>.types`를 더한다(`disclosure-count`에만, 다른 지표에 쓰면 거부). 해석·거부 규칙은 기존 `window`·`years`와 같다.
 - 계산 정밀도·경계 포함 규칙·사유 코드는 selection-catalog 3장 그대로(`DECIMAL128` 중간 계산, `GATE_<nn>_NO_DATA` 등).
 
@@ -66,7 +66,7 @@
 ### 3.4 공시 스냅샷(data-engineer, 수집 일괄 명령 확장)
 
 - 수집: 기존 수집 명령(ADR-008)에 `dartDisclosures` 단계를 더한다. `list.json`을 회사 코드 없이 날짜 구간·쪽 단위로 부른다(구간 최대 3개월, 쪽 최대 100건 `[사실]`, ADR-008 2장). 키는 기존 OpenDART 키(수집기 전용 비밀 파일, D-050 ⑤)를 그대로 쓴다. 새 키·과금 없음.
-- 저장: `<설정 폴더>/snapshots/dart-disclosures-<마지막 날짜>-<해시8>/`(기존 스냅샷과 같은 manifest·sha256 규칙). 필드는 `rcept_no`, `corp_code`, `stock_code`, `rcept_dt`, `pblntf_ty`(요청 구간별로 받은 유형), `report_nm`, 정정 여부. 원문·본문은 받지 않는다.
+- 저장: `<설정 폴더>/snapshots/dart-disclosures-<마지막 날짜>-<해시8>/`(구현은 `<설정 폴더>/snapshots/dart-disclosures/dart-disclosures-<마지막 날짜>-<해시8>/`, 다른 스냅샷처럼 종류 폴더 아래)(기존 스냅샷과 같은 manifest·sha256 규칙). 필드는 `rcept_no`, `corp_code`, `stock_code`, `rcept_dt`, `pblntf_ty`(요청 구간별로 받은 유형), `report_nm`, 정정 여부. 원문·본문은 받지 않는다.
 - 과거분: 2010년부터 거슬러 받을 수 있다 `[추론]`(구간 조회 API라서). 하루 호출 상한은 재무 수집과 같은 키의 할당을 나눠 쓴다. 수집기 기본 상한은 하루 10,000회(가이드 "일반적으로 20,000건"의 절반 `[가정]`, ADR-008 2장)이고, 공시 단계는 그 안에서 유형(`pblntf_ty=B`, `I` 등 선정 프로필이 쓰는 유형만)으로 좁혀 부르고 **재무 수집 뒤에** 돈다(재무 신선도가 먼저, architect F6). manifest에 받은 유형 목록을 남긴다. 상태 020(요청 제한 초과)이면 멈추고 다음 실행에 이어 받는다(기존 재무 수집과 같음).
 - 장 시간 보호(08:00~16:00)·정지 요청 파일 관문은 기존 수집 명령 그대로.
 - 재배포 금지·키 비공개(D-050 ③) 그대로. 스냅샷은 저장소 밖에 둔다.

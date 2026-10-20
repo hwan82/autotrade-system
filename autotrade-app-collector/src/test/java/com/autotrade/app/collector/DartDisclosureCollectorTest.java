@@ -107,6 +107,38 @@ class DartDisclosureCollectorTest {
         assertThat(http.calls).allSatisfy(u -> assertThat(FakeHttp.query(u, "bgn_de")).isEqualTo("20260916"));
     }
 
+    /**
+     * 창 파일을 쓴 뒤 훑은 구간을 적기 전에 끝난 실행이 남긴 파일(PR #196 architect F1): 다음 실행이 지우고 다시 받으므로 같은 공시가
+     * 두 창에 들어가지 않는다. 훑은 구간 안 창끼리 겹치면 스냅샷을 만들지 않고 실패한다.
+     */
+    @Test
+    void 훑은_구간을_적기_전에_끝난_창_파일은_두_번_세지_않는다() throws IOException {
+        FakeHttp http = new FakeHttp(server());
+        DartDisclosureCollector c = collector(http, seoulNoon("2026-09-16"), 100);
+        c.collect(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 15), List.of("B"));
+        Path windows = cache.resolve("dart-disclosures").resolve("windows").resolve("B");
+        // 다음 날 실행이 9-16 창 파일을 쓴 뒤 훑은 구간을 적기 전에 끝났다고 친다(이름만 다른 남은 파일)
+        Files.copy(windows.resolve("2026-09-01_2026-09-15.json"), windows.resolve("2026-09-16_2026-09-16.json"));
+        assertThat(c.windowFiles(List.of("B")).get("B")).as("훑은 구간 밖 창은 스냅샷에 넣지 않음")
+                .extracting(f -> f.getFileName().toString()).containsExactly("2026-09-01_2026-09-15.json");
+        DartDisclosureCollector next = collector(http, seoulNoon("2026-09-17"), 100);
+        next.collect(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 16), List.of("B"));
+        assertThat(next.windowFiles(List.of("B")).get("B")).extracting(f -> f.getFileName().toString())
+                .containsExactly("2026-09-01_2026-09-15.json", "2026-09-16_2026-09-16.json");
+        assertThat(DartDisclosureCollector.readWindow(windows.resolve("2026-09-16_2026-09-16.json"))).as("다시 받은 9-16 창").isEmpty();
+        // state.json을 잃으면 훑은 구간이 없으므로 창 파일을 쓰지 않고, 다음 실행이 지우고 다시 받는다
+        Files.delete(cache.resolve("dart-disclosures").resolve("state.json"));
+        assertThat(next.windowFiles(List.of("B")).get("B")).isEmpty();
+        next.collect(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 16), List.of("B"));
+        try (var s = Files.list(windows)) {
+            assertThat(s.map(f -> f.getFileName().toString()).toList()).containsExactly("2026-09-01_2026-09-16.json");
+        }
+        // 훑은 구간 안에서 창끼리 겹치면 실패
+        Files.copy(windows.resolve("2026-09-01_2026-09-16.json"), windows.resolve("2026-09-10_2026-09-16.json"));
+        assertThatThrownBy(() -> next.windowFiles(List.of("B"))).isInstanceOf(IOException.class)
+                .hasMessageContaining("겹칩니다");
+    }
+
     @Test
     void 창_도중_상한에_닿으면_멈춘_사유를_돌려주고_다음_실행이_남은_쪽만_받는다() throws IOException {
         FakeHttp http = new FakeHttp(server());

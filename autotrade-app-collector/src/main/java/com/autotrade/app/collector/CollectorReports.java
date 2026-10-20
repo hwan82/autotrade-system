@@ -116,10 +116,6 @@ final class CollectorReports {
         return out;
     }
 
-    /**
-     * 빈 평일·시장 공백·수정 이벤트 몰린 날(PR #137 strategy-researcher R1 (b)(c)). 거래일이 휴장일로 캐시되면 다음 거래일에
-     * 시장 전체 가짜 수정 이벤트가 생겨 수정 계수가 조용히 오염되므로, 4단계 사전 등록 전에 사람이 이 칸을 본다.
-     */
     /** 공시 스냅샷 품질 리포트(ADR-012 3.4, D-123). 종목 코드를 못 붙인 행은 유형·법인 구분별로 적는다(생존편향 확인). */
     static Path writeDisclosures(Path dir, SnapshotManifest m, DartDisclosureSnapshotBuilder.Stats s,
             Map<String, java.util.List<java.time.LocalDate[]>> scanned, DartDisclosureCollector.Result r, int laneUsed,
@@ -187,6 +183,10 @@ final class CollectorReports {
         return out;
     }
 
+    /**
+     * 빈 평일·시장 공백·수정 이벤트 몰린 날(PR #137 strategy-researcher R1 (b)(c)). 거래일이 휴장일로 캐시되면 다음 거래일에
+     * 시장 전체 가짜 수정 이벤트가 생겨 수정 계수가 조용히 오염되므로, 4단계 사전 등록 전에 사람이 이 칸을 본다.
+     */
     static String gapSections(KrxDailySnapshotBuilder.Stats s, ExchangeCalendar cal, Set<LocalDate> pending) {
         StringBuilder sb = new StringBuilder();
         int kinds = EmptyDayKind.values().length;

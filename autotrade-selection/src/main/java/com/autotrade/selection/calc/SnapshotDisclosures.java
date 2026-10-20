@@ -95,6 +95,11 @@ public final class SnapshotDisclosures implements SelectionData.DisclosureInput 
             }
             ranges.replaceAll((t, l) -> {
                 l.sort((a, b) -> a[0].compareTo(b[0]));
+                for (int i = 1; i < l.size(); i++) {
+                    if (!l.get(i)[0].isAfter(l.get(i - 1)[1])) { // 수집기는 합친 구간만 쓴다(PR #196 architect R1)
+                        throw new IllegalStateException(TYPES_FILE + ": 유형 " + t + "의 수집 구간이 겹칩니다");
+                    }
+                }
                 return List.copyOf(l);
             });
             Map<Symbol, Map<String, List<Integer>>> raw = new HashMap<>();

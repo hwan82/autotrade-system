@@ -146,7 +146,8 @@ function metricLabel(key) {
 function metricOptions(cat, selected, withNone) {
   return [
     withNone ? h('option', { value: '', selected: !selected }, '순위 없음') : null,
-    ...cat.metrics.map(m => h('option', { value: m.key, selected: m.key === selected }, `${metricLabel(m.key)} · ${KIND[m.kind] || m.kind}`)),
+    // 순위에는 공시 건수를 쓰지 않는다(자격 조건에만, D-123). 저장된 값이면 보이게 둔다
+    ...cat.metrics.filter(m => !withNone || m.kind !== 'DISCLOSURE' || m.key === selected).map(m => h('option', { value: m.key, selected: m.key === selected }, `${metricLabel(m.key)} · ${KIND[m.kind] || m.kind}`)),
   ];
 }
 

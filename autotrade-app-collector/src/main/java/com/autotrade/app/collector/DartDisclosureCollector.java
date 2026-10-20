@@ -82,6 +82,7 @@ public final class DartDisclosureCollector {
         }
         List<Window> todo = new ArrayList<>();
         for (String t : types) {
+            pruneOrphans(t);
             for (LocalDate[] gap : DartFinancialCollector.gaps(scannedRanges(t), from, to)) {
                 todo.addAll(monthWindows(t, gap[0], gap[1]));
             }
@@ -280,20 +281,59 @@ public final class DartDisclosureCollector {
         write(f, state);
     }
 
-    /** 다 받은 창 파일(유형별, 시작일 순). */
+    /**
+     * 다 받은 창 파일(유형별, 시작일 순). 훑은 구간(state.json) 안의 창만 돌려준다. 창 파일을 쓴 뒤 훑은 구간을 적기 전에 끝난 실행이
+     * 남긴 파일은 빼고, 남은 창끼리 날짜가 겹치면 같은 공시가 두 번 들어가므로 실패한다(PR #196 architect F1).
+     */
     public Map<String, List<Path>> windowFiles(List<String> types) throws IOException {
         Map<String, List<Path>> out = new LinkedHashMap<>();
         for (String t : types) {
-            Path d = dir.resolve("windows").resolve(t);
+            List<LocalDate[]> scanned = scannedRanges(t);
             List<Path> files = new ArrayList<>();
-            if (Files.isDirectory(d)) {
-                try (Stream<Path> s = Files.list(d)) {
-                    files.addAll(s.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().toList());
+            LocalDate lastEnd = null;
+            for (Path f : listWindows(t)) {
+                if (!inside(scanned, windowStart(f), windowEnd(f))) {
+                    continue;
                 }
+                if (lastEnd != null && !windowStart(f).isAfter(lastEnd)) {
+                    throw new IOException("공시 창 파일 날짜가 겹칩니다(같은 공시가 두 번 들어감): " + f
+                            + ". 캐시 폴더 dart-disclosures/windows/" + t + "를 확인하세요");
+                }
+                lastEnd = windowEnd(f);
+                files.add(f);
             }
             out.put(t, files);
         }
         return out;
+    }
+
+    /** 훑은 구간 밖 창 파일(창을 쓰고 훑은 구간을 적기 전에 끝난 실행이 남긴 것)을 지운다. 이 구간은 다시 받는다. */
+    private void pruneOrphans(String type) throws IOException {
+        List<LocalDate[]> scanned = scannedRanges(type);
+        for (Path f : listWindows(type)) {
+            if (!inside(scanned, windowStart(f), windowEnd(f))) {
+                Files.delete(f);
+            }
+        }
+    }
+
+    private List<Path> listWindows(String type) throws IOException {
+        Path d = dir.resolve("windows").resolve(type);
+        if (!Files.isDirectory(d)) {
+            return List.of();
+        }
+        try (Stream<Path> s = Files.list(d)) {
+            return s.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().toList();
+        }
+    }
+
+    private static boolean inside(List<LocalDate[]> ranges, LocalDate from, LocalDate to) {
+        for (LocalDate[] r : ranges) {
+            if (!from.isBefore(r[0]) && !to.isAfter(r[1])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 창 파일 하나의 행들(접수번호 순). */
@@ -306,6 +346,11 @@ public final class DartDisclosureCollector {
     /** 창 파일 이름의 시작일. */
     static LocalDate windowStart(Path file) {
         return LocalDate.parse(file.getFileName().toString().substring(0, 10));
+    }
+
+    /** 창 파일 이름의 끝날({@code <시작>_<끝>.json}). */
+    static LocalDate windowEnd(Path file) {
+        return LocalDate.parse(file.getFileName().toString().substring(11, 21));
     }
 
     private LocalDate today() {

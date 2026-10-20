@@ -27,8 +27,8 @@ import java.util.regex.Pattern;
  * <p><b>종목 코드 이어 붙이기</b>(생존편향 방지, strategy-researcher PR #191 m4): 응답 행의 {@code stock_code}가 비면
  * (1) 같은 고유번호({@code corp_code})의 다른 행이 가진 종목 코드(그 날짜를 덮는 것, 없으면 가장 가까운 것), (2) 그날 KRX 종목
  * 이력에서 회사 이름이 정확히 같은(공백·"(주)"·"주식회사" 무시) 종목이 하나뿐이면 그 코드를 쓴다. 출처를 {@code code_source}
- * ({@code DART}, {@code CORP}, {@code NAME})에 남기고, 못 붙인 행은 코드를 비워 두고 manifest와 품질 리포트에 유형·법인 구분별
- * 건수를 남긴다. 상장폐지 회사 행의 {@code stock_code}가 실제로 비는지는 OpenDART 원문으로 확인하지 못했다 `[가정]`.
+ * ({@code DART}, {@code CORP}, {@code NAME})에 남기고, 못 붙인 행은 코드를 비워 두고 품질 리포트에 유형·법인 구분별·접수 연도별
+ * 건수를 남긴다(manifest 형식은 바꾸지 않음). 상장폐지 회사 행의 {@code stock_code}가 실제로 비는지는 OpenDART 원문으로 확인하지 못했다 `[가정]`.
  *
  * <p>행 순서: 접수일, 접수번호, 유형. 정정 공시 판정(보고서명 대괄호 머리말)은 읽는 쪽이 한다(카탈로그 정의 한 곳).
  */
@@ -127,8 +127,14 @@ final class DartDisclosureSnapshotBuilder {
             }
             rows.sort(Comparator.comparing((List<String> r) -> r.get(7)).thenComparing(r -> r.get(6))
                     .thenComparing(r -> r.get(5)));
+            List<String> prev = null;
             for (List<String> r : rows) {
+                if (prev != null && prev.get(6).equals(r.get(6)) && prev.get(7).equals(r.get(7))) {
+                    // 같은 접수번호가 두 번이면 공시 건수가 부푼다(PR #196 architect F1). 창 파일 겹침은 windowFiles가 먼저 막는다
+                    throw new IOException("같은 접수번호가 두 번 있습니다: " + r.get(6) + " (유형 " + prev.get(5) + ", " + r.get(5) + ")");
+                }
                 out.write(r);
+                prev = r;
                 total++;
             }
         }

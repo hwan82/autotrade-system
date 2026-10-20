@@ -1,6 +1,7 @@
 package com.autotrade.app.collector;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -94,5 +95,14 @@ class DartDisclosureSnapshotBuilderTest {
                 new LocalDate[] {LocalDate.of(2026, 1, 1), LocalDate.of(2026, 9, 15)}));
         assertThat(DartDisclosureSnapshotBuilder.typeRows(scanned)).containsExactly(List.of("B", "2010-01-01", "2011-01-01"),
                 List.of("B", "2026-01-01", "2026-09-15"), List.of("I", "2026-01-01", "2026-09-15"));
+    }
+
+    @Test
+    void 같은_접수번호가_두_번이면_스냅샷을_만들지_않는다() throws IOException {
+        Map<String, List<Path>> windows = Map.of("B", List.of(
+                window("B", "2026-01-01_2026-01-14.json", "Y;00000001;111111;가;보고;20260105000001;20260105"),
+                window("B", "2026-01-01_2026-01-31.json", "Y;00000001;111111;가;보고;20260105000001;20260105")));
+        assertThatThrownBy(() -> DartDisclosureSnapshotBuilder.build(windows, List.of(), r -> { }))
+                .isInstanceOf(IOException.class).hasMessageContaining("20260105000001");
     }
 }
