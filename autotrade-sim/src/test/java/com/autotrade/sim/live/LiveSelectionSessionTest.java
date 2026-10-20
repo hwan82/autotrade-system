@@ -110,6 +110,11 @@ class LiveSelectionSessionTest {
         boolean wroteLate = false;
         LiveSession s = LiveSession.open(plan(true), REPO, sessions, clock, m -> { });
         assertThat(s.hasSelections()).isTrue();
+        // 화면의 다음 거래일 표는 읽기 전용 결과만 받는다(PR #201 N1): D1 결과 파일 있음, D2 아무 파일 없음
+        assertThat(s.preparedSelections(D1)).hasValueSatisfying(p -> assertThat(p).singleElement()
+                .satisfies(it -> assertThat(it.state()).isEqualTo(SessionSelections.Prepared.State.READY)));
+        assertThat(s.preparedSelections(D2)).hasValueSatisfying(p -> assertThat(p).singleElement()
+                .satisfies(it -> assertThat(it.state()).isEqualTo(SessionSelections.Prepared.State.NONE)));
         for (int n = 0; n < events.size(); n++) {
             MarketEvent e = events.get(n);
             clock.now = e.receivedAt();
@@ -131,6 +136,10 @@ class LiveSelectionSessionTest {
                 .candidates().candidates()).containsExactly("005930"));
         assertThat(s.appliedSelections(D2)).hasValueSatisfying(a -> assertThat(a.item(hot.selectionHash()).reason())
                 .isEqualTo(SelectionInvalidReason.MISSING));
+        assertThat(s.preparedSelections(D1)).hasValueSatisfying(p -> assertThat(p).singleElement()
+                .satisfies(it -> assertThat(it.state()).isEqualTo(SessionSelections.Prepared.State.APPLIED)));
+        assertThat(s.preparedSelections(D2)).hasValueSatisfying(p -> assertThat(p).singleElement()
+                .satisfies(it -> assertThat(it.state()).isEqualTo(SessionSelections.Prepared.State.APPLIED_MISSING)));
 
         SimulationReport live = s.finish(new CodeVersion("live", false));
         assertThat(live.runs()).hasSize(3);
@@ -168,6 +177,7 @@ class LiveSelectionSessionTest {
         Path plainSessions = plainRoot.resolve("live-sessions");
         LiveSession plain = LiveSession.open(plan(false), REPO, plainSessions, clock, m -> { });
         assertThat(plain.hasSelections()).isFalse();
+        assertThat(plain.preparedSelections(D1)).isEmpty();
         for (int n = 0; n < events.size(); n++) {
             clock.now = events.get(n).receivedAt();
             if (n == restartAt) {
