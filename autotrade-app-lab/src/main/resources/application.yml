@@ -12,6 +12,11 @@ server:
   # 로컬 전용(D-020, UI-01). 루프백이 아닌 주소로 바꾸면 기동을 거부한다(LoopbackBindingCheck)
   address: 127.0.0.1
   port: ${AUTOTRADE_UI_PORT:8480}
+  servlet:
+    # 응답 Content-Type에 charset=UTF-8을 붙인다(D-118). 없으면 Windows PowerShell 5.1 Invoke-RestMethod가 JSON을 Latin-1로 읽어 한글이 깨진다
+    encoding:
+      charset: UTF-8
+      force-response: true
   error:
     include-message: never
     include-stacktrace: never

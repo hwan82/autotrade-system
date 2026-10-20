@@ -192,9 +192,12 @@ public final class VirtualExchange implements OrderGateway {
             books.put(book.symbol(), book);
             staleBooks.remove(book.symbol());
         } else if (event instanceof TradeTick tick) {
-            long left = phase.isAuction() ? tick.quantity() : matchAuction(tick, phase);
+            // 중간가 체결(D-118)은 보이는 호가 대기열에 있던 주문이 체결됐다는 증거가 아니다: 지정가 체결과 단일가 참여에
+            // 쓰지 않는다(평가 가격과 호가 없는 종목의 시장가 기준 가격으로는 쓴다)
+            boolean midpoint = MidpointTrades.isMidpoint(rules, tick.symbol(), tick.price());
+            long left = phase.isAuction() ? tick.quantity() : matchAuction(tick, phase, midpoint);
             if (phase == SessionPhase.CONTINUOUS) {
-                matchTrade(tick, left);
+                matchTrade(tick, left, midpoint);
             }
             // 평가 가격은 정규장 체결(접속 매매, 시가·종가 단일가 체결)로만 갱신한다. 장전·장후 시간외 체결은 쓰지 않는다
             if (phase == SessionPhase.CONTINUOUS || closingPrint) {
@@ -376,9 +379,11 @@ public final class VirtualExchange implements OrderGateway {
     /**
      * 단일가 체결: 단일가 구간이 끝난 뒤 그 종목의 첫 체결을 단일가 체결로 보고 참여 주문을 그 가격으로 체결한다(D-069).
      *
+     * @param midpoint 중간가 체결(D-118)이면 단일가 체결이 아니므로 참여 표시만 지우고 체결하지 않는다(단일가 체결을 놓친 것으로
+     *     본다. 다음 정상 체결이 그 가격으로 참여 주문을 체결하지 않게)
      * @return 이 체결에서 단일가 참여 주문이 쓰고 남은 수량
      */
-    private long matchAuction(TradeTick tick, SessionPhase phase) {
+    private long matchAuction(TradeTick tick, SessionPhase phase, boolean midpoint) {
         Symbol s = tick.symbol();
         long tickLeft = tick.quantity();
         boolean tradable = tradable(s);
@@ -388,7 +393,8 @@ public final class VirtualExchange implements OrderGateway {
             }
             // 시가 단일가는 접속 매매 첫 체결, 종가 단일가는 폐장 직후 첫 체결({@link #closingPrint})로만 체결한다. 그 밖(시가
             // 참여 주문이 폐장 뒤 체결을 처음 만남, 종가 체결 틱 없이 시간외 체결이 옴 등)은 단일가 체결을 놓친 것이므로 표시만 지운다
-            boolean print = o.auction == SessionPhase.OPENING_AUCTION ? phase == SessionPhase.CONTINUOUS : closingPrint;
+            boolean print = !midpoint
+                    && (o.auction == SessionPhase.OPENING_AUCTION ? phase == SessionPhase.CONTINUOUS : closingPrint);
             o.auction = null;
             if (!print || !tradable || tickLeft <= 0) {
                 continue;
@@ -555,8 +561,11 @@ public final class VirtualExchange implements OrderGateway {
         o.queueAhead = o.queueAhead == null ? levelQty : Math.min(o.queueAhead, levelQty);
     }
 
-    /** @param tickLeft 이 체결에서 단일가 참여 주문이 쓰고 남은 수량 */
-    private void matchTrade(TradeTick tick, long tickLeft) {
+    /**
+     * @param tickLeft 이 체결에서 단일가 참여 주문이 쓰고 남은 수량
+     * @param midpoint 중간가 체결이면 지정가 주문은 체결하지 않는다(D-118)
+     */
+    private void matchTrade(TradeTick tick, long tickLeft, boolean midpoint) {
         Symbol s = tick.symbol();
         if (!tradable(s)) {
             return;
@@ -577,6 +586,9 @@ public final class VirtualExchange implements OrderGateway {
                 BigDecimal slip = price.subtract(tick.price()).abs();
                 long qty = o.remaining();
                 fill(o, tick, price, qty, slip.multiply(BigDecimal.valueOf(qty)));
+                continue;
+            }
+            if (midpoint) {
                 continue;
             }
             BigDecimal limit = o.request.limitPrice();

@@ -300,6 +300,36 @@ class LiveSessionTest {
     }
 
     @Test
+    void midpointTradesKeepTheSessionRunningButOffTickQuotesAndOtherPricesStillStop() throws Exception {
+        Instant t = LocalDate.of(2026, 10, 14).atTime(10, 0).atZone(SEOUL).toInstant();
+        // D-118: 호가 단위 반 칸 체결(중간가 체결)은 받는다. 60,050은 100원 단위의 반 칸
+        try (LiveSession s = open()) {
+            clock.now = t;
+            assertThat(s.accept("KIWOOM-WS", new TradeTick(SAMSUNG, 1, t, t, new BigDecimal("60050"), 3)))
+                    .isEqualTo(LiveSession.Accepted.ACCEPTED);
+            assertThat(s.status().stopReason()).isEmpty();
+            assertThat(s.status().events()).isEqualTo(1);
+            assertThat(s.accept("KIWOOM-WS", new TradeTick(SAMSUNG, 2, t, t, new BigDecimal("60000"), 1)))
+                    .isEqualTo(LiveSession.Accepted.ACCEPTED);
+        }
+    }
+
+    @Test
+    void offTickQuotePricesStopEvenWhenHalfTick() throws Exception {
+        Instant t = LocalDate.of(2026, 10, 14).atTime(10, 0).atZone(SEOUL).toInstant();
+        try (LiveSession s = open()) {
+            clock.now = t;
+            // 호가 가격은 반 칸도 받지 않는다
+            var halfTickBook = new com.autotrade.domain.market.OrderBookSnapshot(SAMSUNG, 1, t, t,
+                    List.of(new com.autotrade.domain.market.PriceLevel(new BigDecimal("60050"), 10)),
+                    List.of(new com.autotrade.domain.market.PriceLevel(new BigDecimal("60000"), 10)));
+            assertThat(s.accept("KIWOOM-WS", halfTickBook)).isEqualTo(LiveSession.Accepted.STOPPED);
+            assertThat(s.status().stopReason()).contains("호가 단위").contains("60050");
+            assertThat(s.journalDays()).isEmpty();
+        }
+    }
+
+    @Test
     void blacklistedSymbolIsNeverBoughtInTheLiveSession() throws Exception {
         String yaml = Files.readString(experimentDir.resolve("experiment.yaml"), StandardCharsets.UTF_8)
                 + "blacklist:\n  - \"000660\"\n";

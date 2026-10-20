@@ -21,6 +21,7 @@ import com.autotrade.sim.RunResult;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.exchange.ExecutionSettings;
+import com.autotrade.sim.exchange.MidpointTrades;
 import com.autotrade.sim.metrics.MetricsCalculator;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.run.CodeVersion;
@@ -188,12 +189,15 @@ public final class RecordingExperiment {
 
     /**
      * 이벤트의 체결가·호가 중 주식 호가 단위에 맞지 않는 첫 가격(없으면 빈 값). 녹화 실험과 실시간 모의(D-076)가 같은 검사를
-     * 쓴다(D-075 4번).
+     * 쓴다(D-075 4번). 체결가가 호가 단위의 정확한 반 칸이면 중간가 체결이라 단위 밖으로 보지 않는다(D-118,
+     * {@link MidpointTrades}). 호가 가격에는 예외가 없다.
      */
     public static Optional<BigDecimal> offStockTick(MarketRules rules, MarketEvent e) {
         List<BigDecimal> prices = new ArrayList<>();
         if (e instanceof TradeTick t) {
-            prices.add(t.price());
+            if (!MidpointTrades.isMidpoint(rules, t.symbol(), t.price())) {
+                prices.add(t.price());
+            }
         } else if (e instanceof OrderBookSnapshot b) {
             b.asks().forEach(l -> prices.add(l.price()));
             b.bids().forEach(l -> prices.add(l.price()));

@@ -61,6 +61,14 @@ class WebSecurityIntegrationTest {
     }
 
     @Test
+    void JSON_응답은_charset_UTF8을_선언한다_D118() throws Exception {
+        // charset이 없으면 Windows PowerShell 5.1 Invoke-RestMethod가 한글을 Latin-1로 읽어 깨진다
+        mvc.perform(get("/api/session"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("charset=UTF-8")));
+    }
+
+    @Test
     void 루프백이_아닌_Host는_조회도_거부한다() throws Exception {
         mvc.perform(get("/api/session").header("Host", "evil.example:8480"))
                 .andExpect(status().isForbidden())

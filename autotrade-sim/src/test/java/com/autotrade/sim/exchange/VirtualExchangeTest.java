@@ -535,6 +535,49 @@ class VirtualExchangeTest {
     }
 
     @Test
+    void 중간가_체결은_주문을_체결시키지_않는다_D118() {
+        event(book(1000, asks("70200x60"), bids("70000x400")));
+        submit(Side.BUY, OrderType.LIMIT, "70100", 10);
+        event(book(2000, asks("70200x60"), bids("70000x400")));
+        // 70,050은 호가 단위 100의 반 칸: 일반 체결이면 지정가 70,100을 통과해 체결되지만 중간가 체결은 체결 근거가 아니다
+        assertThat(event(trade(3000, "70050", 1000))).isEmpty();
+        assertThat(ex.hasOpenOrder(S)).isTrue();
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70050"); // 평가 가격에는 쓴다
+        // 단위에 맞는 체결은 그대로 체결(통과한 70,000 체결은 지정가 70,100 체결)
+        assertThat(event(trade(4000, "70000", 100))).singleElement()
+                .satisfies(a -> assertThat(a.fill().quantity()).isEqualTo(10));
+    }
+
+    @Test
+    void 시가_단일가_뒤_첫_체결이_중간가면_단일가_체결을_놓친_것으로_보고_다음_체결이_참여_주문을_단일가로_체결하지_않는다_D118() {
+        newExchange(Money.of(10_000_000, Money.KRW), Duration.ofMillis(500), SESSIONS);
+        event(book(kst(8, 50, 0), asks("70300x60"), bids("70000x400")));
+        IdempotencyKey k = submit(Side.BUY, OrderType.LIMIT, "70200", 10);
+        // 개장 뒤 첫 체결이 중간가 70,050: 시가 단일가 체결이 아니므로 체결 없음, 참여 표시만 지운다
+        assertThat(event(trade(kst(9, 0, 3), "70050", 100))).isEmpty();
+        // 다음 정상 체결 70,100은 접속 매매 통과 체결: 단일가 체결가 70,100이 아니라 지정가 70,200으로 체결(앞선 잔량 없이 단일가로 체결되지 않음)
+        assertThat(event(trade(kst(9, 0, 5), "70100", 100))).singleElement()
+                .satisfies(a -> assertFill(a, 10, "70200", 1, 0));
+        assertThat(state(k)).isEqualTo(OrderState.FILLED);
+    }
+
+    @Test
+    void 중간가_판정은_정확한_반_칸만_받는다_D118() {
+        MarketRules r = TestKrxRules.INSTANCE;
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("218750"))).isTrue(); // 500원 단위의 반 칸
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("70050"))).isTrue(); // 100원 단위의 반 칸
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("199950"))).isTrue(); // 구간 경계 아래 100원 단위
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("70000"))).isFalse(); // 단위에 맞음
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("70060"))).isFalse(); // 반 칸 아님
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("60005"))).isFalse(); // ETF 5원
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("218751"))).isFalse();
+        assertThat(MidpointTrades.isMidpoint(r, S, BigDecimal.ZERO)).isFalse();
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("1999.5"))).isTrue(); // 1원 단위 구간의 0.5원
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("500500"))).isTrue(); // 1,000원 단위 구간의 500원
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("500400"))).isFalse();
+    }
+
+    @Test
     void 표시_범위_밖_지정가는_그_가격이_표시될_때까지_앞선_잔량을_정하지_않는다() {
         event(book(1000, asks("70100x60"), bids("70000x400", "69900x300")));
         submit(Side.BUY, OrderType.LIMIT, "69800", 10);
