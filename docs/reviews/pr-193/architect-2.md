@@ -26,3 +26,29 @@
 
 ## 판정
 수정 필요(F1, F2)
+
+## 재검토 2026-10-20
+- 대상: PR #193 / 커밋 fe938b5 / main 대비 diff 전체(`git diff origin/main...HEAD`, 리뷰 원문 제외 운영·문서 파일 10개). 직전 재검토(9b68211) 뒤 바뀐 것은 `SelectionCalculator.volumeSpike`(조건 `<= 0`), `IntradaySelectionCalculatorTest`(700080), ADR-012 3.2 표·3.3 (다) 표기, selection-catalog 3장 표
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew --init-script <저장소 밖 Maven Central 미러 init 스크립트> build` → BUILD SUCCESSFUL(138 tasks)
+  - `:autotrade-selection:test --rerun :autotrade-architecture-test:test --rerun` → BUILD SUCCESSFUL. test-results XML: autotrade-selection 40건, autotrade-architecture-test 46건, 둘 다 실패 0·오류 0·건너뜀 0
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 실행 |
+| B2 | 통과 | 운영 코드 변경은 `autotrade-selection`(순수 Java)과 UI 정적 JS뿐. 이번에 더해진 `docs/adr/ADR-012-intraday-selection.md`를 포함해 보호 경로(`scripts/ci/protected-paths.txt`) 변경 없음. ArchUnit 재실행 통과 |
+| B3 | 통과(F2 해소) | ADR-012 3.2 volume-spike 행 결측 칸이 "w+1거래일 중 하루라도 없음, 또는 거래량 0 이하인 날 → `NO_DATA`"로 카탈로그(`selection-catalog.md` 3장 표)·코드(`SelectionCalculator.volumeSpike`)와 일치. 3.3 (다)의 ±30%가 `[사실]`, 2015-06-15, `KrxMarketRules`로 카탈로그·프로필 주석과 일치. 카탈로그 REST는 추가만(1차 B3 그대로) |
+| B4 | 통과 | Clock·난수 없음, 창 길이 불변(`SelectionCriteria.java:93`). 미래 정보 테스트·기존 골든 통과 |
+| B5 | 통과 | `BigDecimal`, `DECIMAL128` 중간·`DECIMAL64` 값 그대로 |
+| B6 | 통과(F1 해소) | `volumeSpike` 조건이 `b.volume() <= 0`이라 앞 구간 합이 0 이하가 될 수 없고 분모 0 예외 경로가 닫힘. 새 단언 `#거래량_급증은_c_하루를_앞_구간_평균과_비교한다`의 700080(앞 구간 −200·100·100, 합 0)이 `GATE_01_NO_DATA`. 수정 전 조건(`== 0`)이면 이 입력에서 `divide`가 Division by zero를 던져 테스트가 깨진다 `[추론]`(BigDecimal 의미로 판단, 되돌려 실행해 보지는 않음). 기존 단언 삭제·약화 없음, 건너뜀 0 |
+| B7 | 해당 없음 | 실전 주문 경로·Guard·블랙리스트·리스크 한도·장애 대응 변경 없음. 실전용 선정 생산자 연결은 ADR-012 배치표 5번 |
+| B8 | 통과 | diff에 비밀값 없음, 새 로그 없음 |
+
+## 점검표 밖 발견
+- F1·F2 해소(위 B6·B3).
+- 정보(비차단): ADR-012 상태 줄에는 PR #193 반영이 따로 적히지 않았지만 해당 행 안에 출처(strategy-researcher M1·architect-2 F1)가 적혀 있어 추적에는 충분하다.
+- 앞선 정보 항목(정지일 c의 day-range 0, `volume-ratio` 정지일 비대칭 기록)은 그대로 비차단.
+
+## 판정
+승인
