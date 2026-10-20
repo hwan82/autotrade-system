@@ -92,6 +92,11 @@ class EdgeJudgeTest {
         assertThat(r.pNetLow()).isEqualTo(1.0 / 60);
         assertThat(r.reasons()).anyMatch(s -> s.startsWith("E3 미달") && s.contains("≤ 0.0500(보정 없음)"));
         assertThat(EdgeJudge.E3_ALPHA).isEqualTo(0.05);
+        // (0.05/m, 0.05] 사이 p는 보정 없는 기준으로 미달(α/m이었다면 통과), 0.05 초과만 통과
+        assertThat(EdgeJudge.e3Passes(EdgePlan.Test.RANGE, 2.0 / 60)).isFalse();
+        assertThat(EdgeJudge.e3Passes(EdgePlan.Test.RANGE, 3.0 / 60)).isFalse();
+        assertThat(EdgeJudge.e3Passes(EdgePlan.Test.RANGE, 4.0 / 60)).isTrue();
+        assertThat(EdgeJudge.e3Passes(EdgePlan.Test.NET, 1.0 / 60)).as("NET이면 E3를 보지 않음").isTrue();
     }
 
     @Test

@@ -169,7 +169,10 @@ class SelectionEdgeStudyTest {
         assertThat(inputs).contains("determinism: same").contains("bars-snapshot: " + SNAPSHOT)
                 .contains("cost-model: KR-DEFAULT-1c6a40d3efb8").contains("model: EDGE-DAILY-V1");
         String results = Files.readString(dir.resolve("results.md"));
-        assertThat(results).contains("## 1. 판정").contains("W1 ").contains("D1 ").contains("해석 한계");
+        assertThat(results).contains("## 1. 판정").contains("W1 ").contains("D1 ").contains("해석 한계")
+                .contains("비교 대상: 같은 날 T, 같은 수를 그날 하드 필터 통과 집합에서 무작위로 고른 선정(시드 ")
+                .contains("일봉 스냅샷 `" + SNAPSHOT + "`").contains("표본 외 보존 2026-04-01 이후")
+                .contains("비용 모델 `KR-DEFAULT-1c6a40d3efb8`, 왕복 금액 ").contains(" KRW");
         String days = Files.readString(dir.resolve("days.tsv"));
         assertThat(days.lines().count()).as("머리 줄 + 판정 44일 + 기술 통계 12일").isEqualTo(1 + 44 + 12);
 

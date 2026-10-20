@@ -152,7 +152,7 @@ public final class EdgeJudge {
         } else {
             boolean e1 = pHigh <= alpha;
             boolean e2 = positive * 2 > w;
-            boolean e3 = test != EdgePlan.Test.RANGE || pNetLow > E3_ALPHA;
+            boolean e3 = e3Passes(test, pNetLow);
             reasons.add("E1 " + (e1 ? "통과" : "미달") + ": p = " + EdgeReport.p(pHigh) + (e1 ? " ≤ " : " > ")
                     + EdgeReport.p(alpha));
             reasons.add("E2 " + (e2 ? "통과" : "미달") + ": 대조군 중앙값 초과 구간 " + positive + "/" + w);
@@ -169,6 +169,11 @@ public final class EdgeJudge {
         }
         return new Result(test, verdict, List.copyOf(reasons), all, List.copyOf(segments), pHigh, pOther, pNetLow,
                 positive, effective, alpha, survivorship);
+    }
+
+    /** E3: 주 통계가 RANGE가 아니면 보지 않고, RANGE면 net 아래쪽 p &gt; {@link #E3_ALPHA}. */
+    static boolean e3Passes(EdgePlan.Test test, double pNetLow) {
+        return test != EdgePlan.Test.RANGE || pNetLow > E3_ALPHA;
     }
 
     /** (1 + #{v ≥ x}) ÷ (N′ + 1). NaN 시드는 뺀다. x가 NaN이면 1. */
