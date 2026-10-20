@@ -132,6 +132,52 @@ class LiveLabServiceTest {
         await(() -> gateway.subscriberCount() == 0); // 끝내면 전달 연결도 끊는다
     }
 
+    /** 참고 계좌·묶음별 시드 수가 있는 등록은 판정과 같은 역할 계산을 시작 때 돌려, 틀렸으면 세션을 열지 않는다(ADR-014 4.3). */
+    @Test
+    void judgementKeysAreCheckedBeforeTheSessionStarts() throws Exception {
+        Path dir = Files.createDirectories(experiments.resolve("EXP-TEST-LIVE02R"));
+        String head = String.join("\n",
+                "id: \"EXP-TEST-LIVE02R\"",
+                "question: \"q\"",
+                "input: \"live\"",
+                "market: \"KRX\"",
+                "from: \"2026-10-14\"",
+                "to: \"2026-10-14\"",
+                "seed: \"1\"",
+                "seed-capital: \"10000000\"",
+                "benchmark: \"005930\"",
+                "profiles:",
+                "  - \"kr-bh-baseline@1\"",
+                "  - \"kr-random-control@1\"",
+                "  - \"kr-orb-30@1\"",
+                "  - \"kr-vwap-reclaim@1\"",
+                "boards:",
+                "  - \"005930 KOSPI\"",
+                "");
+        // 기준선을 참고로 적음 → 판정 때 거절될 등록이라 시작하지 않는다
+        Files.writeString(dir.resolve("experiment.yaml"), head + "references:\n  - \"kr-bh-baseline@1\"\n",
+                StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-LIVE02R")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("references에 기준선");
+        assertThat(service.status().session()).isEmpty();
+        // 시드 수를 21m − 1(m = 1 → 20)보다 적게 적음
+        Files.writeString(dir.resolve("experiment.yaml"), head + "references:\n  - \"kr-vwap-reclaim@1\"\n"
+                + "group-null-seeds:\n  - \"none 19\"\n", StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-LIVE02R")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("21m − 1 = 20");
+        // 맞는 등록은 시작한다
+        Files.writeString(dir.resolve("experiment.yaml"), head + "references:\n  - \"kr-vwap-reclaim@1\"\n"
+                + "group-null-seeds:\n  - \"none 20\"\n", StandardCharsets.UTF_8);
+        assertThat(service.start("EXP-TEST-LIVE02R").restoring()).isTrue();
+    }
+
+    /** 두 키가 없는 등록은 시작 때 역할을 보지 않는다(기준선만 있는 시험 등록, LIVE00·LIVE01 모양). */
+    @Test
+    void registrationsWithoutJudgementKeysStartWithoutRoleCheck() {
+        // setUp의 등록은 기준선 하나뿐이라 판정 역할로는 거절될 모양이다
+        assertThat(service.start(ID).restoring()).isTrue();
+    }
+
     @Test
     void runsWithoutGatewayAndStopsOnWatchdogStopRequest() throws Exception {
         service.start(ID);
