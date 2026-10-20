@@ -58,6 +58,7 @@ final class DayWriter implements AutoCloseable {
     private final Map<String, String> sources = new TreeMap<>();
     private final List<RecordingMeta.Segment> segments = new ArrayList<>();
     private final RecordingCodec codec = new RecordingCodec();
+    private final TmpOpener tmpOpener;
     private final BufferedWriter out;
     private final Instant openedAt;
     private long seq;
@@ -71,6 +72,16 @@ final class DayWriter implements AutoCloseable {
 
     DayWriter(Path dir, Market market, LocalDate date, ZoneId zone, Map<String, String> knownSources, String license,
             Instant openedAt) {
+        this(dir, market, date, zone, knownSources, license, openedAt, Files::newOutputStream);
+    }
+
+    /**
+     * @param tmpOpener 같은 날 재기동 때 다시 쓸 tmp 파일을 여는 방법. 운영은 {@link Files#newOutputStream}이고, 시험만 쓰기
+     *        실패를 만들려고 바꾼다(PR #192 QA Q2)
+     */
+    DayWriter(Path dir, Market market, LocalDate date, ZoneId zone, Map<String, String> knownSources, String license,
+            Instant openedAt, TmpOpener tmpOpener) {
+        this.tmpOpener = tmpOpener;
         this.dir = dir;
         this.market = market;
         this.date = date;
@@ -123,7 +134,7 @@ final class DayWriter implements AutoCloseable {
      */
     private RecordedDayStream.Summary rewriteToTmp(Path tmp, SortedSet<Symbol> symbols) throws IOException {
         try (BufferedWriter w = new BufferedWriter(new OutputStreamWriter(
-                new GZIPOutputStream(Files.newOutputStream(tmp)), StandardCharsets.UTF_8))) {
+                new GZIPOutputStream(tmpOpener.open(tmp)), StandardCharsets.UTF_8))) {
             return RecordedDayStream.read(dir, l -> {
                 try {
                     w.write(codec.encode(l.seq(), l.sourceId(), withSourceSequence(l)));
@@ -141,6 +152,12 @@ final class DayWriter implements AutoCloseable {
             }
             throw e;
         }
+    }
+
+    /** 재기동 다시 쓰기 tmp 파일을 연다. */
+    @FunctionalInterface
+    interface TmpOpener {
+        OutputStream open(Path tmp) throws IOException;
     }
 
     /** 읽은 줄의 이벤트는 sequence가 녹화 순번이므로, 원래 소스 순번으로 되돌려 같은 줄을 만든다. */

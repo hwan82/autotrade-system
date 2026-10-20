@@ -71,3 +71,4 @@
   - architect 2: 다시 쓰기 중 쓰기 실패 예외 문구에 녹화 폴더를 넣는다(`녹화 재기동 다시 쓰기 실패: <폴더>`). 동작 무변경.
   - 남은 것: tmp 잔존(Error·보관 실패·종료 때, 다음 재기동이 덮어 손실 없음, risk-ops N2·N3·architect 1)은 그대로 둔다. 무거운 시험의 Windows 실행은 사용자 PC에서 `./gradlew :autotrade-marketdata:test`로 확인된다.
 - PR #192 머지(2026-10-20, 8da71de, 독립 QA 승인 `docs/reviews/pr-192/qa.md`). QA 권고 Q1(같은 날 재기동 공백 시작이 마지막 구간 끝을 반영하는지 고정, 변이 P15), Q2(다시 쓰기 실패 문구 고정, 변이 P13)는 다음 marketdata PR에서 시험으로 넣는다.
+- PR #192 QA Q1·Q2 시험과 architect 비차단 주석 수정은 D-132 PR에 넣었다([D-132](D-132-recording-meta-sources-order.md) "같은 PR의 시험 보강").

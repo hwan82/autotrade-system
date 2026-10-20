@@ -10,9 +10,11 @@ import com.autotrade.domain.market.OrderBookSnapshot;
 import com.autotrade.domain.market.PriceLevel;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -97,7 +99,7 @@ class DayWriterRestartStreamTest {
 
     @Test
     void 정상_종료_녹화를_다시_쓴_줄은_원본_줄과_바이트가_같다() throws IOException {
-        // 소스 순번을 녹화 순번과 다르게 둔다(소스 둘, 1000·5000부터). 같으면 소스 순번 복원이 빠져도 바이트가 같다(PR #187 QA Q1)
+        // 소스 순번을 녹화 순번과 다르게 둔다(소스 둘, 첫 줄 KIS-WS 5000·둘째 줄 KIWOOM-WS 1001부터). 같으면 소스 순번 복원이 빠져도 바이트가 같다(PR #187 QA Q1)
         DayWriter first = open(OPEN);
         for (long i = 0; i < 1_000; i++) {
             boolean kis = i % 3 == 0;
@@ -130,7 +132,7 @@ class DayWriterRestartStreamTest {
         Instant lastRx = prevOpen.plusSeconds(10);
         prev.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 1, prevOpen, prevOpen, BigDecimal.valueOf(70_000), 1));
         prev.write("KIWOOM-WS", new TradeTick(Symbol.krx("000660"), 1, lastRx, lastRx, BigDecimal.valueOf(120_000), 1));
-        Instant ended = prevOpen.plus(Duration.ofHours(7)); // 마지막 수신(event(1))보다 한참 늦은 정상 종료
+        Instant ended = prevOpen.plus(Duration.ofHours(7)); // 마지막 수신(000660 체결, lastRx)보다 한참 늦은 정상 종료
         prev.close(ended);
         assertThat(ended).isAfter(lastRx);
 
@@ -146,6 +148,69 @@ class DayWriterRestartStreamTest {
             assertThat(g.reason()).isEqualTo(DataGap.GapReason.RECORDER_RESTART);
         });
         w.close(resumed.plusSeconds(1));
+    }
+
+    @Test
+    void 같은_날_앞_구간_정상_종료_시각이_마지막_수신보다_늦으면_그_시각부터_재기동_공백을_남긴다() throws IOException {
+        // 같은 날 재기동 공백 시작이 앞 구간 끝을 반영하는지 고정한다(PR #192 QA Q1, 변이 P15). 날짜를 넘긴 쪽 짝은 위 시험
+        DayWriter first = open(OPEN);
+        Instant lastRx = OPEN.plusSeconds(10);
+        first.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 1, OPEN, OPEN, BigDecimal.valueOf(70_000), 1));
+        first.write("KIWOOM-WS", new TradeTick(Symbol.krx("000660"), 2, lastRx, lastRx, BigDecimal.valueOf(120_000), 1));
+        Instant ended = OPEN.plusSeconds(600); // 마지막 수신보다 늦고 재개보다 이른 정상 종료
+        first.close(ended);
+
+        DayWriter second = open(OPEN.plusSeconds(900));
+        Instant resumed = OPEN.plusSeconds(905);
+        List<DataGap> gaps = second.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 3, resumed, resumed,
+                BigDecimal.valueOf(70_100), 1));
+        assertThat(gaps).extracting(DataGap::symbol).containsExactly(Symbol.krx("000660"), Symbol.krx("005930"));
+        assertThat(gaps).allSatisfy(g -> {
+            assertThat(g.gapStart()).isEqualTo(ended);
+            assertThat(g.gapEnd()).isEqualTo(resumed);
+            assertThat(g.reason()).isEqualTo(DataGap.GapReason.RECORDER_RESTART);
+        });
+        second.close(resumed.plusSeconds(1));
+        // 녹화 파일에 남은 공백 줄도 같은 시작이다
+        List<RecordingCodec.Line> lines = new ArrayList<>();
+        RecordedDayStream.read(dayDir(), lines::add);
+        assertThat(((DataGap) lines.get(2).event()).gapStart()).isEqualTo(ended);
+    }
+
+    @Test
+    void 다시_쓰기_중_쓰기가_실패하면_폴더를_밝힌_문구로_멈추고_원본을_그대로_둔다() throws IOException {
+        // 다시 쓰기 실패 문구(PR #187 architect 2)를 고정한다(PR #192 QA Q2, 변이 P13). 읽기 실패 시험은 위에 있다
+        Path dir = crashedDay(2_000);
+        Path events = dir.resolve(RecordingLayout.EVENTS_FILE);
+        byte[] original = Files.readAllBytes(events);
+        Path tmp = dir.resolve(RecordingLayout.EVENTS_FILE + ".tmp");
+        // gzip 머리(10바이트)는 받고 그 뒤 첫 쓰기에서 실패한다: 줄을 쓰는 중에 실패가 난다
+        DayWriter.TmpOpener failing = t -> new FilterOutputStream(Files.newOutputStream(t)) {
+            private long written;
+
+            @Override
+            public void write(int b) throws IOException {
+                write(new byte[] {(byte) b}, 0, 1);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                if (written + len > 10) {
+                    throw new IOException("디스크 가득 참(시험)");
+                }
+                written += len;
+                out.write(b, off, len);
+            }
+        };
+
+        assertThatThrownBy(() -> new DayWriter(dir, Market.KRX, DAY, SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"), "",
+                OPEN.plusSeconds(60), failing))
+                .isInstanceOf(UncheckedIOException.class)
+                .hasMessage("녹화 재기동 다시 쓰기 실패: " + dir)
+                .hasRootCauseMessage("디스크 가득 참(시험)");
+        assertThat(events).hasBinaryContent(original);
+        assertThat(tmp).doesNotExist();
+        assertThat(dir.resolve(DayWriter.restartBackupName(2))).doesNotExist();
     }
 
     @Test
