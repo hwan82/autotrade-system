@@ -178,7 +178,15 @@ class LiveIntradayJudgementTest {
         LiveSelectionJudgementTest.assertL10UsesGroupDistribution(r, ID + "-A05", ID + "-S2-NULL1");
         // 같은 이벤트를 녹화했으므로 장중 계좌도 녹화 리플레이가 실시간과 같다
         assertThat(r.substring(r.indexOf("### " + ID + "-A05 "), r.indexOf("### " + ID + "-A06 ")))
-                .contains("- L11 실시간 대 녹화: 수익률 차 ≤ 2.00%p, 체결 수 차 ≤ 10.00%: 통과");
+                .contains("- L11 실시간 대 녹화: 수익률 차 ≤ 2.00%p, 체결 수 차 ≤ 10.00%: 통과")
+                // 장중 계좌의 L11 줄에 순위 다른 날 수(PR #203 strategy-researcher R2). 장중 대조군 계좌도 같은 선정이라 적는다
+                .containsPattern("- L11 [^\\n]+ \\(순위 다른 날 0/2일, 10장\\)\\n");
+        assertThat(r.substring(r.indexOf("### " + ID + "-A06 "), r.indexOf("## 4."))).contains("(순위 다른 날 0/2일, 10장)");
+        // 장전 선정·선정 없는 계좌의 L11 줄에는 붙이지 않는다
+        assertThat(r.substring(r.indexOf("### " + ID + "-A03 "), r.indexOf("### " + ID + "-A04 "))).doesNotContain("순위 다른 날");
+        // m에는 장중 순위 선정 묶음의 판정 대상(A05)도 들어간다(PR #203 strategy-researcher n4): 장전 A03 + 장중 A05 = 2
+        assertThat(LiveJudgement.roles(LiveSetup.of(plan, REPO)).judged()).containsExactly(2, 4);
+        assertThat(r).contains("m에는 장중 순위 선정 묶음의 판정 대상도 들어간다");
         // 묶음 수는 결과에 영향이 없다
         assertThat(judge(1).report()).isEqualTo(r);
     }
@@ -190,7 +198,7 @@ class LiveIntradayJudgementTest {
         Path sessionDir = sessions.resolve(ID);
         StreamedRecordingDataSet journal = StreamedRecordingDataSet.open(Market.KRX,
                 LiveReplayCheck.journalDays(setup, sessionDir), () -> { }, e -> { });
-        LiveJudgement.Roles roles = LiveJudgement.roles(setup);
+        JudgeRoles.Roles roles = LiveJudgement.roles(setup);
         assertThat(roles.judged()).containsExactly(2, 4);
         assertThat(roles.nullControls()).containsExactly(3, 5);
         LiveJudgement.Plan lanes = LiveJudgement.lanes(setup, roles, journal.version(), 3, m -> { });
@@ -262,5 +270,8 @@ class LiveIntradayJudgementTest {
         assertThat(rows).hasSize(2);
         assertThat(rows.get(0)).startsWith("| " + D1 + " |").endsWith(" | **다름**: 005930 |");
         assertThat(rows.get(1)).startsWith("| " + D2 + " |").endsWith(" | **다름**: 순위 없음 |");
+        // 계좌별 L11 줄에도 같은 수(PR #203 strategy-researcher R2)
+        assertThat(r.substring(r.indexOf("### " + ID + "-A05 "), r.indexOf("### " + ID + "-A06 ")))
+                .contains("(순위 다른 날 2/2일, 10장)");
     }
 }

@@ -171,7 +171,7 @@ class LiveSelectionJudgementTest {
         Path sessionDir = sessions.resolve(ID);
         StreamedRecordingDataSet journal = StreamedRecordingDataSet.open(Market.KRX,
                 LiveReplayCheck.journalDays(setup, sessionDir), () -> { }, e -> { });
-        LiveJudgement.Roles roles = LiveJudgement.roles(setup);
+        JudgeRoles.Roles roles = LiveJudgement.roles(setup);
         assertThat(roles.controls()).containsExactly(1, 4);
         assertThat(roles.judged()).containsExactly(2, 3);
         assertThat(roles.nullControls()).containsExactly(1, 4);
@@ -211,7 +211,7 @@ class LiveSelectionJudgementTest {
                 .hasMessageContaining("같은 선정의 대조군(logic: random)");
         // 판정 대상이 없는 선정 묶음의 대조군은 참고로만 판정하고 시드 분포를 돌리지 않는다
         writePlan(List.of("kr-intraday-hot@1 x kr-random-control@1"));
-        LiveJudgement.Roles roles = LiveJudgement.roles(LiveSetup.of(plan, REPO));
+        JudgeRoles.Roles roles = LiveJudgement.roles(LiveSetup.of(plan, REPO));
         assertThat(roles.controls()).containsExactly(1, 3);
         assertThat(roles.nullControls()).containsExactly(1);
         assertThat(LiveJudgement.lanes(LiveSetup.of(plan, REPO), roles, "v", 3, m -> { }).nullsByControl())
