@@ -10,9 +10,11 @@ import com.autotrade.selection.calc.SnapshotDisclosures;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.function.IntPredicate;
 
 /**
  * 공시 선정의 생존편향 확인(D-125 2.4, PR #196 strategy-researcher R3·n3·n4). 결과를 보기 전에 고정한 규칙이다.
@@ -72,21 +74,9 @@ final class EdgeSurvivorship {
                 continue;
             }
             boolean delisted = bars.instrumentOn(s, snapshotLast).isEmpty();
-            LocalDate end = lastBar.minusDays(365);
-            int eligible = 0;
-            int hit = 0;
-            for (int y = firstBar.getYear(); y <= end.getYear(); y++) {
-                LocalDate from = LocalDate.of(y, 1, 1);
-                LocalDate to = LocalDate.of(y, 12, 31);
-                if (from.isBefore(firstBar) || to.isAfter(end) || !coversAll(disclosures, types, from, to)) {
-                    continue;
-                }
-                eligible++;
-                if (disclosures.count(s, types, from, to) > 0) {
-                    hit++;
-                }
-            }
-            if (eligible == 0) {
+            OptionalDouble cov = coverage(firstBar, lastBar, y -> coversAll(disclosures, types, LocalDate.of(y, 1, 1),
+                    LocalDate.of(y, 12, 31)), y -> disclosures.count(s, types, LocalDate.of(y, 1, 1), LocalDate.of(y, 12, 31)) > 0);
+            if (cov.isEmpty()) {
                 if (delisted) {
                     ds++;
                 } else {
@@ -94,7 +84,7 @@ final class EdgeSurvivorship {
                 }
                 continue;
             }
-            double r = (double) hit / eligible;
+            double r = cov.getAsDouble();
             if (delisted) {
                 dc++;
                 dsum += r;
@@ -105,8 +95,34 @@ final class EdgeSurvivorship {
         }
         double dm = dc == 0 ? Double.NaN : dsum / dc;
         double lm = lc == 0 ? Double.NaN : lsum / lc;
-        boolean passed = dc >= MIN_DELISTED && lc > 0 && !Double.isNaN(dm) && dm >= MIN_RATIO * lm;
+        boolean passed = passes(dc, dm, lc, lm);
         return new Result(java.util.Collections.unmodifiableSortedSet(new TreeSet<>(types)), dc, ds, dm, lc, ls, lm, passed);
+    }
+
+    /**
+     * 종목 하나의 연 단위 덮임률. 셀 수 있는 연도 = 1~12월 전체가 [firstBar, lastBar − 365일] 안이고 {@code yearCovered}인 연도.
+     * 셀 수 있는 연도가 없으면 비어 있다.
+     */
+    static OptionalDouble coverage(LocalDate firstBar, LocalDate lastBar, IntPredicate yearCovered, IntPredicate yearHit) {
+        LocalDate end = lastBar.minusDays(365);
+        int eligible = 0;
+        int hit = 0;
+        for (int y = firstBar.getYear(); y <= end.getYear(); y++) {
+            if (LocalDate.of(y, 1, 1).isBefore(firstBar) || LocalDate.of(y, 12, 31).isAfter(end) || !yearCovered.test(y)) {
+                continue;
+            }
+            eligible++;
+            if (yearHit.test(y)) {
+                hit++;
+            }
+        }
+        return eligible == 0 ? OptionalDouble.empty() : OptionalDouble.of((double) hit / eligible);
+    }
+
+    /** 폐지 평균 ≥ 0.8 × 유지 평균, 셀 수 있는 폐지 종목 30개 이상, 유지 종목 1개 이상. */
+    static boolean passes(int delistedCounted, double delistedMean, int listedCounted, double listedMean) {
+        return delistedCounted >= MIN_DELISTED && listedCounted > 0 && !Double.isNaN(delistedMean)
+                && delistedMean >= MIN_RATIO * listedMean;
     }
 
     private static boolean coversAll(SnapshotDisclosures d, Set<String> types, LocalDate from, LocalDate to) {

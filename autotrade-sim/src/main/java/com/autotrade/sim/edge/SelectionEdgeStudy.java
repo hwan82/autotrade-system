@@ -410,7 +410,8 @@ public final class SelectionEdgeStudy {
             EdgeSurvivorship.Result survivorship, Boolean deterministic) {
         EdgeJudge.Result judged = EdgeJudge.judge(plan, days, survivorship);
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("results.md", EdgeReport.results(plan, profile, judged, days));
+        files.put("results.md", EdgeReport.results(plan, profile, judged, days, in.selectionData().barsSnapshotId(),
+                in.disclosures() == null ? null : in.disclosures().snapshotId(), cost.id(), from, to));
         files.put("windows.tsv", EdgeReport.windowsTsv(plan, judged));
         files.put("days.tsv", EdgeReport.daysTsv(plan, days));
         files.put("null.tsv", EdgeReport.nullTsv(judged));

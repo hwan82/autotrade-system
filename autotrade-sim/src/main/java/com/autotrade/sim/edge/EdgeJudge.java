@@ -15,7 +15,7 @@ import java.util.TreeMap;
  *   <li><b>E1 대조군 초과</b>: 판정 구간 전체의 후보 평균 X(주 통계)에 대해 경험적 p = (1 + #{대조군 ≥ X}) ÷ (N′ + 1) ≤ 0.05 ÷ m.</li>
  *   <li><b>E2 구간 일관성</b>: 판정 구간 중 후보 평균이 그 구간 대조군 평균들의 중앙값보다 큰 구간이 과반(2 × 양수 구간 &gt; W).</li>
  *   <li><b>E3 방향 열위 없음</b>(주 통계가 {@code RANGE}일 때만): 비용 차감 수익 {@code net}의 아래쪽 p = (1 + #{대조군 ≤ X_net})
- *       ÷ (N′ + 1) &gt; 0.05 ÷ m. 변동성은 크지만 방향이 무작위보다 유의하게 나쁜 선정은 롱 단타에 쓰지 않는다.</li>
+ *       ÷ (N′ + 1) &gt; 0.05(본페로니 보정 없음, {@link #E3_ALPHA}). 변동성은 크지만 방향이 무작위보다 유의하게 나쁜 선정은 롱 단타에 쓰지 않는다.</li>
  * </ol>
  * E1·E2·(E3) 모두면 통과, 하나라도 아니면 탈락.
  */
@@ -23,6 +23,11 @@ public final class EdgeJudge {
 
     /** 판정에 필요한 최소 후보 왕복 수(D-066·D-071의 검증 30건과 같은 값). */
     static final int MIN_TRADES = 30;
+    /**
+     * E3(방향 열위)의 유의수준. 본페로니는 "엣지 있음" 주장의 거짓 양성을 막는 것이라, 거르는 쪽인 E3에 α/m을 쓰면 나쁜 선정이
+     * 통과할 여지만 커진다. 그래서 E3는 보정 없이 0.05를 쓴다(PR #198 strategy-researcher n1, D-125 2장 4번).
+     */
+    static final double E3_ALPHA = 0.05;
 
     private EdgeJudge() {
     }
@@ -147,13 +152,13 @@ public final class EdgeJudge {
         } else {
             boolean e1 = pHigh <= alpha;
             boolean e2 = positive * 2 > w;
-            boolean e3 = test != EdgePlan.Test.RANGE || pNetLow > alpha;
+            boolean e3 = test != EdgePlan.Test.RANGE || pNetLow > E3_ALPHA;
             reasons.add("E1 " + (e1 ? "통과" : "미달") + ": p = " + EdgeReport.p(pHigh) + (e1 ? " ≤ " : " > ")
                     + EdgeReport.p(alpha));
             reasons.add("E2 " + (e2 ? "통과" : "미달") + ": 대조군 중앙값 초과 구간 " + positive + "/" + w);
             if (test == EdgePlan.Test.RANGE) {
                 reasons.add("E3 " + (e3 ? "통과" : "미달") + ": net 아래쪽 p = " + EdgeReport.p(pNetLow)
-                        + (e3 ? " > " : " ≤ ") + EdgeReport.p(alpha));
+                        + (e3 ? " > " : " ≤ ") + EdgeReport.p(E3_ALPHA) + "(보정 없음)");
             }
             verdict = e1 && e2 && e3 ? Verdict.PASS : Verdict.FAIL;
         }

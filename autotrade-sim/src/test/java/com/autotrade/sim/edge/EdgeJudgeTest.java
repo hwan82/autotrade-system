@@ -17,6 +17,10 @@ class EdgeJudgeTest {
     private static final int H = 40;
 
     private static EdgePlan plan(String test, int seeds) {
+        return plan(test, seeds, 1);
+    }
+
+    private static EdgePlan plan(String test, int seeds, int m) {
         return EdgePlan.parse("""
                 id: "EXP-20261020-EDGET"
                 question: "q"
@@ -24,7 +28,7 @@ class EdgeJudgeTest {
                 bars-snapshot: "krx-daily-test"
                 selection: "test-edge-hot@1"
                 test: "%s"
-                family-size: "1"
+                family-size: "%d"
                 seed: "7"
                 null-seeds: "%d"
                 trade-notional: "1000000"
@@ -34,7 +38,7 @@ class EdgeJudgeTest {
                   - "2026-01-05..2026-01-31"
                   - "2026-02-01..2026-02-28"
                   - "2026-03-01..2026-03-31"
-                """.formatted(test, seeds), "t");
+                """.formatted(test, m, seeds), "t");
     }
 
     /** 순방향이면 net = range − 0.1, 역방향이면 net = 0.1 − range. */
@@ -78,6 +82,16 @@ class EdgeJudgeTest {
         assertThat(r.pNetLow()).isEqualTo(1.0 / 40);
         assertThat(r.verdict()).isEqualTo(EdgeJudge.Verdict.FAIL);
         assertThat(r.reasons()).anyMatch(s -> s.startsWith("E3 미달"));
+    }
+
+    @Test
+    void E3는_본페로니_보정_없이_0_05를_쓴다() {
+        // m = 3, N = 59: E1 α = 0.0167, E3 기준은 0.05. 역방향이면 net 아래쪽 p = 1/60
+        EdgeJudge.Result r = EdgeJudge.judge(plan("RANGE", 59, 3), days(false, 6));
+        assertThat(r.alpha()).isEqualTo(0.05 / 3);
+        assertThat(r.pNetLow()).isEqualTo(1.0 / 60);
+        assertThat(r.reasons()).anyMatch(s -> s.startsWith("E3 미달") && s.contains("≤ 0.0500(보정 없음)"));
+        assertThat(EdgeJudge.E3_ALPHA).isEqualTo(0.05);
     }
 
     @Test

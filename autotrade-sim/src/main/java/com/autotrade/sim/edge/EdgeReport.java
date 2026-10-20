@@ -16,7 +16,9 @@ final class EdgeReport {
     private EdgeReport() {
     }
 
-    static String results(EdgePlan plan, SelectionProfile profile, EdgeJudge.Result r, List<SelectionEdgeStudy.Day> days) {
+    static String results(EdgePlan plan, SelectionProfile profile, EdgeJudge.Result r, List<SelectionEdgeStudy.Day> days,
+            String barsSnapshot, String disclosuresSnapshot, String costModel, java.time.LocalDate from,
+            java.time.LocalDate to) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 선정 엣지 일봉 사전 검사 결과\n\n");
         sb.append("- 질문: ").append(plan.question()).append('\n');
@@ -26,8 +28,19 @@ final class EdgeReport {
                 .append(plan.test() == EdgePlan.Test.RANGE ? "T 장중 변동폭 (고가 − 저가) ÷ 시가"
                         : "T 시가 매수 → T 종가 매도 비용 차감 수익률").append('\n');
         sb.append("- 모델 `").append(SelectionEdgeStudy.MODEL).append("`, 대조군 시드 N = ").append(plan.nullSeeds())
-                .append(", 본페로니 m = ").append(plan.familySize()).append(", 유의수준 0.05 ÷ m = ").append(p(r.alpha()))
+                .append(", 본페로니 m = ").append(plan.familySize()).append(", 유의수준 E1 0.05 ÷ m = ").append(p(r.alpha()))
+                .append(plan.test() == EdgePlan.Test.RANGE ? ", E3 " + p(EdgeJudge.E3_ALPHA) + "(보정 없음)" : "")
                 .append('\n');
+        sb.append("- 비교 대상: 같은 날 T, 같은 수를 그날 하드 필터 통과 집합에서 무작위로 고른 선정(시드 ").append(plan.seed())
+                .append(")\n");
+        sb.append("- 일봉 스냅샷 `").append(barsSnapshot).append('`');
+        if (disclosuresSnapshot != null) {
+            sb.append(", 공시 스냅샷 `").append(disclosuresSnapshot).append('`');
+        }
+        sb.append(", 계산 기간 ").append(from).append(" ~ ").append(to).append(", 표본 외 보존 ").append(plan.holdoutFrom())
+                .append(" 이후\n");
+        sb.append("- 비용 모델 `").append(costModel).append("`, 왕복 금액 ").append(plan.tradeNotional().toPlainString())
+                .append(" KRW\n");
         sb.append("- 입력 버전·해시·커밋은 `inputs.yaml`, 날마다 값은 `days.tsv`, 대조군 시드별 값은 `null.tsv`\n\n");
 
         sb.append("## 1. 판정\n\n");

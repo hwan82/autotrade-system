@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  * disclosures-snapshot: "dart-disclosures-..."  # 선정이 공시 지표를 쓸 때만(D-123). 생존편향 확인도 이 스냅샷으로 한다
  * selection: "kr-intraday-hot@1"
  * test: "RANGE"                 # RANGE: T 장중 변동폭 (고가 − 저가) ÷ 시가, NET: T 시가 매수 → T 종가 매도 비용 차감 수익률
- * family-size: "2"              # 본페로니 m(2b 검사 묶음 전체의 선정 프로필 수)
+ * family-size: "3"              # 본페로니 m(2b 검사 묶음 전체의 선정 프로필 수)
  * seed: "20261020"
  * null-seeds: "999"             # 무작위 선정 대조군 시드 수 N. N + 1 ≥ 20m
  * trade-notional: "1000000"     # 왕복 하나의 매수 금액(원). 수수료·거래세 원 미만 절사가 수익률에 주는 영향을 고정한다
