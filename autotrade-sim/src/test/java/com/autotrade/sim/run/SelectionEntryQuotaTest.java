@@ -17,6 +17,7 @@ import com.autotrade.risk.BlacklistType;
 import com.autotrade.risk.RiskChain;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.selection.profile.SelectionProfile;
+import com.autotrade.marketdata.rules.BundledMarketRules;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
@@ -26,6 +27,7 @@ import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.selection.DailySelection;
+import com.autotrade.sim.selection.IntradayUniverse;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.sim.testing.TestKrxRules;
 import com.autotrade.strategy.Strategy;
@@ -41,6 +43,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
@@ -69,6 +72,34 @@ class SelectionEntryQuotaTest {
         assertThat(run.selectionDays()).hasSize(1);
         assertThat(run.selectionDays().get(0).blockedEntries()).as("막힌 삼성전자 신호는 실행기가 한 번씩 센다").isEqualTo(2);
         assertThat(run.rejections()).isEmpty();
+    }
+
+    @Test
+    void 장중_순위_시각_전_신호는_하루_진입_한도를_쓰지_않고_순위_뒤_후보가_들어간다() {
+        // 순위 입력 범위는 실제 KRX 장 시간(시험용 TestKrxRules는 늘 정규장이라 첫 이벤트를 늦은 시작으로 봄).
+        // PR #205 QA Q1: 09:30 순위 전 삼성전자 신호(그 종목도 순위 뒤에는 후보)가 하루 1건 한도를 쓰면 하이닉스가 못 들어간다.
+        // 실행기가 이벤트 순번을 보지 않고 답하면(QA 변이 P1) 순위 전 신호를 받아 한도를 쓰고 주문 전 거름이 버려 매수 0건이 된다
+        SelectionProfile openAll = new SelectionProfile("open-all", 1, Market.KRX, TradingStyle.INTRADAY,
+                new TreeMap<>(Map.of("hypothesis", "테스트", "refresh", "INTRADAY_AT", "at", "09:30", "max-symbols", "200",
+                        "gate.01.metric", "session-turnover", "gate.01.op", "GT", "gate.01.value", "0")));
+        List<MarketEvent> events = new ArrayList<>();
+        long[] seq = {0};
+        trade(events, seq, PICKED, "09:00:00", 180_100);
+        book(events, seq, OUTSIDE, "09:10:00", 70_000, 70_100);
+        trade(events, seq, OUTSIDE, "09:10:01", 70_100);
+        book(events, seq, PICKED, "09:31:00", 180_000, 180_100);
+        trade(events, seq, PICKED, "09:31:01", 180_100);
+        book(events, seq, PICKED, "09:31:02", 180_000, 180_100);
+        SimulationReport report = runner(events, new CatalogStrategyFactory(TestKrxRules.INSTANCE),
+                RiskChain.builder(BlacklistSnapshot.EMPTY).build())
+                .withIntradayUniverse(new IntradayUniverse(Set.of(OUTSIDE.code(), PICKED.code()), Set.of(),
+                        BundledMarketRules.of(Market.KRX)))
+                .runDetailed(spec(Combination.of(openAll, RANDOM_ONE_PER_DAY), events));
+        RunReport run = report.runs().get(0);
+
+        assertThat(buys(run)).extracting(f -> f.fill().symbol()).containsExactly(PICKED);
+        assertThat(run.selectionDays()).singleElement()
+                .satisfies(d -> assertThat(d.blockedEntries()).as("순위 전 삼성전자 신호 1건").isEqualTo(1));
     }
 
     @Test
@@ -143,15 +174,23 @@ class SelectionEntryQuotaTest {
 
     private static SimulationReport runDetailed(Combination combination, StrategyFactory factory, RiskChain risk) {
         List<MarketEvent> events = events();
-        MarketDataSet data = new InMemoryMarketDataSet("FIXTURE-F7", Market.KRX, events);
+        return runner(events, factory, risk).runDetailed(spec(combination, events));
+    }
+
+    private static SimulationExperimentRunner runner(List<MarketEvent> events, StrategyFactory factory, RiskChain risk) {
         SelectionSource source = (selection, date) -> new DailySelection.Selected(selection.selectionHash(),
                 "ab".repeat(32), date, date, new TreeSet<>(List.of(PICKED)));
-        SimulationExperimentRunner runner = new SimulationExperimentRunner(data, TestKrxRules.INSTANCE, COST,
-                factory, risk,
+        return new SimulationExperimentRunner(data(events), TestKrxRules.INSTANCE, COST, factory, risk,
                 ExecutionSettings.defaults(), new CodeVersion("test", false), 1, OUTSIDE, source);
-        ExperimentSpec spec = new ExperimentSpec(new ExperimentId("EXP-F7"), DAY, DAY, 7,
-                Money.of(10_000_000, Money.KRW), COST.id(), data.version(), ClockMode.REPLAY, List.of(combination));
-        return runner.runDetailed(spec);
+    }
+
+    private static MarketDataSet data(List<MarketEvent> events) {
+        return new InMemoryMarketDataSet("FIXTURE-F7", Market.KRX, events);
+    }
+
+    private static ExperimentSpec spec(Combination combination, List<MarketEvent> events) {
+        return new ExperimentSpec(new ExperimentId("EXP-F7"), DAY, DAY, 7, Money.of(10_000_000, Money.KRW), COST.id(),
+                data(events).version(), ClockMode.REPLAY, List.of(combination));
     }
 
     /** 삼성전자 호가·체결 두 번(신호 두 번) 뒤 하이닉스 호가·체결, 그 뒤 체결을 받을 호가. */
