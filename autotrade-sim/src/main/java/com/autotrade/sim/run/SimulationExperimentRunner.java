@@ -16,6 +16,10 @@ import com.autotrade.sim.RunResult;
 import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.exchange.ExecutionSettings;
+import com.autotrade.selection.profile.SelectionProfile;
+import com.autotrade.selection.profile.SelectionRefresh;
+import com.autotrade.sim.selection.IntradayTracker;
+import com.autotrade.sim.selection.IntradayUniverse;
 import com.autotrade.sim.selection.SelectionSchedule;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.strategy.StrategyFactory;
@@ -70,6 +74,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final SelectionSource selections;
     private final int warmupDays;
     private final boolean settleAtWindowEnd;
+    /** 장중 순위 선정 입력 범위(D-125). 장중 순위 선정 조합이 없으면 null이어도 된다. */
+    private IntradayUniverse intradayUniverse;
 
     /**
      * 실험 하나의 조합 수 상한(SIM-14 실험실 자원 상한, STR-17 "조합 수가 상한을 넘으면 시작 거부") `[가정]`. 조합마다 계좌·
@@ -161,6 +167,17 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         this.parallelism = Math.min(parallelism, cap);
         this.benchmark = benchmark;
         this.selections = selections;
+    }
+
+    /**
+     * 장중 순위 선정({@code INTRADAY_AT}) 조합의 입력 범위(등록 파일 boards·blacklist)를 정한다(D-125). 실행 전에 한 번 부른다. 장중
+     * 순위 선정 조합이 있는데 정하지 않으면 실험을 시작하지 않는다.
+     *
+     * @return 이 실행기
+     */
+    public SimulationExperimentRunner intradayUniverse(IntradayUniverse universe) {
+        this.intradayUniverse = Objects.requireNonNull(universe, "universe");
+        return this;
     }
 
     @Override
@@ -321,7 +338,10 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size()
                     + " > " + MAX_COMBINATIONS);
         }
-        if (spec.hasSelections() && selections == null) {
+        // 장중 순위 선정(INTRADAY_AT)은 공급자 없이 시세로 정한다(D-125). 장전 선정이 있을 때만 공급자가 필요하다
+        boolean daily = spec.combinations().stream().anyMatch(c -> c.selection()
+                .filter(sel -> sel.refresh() != SelectionRefresh.INTRADAY_AT).isPresent());
+        if (daily && selections == null) {
             throw new IllegalArgumentException("선정 있는 조합이 있는데 선정 결과 공급자가 없습니다: " + spec.id());
         }
         if (spec.clockMode() != ClockMode.REPLAY) {
@@ -466,7 +486,34 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         for (MarketEvent e : events) {
             dates.add(rules.tradingDate(e.exchangeTime()));
         }
-        return SelectionSchedule.compute(spec.combinations(), dates, selections, gate::check);
+        SelectionSchedule schedule = SelectionSchedule.compute(spec.combinations(), dates, selections, gate::check);
+        IntradayTracker tracker = intradayTracker(List.of(spec));
+        if (tracker == null) {
+            return schedule;
+        }
+        // 장중 순위 선정은 실험 기간 이벤트를 순번 순서로 한 번 읽어 정한다. 실시간 모의가 계좌에 주기 직전에 같은 추적기를 돌리는
+        // 것과 같은 값이 나온다(D-125)
+        for (MarketEvent e : events) {
+            tracker.onEvent(e);
+        }
+        return schedule.withIntraday(tracker);
+    }
+
+    /** 명세들의 장중 순위 선정 추적기. 장중 순위 선정 조합이 없으면 null. */
+    private IntradayTracker intradayTracker(List<ExperimentSpec> specs) {
+        List<Combination> all = new ArrayList<>();
+        specs.forEach(s -> all.addAll(s.combinations()));
+        List<SelectionProfile> profiles = IntradayTracker.intradayProfiles(all);
+        if (profiles.isEmpty()) {
+            return null;
+        }
+        if (intradayUniverse == null) {
+            throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT) 조합이 있는데 입력 범위(boards)가 정해지지 않았습니다");
+        }
+        if (intradayUniverse.rules().market() != rules.market()) {
+            throw new IllegalArgumentException("장중 순위 선정 입력 범위의 시장이 실행기와 다릅니다");
+        }
+        return new IntradayTracker(profiles, intradayUniverse);
     }
 
     private BigDecimal benchmarkReturn(List<MarketEvent> events) {
@@ -565,7 +612,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException("예열 거래일은 목록 데이터셋(MarketDataSet)만 받습니다: " + data.version());
         }
         ExperimentSpec window = lanes.get(0).spec();
-        StreamScan scan = scanStream(window);
+        IntradayTracker tracker = intradayTracker(lanes.stream().map(Lane::spec).toList());
+        StreamScan scan = scanStream(window, tracker);
         BigDecimal benchmarkReturn = scan.benchmarkReturn();
         int total = 0;
         for (Lane lane : lanes) {
@@ -578,6 +626,9 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             schedules[l] = spec.hasSelections()
                     ? SelectionSchedule.compute(spec.combinations(), scan.dates, selections, gate::check)
                     : SelectionSchedule.empty();
+            if (tracker != null && spec.hasSelections()) {
+                schedules[l] = schedules[l].withIntraday(tracker); // 첫 번째 읽기에서 다 받았다(D-125)
+            }
         }
         Progress progress = new Progress(gate, progressId, total, scan.dayChanges);
         progress.started();
@@ -691,7 +742,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         }
     }
 
-    private StreamScan scanStream(ExperimentSpec spec) {
+    /** @param tracker 장중 순위 선정 추적기. 실험 기간 이벤트를 순번 순서로 준다. 없으면 null */
+    private StreamScan scanStream(ExperimentSpec spec, IntradayTracker tracker) {
         StreamScan scan = new StreamScan();
         long[] prev = {Long.MIN_VALUE};
         LocalDate[] readDay = {null};
@@ -709,6 +761,9 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 return;
             }
             scan.count++;
+            if (tracker != null) {
+                tracker.onEvent(e);
+            }
             if (scan.firstReceivedAt == null) {
                 scan.firstReceivedAt = e.receivedAt();
             }

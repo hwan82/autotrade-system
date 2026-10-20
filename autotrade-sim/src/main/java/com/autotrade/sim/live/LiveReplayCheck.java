@@ -132,7 +132,7 @@ public final class LiveReplayCheck {
         ExperimentSpec spec = setup.spec(ClockMode.REPLAY, data.version());
         SimulationReport replay = new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(),
                 setup.risk(), setup.execution(), code, 1, setup.benchmark(), selectionSource(setup, sessionDir), gate)
-                .runDetailed(spec);
+                .intradayUniverse(setup.intradayUniverse()).runDetailed(spec);
         String detail = ReportWriter.render(replay);
         int diff = firstDifference(withoutCodeLine(liveDetail), withoutCodeLine(detail));
         boolean same = diff < 0;

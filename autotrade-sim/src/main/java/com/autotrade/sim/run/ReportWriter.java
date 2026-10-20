@@ -86,6 +86,9 @@ public final class ReportWriter {
                 sb.append("  selection-day ").append(d.date()).append(' ').append(d.validity());
                 if (d.isValid()) {
                     sb.append(" result=").append(d.resultHash()).append(" symbols=").append(d.symbols().size());
+                    if (d.activeFrom() > 0) {
+                        sb.append(" from-seq=").append(d.activeFrom()); // 장중 순위 선정(D-125). 장전 선정 줄은 그대로
+                    }
                 }
                 sb.append(" blocked-entries=").append(day.blockedEntries()).append('\n');
             }

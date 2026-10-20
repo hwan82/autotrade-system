@@ -31,14 +31,28 @@ public final class SelectionSchedule implements SelectionDays {
 
     /** 선정 해시 → (거래일 → 판정). */
     private final Map<String, NavigableMap<LocalDate, SelectionDay>> days;
+    /** 장중 순위 선정 판정(D-125). 다 읽은 뒤에만 넘겨받으므로 이후 바뀌지 않는다. 없으면 null. */
+    private final IntradayTracker intraday;
 
-    private SelectionSchedule(Map<String, NavigableMap<LocalDate, SelectionDay>> days) {
+    private SelectionSchedule(Map<String, NavigableMap<LocalDate, SelectionDay>> days, IntradayTracker intraday) {
         this.days = days;
+        this.intraday = intraday;
     }
 
     /** 선정 있는 조합이 없을 때 쓰는 빈 표. */
     public static SelectionSchedule empty() {
-        return new SelectionSchedule(Map.of());
+        return new SelectionSchedule(Map.of(), null);
+    }
+
+    /**
+     * 장중 순위 선정 판정을 더한 표. {@code tracker}는 실험 기간 이벤트를 다 받은 뒤여야 하고 이후 바꾸지 않는다(Run들이 함께 읽음).
+     */
+    public SelectionSchedule withIntraday(IntradayTracker tracker) {
+        Objects.requireNonNull(tracker, "tracker");
+        if (intraday != null) {
+            throw new IllegalStateException("장중 순위 선정 판정이 이미 있습니다");
+        }
+        return new SelectionSchedule(days, tracker);
     }
 
     /**
@@ -57,12 +71,16 @@ public final class SelectionSchedule implements SelectionDays {
     public static SelectionSchedule compute(
             Collection<Combination> combinations, Collection<LocalDate> tradingDates, SelectionSource source,
             Runnable checkpoint) {
-        Objects.requireNonNull(source, "source");
         Objects.requireNonNull(checkpoint, "checkpoint");
-        // 선정 해시 순으로 처리해 공급자 호출 순서가 조합 목록 순서와 무관하게 정해진다
+        // 선정 해시 순으로 처리해 공급자 호출 순서가 조합 목록 순서와 무관하게 정해진다. 장중 순위 선정은 공급자가 아니라
+        // 이벤트로 정하므로 건너뛴다({@link #withIntraday}, D-125)
         TreeMap<String, SelectionProfile> selections = new TreeMap<>();
         for (Combination c : combinations) {
-            c.selection().ifPresent(s -> selections.putIfAbsent(s.selectionHash(), s));
+            c.selection().filter(s -> s.refresh() != SelectionRefresh.INTRADAY_AT)
+                    .ifPresent(s -> selections.putIfAbsent(s.selectionHash(), s));
+        }
+        if (!selections.isEmpty()) {
+            Objects.requireNonNull(source, "source");
         }
         List<LocalDate> dates = new TreeSet<>(tradingDates).stream().toList();
         Map<String, NavigableMap<LocalDate, SelectionDay>> out = new LinkedHashMap<>();
@@ -70,12 +88,15 @@ public final class SelectionSchedule implements SelectionDays {
             out.put(e.getKey(),
                     Collections.unmodifiableNavigableMap(schedule(e.getValue(), e.getKey(), dates, source, checkpoint)));
         }
-        return new SelectionSchedule(Collections.unmodifiableMap(out));
+        return new SelectionSchedule(Collections.unmodifiableMap(out), null);
     }
 
-    /** 그 선정의 그 거래일 판정. 표에 없는 날은 {@code MISSING}. */
+    /** 그 선정의 그 거래일 판정. 표에 없는 날은 {@code MISSING}(장중 순위 선정은 순위 전이면 {@code NOT_YET}). */
     @Override
     public SelectionDay day(String selectionHash, LocalDate date) {
+        if (intraday != null && intraday.tracks(selectionHash)) {
+            return intraday.day(selectionHash, date);
+        }
         NavigableMap<LocalDate, SelectionDay> m = days.get(selectionHash);
         SelectionDay d = m == null ? null : m.get(date);
         return d != null ? d : SelectionDay.invalid(date, SelectionInvalidReason.MISSING);

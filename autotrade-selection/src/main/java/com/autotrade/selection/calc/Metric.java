@@ -36,10 +36,19 @@ public enum Metric {
      * 접수일이 c에서 끝나는 {@code window}거래일의 첫날 ~ T 전날(달력일, c와 T 사이 휴장일 포함)인
      * 그 종목 공시 건수. 유형은 {@code types}(OpenDART 공시 유형 코드)로 정하고 정정 공시는 세지 않는다(ADR-012 3.2, 단타).
      */
-    DISCLOSURE_COUNT("disclosure-count", Kind.DISCLOSURE, Param.WINDOW);
+    DISCLOSURE_COUNT("disclosure-count", Kind.DISCLOSURE, Param.WINDOW),
+    /**
+     * 장중 누적 거래대금: 그날 정규장 시작부터 순위 시각 {@code at} 전까지 받은 체결의 가격 × 수량 합(원가격, 원). 체결이 없으면
+     * NO_DATA({@code INTRADAY_AT} 선정만, ADR-012 5.2, D-125).
+     */
+    SESSION_TURNOVER("session-turnover", Kind.SESSION, Param.NONE),
+    /** 장중 수익률: 구간 마지막 체결가 ÷ 구간 첫 체결가(보통 시가) − 1. 체결이 없으면 NO_DATA({@code INTRADAY_AT}만). */
+    SESSION_RETURN("session-return", Kind.SESSION, Param.NONE),
+    /** 장중 변동폭: (구간 최고 체결가 − 최저 체결가) ÷ 구간 첫 체결가. 체결이 없으면 NO_DATA({@code INTRADAY_AT}만). */
+    SESSION_RANGE("session-range", Kind.SESSION, Param.NONE);
 
-    /** 지표가 읽는 입력. */
-    public enum Kind { BARS, SHARES, FINANCIAL, DISCLOSURE }
+    /** 지표가 읽는 입력. {@link #SESSION}은 일봉 스냅샷이 아니라 그날 입력 기록의 체결(장중 순위 선정 전용)이다. */
+    public enum Kind { BARS, SHARES, FINANCIAL, DISCLOSURE, SESSION }
 
     /** 지표의 기간 파라미터. */
     public enum Param { NONE, WINDOW, YEARS }

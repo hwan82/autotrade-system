@@ -127,7 +127,7 @@ public final class LiveJudgement {
         Path sessionDir = sessionsRoot.toAbsolutePath().resolve(plan.id().value());
         LiveReplayCheck.ensureSessionClosed(sessionDir);
         LiveSetup setup = LiveSetup.of(plan, repoRoot);
-        if (setup.hasSelections()) {
+        if (setup.hasSelections() || setup.hasIntraday()) {
             // 판정 묶음(기준선·대조군 시드)은 profiles 계좌만 안다. 선정 계좌를 빼고 판정하면 표가 어긋나므로 받지 않는다(D-124 후속)
             throw new IllegalArgumentException("선정 조합 계좌(selections)가 있는 등록은 아직 녹화 판정을 지원하지 않습니다(D-124 후속): "
                     + plan.id());

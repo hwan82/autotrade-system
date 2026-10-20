@@ -309,7 +309,9 @@ class LiveSelectionSessionTest {
         assertThatThrownBy(() -> LivePlan.parse(disclosures, "x")).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("disclosures");
         String noInput = yaml(true).replace("selection-input:\n  daily: \"latest\"\n", "");
-        assertThatThrownBy(() -> LivePlan.parse(noInput, "x")).isInstanceOf(IllegalArgumentException.class);
+        // 장전 선정이 있는데 일봉 입력이 없으면 거절한다. 선정 프로필을 읽어야 장전·장중을 알아서 설정을 만들 때 본다(D-125)
+        assertThatThrownBy(() -> LiveSetup.of(LivePlan.parse(noInput, "x"), REPO))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input.daily");
         String duplicate = yaml(true).replace("  - \"kr-intraday-hot@1 x kr-random-control@1\"\n",
                 "  - \"kr-intraday-hot@1 x kr-random-control@1\"\n  - \"kr-intraday-hot@1 x kr-random-control@1\"\n");
         assertThatThrownBy(() -> LivePlan.parse(duplicate, "x")).isInstanceOf(IllegalArgumentException.class);

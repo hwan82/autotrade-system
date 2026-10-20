@@ -50,10 +50,16 @@ public record SelectionCandidates(List<String> candidates, List<Excluded> exclud
      * @param blacklist 등록 파일 blacklist 종목 코드
      */
     public static SelectionCandidates of(SelectionResult result, Set<String> boards, Set<String> blacklist) {
+        return of(result.selected(), boards, blacklist);
+    }
+
+    /** 선정 순위 목록으로 만든다(장중 순위 선정 결과도 같은 규칙, D-125). */
+    public static SelectionCandidates of(List<SelectionResult.Selected> selected, Set<String> boards,
+            Set<String> blacklist) {
         List<String> candidates = new ArrayList<>();
         List<Excluded> excluded = new ArrayList<>();
         int onBoards = 0;
-        for (SelectionResult.Selected s : result.selected()) {
+        for (SelectionResult.Selected s : selected) {
             boolean subscribed = boards.contains(s.code());
             if (subscribed) {
                 onBoards++;
@@ -66,7 +72,7 @@ public record SelectionCandidates(List<String> candidates, List<Excluded> exclud
                 candidates.add(s.code());
             }
         }
-        return new SelectionCandidates(candidates, excluded, result.selected().size(), onBoards);
+        return new SelectionCandidates(candidates, excluded, selected.size(), onBoards);
     }
 
     /** 뺀 종목 중 그 이유인 것(선정 순위순). */

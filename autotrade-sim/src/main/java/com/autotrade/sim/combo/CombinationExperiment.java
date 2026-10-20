@@ -148,6 +148,11 @@ public final class CombinationExperiment {
             if (e.selection().isPresent()) {
                 SelectionProfile s = selectionCache.computeIfAbsent(e.selection().get().text(),
                         k -> loadSelection(repoRoot, e.selection().get()));
+                if (s.refresh() == com.autotrade.selection.profile.SelectionRefresh.INTRADAY_AT) {
+                    // 일봉 조합 실험에는 장중 체결 입력이 없다. 장중 순위 선정은 녹화 실험·실시간 모의만(D-125)
+                    throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT)은 조합 실험에 쓸 수 없습니다(녹화 실험·실시간 모의만): "
+                            + s.key());
+                }
                 combinations.add(Combination.of(s, p));
             } else {
                 combinations.add(Combination.of(p));

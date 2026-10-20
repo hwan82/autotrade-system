@@ -18,6 +18,8 @@ import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.recording.RecordingPlan;
+import com.autotrade.sim.selection.IntradayTracker;
+import com.autotrade.sim.selection.IntradayUniverse;
 import com.autotrade.sim.selection.SessionSelections;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
@@ -44,6 +46,7 @@ record LiveSetup(
         Symbol benchmark,
         ExchangeCalendar calendar,
         List<SelectionProfile> selectionProfiles) {
+    // selectionProfiles: 장전 선정(PRE_OPEN_DAILY)만. 장중 순위 선정은 combinations에서 찾는다(D-125)
 
     /** 실시간 세션 계약 데이터 버전. 리플레이 확인은 입력 기록의 녹화 데이터셋 버전을 쓴다(보고서에는 나오지 않음). */
     static final String LIVE_DATA_VERSION_PREFIX = "LIVE-";
@@ -75,9 +78,24 @@ record LiveSetup(
                 ExecutionSettings.defaults(), benchmark, calendar, RecordingExperiment.selectionProfiles(selected));
     }
 
-    /** 선정 조합 계좌가 있는지. */
+    /** 장전 선정 조합 계좌가 있는지(고정 파일·적용 기록을 쓰는 선정, D-124). 장중 순위 선정은 {@link #hasIntraday}. */
     boolean hasSelections() {
         return !selectionProfiles.isEmpty();
+    }
+
+    /** 장중 순위 선정 조합 계좌가 있는지(D-125). */
+    boolean hasIntraday() {
+        return !IntradayTracker.intradayProfiles(combinations).isEmpty();
+    }
+
+    /** 장중 순위 선정 입력 범위(등록 파일 boards·blacklist). 실시간 세션과 리플레이 확인이 같은 값을 쓴다. */
+    IntradayUniverse intradayUniverse() {
+        return new IntradayUniverse(plan.boards().keySet(), Set.copyOf(plan.blacklist()), rules);
+    }
+
+    /** 장중 순위 선정 추적기(새 것). 장중 순위 선정이 없으면 null. */
+    IntradayTracker newIntradayTracker() {
+        return hasIntraday() ? new IntradayTracker(IntradayTracker.intradayProfiles(combinations), intradayUniverse()) : null;
     }
 
     /** 세션 폴더의 선정 고정 파일·적용 기록(D-124). */

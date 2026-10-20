@@ -85,6 +85,11 @@ public final class SelectionCalculator {
         if (profile.market() != data.market()) {
             throw new IllegalArgumentException("선정 프로필과 데이터의 시장이 다릅니다: " + profile.market() + " ≠ " + data.market());
         }
+        if (profile.refresh() == SelectionRefresh.INTRADAY_AT) {
+            // 장중 순위 선정은 일봉 스냅샷이 아니라 그날 입력 기록으로 계산한다(SessionSelectionCalculator, D-125)
+            throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT)은 일봉 선정 계산기로 계산하지 않습니다(녹화 실험·실시간 모의만): "
+                    + profile.key());
+        }
         TradingDays days = data.tradingDays();
         if (!days.isTradingDay(applyFrom)) {
             throw new IllegalArgumentException("선정 기준일이 거래일이 아닙니다: " + applyFrom);
@@ -368,6 +373,8 @@ public final class SelectionCalculator {
             case CLOSE_STRENGTH -> closeStrength(ctx);
             case VOLUME_SPIKE -> volumeSpike(ctx, period);
             case DISCLOSURE_COUNT -> throw new IllegalStateException("disclosure-count는 자격 조건으로만 계산합니다");
+            case SESSION_TURNOVER, SESSION_RETURN, SESSION_RANGE ->
+                    throw new IllegalStateException("장중 지표는 장중 순위 계산기만 계산합니다: " + metric.key());
             case OP_MARGIN -> latestRatio(ctx, f -> margin(f));
             case DEBT_RATIO -> debtRatio(ctx);
             case OP_MARGIN_GROWTH -> growth(ctx, period, FinancialItem.OP_MARGIN);
