@@ -16,7 +16,21 @@ $id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else
 
 `$id`는 날짜로 정한다(10-23까지 LIVE00, 10-24부터 LIVE01). 아래 명령은 이 두 줄을 붙여 넣은 창에서만 동작한다.
 
+게이트웨이 창은 하나 더 확인한다. bat 실행 파일은 `JAVA_HOME`의 Java를 쓰고 프로그램은 Java 21로 빌드되어 있다. 아래 출력의 버전 번호가 `21`이 아니거나 명령이 오류를 내면(`JAVA_HOME`이 비어 있음) 1장 0번을 먼저 한다(`UnsupportedClassVersionError ... class file version 65.0 ... up to 61.0`이 그 증상이다).
+
+```powershell
+& "$env:JAVA_HOME\bin\java" -version
+```
+
 ## 1. 처음 한 번(LIVE00 시작 전날 또는 첫날 08:30 전)
+
+0. Java 21을 `JAVA_HOME`으로 둔다(실험실·주간 점검은 Gradle이 21을 직접 찾지만, 게이트웨이 bat은 `JAVA_HOME`이나 PATH의 Java를 쓴다). 아래 첫 줄 출력에서 `Language Version: 21` 항목의 `Location`을 복사해 둘째 줄에 넣는다. 사용자 환경 변수라 **새로 여는 창부터** 적용된다(지금 창은 셋째 줄로 바로 적용).
+
+   ```powershell
+   .\gradlew -q javaToolchains
+   [Environment]::SetEnvironmentVariable("JAVA_HOME", "여기에 Location 경로", "User")
+   $env:JAVA_HOME = [Environment]::GetEnvironmentVariable("JAVA_HOME", "User"); & "$env:JAVA_HOME\bin\java" -version
+   ```
 
 1. 최신 main 받기와 등록 파일 확인:
 
@@ -81,7 +95,7 @@ $id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else
 창 3 — 세션 시작(0장 두 줄 먼저). 실험실을 다시 띄운 뒤에도 이 블록을 다시 붙여 넣는다(실험실은 세션을 자동으로 다시 열지 않는다).
 
 ```powershell
-$s = Invoke-RestMethod http://127.0.0.1:8480/api/session -SessionVariable web
+do { try { $s = Invoke-RestMethod http://127.0.0.1:8480/api/session -SessionVariable web; $ok = $true } catch { "실험실 기다리는 중..."; $ok = $false; Start-Sleep 5 } } until ($ok)   # 창 2가 다 뜰 때까지(처음엔 1~3분)
 $h = @{ "X-CSRF-Token" = $s.csrfToken }
 $t0 = Get-Date
 Invoke-RestMethod -Method Post -Headers $h -WebSession $web "http://127.0.0.1:8480/api/live/sessions/$id/start"
