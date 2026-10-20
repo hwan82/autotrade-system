@@ -32,7 +32,8 @@ import java.util.TreeMap;
  *   <li>거래일이 바뀌면 당일 카운터(진입 수, 연속 손절, 진입 중단)를 비우고 당일 시작 평가금액을 잡는다</li>
  *   <li>종목 상태 갱신 후 {@link #observe} 호출(지표 상태는 항상 갱신)</li>
  *   <li>보유 중이면 청산 조건 확인. 손절 → 익절 → 추적 손절 → 시간 → 최대 보유일 → 로직 청산 → 장 마감 순으로 첫 사유 하나로 전량 시장가 매도</li>
- *   <li>보유가 없으면 주 신호 확인 → 확인 신호를 만료 전까지 기다림 → 한도 확인 → 수량 계산 → 시장가 매수</li>
+ *   <li>보유가 없으면 주 신호 확인 → 확인 신호를 만료 전까지 기다림 → 실행기가 받는 진입인지 확인
+ *       ({@link StrategyContext#admitsEntry}) → 한도 확인 → 수량 계산 → 시장가 매수</li>
  * </ol>
  * 주문은 모두 시장가다. 신호(T) 다음 이벤트부터 체결되는 것은 실행기·가상 거래소가 보장한다.
  *
@@ -246,6 +247,11 @@ public abstract class ManagedStrategy implements Strategy {
             return List.of();
         }
         armedAt.remove(symbol);
+        if (!ctx.admitsEntry(symbol)) {
+            // 실행기가 받지 않는 신규 진입(선정 밖 종목 등, D-130): 신호는 쓴 것으로 하되 하루 진입 수·대기 진입 금액·깔때기는
+            // 건드리지 않는다. 예전에는 신호를 내고 실행기가 버려서 그날 진입 한도와 현금을 후보 밖 종목이 먼저 써 버렸다(F7)
+            return List.of();
+        }
         funnel.signal(today);
         if (!allowedByLimits(symbol, now, account, ctx)) {
             funnel.limitBlocked(today);
