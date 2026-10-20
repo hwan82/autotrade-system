@@ -1,6 +1,6 @@
 # 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
 # 예시 (다) 전일 관심 종목(ADR-012 3.3, D-121). 수치는 모두 [가정] 출발값이다. 실험으로 비교하려고 두는 것이지 추천 기준이 아니다.
-# 상한가 근접 제외 0.25는 국내 가격제한폭 ±30% [가정] 기준. volume-spike w20은 c 포함 21거래일이 필요해 min-bar-days 21.
+# 상한가 근접 제외 0.25는 국내 가격제한폭 ±30%(2015-06-15 시행, KrxMarketRules) 기준. volume-spike w20은 c 포함 21거래일이 필요해 min-bar-days 21.
 id: "kr-intraday-hot"
 version: 1
 market: "KRX"

@@ -174,11 +174,14 @@ class IntradaySelectionCalculatorTest {
     /**
      * 거래량 급증 = c 수정 거래량 ÷ (앞 w거래일 수정 거래량 평균). 기존 volume-ratio(w일 합 ÷ 앞 w일 합)와 달리 c 하루를 본다.
      * w = 3, 앞 3일 수정 거래량 100·200·300(평균 200), c 500 → 2.5. 수정 계수가 1이 아니어도 정확히 2배는 2.
+     * 거래정지일(거래량 0 일봉)이 앞 구간이나 c에 하루라도 있으면 결측이다. 700060을 평균에 넣으면 (100 + 0 + 100) ÷ 3 대비
+     * 500 → 7.5배로 부풀어 통과하지만, 결측으로 탈락해야 한다(PR #193 strategy-researcher M1).
      */
     @Test
     void 거래량_급증은_c_하루를_앞_구간_평균과_비교한다() {
         FixtureData d = new FixtureData();
-        d.stock("700010").stock("700020").stock("700030").stock("700040").stock("700050");
+        d.stock("700010").stock("700020").stock("700030").stock("700040").stock("700050").stock("700060")
+                .stock("700070");
         List<LocalDate> w = d.days.lastN(C, 4);
         long[] vols = {100, 200, 300};
         for (int i = 0; i < 3; i++) {
@@ -187,12 +190,16 @@ class IntradaySelectionCalculatorTest {
             d.bar("700030", w.get(i), "10000", 0, "1");
             d.bar("700040", w.get(i), "10000", 100, "1");
             d.bar("700050", w.get(i), "10000", 100, "1");
+            d.bar("700060", w.get(i), "10000", i == 1 ? 0 : 100, "1"); // 앞 구간 하루 거래정지
+            d.bar("700070", w.get(i), "10000", 100, "1");
         }
         d.bar("700010", C, "10000", 500, "1");
         d.bar("700020", C, "10000", 2_000_006L, "0.123456789");
         d.bar("700030", C, "10000", 500, "1"); // 앞 구간 합 0
         d.bar("700040", C, "10000", 500, "1");
         d.removeBar("700040", w.get(0)); // 앞 구간 하루 결측
+        d.bar("700060", C, "10000", 500, "1");
+        d.bar("700070", C, "10000", 0, "1"); // c 거래정지
         // 700050: c 일봉 없음
         SelectionResult r = new SelectionCalculator(d).calculate(intraday("volume-spike", "3", "GE", "2"), T);
         assertThat(eval(r, "700010").values()).containsEntry("gate.01", "2.5");
@@ -201,6 +208,8 @@ class IntradaySelectionCalculatorTest {
         assertThat(eval(r, "700030").reasons()).containsExactly("GATE_01_NO_DATA");
         assertThat(eval(r, "700040").reasons()).containsExactly("GATE_01_NO_DATA");
         assertThat(eval(r, "700050").reasons()).containsExactly("GATE_01_NO_DATA");
+        assertThat(eval(r, "700060").reasons()).as("앞 구간 거래정지일").containsExactly("GATE_01_NO_DATA");
+        assertThat(eval(r, "700070").reasons()).as("c 거래정지").containsExactly("GATE_01_NO_DATA");
     }
 
     @Test
