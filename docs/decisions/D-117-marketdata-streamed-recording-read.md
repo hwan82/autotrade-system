@@ -58,3 +58,4 @@
 
 - sim 복제본 정리(PR #179 머지 뒤 PR): sim `RecordedDayStream`·sim `RecordedDayStreamTest`를 지우고 `LiveWeeklyCheck`·`RecordingDayAdapter`가 marketdata `RecordedDayStream`을 쓴다. sim `build.gradle.kts`의 `jackson-databind`를 뺐다. 지운 sim 시험이 고정하던 규칙(정상 종료·재기동·표시 없는 경계·잘린 마지막 줄·깨진 gzip 머리·순번 끊김·해시 불일치·받는 쪽 예외)은 marketdata `RecordedDayStreamTest`·`RecordingReplayTest`에 있다.
 - 독립 QA(PR #179) 권고: Q1은 gateway `ReplayCheckTest`에 시험 셋(건수가 같아도 메타가 바뀌면 실패, 건수·마지막 순번이 같아도 마지막 수신 시각이 바뀌면 실패, 구간 경계 첫 줄이 재기동 표시가 아닌 공백이면 표시 없는 경계로 적음). Q2는 같은 파일에 정상 종료 표시가 있는데 해시가 비고 gzip 끝이 잘렸으면 종료 코드 2(정상 종료 아님이면 불완전)를 고정했다. 세 변이(M2 요약 비교를 건수만, M9 재기동 표시 판정에서 사유 검사 뺌, M12 정상 종료에도 gzip 끝 허용)를 손으로 넣어 각각 이 시험이 잡는지 확인했다(개발 쪽 직접 실행).
+- data-engineer 녹화 쓰기 경로 후속은 [D-119](D-119-daywriter-streamed-restart.md)로 반영: `DayWriter` 재기동이 줄 단위로 읽으며 다시 쓴다(220만 줄 힙 3GB OOM → 64MB).
