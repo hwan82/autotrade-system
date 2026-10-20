@@ -235,19 +235,19 @@ export async function liveRunPage(runId) {
     const market = view.market || 'KRX';
     const cur = run.equity.currency;
     const base = `/api/live/runs/${enc(runId)}`;
-    body.replaceChildren(
+    body.replaceChildren(...[
       failure ? h('div', { class: 'notice warn' }, h('p', {}, `이 계좌는 실패로 멈췄습니다: ${failure}`),
         h('p', { class: 'small' }, '멈추기 전까지의 체결과 거절만 있습니다.')) : null,
       h('div', { class: 'tiles' },
         tile('평가금액', money(run.equity.amount, cur), '마지막 체결가 기준'),
         tile('현금', money(run.cash.amount, cur), `보유 종목 ${number(run.positions)}개`),
         tile('체결', `${number(run.fills)}건`, `거절 ${number(run.rejections)}건`),
-        tile('거래일', run.tradingDay || '–', `기록일 ${s.journalDate || '–'}`)),
+        tile('거래일', run.tradingDay || '–', '마지막으로 처리한 이벤트 기준')),
       h('h2', {}, '체결 내역'),
       h('p', { class: 'muted small' }, '최근 것부터입니다. 체결가에는 슬리피지가 들어 있고, 실현손익은 수수료·세금을 뺀 값입니다. 실험실을 다시 띄워 되살린 계좌도 같은 체결이 보입니다.'),
       pagedSection(`${base}/fills`, fillColumns(market), '아직 체결이 없습니다.'),
       h('h2', {}, '거절 사유'),
-      rejectionSection(base));
+      rejectionSection(base)].filter(Boolean));
   };
   await load().catch(e => body.replaceChildren(h('p', { class: 'notice warn' }, e.message)));
   return h('div', {},
