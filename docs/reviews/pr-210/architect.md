@@ -60,3 +60,30 @@ ADR 9장 3번은 "병렬 1 대 4 바이트 동일"인데 시험은 등록 `paral
 
 ## 판정
 수정 필요(M1: ADR-014 9장 3번의 P0·P1·P3·결과 합치기 경계 시험과 "묶음 빼기"·"999 초과"·커버리지 알림 표시 시험 추가)
+
+## 재검토 2026-10-20
+- 대상: PR #210 / 커밋 d775333(코드는 e4d0718과 같음. d775333은 strategy-researcher 검토 원문만 더함) / main(f571a38) 대비 diff `git diff origin/main...HEAD` 전체
+- 점검표: B
+- 직접 실행한 것:
+  - 앞 검토(a8ae651) 이후 바뀐 것 `git diff 56eb626 HEAD` 전문 읽음: `RecordingPrecheck.java`(판정 합치기 `result`, LIVE02 N 표 칸 `liveSeedsCell`, 커버리지 알림 `coverageAlert`를 함수로 꺼냄, `combine` 패키지 공개. 동작은 그대로), `RecordingPrecheckTest.java`(시험 4개 추가, 등록 `parallelism` 2 → 4). PR 전체 변경 파일 범위는 그대로(`autotrade-sim`·`autotrade-app-experiment`·`docs/runbooks`·`docs/reviews`, 보호 경로 없음).
+  - `./gradlew cleanTest build`(d775333, 작업 트리 깨끗): **BUILD SUCCESSFUL in 3m 14s**. 결과 XML 합계 1855건, 건너뜀 0, 실패·오류 0. `RecordingPrecheckTest` 13건 모두 통과(새 시험 `p0AndP1BoundariesFollowAdr014NineThree`, `p3NeedsOverallDAboveZeroAndEnoughPositiveSegments`, `resultAndPairCombinationRules`, `liveSeedsCellAndCoverageAlert` 포함).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드, 1855건 실패 0 |
+| B2 | 통과 | 바뀐 코드는 `autotrade-sim` 안 함수 추출뿐. `verifyPureDependencies`·`ArchitectureTest`·`ModuleOwnershipTest` 통과 |
+| B3 | 통과(m1 남음) | 계약 변경 없음. 종료 코드 2는 여전히 ADR-014 5.4 문구와 다르고 런북 4장에만 있다(아래) |
+| B4 | 통과 | 추출 함수는 같은 식(`2L * x >= n`, `mean(...) < 0.5`, 탈락 → 판정 불가 → 후보 순). `writesPrecheckAndInputsDeterministically`가 이제 묶음 4 대 1 바이트 일치(`determinism: "같음(묶음 4 vs 1, …)"`)를 고정하고, 두 번째 실행(묶음 1)과도 같다. LIVE01 고정 시험 통과 |
+| B5 | 통과 | 바뀐 부분도 `BigDecimal`·정수만 |
+| B6 | 통과 | M1 해소: P0 = 기준 통과·기준 − 1 탈락·실패 판정 불가, P1 0원 탈락·+10원 통과·왕복 0건/실패 판정 불가, P3 전체 d = 0 탈락·d_s 구간 부족 탈락(왕복 0건 구간 포함)·왕복 0건/실패 판정 불가·통과, 결과 합치기와 P3 쌍 합치기 순서, "묶음 빼기"(x/N = 0.5 포함)·"999 초과"·정상 칸(83), 커버리지 평균 50% 같음은 알리지 않음·미만 알림·빈 목록. 지운 시험·건너뛴 시험 없음 |
+| B7 | 해당 없음 | 실전 경로·보호 경로 변경 없음 |
+| B8 | 통과 | 비밀값 없음 |
+
+### 앞 검토 항목 처리
+- M1: 해소(위 B6).
+- m3: 해소(병렬 4 대 1).
+- m1(종료 코드 2를 ADR-014 5.4나 D-131 후속에 기록): 이번 diff에 없음. 막지 않는 권고로 남긴다. 머지 뒤 ADR·결정 로그 후속으로 처리한다.
+- m2(`jobs.js` 이름표 `recording-precheck`): 이번 diff에 없음. 막지 않는 ui-dev 후속 제안으로 남긴다.
+
+### 판정
+승인
