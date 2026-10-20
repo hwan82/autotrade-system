@@ -1,9 +1,11 @@
 // 실시간 모의 화면(ADR-010 2.4, D-076): 실시간 모의 등록 파일 고르기, 시작·멈춤·끝내기, 계좌별 상태와 최근 공백(DataGap).
 // 모의 계좌만 다룬다. 실전 주문 경로와 무관하고 증권사를 직접 부르지 않는다(시세는 게이트웨이 전달 소켓으로만 받음).
 // 실시간 갱신은 3초 폴링이다(SSE는 UI-01 이연 항목, D-079). 화면을 떠나면 폴링을 멈춘다.
+// 계좌 ID를 누르면 그 계좌의 체결 내역과 거절 사유를 본다(#/live/runs/<계좌>, D-120). 표 모양은 실험 계좌 상세와 같다.
 import { h, toast, table } from '../dom.js';
 import { get, post } from '../api.js';
 import { money, number, time } from '../format.js';
+import { pagedSection, fillColumns, rejectionSection } from './experiments.js';
 
 const enc = encodeURIComponent;
 const POLL_MS = 3000;
@@ -168,6 +170,7 @@ function sessionView(view, gaps, act) {
       tile('공백', number(s.dataGaps), '빠진 구간(아래 표)'),
       tile('마지막 이벤트', s.lastEventAt ? time(s.lastEventAt, market) : '–', `기록일 ${s.journalDate || '–'}`)),
     h('h2', {}, '계좌'),
+    h('p', { class: 'muted small' }, '계좌 ID를 누르면 그 계좌의 체결 내역과 거절 사유를 봅니다.'),
     accountsTable(view, s),
     h('h2', {}, '최근 공백'),
     gapsSection(gaps, market),
@@ -193,7 +196,8 @@ function accountsTable(view, s) {
   }));
   const cur = r => r.run ? r.run.equity.currency : 'KRW';
   return table([
-    { label: '계좌', render: r => r.run ? r.run.runId : '–' },
+    { label: '계좌', render: r => r.run
+      ? h('a', { href: `#/live/runs/${enc(r.run.runId)}`, title: '체결 내역과 거절 사유 보기' }, r.run.runId) : '–' },
     { label: '전략 프로필', render: r => r.profile },
     { label: '평가금액', num: true, render: r => r.run ? money(r.run.equity.amount, cur(r)) : '–' },
     { label: '현금', num: true, render: r => r.run ? money(r.run.cash.amount, cur(r)) : '–' },
@@ -203,6 +207,58 @@ function accountsTable(view, s) {
     { label: '거래일', render: r => r.run && r.run.tradingDay ? r.run.tradingDay : '–' },
     { label: '상태', render: r => r.failure ? h('span', { class: 'warn-text', title: r.failure }, `실패: ${r.failure}`) : (r.run ? '정상' : '대기') },
   ], rows, { rowClass: r => r.failure ? 'urgent' : null });
+}
+
+// ---- 계좌 하나: 체결 내역과 거절 사유(D-120) ----
+
+/**
+ * 돌고 있는 세션의 계좌 하나. 체결·거절은 최근 것부터이고, 되살린 기록으로 다시 만든 것도 들어 있다.
+ * 자동으로 다시 읽지 않는다(쪽을 넘기는 중에 표가 바뀌지 않게). "새로 읽기"로 다시 읽는다.
+ */
+export async function liveRunPage(runId) {
+  stopPolling();
+  const body = h('div', {});
+  const load = async () => {
+    const view = await get('/api/live/status');
+    const s = view.session;
+    const i = s ? s.runs.findIndex(r => r.runId === runId) : -1;
+    if (i < 0) {
+      body.replaceChildren(h('div', { class: 'notice warn' },
+        h('p', {}, view.experimentId
+          ? (view.restoring ? '입력 기록으로 계좌를 되살리는 중입니다. 끝나면 다시 읽어 주세요.' : `돌고 있는 세션(${view.experimentId})에 이 계좌가 없습니다.`)
+          : '돌고 있는 실시간 모의 세션이 없습니다.'),
+        h('p', { class: 'small' }, '끝낸 세션의 체결은 실험 폴더의 live-detail.txt에 계좌별 fill 줄로 남아 있습니다.')));
+      return;
+    }
+    const run = s.runs[i];
+    const failure = s.failures[i];
+    const market = view.market || 'KRX';
+    const cur = run.equity.currency;
+    const base = `/api/live/runs/${enc(runId)}`;
+    body.replaceChildren(
+      failure ? h('div', { class: 'notice warn' }, h('p', {}, `이 계좌는 실패로 멈췄습니다: ${failure}`),
+        h('p', { class: 'small' }, '멈추기 전까지의 체결과 거절만 있습니다.')) : null,
+      h('div', { class: 'tiles' },
+        tile('평가금액', money(run.equity.amount, cur), '마지막 체결가 기준'),
+        tile('현금', money(run.cash.amount, cur), `보유 종목 ${number(run.positions)}개`),
+        tile('체결', `${number(run.fills)}건`, `거절 ${number(run.rejections)}건`),
+        tile('거래일', run.tradingDay || '–', `기록일 ${s.journalDate || '–'}`)),
+      h('h2', {}, '체결 내역'),
+      h('p', { class: 'muted small' }, '최근 것부터입니다. 체결가에는 슬리피지가 들어 있고, 실현손익은 수수료·세금을 뺀 값입니다. 실험실을 다시 띄워 되살린 계좌도 같은 체결이 보입니다.'),
+      pagedSection(`${base}/fills`, fillColumns(market), '아직 체결이 없습니다.'),
+      h('h2', {}, '거절 사유'),
+      rejectionSection(base));
+  };
+  await load().catch(e => body.replaceChildren(h('p', { class: 'notice warn' }, e.message)));
+  return h('div', {},
+    h('p', { class: 'crumb' }, h('a', { href: '#/live' }, '실시간 모의'), ' / ', runId),
+    h('div', { class: 'page-head' },
+      h('div', {},
+        h('h1', {}, runId),
+        h('p', { class: 'muted' }, '모의 계좌 하나의 체결 내역과 거절 사유입니다. 실전 주문과 무관합니다.')),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn secondary', type: 'button', onclick: () => load().catch(e => toast(e.message, true)) }, '새로 읽기'))),
+    body);
 }
 
 function gapsSection(gaps, market) {

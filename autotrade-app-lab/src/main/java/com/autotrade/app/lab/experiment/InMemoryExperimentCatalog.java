@@ -5,7 +5,6 @@ import com.autotrade.marketdata.symbols.SymbolNames;
 import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
-import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationReport;
 import java.util.ArrayList;
@@ -19,7 +18,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.stream.Collectors;
 
 /**
  * 프로세스 메모리에만 두는 실험 목록. 실험실을 다시 띄우면 비어 있다(DB 저장 전 임시 구현).
@@ -94,7 +92,7 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
 
     @Override
     public synchronized Optional<Page<ExperimentViews.FillRow>> fills(ExperimentId id, String runId, int page, int size) {
-        return run(id, runId).map(r -> Page.of(r.fills().stream().map(a -> ExperimentViews.FillRow.of(a, names)).toList(), page, size));
+        return run(id, runId).map(r -> ExperimentViews.fillPage(r.fills(), page, size, names));
     }
 
     @Override
@@ -107,14 +105,7 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
     @Override
     public synchronized Optional<ExperimentViews.RejectionPage> rejections(
             ExperimentId id, String runId, String stage, String code, int page, int size) {
-        return run(id, runId).map(r -> {
-            List<ExperimentViews.RejectionRow> filtered = r.rejections().stream()
-                    .filter(j -> stage == null || stage.isBlank() || j.stage().equals(stage))
-                    .filter(j -> code == null || code.isBlank() || j.code().equals(code))
-                    .map(j -> ExperimentViews.RejectionRow.of(j, names))
-                    .toList();
-            return new ExperimentViews.RejectionPage(Page.of(filtered, page, size), counts(r.rejections()));
-        });
+        return run(id, runId).map(r -> ExperimentViews.rejectionPage(r.rejections(), stage, code, page, size, names));
     }
 
     @Override
@@ -153,20 +144,6 @@ public final class InMemoryExperimentCatalog implements ExperimentCatalog {
 
     private Optional<SelectionResult> result(ExperimentId id, String resultHash) {
         return entry(id).flatMap(e -> Optional.ofNullable(e.results().get(resultHash)));
-    }
-
-    /** 건수 내림차순, 같으면 stage·code 이름순(결과가 매번 같은 순서). */
-    static List<ExperimentViews.RejectionCount> counts(List<OrderRejection> all) {
-        record Key(String stage, String code) {
-        }
-        Map<Key, Long> byKey = all.stream().collect(Collectors.groupingBy(
-                j -> new Key(j.stage(), j.code()), Collectors.counting()));
-        return byKey.entrySet().stream()
-                .map(e -> new ExperimentViews.RejectionCount(e.getKey().stage(), e.getKey().code(), e.getValue()))
-                .sorted(Comparator.comparingLong(ExperimentViews.RejectionCount::count).reversed()
-                        .thenComparing(ExperimentViews.RejectionCount::stage)
-                        .thenComparing(ExperimentViews.RejectionCount::code))
-                .toList();
     }
 
     private Optional<Entry> entry(ExperimentId id) {

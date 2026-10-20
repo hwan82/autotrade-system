@@ -25,11 +25,13 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.Currency;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -230,6 +232,39 @@ public final class ExperimentViews {
 
     /** 거절 사유 분포 한 줄({@code stage:code}별 건수). */
     public record RejectionCount(String stage, String code, long count) {
+    }
+
+    /** 체결 원장 한 쪽(받은 순서 그대로 자름). 실험 계좌 상세와 실시간 모의 계좌 상세(D-120)가 같이 쓴다. */
+    public static Page<FillRow> fillPage(List<AppliedFill> fills, int page, int size, SymbolNames names) {
+        return Page.of(fills.stream().map(a -> FillRow.of(a, names)).toList(), page, size);
+    }
+
+    /**
+     * 거절 기록 한 쪽({@code stage}·{@code code}가 비어 있지 않으면 그것만)과 거르기 전 전체의 사유별 건수. 실험 계좌 상세와
+     * 실시간 모의 계좌 상세(D-120)가 같이 쓴다.
+     */
+    public static RejectionPage rejectionPage(List<OrderRejection> all, String stage, String code, int page, int size,
+            SymbolNames names) {
+        List<RejectionRow> filtered = all.stream()
+                .filter(j -> stage == null || stage.isBlank() || j.stage().equals(stage))
+                .filter(j -> code == null || code.isBlank() || j.code().equals(code))
+                .map(j -> RejectionRow.of(j, names))
+                .toList();
+        return new RejectionPage(Page.of(filtered, page, size), rejectionCounts(all));
+    }
+
+    /** 건수 내림차순, 같으면 stage·code 이름순(결과가 매번 같은 순서). */
+    static List<RejectionCount> rejectionCounts(List<OrderRejection> all) {
+        record Key(String stage, String code) {
+        }
+        Map<Key, Long> byKey = all.stream().collect(Collectors.groupingBy(
+                j -> new Key(j.stage(), j.code()), Collectors.counting()));
+        return byKey.entrySet().stream()
+                .map(e -> new RejectionCount(e.getKey().stage(), e.getKey().code(), e.getValue()))
+                .sorted(Comparator.comparingLong(RejectionCount::count).reversed()
+                        .thenComparing(RejectionCount::stage)
+                        .thenComparing(RejectionCount::code))
+                .toList();
     }
 
     /**
