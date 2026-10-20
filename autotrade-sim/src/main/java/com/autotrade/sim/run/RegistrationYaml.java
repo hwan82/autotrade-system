@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
 public record RegistrationYaml(Map<String, String> scalars, Map<String, List<String>> lists,
         Map<String, Map<String, String>> maps) {
 
-    private static final Pattern TOP = Pattern.compile("([a-z][a-z-]*):(.*)");
+    /** 최상위 키: 소문자로 시작, 소문자·숫자·{@code -}(녹화 사전 검사 {@code p2}·{@code p3}, ADR-014 5.1). 모르는 키는 따로 거절한다. */
+    private static final Pattern TOP = Pattern.compile("([a-z][a-z0-9-]*):(.*)");
     private static final Pattern ITEM = Pattern.compile(" {2}- (.*)");
     private static final Pattern SUB = Pattern.compile(" {2}([a-z][a-z-]*):(.*)");
 

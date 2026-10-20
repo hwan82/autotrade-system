@@ -180,7 +180,8 @@ public final class LiveJudgement {
         }
         log.accept("입력 기록 레인 " + lanes.all().size() + "개(Run " + lanes.all().stream()
                 .mapToInt(l -> l.spec().combinations().size()).sum() + "개)를 " + groups.size() + "묶음으로 돌립니다");
-        Map<String, SimulationReport> byId = runGroups(setup, sessionDir, journal, groups, code, plan.id().value(), gate);
+        Map<String, SimulationReport> byId = runGroups(setup, sessionDir, journal, groups, code, plan.id().value() + "-JUDGE",
+                gate);
 
         SimulationReport base = byId.get(lanes.base().spec().id().value());
         String detail = ReportWriter.render(base);
@@ -290,9 +291,23 @@ public final class LiveJudgement {
         for (Duration d : LATENCIES) {
             latency.add(new Lane(spec(setup, "L" + d.toMillis(), plan.seed(), judged, dataVersion), new ExecutionSettings(d)));
         }
-        // 대조군 시드 레인: 선정 없음 묶음은 NULL<i>(지금까지와 같은 ID), 선정 묶음은 S<k>-NULL<i>(k는 선정 묶음 순서)
-        Map<Integer, List<Lane>> byControl = new LinkedHashMap<>();
+        Map<Integer, List<Lane>> byControl = nullLanes(setup, roles, dataVersion, nullSeeds);
         List<Lane> nulls = new ArrayList<>();
+        byControl.values().forEach(nulls::addAll);
+        return new Plan(baseLane, perturb, pairs, List.copyOf(latency), List.copyOf(nulls), byControl);
+    }
+
+    /**
+     * 대조군 시드 레인(대조군 계좌 번호 → 그 묶음 레인, 계좌 순서). 선정 없음 묶음은 {@code NULL<i>}, 선정 묶음은
+     * {@code S<k>-NULL<i>}(k는 대조군을 돌리는 선정 묶음 순서), 시드 = 실험 시드 + i. 녹화 판정과 녹화 사전 검사(ADR-014 5.2)가 같은
+     * 규칙을 쓴다.
+     *
+     * @param nullSeeds 등록 파일 {@code group-null-seeds}가 없는 묶음의 시드 수
+     */
+    static Map<Integer, List<Lane>> nullLanes(LiveSetup setup, JudgeRoles.Roles roles, String dataVersion, int nullSeeds) {
+        LivePlan plan = setup.plan();
+        ExecutionSettings base = setup.execution();
+        Map<Integer, List<Lane>> byControl = new LinkedHashMap<>();
         int selectionGroup = 0;
         for (int controlIndex : roles.nullControls()) {
             Combination control = setup.combinations().get(controlIndex);
@@ -304,10 +319,8 @@ public final class LiveJudgement {
                 lanes.add(new Lane(spec(setup, prefix + i, plan.seed() + i, List.of(control), dataVersion), base));
             }
             byControl.put(controlIndex, List.copyOf(lanes));
-            nulls.addAll(lanes);
         }
-        return new Plan(baseLane, perturb, pairs, List.copyOf(latency), List.copyOf(nulls),
-                Collections.unmodifiableMap(byControl));
+        return Collections.unmodifiableMap(byControl);
     }
 
     private static boolean valid(LiveSetup setup, StrategyProfile p) {
@@ -319,7 +332,7 @@ public final class LiveJudgement {
         }
     }
 
-    private static ExperimentSpec spec(LiveSetup setup, String suffix, long seed, List<Combination> combinations,
+    static ExperimentSpec spec(LiveSetup setup, String suffix, long seed, List<Combination> combinations,
             String dataVersion) {
         LivePlan plan = setup.plan();
         return new ExperimentSpec(new ExperimentId(plan.id().value() + "-" + suffix), plan.from(), plan.to(), seed,
@@ -350,7 +363,13 @@ public final class LiveJudgement {
         return out;
     }
 
-    private static Map<String, SimulationReport> runGroups(LiveSetup setup, Path sessionDir, MarketEventStream journal,
+    /**
+     * 레인 묶음을 묶음마다 스레드 하나로 돌린다(기록을 묶음마다 따로 읽음). 결과는 실험 ID → 보고서.
+     *
+     * @param selectionsBase 장전 선정 고정 파일·적용 기록이 있는 폴더({@code selections/}의 부모). 장전 선정이 없으면 읽지 않는다
+     * @param id 진행 보고 ID 앞부분(묶음마다 {@code -G<n>}을 붙임)
+     */
+    static Map<String, SimulationReport> runGroups(LiveSetup setup, Path selectionsBase, MarketEventStream journal,
             List<List<Lane>> groups, CodeVersion code, String id, RunGate gate) {
         // 한 묶음이 실패하면 나머지 묶음도 멈추게 한다. 실행기는 스레드 중단을 보지 않으므로 취소만으로는 남은 묶음이 끝까지
         // 돈다(PR #180 architect N2). 문은 Run 시작·거래일 바뀜에서만 확인되므로, 기록 읽기도 이벤트마다 실패 표시를 보게 해
@@ -361,9 +380,9 @@ public final class LiveJudgement {
         List<Callable<List<SimulationReport>>> tasks = new ArrayList<>();
         for (int g = 0; g < groups.size(); g++) {
             List<Lane> group = groups.get(g);
-            String progressId = id + "-JUDGE-G" + (g + 1);
+            String progressId = id + "-G" + (g + 1);
             // 선정 공급자는 묶음마다 따로 만든다(실행기는 한 스레드에서 부른다는 계약, SelectionSource)
-            SelectionSource selections = LiveReplayCheck.selectionSource(setup, sessionDir);
+            SelectionSource selections = LiveReplayCheck.selectionSource(setup, selectionsBase);
             tasks.add(() -> runner(setup, stoppable, code, shared, selections).runLanes(group, progressId));
         }
         Map<String, SimulationReport> out = new LinkedHashMap<>();

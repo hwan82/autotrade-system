@@ -285,6 +285,32 @@ class ExperimentGateTest {
     }
 
     @Test
+    void 녹화_사전_검사도_정지_요청과_장_시간에는_시작하지_않고_인자가_틀리면_입력_오류다(@TempDir Path root) throws IOException {
+        // ADR-014 5.2: runRecordingPrecheck도 녹화 판정과 같은 관문(장 시간 보호·정지 요청 파일)을 지난다
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261219-PRE02"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261219-PRE02\n");
+        String[] tail = {root.toString(), "abc", "false", "EXP-20261219-PRE02", "--recordings-dir",
+                root.resolve("rec").toString(), "--snapshots-dir", root.resolve("snap").toString()};
+        Clock weekend = Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC);
+        String r = root.toString();
+
+        assertThat(ExperimentMain.run(concat("recording-precheck", null, tail), Clock.fixed(Instant.parse(KRX_SESSION),
+                ZoneOffset.UTC), config)).isEqualTo(4);
+        assertThat(ExperimentMain.run(new String[] {"recording-precheck", r, "abc", "false", "EXP-20261219-PRE02", "--x"},
+                weekend, config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"recording-precheck", r, "abc", "false", "EXP-20261219-NONE"}, weekend,
+                config)).isEqualTo(1);
+        // 등록 파일이 사전 검사 입력이 아니면 해석 단계의 입력 오류
+        assertThat(ExperimentMain.run(concat("recording-precheck", null, tail), weekend, config)).isEqualTo(1);
+        stopRequest();
+        assertThat(ExperimentMain.run(concat("recording-precheck", "--allow-during-session", tail), weekend, config))
+                .isEqualTo(4);
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files).extracting(p -> p.getFileName().toString()).containsExactly("experiment.yaml");
+        }
+    }
+
+    @Test
     void 주간_점검도_정지_요청과_장_시간에는_시작하지_않는다(@TempDir Path root) throws IOException {
         Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261015-LIVE01"));
         Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261015-LIVE01\n");

@@ -9,6 +9,7 @@ import com.autotrade.sim.live.LiveCheckMain;
 import com.autotrade.sim.live.LiveJudgeMain;
 import com.autotrade.sim.live.LivePrepareMain;
 import com.autotrade.sim.live.LiveWeeklyMain;
+import com.autotrade.sim.live.PrecheckMain;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.recording.RecordingMain;
 import com.autotrade.sim.run.ExperimentJobFiles;
@@ -32,14 +33,14 @@ import java.util.function.ToIntFunction;
  * 확인해 스스로 멈춘다. 장 시간 보호 구간에도 멈춘다({@link ExperimentGate}).
  *
  * <p>인자: {@code <combination|recording|study|walkforward|live-check|live-weekly|live-judge|live-prepare|watchlist|
- * selection-edge>
+ * selection-edge|recording-precheck>
  * [--allow-during-session[=true]]
  * [--max-parallel-runs=N] <나머지는 CombinationMain·
- * RecordingMain·StudyMain·WalkForwardMain·LiveCheckMain·LiveWeeklyMain·LiveJudgeMain 인자>}.
+ * RecordingMain·StudyMain·WalkForwardMain·LiveCheckMain·LiveWeeklyMain·LiveJudgeMain·PrecheckMain 인자>}.
  * 해제 옵션은 값이 없거나 {@code true}일 때만 장 시간 보호를 풀고, 그 밖의 값({@code false} 포함)은 입력 오류다. Gradle 속성은
  * {@code gradle.properties}·환경 변수로도 들어와 하루 쓰려던 해제가 조용히 남을 수 있어서, 해제되면 시작 때 그렇게 출력한다.
  * Gradle 작업 {@code runCombinationExperiment}·{@code runRecordingExperiment}·{@code runStrategyStudy}·{@code runWalkForwardStudy}·
- * {@code runLiveReplayCheck}·{@code runLiveWeeklyCheck}·{@code runLiveJudgement}가 채워 넘긴다.
+ * {@code runLiveReplayCheck}·{@code runLiveWeeklyCheck}·{@code runLiveJudgement}·{@code runRecordingPrecheck}가 채워 넘긴다.
  * 종료 코드: 0 완료, 1 입력 오류(같은 실험이 이미 실행 중 포함), 2 Run 실패나 결정론 불일치(조합·녹화 실험), 3 실험실의 취소
  * 요청으로 멈춤, 4 정지 확인으로 멈춤(3·4는 결과 파일을 쓰지 않음).
  *
@@ -77,9 +78,10 @@ public final class ExperimentMain {
         // 상대 경로나 ..가 섞여도 상태 파일 메시지에서 설정 폴더 경로를 가릴 수 있게 한 번 정규화한다(PR #113 architect R5·risk-ops R3)
         Path configDir = givenConfigDir.toAbsolutePath().normalize();
         if (args.length == 0 || !List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly",
-                "live-judge", "live-prepare", "watchlist", "selection-edge")
+                "live-judge", "live-prepare", "watchlist", "selection-edge", "recording-precheck")
                 .contains(args[0])) {
-            System.err.println("인자: <combination|recording|study|walkforward|live-check|live-weekly|live-judge|live-prepare|watchlist|selection-edge>"
+            System.err.println("인자: <combination|recording|study|walkforward|live-check|live-weekly|live-judge|live-prepare|watchlist|selection-edge"
+                    + "|recording-precheck>"
                     + " [--allow-during-session] ...");
             return 1;
         }
@@ -180,6 +182,7 @@ public final class ExperimentMain {
             case "live-prepare" -> LivePrepareMain.run(forwarded, configDir, gate);
             case "watchlist" -> WatchlistCandidatesMain.run(forwarded, configDir, gate);
             case "selection-edge" -> SelectionEdgeMain.run(forwarded, configDir, gate);
+            case "recording-precheck" -> PrecheckMain.run(forwarded, configDir, gate);
             default -> StudyMain.run(forwarded, gate);
         };
     }
