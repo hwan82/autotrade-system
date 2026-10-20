@@ -42,6 +42,63 @@ final class FixtureData implements SelectionData {
     LocalDate lastTradingDate = TO;
     LocalDate sharesAsOf = TO;
     LocalDate financialsCollected = TO;
+    /** 공시 입력(disclosure-count). 기본은 없음. */
+    Disclosures disclosures;
+
+    /** 손 계산용 공시 입력: 유형별 수집 구간 하나, 종목·유형·접수일 목록(정정·코드 없는 행은 넣지 않은 것으로 본다). */
+    static final class Disclosures implements DisclosureInput {
+        final Map<String, LocalDate[]> ranges = new TreeMap<>();
+        final List<Object[]> rows = new ArrayList<>();
+
+        Disclosures covered(String type, LocalDate from, LocalDate to) {
+            ranges.put(type, new LocalDate[] {from, to});
+            return this;
+        }
+
+        Disclosures filed(String code, String type, LocalDate date) {
+            rows.add(new Object[] {sym(code), type, date});
+            return this;
+        }
+
+        @Override
+        public String snapshotId() {
+            return "dart-disclosures-test";
+        }
+
+        @Override
+        public String sha256() {
+            return "d".repeat(64);
+        }
+
+        @Override
+        public SortedSet<String> types() {
+            return new TreeSet<>(ranges.keySet());
+        }
+
+        @Override
+        public boolean covers(String type, LocalDate from, LocalDate to) {
+            LocalDate[] r = ranges.get(type);
+            return r != null && !from.isBefore(r[0]) && !to.isAfter(r[1]);
+        }
+
+        @Override
+        public LocalDate coveredThrough(String type, LocalDate date) {
+            LocalDate[] r = ranges.get(type);
+            return r != null && !date.isBefore(r[0]) && !date.isAfter(r[1]) ? r[1] : null;
+        }
+
+        @Override
+        public int count(Symbol symbol, Set<String> types, LocalDate from, LocalDate to) {
+            int n = 0;
+            for (Object[] r : rows) {
+                LocalDate d = (LocalDate) r[2];
+                if (r[0].equals(symbol) && types.contains((String) r[1]) && !d.isBefore(from) && !d.isAfter(to)) {
+                    n++;
+                }
+            }
+            return n;
+        }
+    }
 
     FixtureData() {
         List<LocalDate> d = new ArrayList<>();
@@ -191,6 +248,11 @@ final class FixtureData implements SelectionData {
         return withFinancials ? Optional.of(new FinancialSnapshotInfo("dart-test", "b".repeat(64),
                 financialsCollected == null ? null : financialsCollected + "T09:00:00Z", financialsCollected))
                 : Optional.empty();
+    }
+
+    @Override
+    public Optional<DisclosureInput> disclosures() {
+        return Optional.ofNullable(disclosures);
     }
 
     @Override

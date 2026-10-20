@@ -144,7 +144,7 @@ public final class DartFinancialCollector {
         return out;
     }
 
-    private static List<LocalDate[]> merge(List<LocalDate[]> ranges) {
+    static List<LocalDate[]> merge(List<LocalDate[]> ranges) {
         List<LocalDate[]> sorted = new ArrayList<>(ranges);
         sorted.sort(Comparator.comparing((LocalDate[] r) -> r[0]));
         List<LocalDate[]> out = new ArrayList<>();

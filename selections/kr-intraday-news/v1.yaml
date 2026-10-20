@@ -1,0 +1,28 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# 예시 (라) 소식 있는 종목(ADR-012 3.3, D-121·D-123). 수치는 모두 [가정] 출발값이다. 실험으로 비교하려고 두는 것이지 추천 기준이 아니다.
+# 필터는 (다) kr-intraday-hot과 같다. disclosure-count w1은 c 하루(앞 거래일 다음 날 ~ c, 휴장일 접수분 포함)의 주요사항보고(B)·거래소공시(I)
+# 건수이고 정정 공시는 세지 않는다. 공시 스냅샷(수집 명령 dart-disclosures --types B,I)이 그 구간을 담아야 계산된다.
+id: "kr-intraday-news"
+version: 1
+market: "KRX"
+style: "INTRADAY"
+created-at: "2026-10-20T00:00:00Z"
+parameters:
+  hypothesis: "전일 주요사항보고·거래소공시가 있었고 거래대금이 50억 원 이상인 종목은 다음 날 정보 반영 거래로 장중 방향성이 생겨, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)"
+  refresh: "PRE_OPEN_DAILY"
+  max-symbols: "20"
+  filter.kinds: "STOCK"
+  filter.min-price: "1000"
+  filter.min-bar-days: "21"
+  gate.01.metric: "disclosure-count"
+  gate.01.window: "1"
+  gate.01.types: "B,I"
+  gate.01.op: "GE"
+  gate.01.value: "1"
+  gate.02.metric: "avg-turnover"
+  gate.02.window: "1"
+  gate.02.op: "GE"
+  gate.02.value: "5000000000"
+  score.metric: "volume-spike"
+  score.window: "20"
+  score.order: "DESC"

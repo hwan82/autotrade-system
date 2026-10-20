@@ -57,13 +57,30 @@ public final class SnapshotWriter implements AutoCloseable {
      */
     public Path commit(String prefix, String idDate, String hashFile, String createdAt, String scriptVersion,
             List<SnapshotManifest.Source> sources, SnapshotManifest.Coverage coverage) throws IOException {
+        return commit(prefix, idDate, List.of(hashFile), createdAt, scriptVersion, sources, coverage);
+    }
+
+    /**
+     * 해시 기준 파일이 여럿인 스냅샷(공시 스냅샷: 행 파일과 유형별 수집 구간 파일, D-123). 하나면 그 파일의 SHA-256, 여럿이면
+     * {@code <이름>:<SHA-256>\n} 줄들(주어진 순서)의 SHA-256으로 ID를 만든다. 그래서 행이 같아도 수집 구간이 다르면 ID가 다르다.
+     */
+    public Path commit(String prefix, String idDate, List<String> hashFiles, String createdAt, String scriptVersion,
+            List<SnapshotManifest.Source> sources, SnapshotManifest.Coverage coverage) throws IOException {
         List<SnapshotManifest.FileEntry> files = new ArrayList<>();
         for (Map.Entry<String, Sink> e : sinks.entrySet()) {
             e.getValue().out.close();
             files.add(new SnapshotManifest.FileEntry(e.getKey(), Sha256.ofFile(tmp.resolve(e.getKey())), e.getValue().rows));
         }
-        String sha = files.stream().filter(f -> f.name().equals(hashFile)).findFirst()
-                .orElseThrow(() -> new IllegalStateException("해시 기준 파일이 없습니다: " + hashFile)).sha256();
+        StringBuilder joined = new StringBuilder();
+        String sha = null;
+        for (String hashFile : hashFiles) {
+            sha = files.stream().filter(f -> f.name().equals(hashFile)).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("해시 기준 파일이 없습니다: " + hashFile)).sha256();
+            joined.append(hashFile).append(':').append(sha).append('\n');
+        }
+        if (hashFiles.size() != 1) {
+            sha = sha256(joined.toString());
+        }
         String id = prefix + "-" + idDate + "-" + sha.substring(0, 8).toLowerCase(java.util.Locale.ROOT);
         SnapshotManifest m = new SnapshotManifest(id, SnapshotManifest.SCHEMA_VERSION, createdAt, scriptVersion, sources, files,
                 coverage);
@@ -96,6 +113,15 @@ public final class SnapshotWriter implements AutoCloseable {
             for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
                 Files.delete(p);
             }
+        }
+    }
+
+    private static String sha256(String text) {
+        try {
+            return java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256을 쓸 수 없습니다", e);
         }
     }
 

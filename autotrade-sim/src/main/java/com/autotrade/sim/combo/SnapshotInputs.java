@@ -11,6 +11,7 @@ import com.autotrade.marketdata.financial.SnapshotFinancials;
 import com.autotrade.marketdata.rules.InstrumentKind;
 import com.autotrade.marketdata.rules.KrxMarketRules;
 import com.autotrade.selection.calc.SelectionCalculator;
+import com.autotrade.selection.calc.SnapshotDisclosures;
 import com.autotrade.selection.calc.SnapshotSelectionData;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
@@ -34,9 +35,11 @@ import java.util.function.Function;
  * @param last manifest {@code coverage.lastTradingDate}
  * @param shares 상장주식수. 스냅샷에 파일이 없으면 null
  * @param financials 재무 스냅샷. 요청하지 않았으면 null
+ * @param disclosures 공시 스냅샷(D-123). 요청하지 않았으면 null
  */
 public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDate first, LocalDate last,
-        SnapshotListedShares shares, SnapshotFinancials financials, SnapshotTradingDays.Derived days,
+        SnapshotListedShares shares, SnapshotFinancials financials, SnapshotDisclosures disclosures,
+        SnapshotTradingDays.Derived days,
         SnapshotSelectionData selectionData, ExchangeCalendar calendar) {
 
     public SnapshotInputs {
@@ -45,12 +48,19 @@ public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDat
         Objects.requireNonNull(selectionData, "selectionData");
     }
 
+    /** 공시 입력 없이 읽는다(D-123 전 호출 모양). */
+    public static SnapshotInputs load(Market market, String barsSnapshot, Optional<String> financialsSnapshot,
+            Path snapshotsRoot, ExchangeCalendar calendar, RunGate gate, Consumer<String> log,
+            BiConsumer<LocalDate, LocalDate> rangeCheck) {
+        return load(market, barsSnapshot, financialsSnapshot, Optional.empty(), snapshotsRoot, calendar, gate, log, rangeCheck);
+    }
+
     /**
      * @param rangeCheck 스냅샷 범위(first, last)가 정해진 직후, 상장주식수·재무를 읽기 전에 부른다. 실험 기간이 범위 밖이면 여기서
      *     {@link IllegalArgumentException}을 던진다
      */
     public static SnapshotInputs load(Market market, String barsSnapshot, Optional<String> financialsSnapshot,
-            Path snapshotsRoot, ExchangeCalendar calendar, RunGate gate, Consumer<String> log,
+            Optional<String> disclosuresSnapshot, Path snapshotsRoot, ExchangeCalendar calendar, RunGate gate, Consumer<String> log,
             BiConsumer<LocalDate, LocalDate> rangeCheck) {
         gate.check(); // 힙을 크게 쓰는 스냅샷 읽기 전에 먼저 본다
         Path barsDir = snapshotsRoot.resolve("krx-daily").resolve(barsSnapshot);
@@ -81,11 +91,21 @@ public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDat
                 throw new IllegalArgumentException("폴더 이름과 manifest 스냅샷 ID가 다릅니다: " + financialsSnapshot.get());
             }
         }
+        SnapshotDisclosures disclosures = null;
+        if (disclosuresSnapshot.isPresent()) {
+            gate.check();
+            Path dir = snapshotsRoot.resolve("dart-disclosures").resolve(disclosuresSnapshot.get());
+            log.accept("공시 스냅샷 읽기: " + dir);
+            disclosures = SnapshotDisclosures.load(dir);
+            if (!disclosures.snapshotId().equals(disclosuresSnapshot.get())) {
+                throw new IllegalArgumentException("폴더 이름과 manifest 스냅샷 ID가 다릅니다: " + disclosuresSnapshot.get());
+            }
+        }
         gate.check();
         SnapshotTradingDays.Derived days = SnapshotTradingDays.derive(bars, bars.snapshotId(), market, first, last, calendar);
-        SnapshotSelectionData selectionData = new SnapshotSelectionData(market, bars, shares, financials, days.days(),
+        SnapshotSelectionData selectionData = new SnapshotSelectionData(market, bars, shares, financials, disclosures, days.days(),
                 days.digest(), calendar.zone());
-        return new SnapshotInputs(barsDir, bars, first, last, shares, financials, days, selectionData, calendar);
+        return new SnapshotInputs(barsDir, bars, first, last, shares, financials, disclosures, days, selectionData, calendar);
     }
 
     /** 이 입력으로 날짜별 선정을 계산하는 공급자(결과를 캐시한다). */

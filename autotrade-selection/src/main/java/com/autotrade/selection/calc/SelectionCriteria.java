@@ -13,7 +13,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,6 +33,7 @@ import java.util.regex.Pattern;
  * gate.01.value: "3.0"                  기준값(소수, 금액은 원)
  * gate.01.window: "20"                  거래일 기간(WINDOW 지표)
  * gate.01.years: "3"                    사업연도 기간(YEARS 지표)
+ * gate.01.types: "B,I"                  공시 유형(disclosure-count에만, 필수. A~J 한 글자를 알파벳 순 쉼표 목록으로)
  * score.metric / score.window / score.years / score.order(DESC|ASC)   선택: 순위 지표
  * </pre>
  *
@@ -91,6 +94,7 @@ public record SelectionCriteria(
             case AVG_TURNOVER -> period;
             case DAY_RANGE -> 2;
             case VOLUME_SPIKE -> period + 1;
+            case DISCLOSURE_COUNT -> period; // 구간 시작 = c에서 끝나는 w거래일의 첫날
             default -> 1;
         };
     }
@@ -151,6 +155,10 @@ public record SelectionCriteria(
                 }
             }
             Metric metric = metric(profile, "score", s.get("metric"));
+            if (metric == Metric.DISCLOSURE_COUNT) {
+                // 공시 유형을 받을 자리가 gate에만 있다(ADR-012 3.2 gate.<nn>.types)
+                throw fail(profile, "score.metric", "disclosure-count는 자격 조건(gate)에만 씁니다");
+            }
             int period = period(profile, "score", metric, s);
             String order = s.get("order");
             if (!"DESC".equals(order) && !"ASC".equals(order)) {
@@ -172,7 +180,7 @@ public record SelectionCriteria(
 
     private static Condition condition(SelectionProfile profile, String id, Map<String, String> keys) {
         for (String k : keys.keySet()) {
-            if (!Set.of("metric", "op", "value", "window", "years").contains(k)) {
+            if (!Set.of("metric", "op", "value", "window", "years", "types").contains(k)) {
                 throw fail(profile, id + "." + k, "자격 조건에 없는 키입니다");
             }
         }
@@ -189,7 +197,8 @@ public record SelectionCriteria(
         }
         BigDecimal value = decimal(profile, id + ".value", keys.get("value"));
         requireMarket(profile, id, metric);
-        return new Condition(id, metric, compare, value, period(profile, id, metric, keys));
+        return new Condition(id, metric, compare, value, period(profile, id, metric, keys),
+                types(profile, id, metric, keys.get("types")));
     }
 
     private static Metric metric(SelectionProfile profile, String prefix, String value) {
@@ -228,10 +237,35 @@ public record SelectionCriteria(
         };
     }
 
-    /** 재무 지표는 OpenDART(국내) 출처라 KRX 선정에만 쓴다(D-041 5장). */
+    /**
+     * 공시 유형 목록. {@code disclosure-count}에만 받고 반드시 있어야 한다. 같은 뜻의 목록이 다른 해시가 되지 않게 알파벳 순·중복 없음만
+     * 받는다(OpenDART 공시 유형 코드 A~J).
+     */
+    private static SortedSet<String> types(SelectionProfile profile, String id, Metric metric, String v) {
+        if (metric != Metric.DISCLOSURE_COUNT) {
+            if (v != null) {
+                throw fail(profile, id + ".types", metric.key() + "는 공시 유형을 받지 않습니다(disclosure-count에만)");
+            }
+            return new TreeSet<>();
+        }
+        if (v == null || !v.matches("[A-J](,[A-J])*")) {
+            throw fail(profile, id + ".types", "공시 유형이 필요합니다(예: B,I, OpenDART 공시 유형 A~J): " + v);
+        }
+        List<String> list = List.of(v.split(","));
+        SortedSet<String> out = new TreeSet<>(list);
+        if (out.size() != list.size() || !new ArrayList<>(out).equals(list)) {
+            throw fail(profile, id + ".types", "알파벳 순, 겹치지 않게 적어 주세요: " + v);
+        }
+        return out;
+    }
+
+    /** 재무·공시 지표는 OpenDART(국내) 출처라 KRX 선정에만 쓴다(D-041 5장, ADR-012 3.2). */
     private static void requireMarket(SelectionProfile profile, String prefix, Metric metric) {
         if (metric.kind() == Metric.Kind.FINANCIAL && profile.market() != Market.KRX) {
             throw fail(profile, prefix + ".metric", "재무 지표는 KRX 선정에만 쓸 수 있습니다(미국 재무 출처 없음)");
+        }
+        if (metric.kind() == Metric.Kind.DISCLOSURE && profile.market() != Market.KRX) {
+            throw fail(profile, prefix + ".metric", "공시 지표는 KRX 선정에만 쓸 수 있습니다(미국 공시 신호는 D-056 ③ 앞으로 전용)");
         }
     }
 

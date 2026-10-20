@@ -116,6 +116,79 @@ final class CollectorReports {
         return out;
     }
 
+    /** 공시 스냅샷 품질 리포트(ADR-012 3.4, D-123). 종목 코드를 못 붙인 행은 유형·법인 구분별로 적는다(생존편향 확인). */
+    static Path writeDisclosures(Path dir, SnapshotManifest m, DartDisclosureSnapshotBuilder.Stats s,
+            Map<String, java.util.List<java.time.LocalDate[]>> scanned, DartDisclosureCollector.Result r, int laneUsed,
+            int keyUsed, String stopped) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# 공시 데이터 품질 리포트: ").append(m.snapshotId()).append("\n\n");
+        sb.append("- 스냅샷 생성: ").append(m.createdAt()).append(", 수집 일괄 명령 ").append(m.scriptVersion()).append('\n');
+        sb.append("- 규칙: docs/adr/ADR-012-intraday-selection.md 3.4절, D-123\n");
+        if (stopped != null) {
+            sb.append("- **이번 실행은 다 받기 전에 멈췄습니다**: ").append(stopped).append(". 받은 구간까지만 담았습니다\n");
+        }
+        sb.append("\n## 출처\n\n| 이름 | 라이선스 | 수집 시각 | URL |\n|---|---|---|---|\n");
+        for (SnapshotManifest.Source src : m.sources()) {
+            sb.append("| ").append(src.name()).append(" | ").append(src.license()).append(" | ").append(src.collectedAt())
+                    .append(" | ").append(src.url()).append(" |\n");
+        }
+        sb.append("\n## 유형별 수집 구간\n\n| 유형 | 구간 | 행 |\n|---|---|---|\n");
+        scanned.forEach((t, ranges) -> {
+            StringBuilder rs = new StringBuilder();
+            for (java.time.LocalDate[] x : ranges) {
+                rs.append(rs.isEmpty() ? "" : ", ").append(x[0]).append(" ~ ").append(x[1]);
+            }
+            sb.append("| ").append(t).append(" | ").append(rs.isEmpty() ? "없음" : rs).append(" | ")
+                    .append(s.rowsByType().getOrDefault(t, 0L)).append(" |\n");
+        });
+        sb.append("\n## 종목 코드\n\n| 항목 | 값 |\n|---|---|\n");
+        row(sb, "전체 행", s.rows());
+        row(sb, "응답 종목 코드(DART)", s.bySource().getOrDefault("DART", 0L));
+        row(sb, "같은 고유번호의 다른 행에서 이어 붙임(CORP)", s.bySource().getOrDefault("CORP", 0L));
+        row(sb, "KRX 종목 이력 이름 대조로 이어 붙임(NAME)", s.bySource().getOrDefault("NAME", 0L));
+        row(sb, "**못 붙임**(선정에서 세지 않음)", s.bySource().getOrDefault("NONE", 0L));
+        for (Map.Entry<String, Long> e : s.unmapped().entrySet()) {
+            String[] k = e.getKey().split("\\|");
+            row(sb, "못 붙임: 유형 " + k[0] + ", 법인 구분 " + k[1], e.getValue());
+        }
+        sb.append("\n법인 구분 Y 유가증권, K 코스닥, N 코넥스, E 기타. 상장폐지 회사는 OpenDART가 지금 정보로 E·빈 종목 코드를 줄 수 "
+                + "있어 E도 함께 봅니다 `[추론]`(PR #196 strategy-researcher M2).\n");
+        sb.append("\n## 상장폐지 종목 공시 확인(생존편향)\n\n");
+        if (s.delisted() == 0) {
+            sb.append("수집 구간 안에 상장폐지된 KRX 종목 이력이 없거나 KRX 스냅샷을 읽지 않았습니다. 확인하지 못했습니다.\n");
+        } else {
+            sb.append("| 항목 | 값 |\n|---|---|\n");
+            row(sb, "수집 구간 안에 상장폐지된 종목(코드 단위)", s.delisted());
+            row(sb, "그중 상장 기간 안 공시가 종목 코드로 붙은 종목", s.delistedWithDisclosure() + " (" + pct(s.delistedWithDisclosure(), s.delisted()) + ")");
+            row(sb, "기준선: 상장 유지 종목", s.listed());
+            row(sb, "그중 수집 구간 안 공시가 붙은 종목", s.listedWithDisclosure() + " (" + pct(s.listedWithDisclosure(), s.listed()) + ")");
+            sb.append("\n상장폐지 = 같은 종목 코드의 이력 구간이 모두 닫힌 종목(이름·소속부 변경으로 닫힌 구간은 상장 유지로 셈). "
+                    + "상장 기간은 날짜 단위로 대조한다. 폐지 종목 비율이 상장 유지 종목 비율보다 크게 낮으면 상장폐지 회사 공시가 0건으로 세져 (라) 같은 공시 조건 선정에서 "
+                    + "체계적으로 빠집니다. 확인 전에는 과거 구간 공시 선정 결과를 선정 엣지 근거로 쓰지 않습니다(runbook collector.md 4장).\n");
+        }
+        sb.append("\n## 접수 연도별 못 붙인 행\n\n| 연도 | 행 | 못 붙임 | 비율 |\n|---|---|---|---|\n");
+        s.byYear().forEach((y, c) -> sb.append("| ").append(y).append(" | ").append(c[0]).append(" | ").append(c[1]).append(" | ")
+                .append(String.format(java.util.Locale.ROOT, "%.1f%%", c[0] == 0 ? 0.0 : 100.0 * c[1] / c[0])).append(" |\n"));
+        sb.append("\n옛 연도일수록 비율이 오르면 상장폐지·이름 변경 회사가 빠지는 것입니다 `[추론]`.\n");
+        sb.append("\n## 보고서명 대괄호 머리말(선정에서 세지 않음)\n\n| 머리말 | 행 |\n|---|---|\n");
+        s.prefixes().forEach((k, v) -> sb.append("| `").append(k).append("` | ").append(v).append(" |\n"));
+        if (s.prefixes().isEmpty()) {
+            sb.append("| 없음 | 0 |\n");
+        }
+        sb.append("\n## 이번 실행\n\n| 항목 | 값 |\n|---|---|\n");
+        row(sb, "받은 창 / 쪽 / 행", r.windows() + " / " + r.pages() + " / " + r.rows());
+        row(sb, "오늘 공시 몫 호출", laneUsed);
+        row(sb, "오늘 같은 키(재무+공시) 합", keyUsed);
+        Files.createDirectories(dir);
+        Path out = dir.resolve(m.snapshotId() + ".md");
+        Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+        return out;
+    }
+
+    private static String pct(long a, long b) {
+        return b == 0 ? "-" : String.format(java.util.Locale.ROOT, "%.1f%%", 100.0 * a / b);
+    }
+
     /**
      * 빈 평일·시장 공백·수정 이벤트 몰린 날(PR #137 strategy-researcher R1 (b)(c)). 거래일이 휴장일로 캐시되면 다음 거래일에
      * 시장 전체 가짜 수정 이벤트가 생겨 수정 계수가 조용히 오염되므로, 4단계 사전 등록 전에 사람이 이 칸을 본다.

@@ -154,7 +154,8 @@ parameters:
     "bars": {"snapshot_id": "...", "sha256": "<hex64>", "last_trading_date": "2026-10-12"},
     "shares": {"snapshot_id": "...", "as_of_date": "2026-10-12"},
     "financials": null,
-    "calendar": {"sources_digest": "<hex64>"}
+    "calendar": {"sources_digest": "<hex64>"},
+    "disclosures": {"snapshot_id": "...", "sha256": "<hex64>", "covered_through": "2026-10-12"}
   },
   "selected": [{"code": "005930", "rank": 1}],
   "evaluations": [{"code": "000020", "passed": false, "reasons": ["GATE_01"], "values": {"gate.01": "1.42"}, "restatement_fallback": false}],
@@ -164,6 +165,7 @@ parameters:
 }
 ```
 
+- **`inputs.disclosures`**(D-123): 공시 조건(`disclosure-count`)이 있는 선정만 쓴다. 공시 조건이 없으면 키를 **아예 쓰지 않는다**(`null`도 쓰지 않음). 그래서 D-123 전 결과의 내용 해시는 그대로다. `sha256`은 공시 스냅샷의 `disclosures.csv` 파일 SHA-256(manifest의 그 파일 항목과 같음)이고, `covered_through`는 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날이다. 7단계 `SelectionValidity`의 `STALE_INPUT`에 공시 입력을 넣을지는 실전 판정 변경이라 risk-ops 검토로 정한다(지금 판정 함수는 이 필드를 보지 않는다. 생산 쪽 계산기는 공시 스냅샷이 구간 [w거래일 첫날, `apply_from` 전날]을 못 덮으면 결과를 만들지 않는다).
 - **선정 기준일 = `apply_from`**(그 결과를 처음 적용하는 거래일, STR-15). 계산은 `apply_from`의 직전 거래일까지의 데이터만 쓴다(MD-10).
 - **적용 거래일 범위**(거래소 현지 날짜, 양끝 포함, `ExchangeCalendar` 기준):
 

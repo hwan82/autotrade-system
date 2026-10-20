@@ -31,10 +31,15 @@ public enum Metric {
     /** 직전 거래일 종가 강도: (c 종가 − c 저가) ÷ (c 고가 − c 저가). 1이면 고가 마감(ADR-012 3.2, 단타). */
     CLOSE_STRENGTH("close-strength", Kind.BARS, Param.NONE),
     /** 직전 거래일 거래량 급증: c 수정 거래량 ÷ c 앞 {@code window}거래일 수정 거래량 평균(ADR-012 3.2, 단타). */
-    VOLUME_SPIKE("volume-spike", Kind.BARS, Param.WINDOW);
+    VOLUME_SPIKE("volume-spike", Kind.BARS, Param.WINDOW),
+    /**
+     * 접수일이 c에서 끝나는 {@code window}거래일의 첫날 ~ T 전날(달력일, c와 T 사이 휴장일 포함)인
+     * 그 종목 공시 건수. 유형은 {@code types}(OpenDART 공시 유형 코드)로 정하고 정정 공시는 세지 않는다(ADR-012 3.2, 단타).
+     */
+    DISCLOSURE_COUNT("disclosure-count", Kind.DISCLOSURE, Param.WINDOW);
 
     /** 지표가 읽는 입력. */
-    public enum Kind { BARS, SHARES, FINANCIAL }
+    public enum Kind { BARS, SHARES, FINANCIAL, DISCLOSURE }
 
     /** 지표의 기간 파라미터. */
     public enum Param { NONE, WINDOW, YEARS }

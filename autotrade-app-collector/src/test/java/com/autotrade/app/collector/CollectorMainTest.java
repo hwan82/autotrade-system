@@ -285,7 +285,7 @@ class CollectorMainTest {
         Files.writeString(stop, "2026-10-08T10:00:00Z");
         Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
         FakeHttp http = krxServer();
-        for (String cmd : List.of("krx-daily", "dart-financials")) {
+        for (String cmd : List.of("krx-daily", "dart-financials", "dart-disclosures")) {
             assertThat(CollectorMain.run(args(cmd, "--allow-during-session"), clock, http, ms -> {}, PLENTY)).isEqualTo(4);
         }
         assertThat(http.calls).isEmpty();
@@ -465,6 +465,106 @@ class CollectorMainTest {
         assertThat(CollectorMain.run(args("dart-financials", "--dart-base-url", "ftp://x"), clock, http, ms -> {}, PLENTY))
                 .isEqualTo(2);
         assertThat(http.calls).isEmpty();
+    }
+
+    @Test
+    void dart_disclosures는_유형별_공시_스냅샷과_품질_리포트를_만든다() throws IOException {
+        writeKeys();
+        FakeHttp http = new FakeHttp(DartDisclosureCollectorTest.server());
+        // 서울 2026-09-16 19:00
+        Clock clock = Clock.fixed(Instant.parse("2026-09-16T10:00:00Z"), ZoneOffset.UTC);
+        int code = CollectorMain.run(args("dart-disclosures", "--from", "2026-08-01", "--dart-base-url", "https://dart.test/api"),
+                clock, http, ms -> {}, PLENTY);
+        assertThat(code).isZero();
+        Path root = config.resolve("snapshots").resolve("dart-disclosures");
+        Path dir;
+        try (Stream<Path> s = Files.list(root)) {
+            dir = s.findFirst().orElseThrow();
+        }
+        SnapshotManifest m = com.autotrade.marketdata.daily.SnapshotFiles.readManifest(dir);
+        assertThat(m.snapshotId()).startsWith("dart-disclosures-2026-09-15-");
+        assertThat(m.files()).extracting(SnapshotManifest.FileEntry::name)
+                .containsExactly("disclosures.csv", "disclosure_types.csv");
+        assertThat(m.coverage().firstDate()).isEqualTo("2026-08-01");
+        assertThat(Files.readString(dir.resolve("disclosure_types.csv")))
+                .isEqualTo("pblntf_ty,from,to\nB,2026-08-01,2026-09-15\nI,2026-08-01,2026-09-15\n");
+        List<String> lines = Files.readAllLines(dir.resolve("disclosures.csv"));
+        assertThat(lines.get(0)).isEqualTo("market,code,code_source,corp_code,corp_cls,pblntf_ty,rcept_no,rcept_dt,report_nm");
+        assertThat(lines).hasSize(1 + 6);
+        String report = Files.readString(reports.resolve(m.snapshotId() + ".md"));
+        assertThat(report).contains("| B | 2026-08-01 ~ 2026-09-15 | 4 |", "오늘 공시 몫 호출 | 5 |",
+                "## 상장폐지 종목 공시 확인(생존편향)", "## 접수 연도별 못 붙인 행", "| 2026 | 6 |", "## 보고서명 대괄호 머리말");
+        // 같은 캐시로 다시 만들면 같은 ID(창이 바뀌지 않음)
+        assertThat(CollectorMain.run(args("dart-disclosures", "--from", "2026-08-01", "--dart-base-url", "https://dart.test/api"),
+                clock, http, ms -> {}, PLENTY)).isZero();
+        try (Stream<Path> s = Files.list(root)) {
+            assertThat(s.filter(Files::isDirectory).count()).isEqualTo(1);
+        }
+        assertNoKeyAnywhere();
+    }
+
+    @Test
+    void dart_disclosures는_상한에_닿아도_다_받은_최근_창으로_스냅샷을_만들고_종료_코드_3() throws IOException {
+        writeKeys();
+        FakeHttp http = new FakeHttp(DartDisclosureCollectorTest.server());
+        Clock clock = Clock.fixed(Instant.parse("2026-09-16T10:00:00Z"), ZoneOffset.UTC);
+        // 9월 B 두 쪽 + 9월 I 한 쪽 = 3회 뒤 멈춤: 8월은 못 받음
+        int code = CollectorMain.run(args("dart-disclosures", "--from", "2026-08-01", "--max-calls", "3", "--dart-base-url",
+                "https://dart.test/api"), clock, http, ms -> {}, PLENTY);
+        assertThat(code).isEqualTo(3);
+        Path root = config.resolve("snapshots").resolve("dart-disclosures");
+        Path dir;
+        try (Stream<Path> s = Files.list(root)) {
+            dir = s.findFirst().orElseThrow();
+        }
+        assertThat(Files.readString(dir.resolve("disclosure_types.csv")))
+                .isEqualTo("pblntf_ty,from,to\nB,2026-09-01,2026-09-15\nI,2026-09-01,2026-09-15\n");
+        assertThat(Files.readString(reports.resolve(dir.getFileName() + ".md"))).contains("다 받기 전에 멈췄습니다");
+    }
+
+    @Test
+    void dart_disclosures는_재무_몫을_깎지_않고_공시_몫_상한은_재무_기본_몫을_남긴다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-09-16T10:00:00Z"), ZoneOffset.UTC);
+        FakeHttp none = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        assertThat(CollectorMain.run(args("dart-disclosures", "--max-calls", "10001"), clock, none, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(CollectorMain.run(args("dart-disclosures", "--types", "B,Z"), clock, none, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(CollectorMain.run(args("dart-financials", "--types", "B"), clock, none, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(CollectorMain.run(args("dart-disclosures", "--krx-snapshot", "x"), clock, none, ms -> {}, PLENTY)).isEqualTo(2);
+        assertThat(none.calls).isEmpty();
+        // 공시가 먼저 5회를 쓰고 나서 재무를 상한 1회로 돌려도 재무는 1회를 받는다(공시 몫과 따로 셈)
+        assertThat(CollectorMain.run(args("dart-disclosures", "--from", "2026-08-01", "--dart-base-url", "https://dart.test/api",
+                "--no-snapshot"), clock, new FakeHttp(DartDisclosureCollectorTest.server()), ms -> {}, PLENTY)).isZero();
+        FakeHttp fin = new FakeHttp(DartFinancialCollectorTest.server(false));
+        CollectorMain.run(args("dart-financials", "--from", "2026-03-01", "--max-calls", "1", "--dart-base-url",
+                "https://dart.test/api", "--no-snapshot"), clock, fin, ms -> {}, PLENTY);
+        assertThat(fin.calls).hasSize(1);
+        CallBudget seen = new CallBudget(config.resolve("collector-state"), "opendart", "disclosures", 1, 20_000, clock);
+        assertThat(seen.usedTodayByLane()).isEqualTo(5);
+        assertThat(seen.usedToday()).isEqualTo(6);
+    }
+
+    @Test
+    void dart_disclosures는_KRX_일봉_스냅샷의_종목_이력으로_이름_대조한다() throws IOException {
+        writeKeys();
+        // 먼저 KRX 일봉 스냅샷(종목 111111 "가")
+        Clock krxClock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        assertThat(CollectorMain.run(args("krx-daily", "--from", "2026-10-05", "--to", "2026-10-08", "--boards", "KOSPI"), krxClock,
+                krxServer(), ms -> {}, PLENTY)).isZero();
+        FakeHttp http = new FakeHttp((u, n) -> FakeHttp.ok(DartDisclosureCollectorTest.page(1, 1, 1,
+                "E;00000077;;가;주권매매거래정지;20261007000001;20261007")));
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        assertThat(CollectorMain.run(args("dart-disclosures", "--from", "2026-10-07", "--to", "2026-10-07", "--types", "I",
+                "--dart-base-url", "https://dart.test/api"), clock, http, ms -> {}, PLENTY)).isZero();
+        Path root = config.resolve("snapshots").resolve("dart-disclosures");
+        Path dir;
+        try (Stream<Path> s = Files.list(root)) {
+            dir = s.findFirst().orElseThrow();
+        }
+        assertThat(Files.readAllLines(dir.resolve("disclosures.csv")).get(1))
+                .isEqualTo("KRX,111111,NAME,00000077,E,I,20261007000001,2026-10-07,주권매매거래정지");
+        SnapshotManifest m = com.autotrade.marketdata.daily.SnapshotFiles.readManifest(dir);
+        assertThat(m.sources()).extracting(SnapshotManifest.Source::name).anySatisfy(n -> assertThat(n).startsWith("KRX 종목 이력"));
     }
 
     /** 캐시·스냅샷·리포트 어디에도 키 평문이 없다(MD-11). 키 파일 자체만 예외. */

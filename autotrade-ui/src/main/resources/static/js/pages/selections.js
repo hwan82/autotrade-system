@@ -10,7 +10,7 @@ let cloneSource = null;
 let catalogCache = null;
 
 const OP = { GE: '≥ 이상', GT: '> 초과', LE: '≤ 이하', LT: '< 미만' };
-const KIND = { BARS: '일봉', SHARES: '상장주식수', FINANCIAL: '재무' };
+const KIND = { BARS: '일봉', SHARES: '상장주식수', FINANCIAL: '재무', DISCLOSURE: '공시' };
 const PERIOD = { WINDOW: { key: 'window', label: '거래일' }, YEARS: { key: 'years', label: '사업연도' } };
 // 지표 이름(카탈로그 키 → 화면 이름). 모르는 키는 키 그대로 보인다.
 const METRIC = {
@@ -18,6 +18,7 @@ const METRIC = {
   'op-margin': '영업이익률', 'debt-ratio': '부채비율', 'market-cap': '시가총액(원)', 'volume-ratio': '거래량 배율',
   return: '수익률', 'avg-turnover': '평균 거래대금(원)',
   'day-range': '전일 변동폭', 'close-strength': '전일 종가 강도', 'volume-spike': '전일 거래량 급증 배율',
+  'disclosure-count': '공시 건수',
 };
 const GATE_KEY = /^gate\.(\d{2})\.([a-z-]+)$/;
 const KNOWN = new Set(['hypothesis', 'refresh', 'max-symbols', 'filter.kinds', 'filter.min-price', 'filter.min-bar-days',
@@ -145,7 +146,8 @@ function metricLabel(key) {
 function metricOptions(cat, selected, withNone) {
   return [
     withNone ? h('option', { value: '', selected: !selected }, '순위 없음') : null,
-    ...cat.metrics.map(m => h('option', { value: m.key, selected: m.key === selected }, `${metricLabel(m.key)} · ${KIND[m.kind] || m.kind}`)),
+    // 순위에는 공시 건수를 쓰지 않는다(자격 조건에만, D-123). 저장된 값이면 보이게 둔다
+    ...cat.metrics.filter(m => !withNone || m.kind !== 'DISCLOSURE' || m.key === selected).map(m => h('option', { value: m.key, selected: m.key === selected }, `${metricLabel(m.key)} · ${KIND[m.kind] || m.kind}`)),
   ];
 }
 
@@ -202,8 +204,19 @@ function conditionEditor(base, style, cat, onSave, saveLabel) {
     const op = h('select', { 'aria-label': '연산' }, cat.ops.map(o => h('option', { value: o, selected: o === (g.op || 'GE') }, OP[o] || o)));
     const value = h('input', { class: 'narrow', inputmode: 'decimal', value: g.value || '', 'aria-label': '기준값', autocomplete: 'off' });
     const period = periodInput(cat, metric, g.window || g.years);
-    const row = { metric, op, value, period };
-    const tr = h('tr', {}, h('td', { class: 'num seq' }), h('td', {}, metric), h('td', {}, op), h('td', {}, value), h('td', {}, period.el),
+    // 공시 유형(gate.<nn>.types, disclosure-count만, D-123): 공시 지표를 고르면 켠다
+    const types = h('input', { class: 'narrow', value: g.types || '', 'aria-label': '공시 유형', placeholder: 'B,I', autocomplete: 'off' });
+    const typesEl = h('span', { class: 'inline-fields' }, h('span', { class: 'muted small' }, ' 유형 '), types);
+    const syncTypes = () => {
+      const m = cat.metrics.find(x => x.key === metric.value);
+      const on = !!m && m.kind === 'DISCLOSURE';
+      typesEl.hidden = !on;
+      if (!on) types.value = '';
+    };
+    metric.addEventListener('change', syncTypes);
+    syncTypes();
+    const row = { metric, op, value, period, types };
+    const tr = h('tr', {}, h('td', { class: 'num seq' }), h('td', {}, metric), h('td', {}, op), h('td', {}, value), h('td', {}, period.el, typesEl),
       h('td', {}, h('button', { class: 'link', type: 'button', onclick: () => { tr.remove(); gateRows.splice(gateRows.indexOf(row), 1); renumber(); } }, '삭제')));
     row.tr = tr;
     gateRows.push(row);
@@ -247,6 +260,7 @@ function conditionEditor(base, style, cat, onSave, saveLabel) {
       put(`${n}.value`, r.value.value);
       const pk = r.period.key();
       if (pk) put(`${n}.${pk}`, r.period.input.value);
+      put(`${n}.types`, r.types.value.replace(/\s+/g, ''));
     });
     if (scoreMetric.value) {
       put('score.metric', scoreMetric.value);

@@ -51,6 +51,12 @@ final class WalkForwardReport {
             sb.append("  last-collected-at: ").append(f.lastCollectedAt() == null ? "unknown" : f.lastCollectedAt())
                     .append('\n');
         }, () -> sb.append("  snapshot: none\n"));
+        sd.disclosures().ifPresent(x -> { // 공시 조건이 있을 때만(예전 실행 기록 모양 그대로, D-123)
+            sb.append("disclosures:\n");
+            sb.append("  snapshot: ").append(x.snapshotId()).append('\n');
+            sb.append("  sha256: ").append(x.sha256()).append('\n');
+            sb.append("  types: ").append(String.join(",", x.types())).append('\n');
+        });
         var d = r.tradingDays();
         sb.append("trading-days:\n");
         sb.append("  source: \"스냅샷 일봉 날짜 + 캘린더 대조\"\n");
@@ -115,7 +121,8 @@ final class WalkForwardReport {
                 .append("), 대조군 시드 ").append(plan.nullSeeds()).append("개(시드 = 실험 시드 + i, i=1..N. C10에는 완료된 N + 1 ≥ ")
                 .append(needNull).append(" 필요)\n");
         sb.append("- 데이터: `").append(r.selectionData().barsSnapshotId()).append("`, 재무 `")
-                .append(plan.financialsSnapshot().orElse("none")).append("`, 비용 `").append(r.cost().id())
+                .append(plan.financialsSnapshot().orElse("none")).append("`")
+                .append(plan.disclosuresSnapshot().map(x -> ", 공시 `" + x + "`").orElse("")).append(", 비용 `").append(r.cost().id())
                 .append("`(스트레스 `").append(r.stressCost().id()).append("`), 체결 `").append(r.execution().id())
                 .append("` + 일봉 경로 `").append(DailyBarMarketDataSet.PATH_MODEL).append("`, 블랙리스트 ")
                 .append(r.blacklistSize()).append("종목\n");

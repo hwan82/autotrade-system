@@ -115,4 +115,17 @@ class ExperimentRegistrationsTest {
         assertThatThrownBy(() -> failing.create(request("EXP-WRITE-FAIL2"))).isSameAs(boom);
         assertThat(dir.resolve("EXP-WRITE-FAIL2")).doesNotExist();
     }
+
+    @Test
+    void 공시_지표_선정_프로필은_화면_등록을_거절하고_폴더를_만들지_않는다() {
+        ExperimentRegistrations.Request r = new ExperimentRegistrations.Request("EXP-DISCLOSURE-UI", "공시 조건 단타",
+                Market.KRX, TradingStyle.INTRADAY, "2026-01-02", "2026-04-30", "7", "10000000", "krx-daily-test-0001",
+                null, "none", "1", List.of("kr-intraday-news@1 x kr-orb-30@1"), List.of());
+
+        assertThatThrownBy(() -> registrations().create(r))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disclosures-snapshot")
+                .hasMessageContaining("kr-intraday-news@1");
+        assertThat(dir.resolve("EXP-DISCLOSURE-UI")).doesNotExist();
+    }
 }

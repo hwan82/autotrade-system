@@ -36,6 +36,20 @@ class ResultBundleReaderTest {
     }
 
     @Test
+    void 공시_입력이_있는_선정_결과도_해시가_맞게_되살린다() throws IOException {
+        SampleReports.ComboSample s = SampleReports.combos("DEMO-20261020-01", 20, true);
+        String text = write(s);
+        assertThat(text).contains("\"disclosures\":{\"covered_through\":");
+        ResultBundleReader.Loaded loaded = read(text);
+
+        assertThat(loaded.selectionResults()).containsExactlyInAnyOrderElementsOf(s.results());
+        assertThat(loaded.selectionResults()).allSatisfy(r ->
+                assertThat(r.inputs().disclosuresSnapshotId()).isEqualTo("dart-disclosures-2026-09-30-0a1b2c3d"));
+        // 공시 입력이 없는 예전 결과에는 키가 아예 없다(기존 해시 그대로)
+        assertThat(write(SampleReports.combos("DEMO-20261020-01", 20))).doesNotContain("\"disclosures\"");
+    }
+
+    @Test
     void 선정_없는_실험과_실패한_Run도_되살린다() throws IOException {
         SampleReports.Sample s = SampleReports.krx("DEMO-20261008-01", 30);
         StringWriter out = new StringWriter();

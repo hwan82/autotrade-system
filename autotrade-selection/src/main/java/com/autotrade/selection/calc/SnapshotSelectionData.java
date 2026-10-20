@@ -43,6 +43,7 @@ public final class SnapshotSelectionData implements SelectionData {
     private final ZoneId zone;
     private final LocalDate barsLastTradingDate;
     private final LocalDate sharesAsOf;
+    private final DisclosureInput disclosures;
 
     /**
      * @param shares 일봉 스냅샷의 {@code listed_shares.csv}. 없으면 null(시가총액 조건은 결측으로 탈락)
@@ -53,6 +54,14 @@ public final class SnapshotSelectionData implements SelectionData {
      */
     public SnapshotSelectionData(Market market, SnapshotDailyBarSource bars, SnapshotListedShares shares,
             SnapshotFinancials financials, TradingDays tradingDays, String calendarDigest, ZoneId zone) {
+        this(market, bars, shares, financials, null, tradingDays, calendarDigest, zone);
+    }
+
+    /** @param disclosures 공시 스냅샷({@link SnapshotDisclosures}). 없으면 null(공시 조건은 계산 실패) */
+    public SnapshotSelectionData(Market market, SnapshotDailyBarSource bars, SnapshotListedShares shares,
+            SnapshotFinancials financials, DisclosureInput disclosures, TradingDays tradingDays, String calendarDigest,
+            ZoneId zone) {
+        this.disclosures = disclosures;
         this.market = Objects.requireNonNull(market, "market");
         this.bars = Objects.requireNonNull(bars, "bars");
         this.shares = shares;
@@ -79,6 +88,13 @@ public final class SnapshotSelectionData implements SelectionData {
     public static SnapshotSelectionData of(SnapshotDailyBarSource bars, SnapshotListedShares shares,
             SnapshotFinancials financials, ExchangeCalendar calendar) {
         return new SnapshotSelectionData(calendar.market(), bars, shares, financials, TradingDays.of(calendar),
+                calendarDigest(calendar), calendar.zone());
+    }
+
+    /** 공시 스냅샷까지 받는 형태. */
+    public static SnapshotSelectionData of(SnapshotDailyBarSource bars, SnapshotListedShares shares,
+            SnapshotFinancials financials, DisclosureInput disclosures, ExchangeCalendar calendar) {
+        return new SnapshotSelectionData(calendar.market(), bars, shares, financials, disclosures, TradingDays.of(calendar),
                 calendarDigest(calendar), calendar.zone());
     }
 
@@ -184,6 +200,11 @@ public final class SnapshotSelectionData implements SelectionData {
         }
         return Optional.of(new FinancialSnapshotInfo(m.snapshotId(), fileSha(m, SnapshotManifest.FINANCIAL_FILINGS),
                 collected, collectedDate));
+    }
+
+    @Override
+    public Optional<DisclosureInput> disclosures() {
+        return Optional.ofNullable(disclosures);
     }
 
     @Override

@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
  * market: "KRX"
  * bars-snapshot: "krx-daily-..."
  * financials-snapshot: "dart-financials-..."   # 재무 선정이 없으면 생략
+ * disclosures-snapshot: "dart-disclosures-..." # 공시 조건 선정이 없으면 생략(D-123)
  * seed: "20261020"
  * seed-capital: "10000000"
  * parallelism: "4"
@@ -59,6 +60,7 @@ public record WalkForwardPlan(
         Market market,
         String barsSnapshot,
         Optional<String> financialsSnapshot,
+        Optional<String> disclosuresSnapshot,
         long seed,
         Money seedCapital,
         int parallelism,
@@ -78,7 +80,7 @@ public record WalkForwardPlan(
     public static final int MAX_COMBINATIONS = 128;
 
     private static final Set<String> SCALARS = Set.of("id", "question", "market", "bars-snapshot", "financials-snapshot",
-            "seed", "seed-capital", "parallelism", "first-test-from", "train-years", "test-years", "windows",
+            "disclosures-snapshot", "seed", "seed-capital", "parallelism", "first-test-from", "train-years", "test-years", "windows",
             "warmup-days", "null-seeds");
     private static final Set<String> LISTS = Set.of("combinations", "controls", "blacklist");
     private static final Pattern ENTRY = Pattern.compile(
@@ -95,6 +97,7 @@ public record WalkForwardPlan(
         Objects.requireNonNull(market, "market");
         Objects.requireNonNull(barsSnapshot, "barsSnapshot");
         Objects.requireNonNull(financialsSnapshot, "financialsSnapshot");
+        Objects.requireNonNull(disclosuresSnapshot, "disclosuresSnapshot");
         Objects.requireNonNull(seedCapital, "seedCapital");
         Objects.requireNonNull(firstTestFrom, "firstTestFrom");
         combinations = List.copyOf(combinations);
@@ -183,8 +186,9 @@ public record WalkForwardPlan(
             black.add(code);
         }
         Optional<String> financials = Optional.ofNullable(s.get("financials-snapshot")).map(WalkForwardPlan::snapshot);
+        Optional<String> disclosures = Optional.ofNullable(s.get("disclosures-snapshot")).map(WalkForwardPlan::snapshot);
         return new WalkForwardPlan(new ExperimentId(raw.required("id")), raw.required("question"), market,
-                snapshot(raw.required("bars-snapshot")), financials, Long.parseLong(raw.required("seed")),
+                snapshot(raw.required("bars-snapshot")), financials, disclosures, Long.parseLong(raw.required("seed")),
                 Money.of(Long.parseLong(raw.required("seed-capital")), market.currency()),
                 Integer.parseInt(s.getOrDefault("parallelism", "1")), LocalDate.parse(raw.required("first-test-from")),
                 Integer.parseInt(raw.required("train-years")), Integer.parseInt(raw.required("test-years")),
