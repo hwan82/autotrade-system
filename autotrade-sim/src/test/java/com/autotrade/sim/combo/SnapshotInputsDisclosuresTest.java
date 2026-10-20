@@ -21,7 +21,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** 실험 입력에 공시 스냅샷(D-122) 잇기: 폴더 {@code dart-disclosures/<ID>}를 읽어 선정 데이터에 넘긴다. */
+/** 실험 입력에 공시 스냅샷(D-123) 잇기: 폴더 {@code dart-disclosures/<ID>}를 읽어 선정 데이터에 넘긴다. */
 class SnapshotInputsDisclosuresTest {
 
     private static final ExchangeCalendar KRX = ExchangeCalendar.bundled(Market.KRX);

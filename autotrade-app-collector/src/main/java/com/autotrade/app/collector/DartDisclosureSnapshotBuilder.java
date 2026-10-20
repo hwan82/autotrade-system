@@ -16,7 +16,7 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * 공시 목록 캐시의 창 파일들로 공시 스냅샷 행을 만든다(ADR-012 3.4, D-122). 읽는 쪽은 선정 모듈의
+ * 공시 목록 캐시의 창 파일들로 공시 스냅샷 행을 만든다(ADR-012 3.4, D-123). 읽는 쪽은 선정 모듈의
  * {@code com.autotrade.selection.calc.SnapshotDisclosures}다(수집기는 선정 모듈에 의존하지 않으므로 헤더를 양쪽에 같게 둔다).
  *
  * <pre>

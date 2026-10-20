@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * seed-capital: "10000000"
  * bars-snapshot: "krx-daily-2026-10-08-1a2b3c4d"
  * financials-snapshot: "dart-financials-2026-10-08-5e6f7a8b"   # 재무 조건 선정이 없으면 생략
- * disclosures-snapshot: "dart-disclosures-2026-10-08-9a0b1c2d" # 공시 조건(disclosure-count) 선정이 없으면 생략(D-122)
+ * disclosures-snapshot: "dart-disclosures-2026-10-08-9a0b1c2d" # 공시 조건(disclosure-count) 선정이 없으면 생략(D-123)
  * benchmark: "none"                                            # 또는 종목 코드
  * parallelism: "4"
  * combinations:

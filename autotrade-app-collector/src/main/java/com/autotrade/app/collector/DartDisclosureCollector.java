@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * OpenDART 공시 목록 수집(ADR-012 3.4, D-122). 선정 지표 {@code disclosure-count}의 입력이다.
+ * OpenDART 공시 목록 수집(ADR-012 3.4, D-123). 선정 지표 {@code disclosure-count}의 입력이다.
  *
  * <ol>
  *   <li>공시 유형({@code pblntf_ty})마다 요청 범위 중 아직 훑지 않은 구간을 달력 월 단위 창으로 나눠, <b>최근 창부터</b> 회사 코드

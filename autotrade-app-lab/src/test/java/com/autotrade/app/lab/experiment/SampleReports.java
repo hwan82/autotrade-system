@@ -84,7 +84,7 @@ public final class SampleReports {
         return combos(experimentId, tradingDays, false);
     }
 
-    /** @param disclosures 선정 결과 입력에 공시 스냅샷(D-122)을 넣을지 */
+    /** @param disclosures 선정 결과 입력에 공시 스냅샷(D-123)을 넣을지 */
     public static ComboSample combos(String experimentId, int tradingDays, boolean disclosures) {
         List<LocalDate> days = weekdays(LocalDate.of(2026, 9, 1), tradingDays);
         LocalDate from = days.get(0);

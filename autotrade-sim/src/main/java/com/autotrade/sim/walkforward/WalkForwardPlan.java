@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * market: "KRX"
  * bars-snapshot: "krx-daily-..."
  * financials-snapshot: "dart-financials-..."   # 재무 선정이 없으면 생략
- * disclosures-snapshot: "dart-disclosures-..." # 공시 조건 선정이 없으면 생략(D-122)
+ * disclosures-snapshot: "dart-disclosures-..." # 공시 조건 선정이 없으면 생략(D-123)
  * seed: "20261020"
  * seed-capital: "10000000"
  * parallelism: "4"

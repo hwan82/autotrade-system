@@ -41,7 +41,7 @@
 
 ### 2.4 등록 파일 `experiments/<실험ID>/study.yaml`
 
-- 형식은 `WalkForwardPlan` 주석이 원본이다. 키: `id`, `question`, `market`, `bars-snapshot`, `financials-snapshot`(선택), `disclosures-snapshot`(선택, D-122), `seed`, `seed-capital`, `parallelism`, `first-test-from`, `train-years`, `test-years`, `windows`(3~20), `warmup-days`, `null-seeds`(1~5000), 목록 `combinations`, `controls`("STYLE id@버전"), `blacklist`(선택). 읽는 모양은 `RegistrationYaml`(모르는 키·같은 키 두 번 거절)이고, 같은 조합·같은 스타일 대조군 두 번과 스타일 불일치(조합 실험의 스타일 검증 재사용)도 시작 전에 거절한다.
+- 형식은 `WalkForwardPlan` 주석이 원본이다. 키: `id`, `question`, `market`, `bars-snapshot`, `financials-snapshot`(선택), `disclosures-snapshot`(선택, D-123), `seed`, `seed-capital`, `parallelism`, `first-test-from`, `train-years`, `test-years`, `windows`(3~20), `warmup-days`, `null-seeds`(1~5000), 목록 `combinations`, `controls`("STYLE id@버전"), `blacklist`(선택). 읽는 모양은 `RegistrationYaml`(모르는 키·같은 키 두 번 거절)이고, 같은 조합·같은 스타일 대조군 두 번과 스타일 불일치(조합 실험의 스타일 검증 재사용)도 시작 전에 거절한다.
 - 구간 계산: `t_k = first-test-from + k × test-years`(달력, 윤일은 `LocalDate.plusYears` 규칙), 학습 `[t_k − train-years, t_k − 1일]`, 검증 `[t_k, t_(k+1) − 1일]`. 휴장일에 걸려도 빠짐·겹침이 없고 실제 거래일 경계는 데이터셋이 정한다. 스냅샷 범위 밖 구간·`windows < 3`은 시작하지 않는다.
 - 실험 ID 상한 30자(구간·시드별 하위 ID 접미어 때문에 `ExperimentId` 48자 제한 안에 들어야 함).
 - 등록 파일은 실행 전에 커밋하고 결과를 본 뒤 고치지 않는다. 바꾸려면 새 실험 ID.

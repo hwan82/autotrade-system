@@ -64,7 +64,7 @@ seed: "20261012"
 seed-capital: "10000000"
 bars-snapshot: "krx-daily-2026-10-08-1a2b3c4d"
 financials-snapshot: "dart-financials-2026-10-08-5e6f7a8b"   # 재무 조건 선정이 없으면 생략
-disclosures-snapshot: "dart-disclosures-2026-10-19-9a0b1c2d" # 공시 조건(disclosure-count) 선정이 없으면 생략(D-122)
+disclosures-snapshot: "dart-disclosures-2026-10-19-9a0b1c2d" # 공시 조건(disclosure-count) 선정이 없으면 생략(D-123)
 benchmark: "none"
 parallelism: "4"
 combinations:
@@ -92,7 +92,7 @@ question: "스윙 후보가 시총 가중 지수와 같은 선정의 무작위 �
 market: "KRX"
 bars-snapshot: "krx-daily-2026-10-08-1a2b3c4d"
 financials-snapshot: "dart-financials-2026-10-08-5e6f7a8b"   # 재무 선정이 없으면 생략
-disclosures-snapshot: "dart-disclosures-2026-10-19-9a0b1c2d" # 공시 조건 선정이 없으면 생략(D-122)
+disclosures-snapshot: "dart-disclosures-2026-10-19-9a0b1c2d" # 공시 조건 선정이 없으면 생략(D-123)
 seed: "20261020"
 seed-capital: "10000000"
 parallelism: "4"

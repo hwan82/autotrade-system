@@ -47,7 +47,7 @@ public final class OpenDartClient {
     }
 
     /**
-     * 공시 유형 하나의 공시검색 한 쪽(ADR-012 3.4, D-122). 회사 코드 없이 날짜 구간으로, 정정 공시 포함({@code last_reprt_at=N}),
+     * 공시 유형 하나의 공시검색 한 쪽(ADR-012 3.4, D-123). 회사 코드 없이 날짜 구간으로, 정정 공시 포함({@code last_reprt_at=N}),
      * 접수일 오름차순.
      *
      * @param type OpenDART 공시 유형 코드 한 글자(A~J)

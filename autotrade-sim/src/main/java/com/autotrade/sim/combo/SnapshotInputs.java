@@ -35,7 +35,7 @@ import java.util.function.Function;
  * @param last manifest {@code coverage.lastTradingDate}
  * @param shares 상장주식수. 스냅샷에 파일이 없으면 null
  * @param financials 재무 스냅샷. 요청하지 않았으면 null
- * @param disclosures 공시 스냅샷(D-122). 요청하지 않았으면 null
+ * @param disclosures 공시 스냅샷(D-123). 요청하지 않았으면 null
  */
 public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDate first, LocalDate last,
         SnapshotListedShares shares, SnapshotFinancials financials, SnapshotDisclosures disclosures,
@@ -46,6 +46,13 @@ public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDat
         Objects.requireNonNull(bars, "bars");
         Objects.requireNonNull(days, "days");
         Objects.requireNonNull(selectionData, "selectionData");
+    }
+
+    /** 공시 입력 없이 읽는다(D-123 전 호출 모양). */
+    public static SnapshotInputs load(Market market, String barsSnapshot, Optional<String> financialsSnapshot,
+            Path snapshotsRoot, ExchangeCalendar calendar, RunGate gate, Consumer<String> log,
+            BiConsumer<LocalDate, LocalDate> rangeCheck) {
+        return load(market, barsSnapshot, financialsSnapshot, Optional.empty(), snapshotsRoot, calendar, gate, log, rangeCheck);
     }
 
     /**

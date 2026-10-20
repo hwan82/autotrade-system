@@ -73,7 +73,7 @@ final class CombinationReport {
             sb.append("  last-collected-at: ").append(f.lastCollectedAt() == null ? "unknown" : f.lastCollectedAt())
                     .append('\n');
         }, () -> sb.append("  snapshot: none\n"));
-        sd.disclosures().ifPresent(x -> { // 공시 조건이 있을 때만(예전 실행 기록 모양 그대로, D-122)
+        sd.disclosures().ifPresent(x -> { // 공시 조건이 있을 때만(예전 실행 기록 모양 그대로, D-123)
             sb.append("disclosures:\n");
             sb.append("  snapshot: ").append(x.snapshotId()).append('\n');
             sb.append("  sha256: ").append(x.sha256()).append('\n');

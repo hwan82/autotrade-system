@@ -257,7 +257,7 @@ public final class ExperimentRegistrations {
             throw new IllegalArgumentException("지금 카탈로그로 해석되지 않는 선정 프로필입니다: " + selectionRef.text());
         }
         Set<Metric.Kind> kinds = SelectionCriteria.parse(selection.profile()).inputKinds();
-        if (kinds.contains(Metric.Kind.DISCLOSURE)) { // 화면의 공시 스냅샷 칸은 후속(D-122). 등록 파일에 직접 쓴다
+        if (kinds.contains(Metric.Kind.DISCLOSURE)) { // 화면의 공시 스냅샷 칸은 후속(D-123). 등록 파일에 직접 쓴다
             throw new IllegalArgumentException("공시 지표(disclosure-count)를 쓰는 선정 프로필은 아직 이 화면에서 등록할 수 없습니다. "
                     + "등록 파일에 disclosures-snapshot을 직접 적으세요: " + selectionRef.text());
         }

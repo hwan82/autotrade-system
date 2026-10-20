@@ -64,7 +64,7 @@ public interface SelectionData {
     }
 
     /**
-     * 공시 스냅샷(D-122). 세는 행은 종목 코드가 붙고 정정 공시가 아닌 행이다({@link SnapshotDisclosures}).
+     * 공시 스냅샷(D-123). 세는 행은 종목 코드가 붙고 정정 공시가 아닌 행이다({@link SnapshotDisclosures}).
      */
     interface DisclosureInput {
 

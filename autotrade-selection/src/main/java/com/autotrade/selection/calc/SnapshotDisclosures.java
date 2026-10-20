@@ -31,7 +31,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
- * 공시 스냅샷 폴더(수집 명령 {@code dart-disclosures}, ADR-012 3.4, D-122)를 읽는다. 지표 {@code disclosure-count}의 입력이다.
+ * 공시 스냅샷 폴더(수집 명령 {@code dart-disclosures}, ADR-012 3.4, D-123)를 읽는다. 지표 {@code disclosure-count}의 입력이다.
  *
  * <pre>
  * disclosures.csv:      market,code,code_source,corp_code,corp_cls,pblntf_ty,rcept_no,rcept_dt,report_nm

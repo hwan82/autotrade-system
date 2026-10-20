@@ -23,7 +23,7 @@ import java.util.TreeMap;
  * (캐시 폴더를 바꿔도) 합산한다.
  * 한도 초과 응답(OpenDART 020)을 받으면 {@link #stopForToday()}로 그날 남은 실행을 모두 막는다.
  *
- * <p><b>몫(lane, D-122)</b>: 같은 키를 쓰는 단계가 둘 이상이면(OpenDART 재무 {@value #MAIN}, 공시 {@code disclosures}) 단계마다
+ * <p><b>몫(lane, D-123)</b>: 같은 키를 쓰는 단계가 둘 이상이면(OpenDART 재무 {@value #MAIN}, 공시 {@code disclosures}) 단계마다
  * 자기 몫 상한을 따로 세고, 키 전체 합은 키 상한으로 따로 막는다. 그래서 공시 단계가 먼저 돌거나 오래 돌아도 재무 단계의 몫을
  * 깎지 않는다. 몫을 적지 않은 예전 기록의 호출 수는 {@value #MAIN} 몫으로 본다.
  * <pre>{"calls":10500,"stopped":false,"lanes":{"main":10000,"disclosures":500}}</pre>

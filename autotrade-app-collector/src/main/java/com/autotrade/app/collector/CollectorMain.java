@@ -45,11 +45,11 @@ public final class CollectorMain {
     static final String VERSION = "0.1.0";
     /** KRX Open API 이용약관 제8조 ④ 키당 하루 10,000회(D-050). */
     static final int KRX_TERMS_DAILY_LIMIT = 10_000;
-    /** OpenDART 개발가이드 "일반적으로 20,000건" `[가정]`(D-050). 재무·공시 몫을 합친 같은 키의 하루 합 상한이다(D-122). */
+    /** OpenDART 개발가이드 "일반적으로 20,000건" `[가정]`(D-050). 재무·공시 몫을 합친 같은 키의 하루 합 상한이다(D-123). */
     static final int DART_DAILY_LIMIT = 20_000;
     /** 재무 몫 기본 상한(ADR-008 2장, 가이드 한도의 절반). */
     static final int DART_FINANCIALS_DEFAULT = 10_000;
-    /** 공시 몫 기본 상한 `[가정]`(D-122). 재무 몫과 따로 세므로 재무 기본 상한을 깎지 않는다(합 12,000 ≤ 20,000). */
+    /** 공시 몫 기본 상한 `[가정]`(D-123). 재무 몫과 따로 세므로 재무 기본 상한을 깎지 않는다(합 12,000 ≤ 20,000). */
     static final int DART_DISCLOSURES_DEFAULT = 2_000;
     /** 공시 몫 상한의 최대: 재무 기본 몫 10,000회를 남기는 값(어느 쪽을 먼저 돌려도 재무 기본 몫은 늘 남는다). */
     static final int DART_DISCLOSURES_MAX = DART_DAILY_LIMIT - DART_FINANCIALS_DEFAULT;
@@ -188,7 +188,7 @@ public final class CollectorMain {
         LocalDate yesterday = LocalDate.now(clock.withZone(CallBudget.SEOUL)).minusDays(1);
         LocalDate to = o.to != null ? o.to : yesterday;
         LocalDate from = o.from != null ? o.from : LocalDate.of(2016, 1, 1);
-        // 재무 몫은 공시 몫과 따로 센다: 공시 수집이 먼저 돌아도 재무 기본 몫을 깎지 않는다(D-122)
+        // 재무 몫은 공시 몫과 따로 센다: 공시 수집이 먼저 돌아도 재무 기본 몫을 깎지 않는다(D-123)
         CallBudget budget = new CallBudget(o.budgetDir(), "opendart", CallBudget.MAIN, o.maxCalls(DART_FINANCIALS_DEFAULT),
                 DART_DAILY_LIMIT, clock);
         Redaction redaction = new Redaction(List.of(secrets.openDartKey()));
@@ -235,7 +235,7 @@ public final class CollectorMain {
     }
 
     /**
-     * 공시 목록 수집과 공시 스냅샷(ADR-012 3.4, D-122). 같은 OpenDART 키를 쓰지만 호출은 공시 몫({@value #DISCLOSURES_LANE})으로
+     * 공시 목록 수집과 공시 스냅샷(ADR-012 3.4, D-123). 같은 OpenDART 키를 쓰지만 호출은 공시 몫({@value #DISCLOSURES_LANE})으로
      * 따로 세고, 키 전체 합은 {@value #DART_DAILY_LIMIT}회로 막는다. 상한에 닿아 멈춰도 그 전까지 다 받은 창(최근 것부터)으로
      * 스냅샷을 만들고 종료 코드 3으로 끝난다. 재무 수집 뒤에 돌리는 것이 기본 순서다(runbook collector.md 4장).
      */
@@ -539,7 +539,7 @@ public final class CollectorMain {
             }
             int limit = switch (o.command) {
                 case "krx-daily" -> KRX_TERMS_DAILY_LIMIT;
-                case "dart-disclosures" -> DART_DISCLOSURES_MAX; // 재무 기본 몫을 남긴다(D-122)
+                case "dart-disclosures" -> DART_DISCLOSURES_MAX; // 재무 기본 몫을 남긴다(D-123)
                 default -> DART_DAILY_LIMIT;
             };
             if (o.maxCalls != null && (o.maxCalls < 1 || o.maxCalls > limit)) {

@@ -230,7 +230,7 @@ final class ResultBundleReader {
         JsonNode fin = in.get("financials");
         boolean noShares = shares == null || shares.isNull();
         boolean noFin = fin == null || fin.isNull();
-        JsonNode dis = in.get("disclosures"); // 공시 조건이 있는 선정만(D-122)
+        JsonNode dis = in.get("disclosures"); // 공시 조건이 있는 선정만(D-123)
         boolean noDis = dis == null || dis.isNull();
         SelectionResult.Inputs inputs = new SelectionResult.Inputs(text(bars, "snapshot_id"), text(bars, "sha256"),
                 date(bars, "last_trading_date"),

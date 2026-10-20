@@ -61,7 +61,7 @@ public final class SnapshotWriter implements AutoCloseable {
     }
 
     /**
-     * 해시 기준 파일이 여럿인 스냅샷(공시 스냅샷: 행 파일과 유형별 수집 구간 파일, D-122). 하나면 그 파일의 SHA-256, 여럿이면
+     * 해시 기준 파일이 여럿인 스냅샷(공시 스냅샷: 행 파일과 유형별 수집 구간 파일, D-123). 하나면 그 파일의 SHA-256, 여럿이면
      * {@code <이름>:<SHA-256>\n} 줄들(주어진 순서)의 SHA-256으로 ID를 만든다. 그래서 행이 같아도 수집 구간이 다르면 ID가 다르다.
      */
     public Path commit(String prefix, String idDate, List<String> hashFiles, String createdAt, String scriptVersion,

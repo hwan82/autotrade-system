@@ -1,4 +1,4 @@
-# D-122 공시 스냅샷 수집(dart-disclosures)·지표 disclosure-count·프로필 (라)
+# D-123 공시 스냅샷 수집(dart-disclosures)·지표 disclosure-count·프로필 (라)
 
 - 날짜: 2026-10-20
 - 상태: 확정 · **추천안 채택(자율)**(지침 8장). 실전 주문 경로·RealTradingGuard·블랙리스트·리스크 한도·보호 경로(`autotrade-marketdata`·`autotrade-domain`·`autotrade-config`·아키텍처 시험)는 바꾸지 않는다.

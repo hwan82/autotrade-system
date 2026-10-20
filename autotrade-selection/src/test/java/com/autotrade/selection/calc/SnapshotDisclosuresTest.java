@@ -15,7 +15,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** 공시 스냅샷 폴더 읽기(수집 명령 dart-disclosures가 쓰는 형식, D-122). */
+/** 공시 스냅샷 폴더 읽기(수집 명령 dart-disclosures가 쓰는 형식, D-123). */
 class SnapshotDisclosuresTest {
 
     @TempDir

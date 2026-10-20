@@ -203,7 +203,7 @@ function conditionEditor(base, style, cat, onSave, saveLabel) {
     const op = h('select', { 'aria-label': '연산' }, cat.ops.map(o => h('option', { value: o, selected: o === (g.op || 'GE') }, OP[o] || o)));
     const value = h('input', { class: 'narrow', inputmode: 'decimal', value: g.value || '', 'aria-label': '기준값', autocomplete: 'off' });
     const period = periodInput(cat, metric, g.window || g.years);
-    // 공시 유형(gate.<nn>.types, disclosure-count만, D-122): 공시 지표를 고르면 켠다
+    // 공시 유형(gate.<nn>.types, disclosure-count만, D-123): 공시 지표를 고르면 켠다
     const types = h('input', { class: 'narrow', value: g.types || '', 'aria-label': '공시 유형', placeholder: 'B,I', autocomplete: 'off' });
     const typesEl = h('span', { class: 'inline-fields' }, h('span', { class: 'muted small' }, ' 유형 '), types);
     const syncTypes = () => {

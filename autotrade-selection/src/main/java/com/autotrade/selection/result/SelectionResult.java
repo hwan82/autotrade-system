@@ -123,7 +123,7 @@ public record SelectionResult(
      * @param financialsLastCollectedAt 재무 스냅샷 마지막 수집 시각(UTC ISO). 모르면 null
      * @param calendarDigest 거래일 계산에 쓴 캘린더 출처 요약 해시
      * @param disclosuresSnapshotId 공시 조건이 없으면 null(그때 공시 칸 전체가 null이고 파일에 {@code disclosures} 키를 쓰지 않는다.
-     *     공시 지표 전에 만든 결과의 내용 해시가 바뀌지 않게, ADR-012 3.2·D-122)
+     *     공시 지표 전에 만든 결과의 내용 해시가 바뀌지 않게, ADR-012 3.2·D-123)
      * @param disclosuresCoveredThrough 공시 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날(기준 데이터일 이상)
      */
     public record Inputs(
