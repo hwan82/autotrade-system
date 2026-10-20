@@ -81,6 +81,11 @@ public final class SampleReports {
      * 첫 두 주의 결과만 본문을 넣고(첫 주 결과에 정정 대체 규칙 1건), 그 뒤 주는 본문 없음이다.
      */
     public static ComboSample combos(String experimentId, int tradingDays) {
+        return combos(experimentId, tradingDays, false);
+    }
+
+    /** @param disclosures 선정 결과 입력에 공시 스냅샷(D-122)을 넣을지 */
+    public static ComboSample combos(String experimentId, int tradingDays, boolean disclosures) {
         List<LocalDate> days = weekdays(LocalDate.of(2026, 9, 1), tradingDays);
         LocalDate from = days.get(0);
         LocalDate to = days.get(days.size() - 1);
@@ -105,7 +110,7 @@ public final class SampleReports {
             }
             if (w < 2) {
                 LocalDate weekEnd = d.with(java.time.DayOfWeek.FRIDAY);
-                SelectionResult r = result(sel, d, weekEnd, w == 0);
+                SelectionResult r = result(sel, d, weekEnd, w == 0, disclosures);
                 results.add(r);
                 hashByWeek.put(w, r.contentHash());
                 java.util.TreeSet<Symbol> syms = new java.util.TreeSet<>();
@@ -140,10 +145,12 @@ public final class SampleReports {
     }
 
     private static SelectionResult result(SelectionProfile sel, LocalDate applyFrom, LocalDate applyTo,
-            boolean withFallback) {
+            boolean withFallback, boolean disclosures) {
         SelectionResult.Inputs inputs = new SelectionResult.Inputs("KRX-DAILY-20260930", "0".repeat(64),
                 applyFrom.minusDays(1), "KRX-SHARES-20260930", applyFrom.minusDays(1), "DART-FIN-20260930",
-                "1".repeat(64), "2026-08-31T09:00:00Z", "2".repeat(64));
+                "1".repeat(64), "2026-08-31T09:00:00Z", "2".repeat(64),
+                disclosures ? "dart-disclosures-2026-09-30-0a1b2c3d" : null, disclosures ? "3".repeat(64) : null,
+                disclosures ? applyFrom.minusDays(1) : null);
         List<SelectionResult.Evaluation> evals = List.of(
                 new SelectionResult.Evaluation("005930", true, List.of(), values("0.8", "0.4"), false),
                 new SelectionResult.Evaluation("000660", true, List.of(), values("0.6", "0.9"), withFallback),

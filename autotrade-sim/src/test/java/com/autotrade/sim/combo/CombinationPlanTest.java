@@ -41,6 +41,7 @@ class CombinationPlanTest {
         assertThat(p.to()).isEqualTo(LocalDate.of(2026, 10, 8));
         assertThat(p.seedCapital()).isEqualTo(Money.of(10_000_000, Money.KRW));
         assertThat(p.financialsSnapshot()).contains("dart-financials-2026-10-08-5e6f7a8b");
+        assertThat(p.disclosuresSnapshot()).isEmpty();
         assertThat(p.benchmark()).isEmpty();
         assertThat(p.parallelism()).isEqualTo(4);
         assertThat(p.combinations()).extracting(CombinationPlan.Entry::text)
@@ -65,5 +66,13 @@ class CombinationPlanTest {
                 .hasMessageContaining("읽을 수 없는 줄");
         assertThatThrownBy(() -> CombinationPlan.parse(SAMPLE.replace("\"000660\"", "\"66\""), "f"))
                 .hasMessageContaining("종목 코드");
+    }
+
+    @Test
+    void 공시_스냅샷_키를_읽는다() {
+        CombinationPlan p = CombinationPlan.parse(SAMPLE.replace("benchmark:",
+                "disclosures-snapshot: \"dart-disclosures-2026-10-19-9a0b1c2d\"\nbenchmark:"), "f");
+
+        assertThat(p.disclosuresSnapshot()).contains("dart-disclosures-2026-10-19-9a0b1c2d");
     }
 }

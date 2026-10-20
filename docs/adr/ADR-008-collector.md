@@ -21,7 +21,7 @@
 ### 2.1 수집기는 Java 단발 일괄 명령 `autotrade-app-collector` (Q-037)
 
 - 새 부트 모듈 `autotrade-app-collector`(패키지 `com.autotrade.app.collector`), 진입점 `CollectorMain`, 배포 이름 `autotrade-collector`(`installDist`). D-013의 상주 프로세스 4개에 넣지 않는 **단발 명령**이다. 실행이 끝나면 종료한다(`symbolMaster`, ADR-007의 선정 일괄 명령과 같은 자리).
-- 명령 두 개: `krx-daily`(일봉·상장주식수·종목 이력), `dart-financials`(사업보고서 재무). 실행 수단은 사용자가 손으로 또는 OS 예약 작업(장 마감 뒤)으로. 절차는 [수집기 runbook](../runbooks/collector.md).
+- 명령 두 개: `krx-daily`(일봉·상장주식수·종목 이력), `dart-financials`(사업보고서 재무). 세 번째 명령 `dart-disclosures`(공시 목록)는 [ADR-012](ADR-012-intraday-selection.md) 3.4·[D-122](../decisions/D-122-disclosure-snapshot.md)에서 더했다. 실행 수단은 사용자가 손으로 또는 OS 예약 작업(장 마감 뒤)으로. 절차는 [수집기 runbook](../runbooks/collector.md).
 - 의존: domain, marketdata(스냅샷 계약·CSV·SHA-256), config(설정 폴더 위치 규칙과 `Secret` 타입만), Jackson. **런타임 금지**(`verifyProcessIsolation`): sim, app-lab, ui, risk, strategy, control, broker-api·kiwoom·kis, app-engine·gateway·watchdog, Spring.
 - 부르는 곳은 KRX Open API와 OpenDART뿐이다. 증권사 API, 실시간 시세, 주문을 쓰지 않는다(D-019 3번 경계를 그대로 유지).
 - `collectors/python/`에는 수집기를 두지 않는다. CI 경계 검사(`scripts/ci/check-python-collectors.sh`)는 나중에 누가 Python 스크립트를 넣을 때를 막도록 남기고, MD-11대로 `crtfc_key` 패턴을 더한다.

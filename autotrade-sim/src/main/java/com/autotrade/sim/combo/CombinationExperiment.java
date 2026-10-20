@@ -113,7 +113,8 @@ public final class CombinationExperiment {
             throw new IllegalArgumentException("일봉 조합 실험은 국내(KRX)만 지원합니다: " + plan.market());
         }
         ExchangeCalendar calendar = ExchangeCalendar.bundled(Market.KRX);
-        SnapshotInputs in = SnapshotInputs.load(Market.KRX, plan.barsSnapshot(), plan.financialsSnapshot(), snapshotsRoot,
+        SnapshotInputs in = SnapshotInputs.load(Market.KRX, plan.barsSnapshot(), plan.financialsSnapshot(),
+                plan.disclosuresSnapshot(), snapshotsRoot,
                 calendar, gate, log, (first, last) -> {
                     if (plan.from().isBefore(first) || plan.to().isAfter(last)) {
                         throw new IllegalArgumentException("실험 기간이 스냅샷 범위 밖입니다: " + plan.from() + " ~ " + plan.to()

@@ -122,14 +122,29 @@ public record SelectionResult(
      * @param financialsSnapshotId 재무 조건이 없으면 null(그때 재무 칸 전체가 null)
      * @param financialsLastCollectedAt 재무 스냅샷 마지막 수집 시각(UTC ISO). 모르면 null
      * @param calendarDigest 거래일 계산에 쓴 캘린더 출처 요약 해시
+     * @param disclosuresSnapshotId 공시 조건이 없으면 null(그때 공시 칸 전체가 null이고 파일에 {@code disclosures} 키를 쓰지 않는다.
+     *     공시 지표 전에 만든 결과의 내용 해시가 바뀌지 않게, ADR-012 3.2·D-122)
+     * @param disclosuresCoveredThrough 공시 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날(기준 데이터일 이상)
      */
     public record Inputs(
             String barsSnapshotId, String barsSha256, LocalDate barsLastTradingDate,
             String sharesSnapshotId, LocalDate sharesAsOfDate,
             String financialsSnapshotId, String financialsSha256, String financialsLastCollectedAt,
-            String calendarDigest) {
+            String calendarDigest, String disclosuresSnapshotId, String disclosuresSha256, LocalDate disclosuresCoveredThrough) {
+
+        /** 공시 입력이 없는 결과. */
+        public Inputs(String barsSnapshotId, String barsSha256, LocalDate barsLastTradingDate, String sharesSnapshotId,
+                LocalDate sharesAsOfDate, String financialsSnapshotId, String financialsSha256, String financialsLastCollectedAt,
+                String calendarDigest) {
+            this(barsSnapshotId, barsSha256, barsLastTradingDate, sharesSnapshotId, sharesAsOfDate, financialsSnapshotId,
+                    financialsSha256, financialsLastCollectedAt, calendarDigest, null, null, null);
+        }
 
         public Inputs {
+            if ((disclosuresSnapshotId == null) != (disclosuresSha256 == null)
+                    || (disclosuresSnapshotId == null) != (disclosuresCoveredThrough == null)) {
+                throw new IllegalArgumentException("공시 스냅샷 ID·SHA-256·수집 끝날은 함께 있거나 함께 없어야 합니다");
+            }
             Objects.requireNonNull(barsSnapshotId, "barsSnapshotId");
             Objects.requireNonNull(barsSha256, "barsSha256");
             Objects.requireNonNull(barsLastTradingDate, "barsLastTradingDate");
@@ -158,6 +173,10 @@ public record SelectionResult(
                 m.put("financials", f);
             }
             m.put("calendar", Map.of("sources_digest", calendarDigest));
+            if (disclosuresSnapshotId != null) {
+                m.put("disclosures", Map.of("snapshot_id", disclosuresSnapshotId, "sha256", disclosuresSha256,
+                        "covered_through", disclosuresCoveredThrough.toString()));
+            }
             return m;
         }
     }

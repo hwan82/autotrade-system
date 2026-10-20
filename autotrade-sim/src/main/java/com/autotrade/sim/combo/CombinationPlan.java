@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
  * seed-capital: "10000000"
  * bars-snapshot: "krx-daily-2026-10-08-1a2b3c4d"
  * financials-snapshot: "dart-financials-2026-10-08-5e6f7a8b"   # 재무 조건 선정이 없으면 생략
+ * disclosures-snapshot: "dart-disclosures-2026-10-08-9a0b1c2d" # 공시 조건(disclosure-count) 선정이 없으면 생략(D-122)
  * benchmark: "none"                                            # 또는 종목 코드
  * parallelism: "4"
  * combinations:
@@ -56,13 +57,14 @@ public record CombinationPlan(
         Money seedCapital,
         String barsSnapshot,
         Optional<String> financialsSnapshot,
+        Optional<String> disclosuresSnapshot,
         Optional<String> benchmark,
         int parallelism,
         List<Entry> combinations,
         List<String> blacklist) {
 
     private static final Set<String> SCALARS = Set.of("id", "question", "market", "from", "to", "seed", "seed-capital",
-            "bars-snapshot", "financials-snapshot", "benchmark", "parallelism");
+            "bars-snapshot", "financials-snapshot", "disclosures-snapshot", "benchmark", "parallelism");
     private static final Set<String> LISTS = Set.of("combinations", "blacklist");
     private static final Pattern REF = Pattern.compile("([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)");
     private static final Pattern ENTRY = Pattern.compile("(none|[a-z0-9][a-z0-9-]*@[1-9][0-9]*) x ([a-z0-9][a-z0-9-]*@[1-9][0-9]*)");
@@ -109,6 +111,7 @@ public record CombinationPlan(
         Objects.requireNonNull(seedCapital, "seedCapital");
         Objects.requireNonNull(barsSnapshot, "barsSnapshot");
         Objects.requireNonNull(financialsSnapshot, "financialsSnapshot");
+        Objects.requireNonNull(disclosuresSnapshot, "disclosuresSnapshot");
         Objects.requireNonNull(benchmark, "benchmark");
         combinations = List.copyOf(combinations);
         blacklist = List.copyOf(blacklist);
@@ -140,6 +143,7 @@ public record CombinationPlan(
         ExperimentId id = new ExperimentId(required(s, "id"));
         String barsSnapshot = snapshot(required(s, "bars-snapshot"));
         Optional<String> financials = Optional.ofNullable(s.get("financials-snapshot")).map(CombinationPlan::snapshot);
+        Optional<String> disclosures = Optional.ofNullable(s.get("disclosures-snapshot")).map(CombinationPlan::snapshot);
         String bench = s.getOrDefault("benchmark", "none");
         Optional<String> benchmark = bench.equals("none") ? Optional.empty() : Optional.of(code(bench));
         Market market = Market.valueOf(required(s, "market"));
@@ -163,7 +167,7 @@ public record CombinationPlan(
         }
         return new CombinationPlan(id, required(s, "question"), market, LocalDate.parse(required(s, "from")),
                 LocalDate.parse(required(s, "to")), Long.parseLong(required(s, "seed")),
-                Money.of(capital, market.currency()), barsSnapshot, financials, benchmark,
+                Money.of(capital, market.currency()), barsSnapshot, financials, disclosures, benchmark,
                 Integer.parseInt(s.getOrDefault("parallelism", "1")), entries, List.copyOf(black));
     }
 

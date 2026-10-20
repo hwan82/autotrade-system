@@ -92,7 +92,7 @@ memory.used=85:95:3
 | 키 | 형식 | 기본값 | 설명 |
 |---|---|---|---|
 | `krx.auth-key` 🔒 | 문자열 | 빈 값 | KRX Open API 인증키(`AUTH_KEY` 헤더). 비면 `krx-daily`가 오류로 끝난다 |
-| `opendart.crtfc-key` 🔒 | 문자열 | 빈 값 | OpenDART 인증키(쿼리 `crtfc_key`, 로그·오류 메시지에서 가림). 비면 `dart-financials`가 오류로 끝난다 |
+| `opendart.crtfc-key` 🔒 | 문자열 | 빈 값 | OpenDART 인증키(쿼리 `crtfc_key`, 로그·오류 메시지에서 가림). 비면 `dart-financials`·`dart-disclosures`가 오류로 끝난다 |
 
 ## 예시 (자리표시자)
 `runtime-config.json`

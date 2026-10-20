@@ -97,6 +97,7 @@ public final class SelectionCalculator {
         List<LocalDate> window = days.lastN(cutoff, criteria.lookbackDays());
         Set<Metric.Kind> kinds = criteria.inputKinds();
         checkInputs(kinds, cutoff);
+        checkDisclosures(criteria, cutoff, window);
 
         List<Scored> passed = new ArrayList<>();
         Map<String, SelectionResult.Evaluation> evaluations = new TreeMap<>();
@@ -135,7 +136,10 @@ public final class SelectionCalculator {
                         ? data.financials().map(SelectionData.FinancialSnapshotInfo::sha256).orElse(null) : null,
                 kinds.contains(Metric.Kind.FINANCIAL)
                         ? data.financials().map(SelectionData.FinancialSnapshotInfo::lastCollectedAt).orElse(null) : null,
-                data.calendarDigest());
+                data.calendarDigest(),
+                kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().snapshotId() : null,
+                kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().sha256() : null,
+                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, cutoff) : null);
         return new SelectionResult(SelectionResult.Selection.of(profile), applyFrom, applyToFor(profile, applyFrom),
                 inputs, selected, List.copyOf(evaluations.values()));
     }
@@ -169,6 +173,55 @@ public final class SelectionCalculator {
                         + "보다 이릅니다: " + f.snapshotId());
             }
         }
+    }
+
+    /** 사유 코드: 공시 조건의 유형을 스냅샷이 받지 않음(ADR-012 3.2, strategy-researcher PR #191 m3). 계산 실패 메시지 머리말. */
+    public static final String INPUT_TYPE_MISSING = "INPUT_TYPE_MISSING";
+
+    /**
+     * 공시 조건이 쓰는 유형을 스냅샷이 받았고, 조건 구간(첫날 ~ c)을 수집 구간이 통째로 덮는지 본다. 모자라면 "공시 0건"으로 내지 않고
+     * 실패한다(0건과 미수록을 구분, ADR-012 3.2). 메시지는 {@code STALE_INPUT:}·{@code INPUT_TYPE_MISSING:}으로 시작한다.
+     */
+    private void checkDisclosures(SelectionCriteria c, LocalDate cutoff, List<LocalDate> window) {
+        if (!c.inputKinds().contains(Metric.Kind.DISCLOSURE)) {
+            return;
+        }
+        SelectionData.DisclosureInput in = data.disclosures()
+                .orElseThrow(() -> new IllegalStateException("STALE_INPUT: 공시 조건이 있는데 공시 입력이 없습니다"));
+        for (Condition g : c.gates()) {
+            if (g.metric() != Metric.DISCLOSURE_COUNT) {
+                continue;
+            }
+            LocalDate from = disclosureFrom(window, g.period());
+            for (String t : g.types()) {
+                if (!in.types().contains(t)) {
+                    throw new IllegalStateException(INPUT_TYPE_MISSING + ": " + g.id() + " 공시 유형 " + t + "를 공시 스냅샷이 받지 않았습니다: "
+                            + in.snapshotId() + " (받은 유형 " + String.join(",", in.types()) + ")");
+                }
+                if (!in.covers(t, from, cutoff)) {
+                    throw new IllegalStateException("STALE_INPUT: 공시 스냅샷이 " + g.id() + " 구간 " + from + " ~ " + cutoff
+                            + "의 유형 " + t + "를 다 담지 않았습니다: " + in.snapshotId());
+                }
+            }
+        }
+    }
+
+    /** 공시 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날(선정 결과 {@code inputs.disclosures.covered_through}). */
+    private LocalDate disclosuresThrough(SelectionCriteria c, LocalDate cutoff) {
+        SelectionData.DisclosureInput in = data.disclosures().orElseThrow();
+        LocalDate out = null;
+        for (Condition g : c.gates()) {
+            for (String t : g.types()) {
+                LocalDate end = in.coveredThrough(t, cutoff);
+                out = out == null || end.isBefore(out) ? end : out;
+            }
+        }
+        return out;
+    }
+
+    /** {@code disclosure-count} 구간 첫날: c에서 끝나는 w거래일 중 첫 거래일의 앞 거래일 다음 날(휴장일 접수분이 다음 거래일 구간에 듦). */
+    private static LocalDate disclosureFrom(List<LocalDate> window, int w) {
+        return window.get(window.size() - w - 1).plusDays(1);
     }
 
     private record Scored(Symbol symbol, Eval eval) {
@@ -214,7 +267,7 @@ public final class SelectionCalculator {
         }
         Context ctx = new Context(symbol, applyFrom, cutoff, window, bars);
         for (Condition g : c.gates()) {
-            Value v = value(ctx, g.metric(), g.period());
+            Value v = g.metric() == Metric.DISCLOSURE_COUNT ? disclosureCount(ctx, g) : value(ctx, g.metric(), g.period());
             if (v.fallback) {
                 e.fallback = true;
             }
@@ -301,6 +354,7 @@ public final class SelectionCalculator {
             case DAY_RANGE -> dayRange(ctx);
             case CLOSE_STRENGTH -> closeStrength(ctx);
             case VOLUME_SPIKE -> volumeSpike(ctx, period);
+            case DISCLOSURE_COUNT -> throw new IllegalStateException("disclosure-count는 자격 조건으로만 계산합니다");
             case OP_MARGIN -> latestRatio(ctx, f -> margin(f));
             case DEBT_RATIO -> debtRatio(ctx);
             case OP_MARGIN_GROWTH -> growth(ctx, period, FinancialItem.OP_MARGIN);
@@ -424,6 +478,16 @@ public final class SelectionCalculator {
         }
         BigDecimal last = adjustedVolume(bars.get(w));
         return Value.of(last.multiply(BigDecimal.valueOf(w), WIDE).divide(prior, WIDE), false);
+    }
+
+    /**
+     * 구간(첫 거래일의 앞 거래일 다음 날 ~ c)에 접수된 그 종목 공시 건수. 접수일 ≤ c만 세므로 T 당일 접수 공시(장 전 공시 포함)는
+     * 쓰지 않는다(ADR-012 3.1). 0건은 정상값 0이다(스냅샷이 구간을 덮는지는 계산 전에 {@link #checkDisclosures}로 확인).
+     */
+    private Value disclosureCount(Context ctx, Condition g) {
+        LocalDate from = disclosureFrom(ctx.window, g.period());
+        int n = data.disclosures().orElseThrow().count(ctx.symbol, g.types(), from, ctx.cutoff);
+        return Value.of(BigDecimal.valueOf(n), false);
     }
 
     /** 재무 항목(성장률 계산용). */

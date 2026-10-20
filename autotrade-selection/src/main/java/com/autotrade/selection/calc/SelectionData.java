@@ -58,6 +58,34 @@ public interface SelectionData {
     /** 거래일 계산에 쓴 캘린더 출처 요약 해시. */
     String calendarDigest();
 
+    /** 공시 입력(지표 {@code disclosure-count}, ADR-012 3.2). 입력이 없으면 빈 값. */
+    default Optional<DisclosureInput> disclosures() {
+        return Optional.empty();
+    }
+
+    /**
+     * 공시 스냅샷(D-122). 세는 행은 종목 코드가 붙고 정정 공시가 아닌 행이다({@link SnapshotDisclosures}).
+     */
+    interface DisclosureInput {
+
+        String snapshotId();
+
+        /** {@code disclosures.csv} SHA-256. */
+        String sha256();
+
+        /** 스냅샷이 받은 공시 유형. */
+        java.util.SortedSet<String> types();
+
+        /** 그 유형을 {@code [from, to]} 모든 날에 걸쳐 받았는지(수집 구간 하나가 통째로 덮음). */
+        boolean covers(String type, LocalDate from, LocalDate to);
+
+        /** {@code date}를 덮는 그 유형 수집 구간의 끝날. 덮지 않으면 null. */
+        LocalDate coveredThrough(String type, LocalDate date);
+
+        /** 접수일이 {@code [from, to]}인 그 종목의 공시 건수(주어진 유형 합). */
+        int count(Symbol symbol, java.util.Set<String> types, LocalDate from, LocalDate to);
+    }
+
     /**
      * @param lastCollectedAt 마지막 수집 시각(UTC ISO). 모르면 null
      * @param collectedDate 그 시각의 거래소 현지 날짜. 모르면 null(재무 조건을 쓰는 계산은 실패)

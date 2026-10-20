@@ -230,12 +230,16 @@ final class ResultBundleReader {
         JsonNode fin = in.get("financials");
         boolean noShares = shares == null || shares.isNull();
         boolean noFin = fin == null || fin.isNull();
+        JsonNode dis = in.get("disclosures"); // 공시 조건이 있는 선정만(D-122)
+        boolean noDis = dis == null || dis.isNull();
         SelectionResult.Inputs inputs = new SelectionResult.Inputs(text(bars, "snapshot_id"), text(bars, "sha256"),
                 date(bars, "last_trading_date"),
                 noShares ? null : text(shares, "snapshot_id"), noShares ? null : date(shares, "as_of_date"),
                 noFin ? null : text(fin, "snapshot_id"), noFin ? null : nullableText(fin, "sha256"),
                 noFin ? null : nullableText(fin, "last_collected_at"),
-                text(in.get("calendar"), "sources_digest"));
+                text(in.get("calendar"), "sources_digest"),
+                noDis ? null : text(dis, "snapshot_id"), noDis ? null : text(dis, "sha256"),
+                noDis ? null : date(dis, "covered_through"));
         List<SelectionResult.Selected> selected = new ArrayList<>();
         b.get("selected").forEach(x -> selected.add(new SelectionResult.Selected(text(x, "code"), x.path("rank").asInt())));
         List<SelectionResult.Evaluation> evaluations = new ArrayList<>();

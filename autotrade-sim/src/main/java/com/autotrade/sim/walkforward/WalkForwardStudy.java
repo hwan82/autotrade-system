@@ -110,7 +110,8 @@ public final class WalkForwardStudy {
         List<Window> windows = WalkForwardWindows.compute(plan.firstTestFrom(), plan.trainYears(), plan.testYears(),
                 plan.windows());
         ExchangeCalendar calendar = ExchangeCalendar.bundled(Market.KRX);
-        SnapshotInputs in = SnapshotInputs.load(Market.KRX, plan.barsSnapshot(), plan.financialsSnapshot(), snapshotsRoot,
+        SnapshotInputs in = SnapshotInputs.load(Market.KRX, plan.barsSnapshot(), plan.financialsSnapshot(),
+                plan.disclosuresSnapshot(), snapshotsRoot,
                 calendar, gate, log, (first, last) -> WalkForwardWindows.checkCoverage(windows, first, last));
         LocalDate spanFrom = DailyBarMarketDataSet.warmupStart(in.days().dates(), windows.get(0).trainFrom(),
                 plan.warmupDays());

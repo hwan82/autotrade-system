@@ -246,7 +246,7 @@ class CombinationExperimentTest {
         CombinationPlan base = CombinationPlan.parse(Files.readString(experiment(COMBOS).resolve("experiment.yaml")), "f");
         CombinationPlan late = new CombinationPlan(base.id(), base.question(), base.market(), base.from(),
                 DAYS.get(79).plusDays(7), base.seed(), base.seedCapital(), base.barsSnapshot(), base.financialsSnapshot(),
-                base.benchmark(), 1, base.combinations(), base.blacklist());
+                base.disclosuresSnapshot(), base.benchmark(), 1, base.combinations(), base.blacklist());
         assertThatThrownBy(() -> CombinationExperiment.run(late, Path.of(".."), snapshots, new CodeVersion("t", false),
                 false, s -> { })).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("스냅샷 범위 밖");
 

@@ -48,7 +48,16 @@ class WalkForwardPlanTest {
         assertThat(p.controls()).containsOnlyKeys(TradingStyle.SWING, TradingStyle.POSITION);
         assertThat(p.controls().get(TradingStyle.SWING).text()).isEqualTo("kr-random-daily-swing@1");
         assertThat(p.financialsSnapshot()).contains("dart-financials-2026-10-08-5e6f7a8b");
+        assertThat(p.disclosuresSnapshot()).isEmpty();
         assertThat(p.blacklist()).containsExactly("005930");
+    }
+
+    @Test
+    void 공시_스냅샷_키를_읽는다() {
+        WalkForwardPlan p = WalkForwardPlan.parse(VALID.replace("financials-snapshot:",
+                "disclosures-snapshot: \"dart-disclosures-2026-10-19-9a0b1c2d\"\nfinancials-snapshot:"), "f");
+
+        assertThat(p.disclosuresSnapshot()).contains("dart-disclosures-2026-10-19-9a0b1c2d");
     }
 
     @Test

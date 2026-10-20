@@ -73,6 +73,12 @@ final class CombinationReport {
             sb.append("  last-collected-at: ").append(f.lastCollectedAt() == null ? "unknown" : f.lastCollectedAt())
                     .append('\n');
         }, () -> sb.append("  snapshot: none\n"));
+        sd.disclosures().ifPresent(x -> { // 공시 조건이 있을 때만(예전 실행 기록 모양 그대로, D-122)
+            sb.append("disclosures:\n");
+            sb.append("  snapshot: ").append(x.snapshotId()).append('\n');
+            sb.append("  sha256: ").append(x.sha256()).append('\n');
+            sb.append("  types: ").append(String.join(",", x.types())).append('\n');
+        });
         SnapshotTradingDays.Derived d = c.tradingDays();
         sb.append("trading-days:\n");
         sb.append("  source: \"스냅샷 일봉 날짜 + 캘린더 대조\"\n");
@@ -113,7 +119,8 @@ final class CombinationReport {
                 .append(c.data().tradingDays().size()).append("일), 시드 ").append(plan.seed()).append(", 계좌별 시드머니 ")
                 .append(plan.seedCapital()).append('\n');
         sb.append("- 데이터: `").append(c.data().version()).append("`, 재무 `")
-                .append(plan.financialsSnapshot().orElse("none")).append("`, 종목 ").append(c.data().symbols().size())
+                .append(plan.financialsSnapshot().orElse("none")).append("`")
+                .append(plan.disclosuresSnapshot().map(x -> ", 공시 `" + x + "`").orElse("")).append(", 종목 ").append(c.data().symbols().size())
                 .append("(상장폐지 포함), 권리 변동으로 이은 종목 ").append(c.data().adjustedSymbols().size())
                 .append(", 거래정지로 뺀 일봉 ").append(c.data().haltedBars()).append('\n');
         sb.append("- 비용 `").append(c.cost().id()).append("`, 체결 `").append(c.execution().id()).append("` + 일봉 경로 `")
