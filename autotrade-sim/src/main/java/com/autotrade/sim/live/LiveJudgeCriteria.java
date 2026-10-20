@@ -16,6 +16,7 @@ import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -141,7 +142,7 @@ final class LiveJudgeCriteria {
     }
 
     /** 돌리지 않은 항목({@code codes})을 뺀 판정. 판정은 남은 항목으로 다시 낸다(참고 계좌, ADR-014 3.2). */
-    static Judgement without(Judgement j, java.util.Collection<String> codes) {
+    static Judgement without(Judgement j, Collection<String> codes) {
         List<Check> kept = j.checks().stream().filter(c -> !codes.contains(c.code())).toList();
         return new Judgement(verdict(kept), kept);
     }

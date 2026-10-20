@@ -192,7 +192,7 @@ class LiveJudgementTest {
         assertThat(latency).contains("| kr-orb-30 | ").doesNotContain("kr-vwap-reclaim");
         assertThat(judge(parallel(1)).report()).isEqualTo(r);
 
-        // 같은 계좌 구성에서 키가 없을 때의 레인(m = 2 → N = 41)과 비교: 시드 레인은 ID·시드·계좌가 앞에서부터 같다
+        // 같은 계좌 구성에서 참고 계좌만 있고 group-null-seeds가 없을 때의 레인(m = 1 → N = 20)과 비교: 시드 레인은 ID·시드·계좌가 앞에서부터 같다
         LiveSetup keyed = LiveSetup.of(plan, REPO);
         JudgeRoles.Roles keyedRoles = LiveJudgement.roles(keyed);
         LiveJudgement.Plan keyedLanes = LiveJudgement.lanes(keyed, keyedRoles, "v",
