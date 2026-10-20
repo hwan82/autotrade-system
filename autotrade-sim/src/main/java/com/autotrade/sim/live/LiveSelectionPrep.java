@@ -110,7 +110,9 @@ public final class LiveSelectionPrep {
 
     /** 등록 파일에 선정 조합 계좌가 있는지(준비할 것이 있는지). */
     public static boolean hasSelections(LivePlan plan) {
-        return !plan.selections().isEmpty();
+        // 장전 선정이 있는 등록만 준비한다. selection-input.daily는 장전 선정이 있을 때만 있고 그때는 반드시 있다
+        // (RegisteredSelections.requireInputs). 장중 순위 선정(INTRADAY_AT)만 있으면 준비할 것이 없다(D-127, architect PR #200 F3)
+        return !plan.selections().isEmpty() && plan.selections().daily().isPresent();
     }
 
     /**

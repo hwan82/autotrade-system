@@ -26,6 +26,7 @@
 6. **후보** = 선정 결과 − `blacklist`, 메우지 않는다(D-124 `SelectionCandidates`와 같은 규칙. 유니버스가 boards라 `NOT_SUBSCRIBED`는 생기지 않음).
 7. **계산 위치와 결정론**: 순위는 계좌에 이벤트를 주기 직전, 이벤트 경로에서 같은 추적기(`IntradayTracker`)로 매긴다.
    - 계산은 boards 크기만큼의 합계라 받는 큐를 막지 않는다. 일봉 선정을 경로 밖에서 미리 만드는 것(architect PR #191 F1)과는 다르다.
+   - 거래일이 거꾸로 가는 이벤트는 넣지 않고, 한 번 매긴 (선정, 거래일)은 다시 매기지 않는다(architect PR #200 F2).
    - 리플레이 실행기는 Run을 돌리기 전에 같은 이벤트를 같은 순서로 추적기에 준다. 계좌는 순위 전이면 이벤트마다 그날 판정을 다시 묻는다. 그래서 실시간 계좌와 리플레이 확인의 상세 보고서가 바이트로 같다(`LiveIntradaySessionTest`, 장 중간 재기동 포함).
 8. **입력**: 장중 순위 선정만 있는 등록은 `selection-input`을 쓰지 않는다(입력 기록만 씀). 장전 선정이 함께 있으면 `selection-input.daily`가 필요하다. 이 확인은 선정 프로필을 읽은 뒤 한다(`RegisteredSelections.requireInputs`).
 9. **결과 남기기**

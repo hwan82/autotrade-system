@@ -217,6 +217,20 @@ class IntradayTrackerTest {
         });
     }
 
+    @Test
+    void eventOfEarlierTradingDayDoesNotReopenRankedDay() {
+        // architect PR #200 F2: 다음 날 이벤트 뒤에 전날 이벤트가 와도 전날 순위·적용 시작 순번은 그대로다
+        IntradayTracker t = tracker();
+        dayOne().forEach(t::onEvent);
+        IntradayTracker.Ranked before = t.ranked().get(0);
+        t.onEvent(trade("005930", 100, at(D2, 9, 0, 0), 100, 1));
+        t.onEvent(trade("005930", 101, at(D1, 9, 10, 0), 150, 1000)); // 거래일이 거꾸로 감
+        t.onEvent(trade("005930", 102, at(D1, 9, 40, 0), 150, 1));
+        assertThat(t.ranked().get(0)).isEqualTo(before);
+        assertThat(t.day(momentum().selectionHash(), D1).activeFrom()).isEqualTo(20);
+        assertThat(t.day(momentum().selectionHash(), D2).awaiting()).isTrue();
+    }
+
     private static SelectionResult.Evaluation evaluation(IntradayTracker.Ranked r, String code) {
         return r.result().evaluations().stream().filter(e -> e.code().equals(code)).findFirst().orElseThrow();
     }

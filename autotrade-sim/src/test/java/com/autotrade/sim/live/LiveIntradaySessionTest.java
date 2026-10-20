@@ -131,6 +131,8 @@ class LiveIntradaySessionTest {
         Map<LocalDate, Long> rankedFrom = new TreeMap<>();
         LiveSession s = LiveSession.open(plan(true), REPO, sessions, clock, m -> { });
         assertThat(s.hasSelections()).isFalse(); // 장전 선정 파일은 쓰지 않는다
+        // 실험실 준비 스레드도 돌리지 않는다(준비할 장전 선정이 없음, architect PR #200 F3)
+        assertThat(LiveSelectionPrep.hasSelections(plan(true))).isFalse();
         for (int n = 0; n < events.size(); n++) {
             MarketEvent e = events.get(n);
             clock.now = e.receivedAt();

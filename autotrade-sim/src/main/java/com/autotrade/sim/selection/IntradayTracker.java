@@ -12,6 +12,7 @@ import com.autotrade.selection.profile.SelectionRefresh;
 import com.autotrade.selection.result.SessionSelectionResult;
 import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.exchange.VirtualExchange;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -104,6 +105,11 @@ public final class IntradayTracker implements SelectionDays {
             return;
         }
         LocalDate d = universe.rules().tradingDate(e.exchangeTime());
+        if (today != null && d.isBefore(today)) {
+            // 거래일이 거꾸로 가는 이벤트(늦게 온 전날 체결 등)는 넣지 않는다. 지난 날을 다시 열어 이미 매긴 순위를 덮으면 실시간과
+            // 리플레이 결과가 달라진다(architect PR #200 F2)
+            return;
+        }
         if (!d.equals(today)) {
             today = d;
             windows.clear();
@@ -148,7 +154,7 @@ public final class IntradayTracker implements SelectionDays {
      * 정규장 안이거나 {@code at} 이상(장 마감 뒤에 다시 붙은 경우 포함)이면 겹친다. 정규장 시작 전에 끝난 누락은 구간 밖이다.
      */
     private boolean overlapsWindow(DataGap g, LocalTime at) {
-        java.time.Instant atInstant = today.atTime(at).atZone(universe.rules().zone()).toInstant();
+        Instant atInstant = today.atTime(at).atZone(universe.rules().zone()).toInstant();
         if (!g.gapStart().isBefore(atInstant) || universe.rules().tradingDate(g.gapEnd()).isBefore(today)) {
             return false;
         }
@@ -164,8 +170,10 @@ public final class IntradayTracker implements SelectionDays {
             TreeSet<Symbol> symbols = new TreeSet<>();
             c.candidates().forEach(code -> symbols.add(new Symbol(p.market(), code)));
             String hash = r.contentHash();
-            days.get(h).put(d, SelectionDay.intraday(d, hash, symbols, sequence));
-            results.get(h).put(d, new Ranked(r, hash, c, sequence));
+            // 한 번 매긴 (선정, 거래일)은 다시 매기지 않는다(F2와 같은 이유)
+            if (days.get(h).putIfAbsent(d, SelectionDay.intraday(d, hash, symbols, sequence)) == null) {
+                results.get(h).put(d, new Ranked(r, hash, c, sequence));
+            }
         }
     }
 
