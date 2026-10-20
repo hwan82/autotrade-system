@@ -1,5 +1,6 @@
 package com.autotrade.sim.live;
 
+import com.autotrade.domain.MarketRules;
 import com.autotrade.domain.SessionPhase;
 import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
@@ -17,6 +18,7 @@ import com.autotrade.marketdata.recording.RecordingMeta;
 import com.autotrade.marketdata.recording.Sha256;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.exchange.MidpointTrades;
+import com.autotrade.sim.exchange.VirtualExchange;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.recording.RecordingExperiment;
@@ -129,7 +131,7 @@ public final class LiveWeeklyCheck {
      * 해석에 참고한다(PR #184 strategy-researcher R2). 판정 기준은 아니다.
      *
      * <p>앞 네 값은 정규장 접속 매매 체결 틱만 센다(PR #185 architect N2): 매매 단계({@code MarketRules#sessionPhase})가 접속
-     * 매매이고, 시가 단일가로 여는 시장(KRX)은 그 종목 그날 첫 정규장 체결(시가 단일가 체결)을 뺀다. 가상 거래소가 반 칸 틱을
+     * 매매이고, 시가 단일가로 여는 시장(KRX)은 시가 단일가 체결({@link OpeningPrints}, 가상 거래소와 같은 규칙)을 뺀다. 가상 거래소가 반 칸 틱을
      * 지정가 체결 근거에서 빼는 대상이 접속 매매이므로 비중을 그 분모로 본다. 빠진 체결 틱(장전·장후 시간외, 단일가 접수 구간,
      * 장 마감 뒤 종가 단일가 체결, 시가 단일가 체결)은 {@code otherTicks}·{@code otherMidpointTicks}로 따로 센다.
      */
@@ -144,9 +146,57 @@ public final class LiveWeeklyCheck {
     }
 
     /**
+     * 하루 입력 기록에서 종목별 시가 단일가 체결 틱을 가려낸다. 가상 거래소의 매매 단계 판정(VirtualExchange#phase, D-069·D-087)과
+     * 같은 규칙이다: 그날 그 종목 첫 정규장 이벤트(장 밖 이벤트와 단일가 접수 구간의 체결 이벤트는 세지 않음)가 개장 뒤
+     * {@link VirtualExchange#AUCTION_PRINT_GRACE} 이상 지나 오면(장중 시작) 시가 단일가 체결은 지난 것으로 보고, 아니면 접속
+     * 구간의 첫 체결을 시가 단일가 체결로, 그 전 호가는 접수 구간으로 본다. 공백이 먼저 오면 열린 것으로 본다. 체결 틱만이 아니라
+     * 그 종목의 모든 이벤트를 차례로 넣어야 한다(PR #190 architect N1·strategy-researcher R1).
+     */
+    static final class OpeningPrints {
+        private final MarketRules rules;
+        private final Set<Symbol> seen = new java.util.HashSet<>();
+        private final Set<Symbol> opened = new java.util.HashSet<>();
+
+        OpeningPrints(MarketRules rules) {
+            this.rules = rules;
+        }
+
+        boolean isOpeningPrint(MarketEvent event) {
+            if (!rules.opensWithAuction()) {
+                return false;
+            }
+            Instant t = event.exchangeTime();
+            SessionPhase phase = rules.sessionPhase(t);
+            if (phase == SessionPhase.CLOSED) {
+                return false;
+            }
+            boolean counted = !(event instanceof TradeTick && phase.isAuction());
+            boolean firstToday = counted ? seen.add(event.symbol()) : !seen.contains(event.symbol());
+            if (phase != SessionPhase.CONTINUOUS || opened.contains(event.symbol())) {
+                return false;
+            }
+            if (firstToday && rules.sessionPhase(t.minus(VirtualExchange.AUCTION_PRINT_GRACE)) == SessionPhase.CONTINUOUS) {
+                opened.add(event.symbol());
+                return false;
+            }
+            if (event instanceof TradeTick) {
+                opened.add(event.symbol());
+                return true;
+            }
+            if (event instanceof DataGap) {
+                opened.add(event.symbol());
+            }
+            return false;
+        }
+    }
+
+    /**
      * 사용자 PC에 BOOK-V6(D-118)이 들어간 첫 거래일. 그 전 코드는 반 칸 체결 틱을 받기 전에 거절해 세션을 멈췄으므로 입력 기록에
      * 남지 않았다(PR #184 검토 S3). 이 날짜 이하인 기록 날짜는 5장에 "중간가 0은 증거가 아님"으로 적는다(PR #185
-     * strategy-researcher R1). EXP-20261020-LIVE00 첫날이 09:18에 멈춘 뒤 같은 날 D-118로 재기동했으므로 그날은 두 구간이 섞인다.
+     * strategy-researcher R1). EXP-20261020-LIVE00 첫날이 09:18에 멈춘 뒤 같은 날 D-118로 재기동했으므로 그날은 두 구간이 섞인다
+     * `[가정]`: 멈춤은 사용자 PC {@code /api/live/status} stopReason({@code 005930 218750}, D-118 근거 줄)이고, 재기동 시각·커밋은
+     * 저장소에 기록이 없다. LIVE00 리포트에 남기면(PR #184 strategy-researcher R3) 그 기록을 근거로 바꾼다. 다른 PC에서는
+     * 이 날짜가 맞지 않을 수 있고 그때는 경고 문구만 달라진다(판정 무관).
      */
     static final LocalDate BOOK_V6_FIRST_DAY = LocalDate.of(2026, 10, 20);
 
@@ -336,7 +386,7 @@ public final class LiveWeeklyCheck {
         });
         long[] forwarded = {0};
         Map<Symbol, MidpointCount> midpoints = new java.util.TreeMap<>();
-        Set<Symbol> openingPrinted = new java.util.HashSet<>();
+        OpeningPrints openingPrints = new OpeningPrints(setup.rules());
         Map<Key, Integer> jCount = new HashMap<>();
         String jBefore = jDir == null ? null : fingerprintOf(jDir);
         RecordedDayStream.Summary jDay = null;
@@ -346,6 +396,7 @@ public final class LiveWeeklyCheck {
             jDay = RecordedDayStream.read(jDir, l -> {
                 spanBuilder.add(l);
                 MarketEvent e = l.event();
+                boolean openingPrint = setup.onBoards(e) && setup.inPlan(e) && openingPrints.isOpeningPrint(e);
                 if (e instanceof DataGap g && labGaps.containsKey(l.sourceId())) {
                     labGaps.merge(l.sourceId(), 1L, Long::sum);
                     ownGaps.add(new Gap(l.sourceId(), g));
@@ -360,7 +411,7 @@ public final class LiveWeeklyCheck {
                 if (e instanceof TradeTick t && setup.onBoards(e) && setup.inPlan(e)) {
                     boolean mid = MidpointTrades.isMidpoint(setup.rules(), t.symbol(), t.price());
                     boolean continuous = setup.rules().sessionPhase(t.exchangeTime()) == SessionPhase.CONTINUOUS
-                            && (!setup.rules().opensWithAuction() || !openingPrinted.add(t.symbol()));
+                            && !openingPrint;
                     midpoints.merge(t.symbol(), continuous
                             ? new MidpointCount(1, t.quantity(), mid ? 1 : 0, mid ? t.quantity() : 0, 0, 0)
                             : new MidpointCount(0, 0, 0, 0, 1, mid ? 1 : 0), MidpointCount::plus);

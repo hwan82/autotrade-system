@@ -547,6 +547,27 @@ class LiveWeeklyCheckTest {
         assertThat(row.midpoints().get(SAMSUNG)).isEqualTo(new LiveWeeklyCheck.MidpointCount(1, 7, 1, 7, 2, 1));
     }
 
+    @Test
+    void openingPrintsFollowTheVirtualExchangeRuleIncludingMidSessionStart() {
+        // PR #190 architect N1·strategy-researcher R1: 시가 단일가 체결 가려내기를 가상 거래소(60초 유예)와 맞춘다
+        var rules = LiveSetup.of(plan, REPO).rules();
+        LiveWeeklyCheck.OpeningPrints p = new LiveWeeklyCheck.OpeningPrints(rules);
+        java.util.function.Function<String, Instant> at = hm -> DAY1.atTime(java.time.LocalTime.parse(hm)).atZone(SEOUL)
+                .toInstant();
+        java.util.function.BiFunction<Long, String, TradeTick> trade = (seq, hm) -> new TradeTick(SAMSUNG, seq, at.apply(hm),
+                at.apply(hm).plusMillis(20), new BigDecimal("60000"), 1);
+        // 장전 시간외 체결(08:35, 접수 구간 체결 이벤트)은 세지 않고, 개장 직후 첫 체결이 시가 단일가 체결
+        assertThat(p.isOpeningPrint(trade.apply(1L, "08:35:00"))).isFalse();
+        assertThat(p.isOpeningPrint(trade.apply(2L, "09:00:20"))).isTrue();
+        assertThat(p.isOpeningPrint(trade.apply(3L, "09:00:25"))).isFalse();
+        // 하이닉스: 개장 뒤 한참 지나 첫 이벤트(장중 시작)면 시가 단일가 체결은 지났다
+        LiveWeeklyCheck.OpeningPrints q = new LiveWeeklyCheck.OpeningPrints(rules);
+        assertThat(q.isOpeningPrint(new TradeTick(HYNIX, 4, at.apply("10:00:00"), at.apply("10:00:00"),
+                new BigDecimal("180000"), 1))).isFalse();
+        assertThat(q.isOpeningPrint(new TradeTick(HYNIX, 5, at.apply("10:00:05"), at.apply("10:00:05"),
+                new BigDecimal("180000"), 1))).isFalse();
+    }
+
     private static TradeTick withPrice(TradeTick t, BigDecimal price) {
         return new TradeTick(t.symbol(), t.sequence(), t.exchangeTime(), t.receivedAt(), price, t.quantity());
     }
