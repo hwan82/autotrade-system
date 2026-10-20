@@ -123,6 +123,7 @@
 | D-117 | 2026-10-19 | 녹화 줄 단위 읽기를 marketdata 한 곳에(data-engineer, **추천안 채택(자율)**, D-115 후속, 보호 경로라 사용자 머지로 확정). `RecordedDayStream`(marketdata)이 읽기 규칙 한 벌, `RecordedDay.open`도 이것으로 읽음, `RecordedReplaySource.streaming`. 게이트웨이 `replayCheck`는 회차마다 줄 단위로 두 번 읽고 두 요약이 다르면 결과 없이 실패. 보고서·종료 코드·정지 확인 무변경, 100만 줄에서 보고서 바이트 일치·힙 4GB→128MB. sim 복제본 정리는 6단계 녹화 판정 명령 PR 뒤. D-116은 병행 작업이 쓴다 | [D-117](D-117-marketdata-streamed-recording-read.md) |
 | D-118 | 2026-10-20 | 체결 틱이 호가 단위의 정확한 반 칸이면 중간가 체결로 받음(sim-engine, **추천안 채택(자율)**, 6단계 LIVE00 첫날 긴급 결함). 한 곳 `MidpointTrades`: 입력 검사(`offStockTick`, 세션·녹화·주간 점검·리플레이 확인·판정 공통)는 통과시키되 호가 가격과 반 칸 아닌 단위 밖 가격은 그대로 거절·멈춤. 체결 규칙 `BOOK-V6`: 가상 거래소는 이 틱으로 지정가·단일가를 체결하지 않고 신호·거래량·평가 가격에만 씀(5,000~50,000원 구간 ETF 방어는 호가 검사에 기댐)(대안: 건너뜀은 거래량 왜곡, 일반 체결은 낙관). 실험실 JSON 응답 charset UTF-8. 상세 [D-118](D-118-midpoint-trade-ticks.md) |
 | D-119 | 2026-10-20 | 녹화기 재기동이 그날 녹화를 메모리에 올리지 않음(data-engineer, **추천안 채택(자율)**, PR #179 risk-ops N2·D-117 후속, 보호 경로라 사용자 머지로 확정). `DayWriter` 같은 날 재기동은 앞 녹화를 줄 단위로 읽으며 바로 tmp에 다시 쓰고 종목만 모음, 날짜를 넘긴 재기동도 줄 단위. 형식·재기동 공백·보관본 무변경, 220만 줄에서 힙 3GB OOM → 64MB 통과·결과 바이트 일치 | [D-119](D-119-daywriter-streamed-restart.md) |
+| D-120 | 2026-10-20 | 실시간 모의 계좌별 체결·거절 내역을 도는 중에 화면에서 봄(ui-dev, **추천안 채택(자율)**, 사용자 질문 LIVE00). `#/live` 계좌 ID 링크 → `#/live/runs/<계좌>`: 체결 내역·거절 사유(최근 것부터, 실험 계좌 상세와 같은 표). API `GET /api/live/runs/{runId}/fills`·`/rejections`는 세션 메모리의 사본만 읽음(결과·기록 형식 무변경)(대안: 체결 파일 따로 쓰기는 두 원본, 끝낸 뒤 보고서 파싱은 도는 중 답 못 함). D-119는 PR #187이 씀 | [D-120](D-120-live-account-fills-view.md) |
 
 ## 미확정
 | ID | 항목 | 담당 |

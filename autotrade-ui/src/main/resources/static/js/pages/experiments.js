@@ -267,20 +267,7 @@ export async function runPage(id, runId) {
   const base = `/api/experiments/${enc(id)}/runs/${enc(runId)}`;
   const summary = await get(`${base}/summary`);
 
-  const fills = pagedSection(`${base}/fills`, [
-    { label: '체결 시각', render: f => time(f.fillTime, e.market) },
-    { label: '종목코드', render: f => f.symbol },
-    { label: '종목명', render: f => nameCell(f.symbolName) },
-    { label: '구분', render: f => `${SIDE[f.side] || f.side}·${INTENT[f.intent] || f.intent}` },
-    { label: '수량', num: true, render: f => number(f.quantity) },
-    { label: '체결가', num: true, render: f => money(f.price, f.currency) },
-    { label: '수수료', num: true, render: f => money(f.commission, f.currency) },
-    { label: '세금', num: true, render: f => money(f.tax, f.currency) },
-    { label: '슬리피지', num: true, render: f => money(f.slippage, f.currency) },
-    { label: '실현손익', num: true, render: f => h('span', { class: signClass(f.realizedPnl) }, f.realizedPnl === null ? '–' : money(f.realizedPnl, f.currency)) },
-    { label: '멱등 키', render: f => h('span', { class: 'hash' }, `${f.key} #${f.fillSeq}`) },
-    { label: '신호→체결 순번', render: f => `${f.signalEventSeq} → ${f.fillEventSeq}` },
-  ], '체결이 없습니다.');
+  const fills = pagedSection(`${base}/fills`, fillColumns(e.market), '체결이 없습니다.');
 
   const trips = pagedSection(`${base}/round-trips`, [
     { label: '로트', render: t => h('span', { class: 'hash' }, t.lotId) },
@@ -301,6 +288,24 @@ export async function runPage(id, runId) {
     h('h2', {}, '체결 내역'), fills,
     h('h2', {}, '왕복 거래'), trips,
     h('h2', {}, '거절 사유'), rejectionSection(base));
+}
+
+/** 체결 내역 표 열. 실험 계좌 상세와 실시간 모의 계좌 상세(live.js, D-120)가 같이 쓴다. 시각은 시장 현지 시간. */
+export function fillColumns(market) {
+  return [
+    { label: '체결 시각', render: f => time(f.fillTime, market) },
+    { label: '종목코드', render: f => f.symbol },
+    { label: '종목명', render: f => nameCell(f.symbolName) },
+    { label: '구분', render: f => `${SIDE[f.side] || f.side}·${INTENT[f.intent] || f.intent}` },
+    { label: '수량', num: true, render: f => number(f.quantity) },
+    { label: '체결가', num: true, render: f => money(f.price, f.currency) },
+    { label: '수수료', num: true, render: f => money(f.commission, f.currency) },
+    { label: '세금', num: true, render: f => money(f.tax, f.currency) },
+    { label: '슬리피지', num: true, render: f => money(f.slippage, f.currency) },
+    { label: '실현손익', num: true, render: f => h('span', { class: signClass(f.realizedPnl) }, f.realizedPnl === null ? '–' : money(f.realizedPnl, f.currency)) },
+    { label: '멱등 키', render: f => h('span', { class: 'hash' }, `${f.key} #${f.fillSeq}`) },
+    { label: '신호→체결 순번', render: f => `${f.signalEventSeq} → ${f.fillEventSeq}` },
+  ];
 }
 
 function nameCell(name) {
@@ -386,7 +391,8 @@ function pager(p, load) {
     h('button', { class: 'btn secondary', type: 'button', disabled: p.page + 1 >= pages, onclick: () => load(p.page + 1) }, '다음'));
 }
 
-function rejectionSection(base) {
+/** 거절 사유 분포와 거절 로그. 실험 계좌 상세와 실시간 모의 계좌 상세(live.js, D-120)가 같이 쓴다. */
+export function rejectionSection(base) {
   const host = h('div', {});
   let filter = null;
   const draw = async (page = 0) => {

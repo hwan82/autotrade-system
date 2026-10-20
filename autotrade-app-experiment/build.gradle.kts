@@ -202,7 +202,7 @@ val runLiveWeeklyCheck by tasks.registering(JavaExec::class) {
 // 6단계 녹화 판정(D-116, 6단계 계획 5장 T2): ./gradlew :autotrade-app-experiment:runLiveJudgement -Pexperiment=<실험ID>
 //     [-PsessionsDir=폴더] [-PrecordingsDir=폴더] [-PallowDuringSession] [-PmaxParallelRuns=N] [-Pheap=4g]
 // 끝낸 실시간 모의 세션의 입력 기록으로 장중 승격 후보 기준 L1~L11(D-114)을 계산해 experiments/<실험ID>/judgement.md에 쓴다
-// (±20% 변형, 지연 0·1.5·2초, 무작위 대조군 20m−1 시드, 같은 날 녹화 리플레이). 무사고 I1~I3이 깨지면 종료 코드 2.
+// (±20% 변형, 지연 0·1.5·2초, 무작위 대조군 21m−1 시드, 같은 날 녹화 리플레이). 무사고 I1~I3이 깨지면 종료 코드 2.
 // 입력 기록을 묶음 수(병렬 상한과 4 중 작은 쪽)만큼 따로 읽어 레인을 나눠 돈다. 결과는 묶음 수와 상관없다.
 val runLiveJudgement by tasks.registering(JavaExec::class) {
     group = "application"

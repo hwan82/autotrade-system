@@ -14,6 +14,8 @@ import com.autotrade.marketdata.recording.JournalWriter;
 import com.autotrade.marketdata.recording.RecordedDay;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.RunStepper;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.SimulationReport;
@@ -178,6 +180,57 @@ class LiveSessionTest {
         assertThat(out.files().get("inputs.yaml")).startsWith("# 실시간 모의(D-076)").contains("clock-mode: REALTIME");
         assertThat(LiveReplayCheck.withoutCodeLine(out.files().get("detail.txt")))
                 .isEqualTo(LiveReplayCheck.withoutCodeLine(ReportWriter.render(live)));
+    }
+
+    /** 계좌 상세 화면(D-120): 도는 중에도 계좌별 체결·거절을 읽을 수 있고, 재기동 뒤에도 같고, 끝낸 보고서와 같다. */
+    @Test
+    void activityShowsEachAccountsFillsAndRejectionsWhileRunningAndAcrossRestart() {
+        List<MarketEvent> events = twoDays();
+        int half = events.size() / 2;
+        LiveSession s = open();
+        for (int n = 0; n < half; n++) {
+            clock.now = events.get(n).receivedAt();
+            s.accept("KIWOOM-WS", events.get(n));
+        }
+        assertThat(s.activity("EXP-TEST-LIVE01-A99")).isEmpty();
+        List<RunStepper.Progress> runs = s.status().runs();
+        String first = runs.get(0).runId();
+        LiveSession.RunActivity mid = s.activity(first).orElseThrow();
+        assertThat(mid.runId()).isEqualTo(first);
+        assertThat(mid.fills()).isNotEmpty().hasSize(runs.get(0).fills());
+        assertThat(mid.rejections()).hasSize(runs.get(0).rejections());
+        // 사본이라 이후 이벤트가 들어와도 이미 돌려준 목록은 그대로다
+        int midFills = mid.fills().size();
+
+        s.close(); // 실험실 재기동: 기록으로 되살린 계좌의 체결도 같다
+        s = open();
+        assertThat(keys(s.activity(first).orElseThrow())).isEqualTo(keys(mid));
+        for (int n = half; n < events.size(); n++) {
+            clock.now = events.get(n).receivedAt();
+            s.accept("KIWOOM-WS", events.get(n));
+        }
+        assertThat(mid.fills()).hasSize(midFills);
+        List<LiveSession.RunActivity> before = new ArrayList<>();
+        for (RunStepper.Progress p : s.status().runs()) {
+            before.add(s.activity(p.runId()).orElseThrow());
+        }
+        SimulationReport report = s.finish(new CodeVersion("c", false));
+        assertThat(before).hasSize(report.runs().size());
+        for (int i = 0; i < before.size(); i++) {
+            RunReport r = report.runs().get(i);
+            assertThat(before.get(i).runId()).isEqualTo(r.summary().runId());
+            assertThat(before.get(i).fills().stream().map(f -> f.fill().key() + "#" + f.fill().fillSeq()).toList())
+                    .isEqualTo(r.fills().stream().map(f -> f.fill().key() + "#" + f.fill().fillSeq()).toList());
+            assertThat(before.get(i).rejections()).isEqualTo(r.rejections());
+        }
+    }
+
+    private static List<String> keys(LiveSession.RunActivity a) {
+        List<String> out = new ArrayList<>();
+        a.fills().forEach(f -> out.add(f.fill().key() + "#" + f.fill().fillSeq() + " " + f.fill().quantity() + "@"
+                + f.fill().price().toPlainString()));
+        a.rejections().forEach(j -> out.add("rejected " + j.key() + " " + j.stage() + ":" + j.code()));
+        return out;
     }
 
     @Test

@@ -373,6 +373,17 @@ public class LiveLabService implements AutoCloseable {
         return new Gaps(session.status().dataGaps(), items);
     }
 
+    /**
+     * 돌고 있는 세션의 계좌 하나의 체결과 거절·취소 기록(계좌 상세 화면, D-120). 세션이 없거나 되살리는 중이거나 그 세션에 없는
+     * 계좌면 비어 있다. 모의 계좌 기록만 읽으며 실전 주문 경로와 무관하다.
+     */
+    public synchronized Optional<LiveSession.RunActivity> activity(String runId) {
+        if (running == null || running.session == null) {
+            return Optional.empty();
+        }
+        return running.session.activity(runId);
+    }
+
     /** @param total 세션 전체 공백 수(items는 그중 최근 것만) */
     public record Gaps(int total, List<GapView> items) {
         public Gaps {

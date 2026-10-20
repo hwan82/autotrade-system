@@ -46,7 +46,7 @@
 
 - 등록 파일 `experiments/<실험ID>/experiment.yaml`, `input: "live"`(`LivePlan`). 키는 녹화 실험과 같고(`id, question, market, from, to, seed, seed-capital, benchmark, profiles, boards, blacklist`), `boards`가 받을 종목 목록이다. 지금은 KRX만, 선정 프로필 없음(녹화 실험과 같은 범위).
 - 사전 등록: 운용 전에 커밋하고 운용 중 고치지 않는다. 바꾸려면 새 실험 ID.
-- 실험실 API(`/api/live`, ADR-005 웹 보안 그대로): `GET /status`, `GET /registrations`, `GET /gaps`, `POST /sessions/{id}/start`, `POST /stop`, `POST /finish`(응답·오류는 [ADR-005](ADR-005-ui-dashboard.md) 5장 표). 한 번에 한 세션. 화면은 실험실 `#/live`(PR #96): 등록 파일 고르기, 시작·멈춤·끝내기, 계좌별 상태와 최근 공백, 3초 폴링(SSE는 UI-01 이연, D-079).
+- 실험실 API(`/api/live`, ADR-005 웹 보안 그대로): `GET /status`, `GET /registrations`, `GET /gaps`, `GET /runs/{runId}/fills`, `GET /runs/{runId}/rejections`(D-120), `POST /sessions/{id}/start`, `POST /stop`, `POST /finish`(응답·오류는 [ADR-005](ADR-005-ui-dashboard.md) 5장 표). 한 번에 한 세션. 화면은 실험실 `#/live`(PR #96): 등록 파일 고르기, 시작·멈춤·끝내기, 계좌별 상태와 최근 공백, 3초 폴링, 계좌 ID를 누르면 그 계좌의 체결 내역·거절 사유(`#/live/runs/<계좌>`, D-120)(SSE는 UI-01 이연, D-079).
 - 세션 하나 = 계좌(프로필) N개. 계좌는 리플레이 실행기와 **같은 코드**로 움직인다: 실행기의 Run 한 개 단계를 `RunStepper`(`autotrade-sim` `run` 패키지)로 떼어 리플레이 실행기(`SimulationExperimentRunner`)와 실시간 세션(`LiveSession`)이 같이 쓴다. 리스크 체인·주문 상태머신·블랙리스트·가상 거래소 그대로(지침 5장).
 - 계좌 하나가 예외로 멈춰도 그 계좌만 실패로 남고 나머지는 계속한다(계좌 격리).
 
@@ -107,7 +107,7 @@
 | 재기동 시간 단축(계좌 상태 스냅샷, 대안 G) | 기록 재실행(별도 스레드, 하루씩) | 몇 주 분량 재기동 측정 후 필요하면 |
 | 실전 엔진 클래스패스의 전달 패키지(`marketdata.feed`)를 ArchUnit으로 막을지 | 엔진은 쓰지 않음 | 7단계 전 risk-ops·architect (risk-ops PR #87 N5) |
 | 같은 OS 사용자의 다른 프로세스가 받는 쪽 4자리를 차지 | 소켓 600으로 다른 사용자만 막음 | 위험 낮음, 7단계 엔진 전달 설계 때 같이 본다 (N6) |
-| 실시간 모의 대 같은 날 게이트웨이 녹화 리플레이 차이 | 주간 점검 명령 `runLiveWeeklyCheck`(D-088): 줄 단위 입력 대조, 빠진 이벤트 원인별 수, 공백 출처, 누계 계좌 대조를 `experiments/<ID>/weekly/<날짜>.md`로 | 실측 결과 해석(strategy-researcher) |
+| 실시간 모의 대 같은 날 게이트웨이 녹화 리플레이 차이 | 주간 점검 명령 `runLiveWeeklyCheck`(D-088): 줄 단위 입력 대조, 빠진 이벤트 원인별 수, 공백 출처, 누계 계좌 대조, 종목별 중간가 체결 틱 수·거래량 비중(D-118, 참고. 분모는 정규장 접속 매매 체결, 시간외·단일가 체결은 따로, 합계 행, BOOK-V6 이전 기록 날짜 표시)을 `experiments/<ID>/weekly/<날짜>.md`로 | 실측 결과 해석(strategy-researcher) |
 | 실전 엔진 시세 전달 | 없음 | 7단계(risk-ops·data-engineer) |
 | 미국 시장 세션 | KRX만 | `UsMarketRules`·비용 표 연결 때 |
 

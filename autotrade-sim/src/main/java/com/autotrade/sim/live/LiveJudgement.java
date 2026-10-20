@@ -1,5 +1,7 @@
 package com.autotrade.sim.live;
 
+import com.autotrade.domain.market.Market;
+import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.sim.ClockMode;
@@ -11,6 +13,7 @@ import com.autotrade.sim.recording.RecordedMarketDataSet;
 import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.run.ExperimentProgress;
 import com.autotrade.sim.run.ExperimentStoppedException;
 import com.autotrade.sim.run.MarketEventStream;
 import com.autotrade.sim.run.OrderRejection;
@@ -35,15 +38,21 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -310,32 +319,140 @@ public final class LiveJudgement {
 
     private static Map<String, SimulationReport> runGroups(LiveSetup setup, MarketEventStream journal,
             List<List<Lane>> groups, CodeVersion code, String id, RunGate gate) {
+        // 한 묶음이 실패하면 나머지 묶음도 멈추게 한다. 실행기는 스레드 중단을 보지 않으므로 취소만으로는 남은 묶음이 끝까지
+        // 돈다(PR #180 architect N2). 문은 Run 시작·거래일 바뀜에서만 확인되므로, 기록 읽기도 이벤트마다 실패 표시를 보게 해
+        // 한 거래일을 더 돌거나 Run이 모두 끝난 묶음이 남은 기록을 끝까지 읽지 않게 한다(PR #185 architect N1)
+        AtomicBoolean failed = new AtomicBoolean();
+        RunGate shared = abortable(gate, failed);
+        MarketEventStream stoppable = abortable(journal, failed);
+        List<Callable<List<SimulationReport>>> tasks = new ArrayList<>();
+        for (int g = 0; g < groups.size(); g++) {
+            List<Lane> group = groups.get(g);
+            String progressId = id + "-JUDGE-G" + (g + 1);
+            tasks.add(() -> runner(setup, stoppable, code, shared).runLanes(group, progressId));
+        }
         Map<String, SimulationReport> out = new LinkedHashMap<>();
-        try (ExecutorService pool = Executors.newFixedThreadPool(groups.size())) {
-            List<Future<List<SimulationReport>>> futures = new ArrayList<>();
-            for (int g = 0; g < groups.size(); g++) {
-                List<Lane> group = groups.get(g);
-                String progressId = id + "-JUDGE-G" + (g + 1);
-                futures.add(pool.submit(() -> runner(setup, journal, code, gate).runLanes(group, progressId)));
+        for (List<SimulationReport> reports : runAll(tasks, id, () -> failed.set(true))) {
+            for (SimulationReport r : reports) {
+                out.put(r.result().experimentId().value(), r);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 작업을 모두 동시에 돌리고 결과를 작업 순서대로 돌려준다(끝난 순서와 상관없이 같은 결과). 어느 작업이든 실패하면 먼저 끝난
+     * 실패를 받는 즉시 {@code onFailure}를 부르고 나머지를 취소한 뒤 그 실패를 올린다. 앞 작업이 끝날 때까지 기다렸다 뒤 작업의
+     * 실패를 올리지 않는다(PR #180 architect N2). 이미 돌고 있는 작업은 {@code onFailure}로 멈추게 해야 빨리 끝난다(풀을 닫을 때
+     * 남은 작업을 기다린다).
+     */
+    static <T> List<T> runAll(List<Callable<T>> tasks, String id, Runnable onFailure) {
+        List<T> results = new ArrayList<>(Collections.nCopies(tasks.size(), null));
+        try (ExecutorService pool = Executors.newFixedThreadPool(Math.max(1, tasks.size()))) {
+            CompletionService<Integer> done = new ExecutorCompletionService<>(pool);
+            List<Future<Integer>> futures = new ArrayList<>();
+            for (int i = 0; i < tasks.size(); i++) {
+                int index = i;
+                Callable<T> task = tasks.get(i);
+                futures.add(done.submit(() -> {
+                    results.set(index, task.call());
+                    return index;
+                }));
             }
             try {
-                for (Future<List<SimulationReport>> f : futures) {
-                    for (SimulationReport r : f.get()) {
-                        out.put(r.result().experimentId().value(), r);
-                    }
+                for (int i = 0; i < tasks.size(); i++) {
+                    done.take().get();
                 }
             } catch (ExecutionException e) {
+                onFailure.run();
                 futures.forEach(f -> f.cancel(true));
                 if (e.getCause() instanceof RuntimeException r) {
                     throw r; // 정지(ExperimentStoppedException), 입력이 바뀜 등은 그대로 올린다
                 }
                 throw new IllegalStateException("판정 실행 오류: " + id, e.getCause());
+            } catch (InterruptedException e) {
+                onFailure.run();
+                futures.forEach(f -> f.cancel(true));
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("판정 실행이 중단됐습니다: " + id, e);
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("판정 실행이 중단됐습니다: " + id, e);
         }
-        return out;
+        return results;
+    }
+
+    /**
+     * {@code failed}가 서면 멈추라고 답하는 문. 그 밖에는 원래 문을 그대로 따른다(진행 보고, 병렬 상한, 사람의 취소). 멈춤 이유는
+     * 명령까지 올라가지 않는다: 먼저 실패한 묶음의 예외가 올라간다.
+     */
+    static RunGate abortable(RunGate gate, AtomicBoolean failed) {
+        return new RunGate() {
+            @Override
+            public Optional<String> stopReason() {
+                return failed.get() ? Optional.of("다른 판정 묶음이 실패해 멈춤") : gate.stopReason();
+            }
+
+            @Override
+            public void check() {
+                if (failed.get()) {
+                    throw new ExperimentStoppedException("다른 판정 묶음이 실패해 멈춤");
+                }
+                gate.check();
+            }
+
+            @Override
+            public void onProgress(ExperimentProgress progress) {
+                gate.onProgress(progress);
+            }
+
+            @Override
+            public void onExperimentsPlanned(int count) {
+                gate.onExperimentsPlanned(count);
+            }
+
+            @Override
+            public int maxParallelRuns() {
+                return gate.maxParallelRuns();
+            }
+        };
+    }
+
+    /**
+     * 이벤트를 넘기기 전마다 {@code failed}를 보고, 서 있으면 {@link ExperimentStoppedException}을 던지는 기록 읽기. 그 밖에는
+     * 원래 읽기를 그대로 따른다(같은 이벤트, 같은 순서, 같은 버전). 실패 표시는 먼저 실패한 묶음이 세우고 그 예외가 명령까지
+     * 올라가므로, 여기서 던진 예외는 결과에 들어가지 않는다. 판정 결과에는 영향이 없다(실패가 없으면 아무것도 바꾸지 않음).
+     */
+    static MarketEventStream abortable(MarketEventStream data, AtomicBoolean failed) {
+        return new MarketEventStream() {
+            @Override
+            public String version() {
+                return data.version();
+            }
+
+            @Override
+            public Market market() {
+                return data.market();
+            }
+
+            @Override
+            public boolean exchangeTimed() {
+                return data.exchangeTimed();
+            }
+
+            @Override
+            public long eventCount() {
+                return data.eventCount();
+            }
+
+            @Override
+            public void forEach(Consumer<MarketEvent> sink) {
+                data.forEach(e -> {
+                    if (failed.get()) {
+                        throw new ExperimentStoppedException("다른 판정 묶음이 실패해 멈춤");
+                    }
+                    sink.accept(e);
+                });
+            }
+        };
     }
 
     private static SimulationExperimentRunner runner(LiveSetup setup, MarketEventStream data, CodeVersion code,
