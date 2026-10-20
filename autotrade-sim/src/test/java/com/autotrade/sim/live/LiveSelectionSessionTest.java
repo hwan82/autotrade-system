@@ -248,6 +248,48 @@ class LiveSelectionSessionTest {
     }
 
     @Test
+    void preparationDoesNotReloadTheSnapshotAfterFailingWithTheSameInputs() throws Exception {
+        // architect PR #197 R2: 같은 입력 스냅샷으로 계산이 실패한 날은 5분마다 일봉 전체를 다시 읽지 않는다
+        Path root = tmp.resolve("r2");
+        Path sessions = root.resolve("live-sessions");
+        Path snapshots = SelectionFixtures.dailySnapshot(root.resolve("snapshots"), "krx-daily-live-0001", D1.minusDays(1),
+                false);
+        // 스냅샷 ID를 고정하면 D2(기준 데이터일 10-14)는 읽은 뒤에 STALE_INPUT이다(입력 키가 사유 파일에 남음)
+        LivePlan fixed = LivePlan.parse(yaml(true).replace("daily: \"latest\"", "daily: \"krx-daily-live-0001\""), "x");
+        java.util.concurrent.atomic.AtomicInteger loads = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.function.LongPredicate counting = rows -> {
+            loads.incrementAndGet();
+            return true;
+        };
+        LiveSelectionPrep.Report first = LiveSelectionPrep.prepare(fixed, REPO, sessions, snapshots, D2, PRODUCER,
+                RunGate.NONE, counting, m -> { });
+        assertThat(loads).hasValue(1);
+        assertThat(first.outcomes()).singleElement()
+                .satisfies(o -> assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT));
+        SessionSelections files = LiveSetup.of(fixed, REPO).selectionFiles(sessions.resolve(ID));
+        assertThat(files.readProblem(D2, hot.selectionHash())).hasValueSatisfying(p -> assertThat(p.inputs())
+                .isEqualTo("daily=krx-daily-live-0001;financials="));
+
+        LiveSelectionPrep.Report again = LiveSelectionPrep.prepare(fixed, REPO, sessions, snapshots, D2, PRODUCER,
+                RunGate.NONE, counting, m -> { });
+        assertThat(loads).hasValue(1); // 읽지 않음
+        assertThat(again.ready()).isFalse();
+        assertThat(again.note()).contains("같은 입력 스냅샷으로 이미 실패함");
+        assertThat(again.outcomes()).singleElement().satisfies(o -> {
+            assertThat(o.status()).isEqualTo(SelectionPreparer.Status.PROBLEM);
+            assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+        });
+
+        // 사유가 다른 입력으로 남은 것이면(새 스냅샷) 다시 읽는다
+        files.writeProblem(D2, hot.selectionHash(), SelectionInvalidReason.STALE_INPUT, "앞 스냅샷", "daily=old;financials=");
+        LiveSelectionPrep.prepare(fixed, REPO, sessions, snapshots, D2, PRODUCER, RunGate.NONE, counting, m -> { });
+        assertThat(loads).hasValue(2);
+        // 적용 기록에는 입력 키가 들어가지 않는다(사유와 설명만)
+        assertThat(files.apply(D2).item(hot.selectionHash()).reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+        assertThat(Files.readString(files.appliedFile(D2))).doesNotContain("krx-daily-live-0001");
+    }
+
+    @Test
     void sessionDoesNotOpenWhenAppliedResultFileChanged() throws Exception {
         Path sessions = tmp.resolve("live-sessions");
         SessionSelections files = prepareDayOne(sessions);

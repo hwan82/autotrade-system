@@ -143,6 +143,40 @@ class RecordingSelectionTest {
     }
 
     @Test
+    void rerunRemovesSelectionFilesOfThePreviousRun() throws IOException {
+        // architect PR #197 R4: 기간을 줄이거나 선정을 빼고 다시 돌리면 옛 날짜 고정 파일이 남지 않는다
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        Path snapshots = snapshots();
+        Path dir = experiment("rerun", BASE + SELECTIONS);
+        Path old = write(Files.createDirectories(dir.resolve(SessionSelections.DIR).resolve("2026-02-27")), "old.json", "{}");
+        RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, Path.of(".."), recordings, snapshots,
+                new CodeVersion("test", false), false, m -> { }, RunGate.NONE);
+        assertThat(old).doesNotExist();
+        assertThat(old.getParent()).doesNotExist();
+        for (String key : out.files().keySet()) {
+            assertThat(dir.resolve(key)).as(key).isRegularFile();
+        }
+        // 선정을 빼고 다시 돌리면 선정 폴더가 통째로 없어진다(결과 파일만 남음)
+        write(dir, "experiment.yaml", BASE);
+        RecordingExperiment.runAndWrite(dir, Path.of(".."), recordings, snapshots, new CodeVersion("test", false), false,
+                m -> { }, RunGate.NONE);
+        assertThat(dir.resolve(SessionSelections.DIR)).doesNotExist();
+        assertThat(dir.resolve("experiment.yaml")).isRegularFile();
+    }
+
+    @Test
+    void selectionPreparationChecksTheHeapBeforeReadingTheSnapshot() {
+        // architect PR #197 R4: 녹화 데이터와 같은 힙에 일봉 전체를 올리기 전에 보고, 늘릴 힙을 알려 준다
+        long gib = 1024L * 1024 * 1024;
+        com.autotrade.sim.selection.SnapshotHeap.requireFits(1_000_000, 3 * gib, "s");
+        assertThatThrownBy(() -> com.autotrade.sim.selection.SnapshotHeap.requireFits(3_750_000, 3 * gib, "krx-daily-x"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("krx-daily-x")
+                .hasMessageContaining("-Pheap=8g");
+        assertThat(com.autotrade.sim.selection.SnapshotHeap.suggestedHeapGib(1)).isEqualTo(1);
+    }
+
+    @Test
     void selectionsNeedASnapshotFolder() throws IOException {
         Path recordings = tmp.resolve("recordings");
         FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);

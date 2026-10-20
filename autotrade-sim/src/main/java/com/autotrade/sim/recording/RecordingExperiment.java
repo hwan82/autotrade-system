@@ -44,6 +44,7 @@ import com.autotrade.sim.selection.IntradayTracker;
 import com.autotrade.sim.selection.IntradayUniverse;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.sim.selection.SessionSelections;
+import com.autotrade.sim.selection.SnapshotHeap;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
 import com.autotrade.strategy.profile.ProfileYaml;
@@ -264,6 +265,9 @@ public final class RecordingExperiment {
                 throw new IllegalArgumentException("선정 조합 계좌가 있는데 수집 스냅샷 폴더가 정해지지 않았습니다");
             }
             RegisteredSelections sel = plan.selections();
+            // 녹화 데이터와 같은 힙에 일봉 전체를 올리므로 먼저 본다. 모자라면 읽지 않고 늘릴 힙을 알려 준다(architect PR #197 R4)
+            String daily = sel.daily().orElseThrow();
+            SnapshotHeap.requireFits(SnapshotHeap.dailyBarRows(snapshotsRoot, daily), Runtime.getRuntime().maxMemory(), daily);
             SnapshotInputs in = SnapshotInputs.load(plan.market(), sel.daily().orElseThrow(), sel.financials(),
                     snapshotsRoot, calendar, gate, log, (first, last) -> { });
             Path dir;
@@ -418,6 +422,7 @@ public final class RecordingExperiment {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다: " + experimentDir.getFileName() + " ≠ " + plan.id());
         }
         Outcome out = run(plan, repoRoot, recordingsRoot, snapshotsRoot, code, verifyDeterminism, log, gate);
+        removeStaleSelections(experimentDir, out.files().keySet(), log);
         for (Map.Entry<String, String> f : out.files().entrySet()) {
             Path target = experimentDir.resolve(f.getKey());
             try {
@@ -429,6 +434,37 @@ public final class RecordingExperiment {
             log.accept("작성: " + target);
         }
         return out;
+    }
+
+    /**
+     * 이전 실행이 남긴 {@code selections/} 파일 중 이번 결과에 없는 것을 지우고 빈 폴더도 지운다(architect PR #197 R4). 기간을 줄이거나
+     * 선정을 빼고 다시 돌리면 옛 날짜 파일이 남아 이번 실행의 선정처럼 보이기 때문이다. 이 폴더는 이 명령만 쓰고 커밋하지 않는다
+     * (.gitignore). 실행이 멈춰 결과가 없으면 부르지 않는다.
+     *
+     * @param written 이번에 쓸 결과 파일(등록 파일 폴더 상대 경로, {@code /} 구분)
+     */
+    static void removeStaleSelections(Path experimentDir, java.util.Set<String> written, Consumer<String> log) {
+        Path dir = experimentDir.resolve(SessionSelections.DIR);
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(dir)) {
+            for (Path f : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                String rel = experimentDir.relativize(f).toString().replace('\\', '/');
+                if (Files.isDirectory(f)) {
+                    try (Stream<Path> children = Files.list(f)) {
+                        if (children.findAny().isEmpty()) {
+                            Files.delete(f);
+                        }
+                    }
+                } else if (!written.contains(rel)) {
+                    Files.delete(f);
+                    log.accept("이전 실행의 선정 파일 지움: " + rel);
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("이전 실행의 선정 파일을 정리할 수 없습니다: " + dir, e);
+        }
     }
 
     public static String inputs(RecordingPlan plan, RecordingInput data, TreeSet<Symbol> symbols, CostModel cost,
@@ -576,6 +612,12 @@ public final class RecordingExperiment {
      * ({@code BLACKLISTED})로 뺀 종목, 구독 커버리지, 그 선정을 쓰는 계좌들이 막힌 신규 진입 신호 수 합.
      */
     private static void selectionResults(StringBuilder sb, SimulationReport report, List<SessionSelections.Applied> applied) {
+        sb.append("\n## 선정(D-124)\n\n");
+        selectionTable(sb, report, applied);
+    }
+
+    /** 선정 표 본문(제목 아래 설명 줄과 표). 녹화 실험 results.md와 녹화 판정(judgement.md)이 같이 쓴다. */
+    public static void selectionTable(StringBuilder sb, SimulationReport report, List<SessionSelections.Applied> applied) {
         Map<String, Integer> blocked = new LinkedHashMap<>();
         for (RunReport r : report.runs()) {
             for (com.autotrade.sim.run.RunSelectionDay d : r.selectionDays()) {
@@ -583,7 +625,6 @@ public final class RecordingExperiment {
                         Integer::sum);
             }
         }
-        sb.append("\n## 선정(D-124)\n\n");
         sb.append("> 그날 후보 = 선정 결과 ∩ boards − blacklist. 뺀 자리는 다음 순위로 메우지 않는다. 커버리지는 선정 종목 중 boards 안 "
                 + "비율이다. 성과를 시장 전체 선정의 성과로 읽지 않는다(ADR-012 6장 R2).\n\n");
         sb.append("| 날짜 | 선정 | 상태 | 후보 | NOT_SUBSCRIBED | BLACKLISTED | 커버리지 | 막힌 신규 진입 |\n");

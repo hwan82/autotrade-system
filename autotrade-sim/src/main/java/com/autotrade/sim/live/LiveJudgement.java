@@ -23,6 +23,8 @@ import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationExperimentRunner.Lane;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.SelectionSource;
+import com.autotrade.sim.selection.SessionSelections;
 import com.autotrade.sim.study.Check;
 import com.autotrade.sim.study.ScreeningCriteria;
 import com.autotrade.sim.study.ScreeningThresholds;
@@ -73,8 +75,16 @@ import java.util.function.Consumer;
  * 나눠 묶음마다 스레드 하나가 기록을 따로 읽는다(묶음 수 = 병렬 Run 상한과 {@value #MAX_GROUPS} 중 작은 쪽). 레인은 서로 아무것도
  * 공유하지 않아 묶음 나누기는 결과에 영향이 없다. 메모리는 기간과 상관없고(D-115) Run 수에 비례한다.
  *
- * <p>판정 대상은 등록 프로필 중 기준선({@code logic: buy-and-hold})과 대조군({@code logic: random})을 뺀 것이고, 기준선과 대조군은
- * 하나씩 있어야 한다. 무사고 I4(주간 점검)·I5(유효 운용일)는 주간 점검 결과로 본다(이 명령은 계산하지 않음).
+ * <p>판정 대상은 등록 계좌 중 기준선({@code logic: buy-and-hold})과 대조군({@code logic: random})을 뺀 것이고, 기준선은 하나 있어야
+ * 한다. 대조군은 선정 묶음(선정 없음, 선정 프로필마다)마다 하나까지이고, 판정 대상이 있는 묶음에는 하나 있어야 한다. 무사고
+ * I4(주간 점검)·I5(유효 운용일)는 주간 점검 결과로 본다(이 명령은 계산하지 않음).
+ *
+ * <p>선정 조합 계좌(D-124)가 있으면 모든 레인(BASE·PERTURB·지연·대조군·REC)이 세션이 남긴 같은 적용 기록과 결과 파일
+ * ({@code selections/<날짜>/})을 읽는다. 그래서 변형·지연·대조군 계좌도 실시간 계좌와 같은 날 같은 후보로 돈다. 판정 때 다시
+ * 계산하지 않으므로 그날 장 시작 전에 정해진 선정만 쓴다(미래 정보 없음). 판정 대상의 변형·지연 계좌는 같은 선정을 그대로 쓰고,
+ * L10 대조군은 같은 선정 + 무작위 진입(ADR-012 3.3 대조군 축 1)을 시드만 바꿔 N개 돌린다. 적용 기록이 결과 파일과 맞지 않거나 입력
+ * 기록이 있는 날의 적용 기록이 없으면 판정하지 않고 멈춘다(리플레이 확인과 같음). 선정 계좌가 없는 등록은 지금까지와 같은 레인·같은
+ * 결과 파일이다.
  */
 public final class LiveJudgement {
 
@@ -127,9 +137,9 @@ public final class LiveJudgement {
         Path sessionDir = sessionsRoot.toAbsolutePath().resolve(plan.id().value());
         LiveReplayCheck.ensureSessionClosed(sessionDir);
         LiveSetup setup = LiveSetup.of(plan, repoRoot);
-        if (setup.hasSelections() || setup.hasIntraday()) {
-            // 판정 묶음(기준선·대조군 시드)은 profiles 계좌만 안다. 선정 계좌를 빼고 판정하면 표가 어긋나므로 받지 않는다(D-124 후속)
-            throw new IllegalArgumentException("선정 조합 계좌(selections)가 있는 등록은 아직 녹화 판정을 지원하지 않습니다(D-124 후속): "
+        if (setup.hasIntraday()) {
+            // 장중 순위 선정 계좌는 레인마다 추적기를 돌려야 해서 아직 받지 않는다(D-127 후속). 장전 선정 계좌는 받는다(D-126)
+            throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT) 계좌가 있는 등록은 아직 녹화 판정을 지원하지 않습니다(D-127 후속): "
                     + plan.id());
         }
         Roles roles = roles(setup);
@@ -145,6 +155,10 @@ public final class LiveJudgement {
         List<LocalDate> journalDates = journal.days().stream().map(RecordedMarketDataSet.DayInfo::date).toList();
         log.accept("입력 기록 " + journalDates.size() + "일(" + journalDates.get(0) + " ~ " + journalDates.get(journalDates.size() - 1)
                 + "), 이벤트 " + journal.eventCount());
+        // 선정 조합 계좌는 세션이 남긴 고정 파일을 그대로 읽는다(D-124). 맞지 않으면 판정하지 않는다(리플레이 확인과 같은 확인)
+        List<SessionSelections.Applied> applied = LiveReplayCheck.verifiedSelections(setup, sessionDir, log);
+        LiveReplayCheck.requireApplied(setup, sessionDir, journal.days().stream().filter(d -> d.recordedEvents() > 0)
+                .map(RecordedMarketDataSet.DayInfo::date).toList());
 
         ScreeningThresholds t = ScreeningThresholds.defaults();
         int m = roles.judged().size();
@@ -162,7 +176,7 @@ public final class LiveJudgement {
         }
         log.accept("입력 기록 레인 " + lanes.all().size() + "개(Run " + lanes.all().stream()
                 .mapToInt(l -> l.spec().combinations().size()).sum() + "개)를 " + groups.size() + "묶음으로 돌립니다");
-        Map<String, SimulationReport> byId = runGroups(setup, journal, groups, code, plan.id().value(), gate);
+        Map<String, SimulationReport> byId = runGroups(setup, sessionDir, journal, groups, code, plan.id().value(), gate);
 
         SimulationReport base = byId.get(lanes.base().spec().id().value());
         String detail = ReportWriter.render(base);
@@ -170,10 +184,11 @@ public final class LiveJudgement {
                 LiveReplayCheck.withoutCodeLine(detail));
 
         gate.check();
-        Recording rec = recording(setup, recordingsRoot, journalDates, code, gate, log);
+        Recording rec = recording(setup, sessionDir, recordingsRoot, journalDates, code, gate, log);
 
         Judged judged = judge(setup, roles, lanes, byId, rec, t, m);
-        String report = render(setup, code, journal, lanes, byId, rec, judged, diff, codeLine(liveDetail), t, m, nullSeeds);
+        String report = render(setup, code, journal, lanes, byId, rec, judged, diff, codeLine(liveDetail), t, m, nullSeeds,
+                applied);
         Map<String, String> verdicts = new LinkedHashMap<>();
         judged.judgements().forEach((k, v) -> verdicts.put(k, v.verdict().label()));
         return new Outcome(judged.incident() || diff >= 0, verdicts, report);
@@ -193,14 +208,28 @@ public final class LiveJudgement {
         return out;
     }
 
-    /** 등록 프로필의 역할(계좌 순서). */
-    record Roles(int baseline, int control, List<Integer> judged) {
+    /**
+     * 계좌 역할(계좌 순서). 선정 묶음(선정 없음, 선정 프로필마다, D-124)마다 대조군이 하나까지 있고, 판정 대상의 L10은 같은 묶음
+     * 대조군의 시드 분포로 본다(ADR-012 3.3 "같은 선정 + 무작위 진입").
+     *
+     * @param controls 대조군 계좌 번호(계좌 순서)
+     * @param controlOf 계좌 번호 → 같은 선정 묶음의 대조군 계좌 번호(묶음에 대조군이 없으면 빠짐)
+     * @param nullControls 시드 분포를 돌릴 대조군(판정 대상이 있는 묶음의 대조군, 계좌 순서)
+     */
+    record Roles(int baseline, List<Integer> controls, List<Integer> judged, Map<Integer, Integer> controlOf,
+            List<Integer> nullControls) {
+        Roles {
+            controls = List.copyOf(controls);
+            judged = List.copyOf(judged);
+            controlOf = Collections.unmodifiableMap(new LinkedHashMap<>(controlOf));
+            nullControls = List.copyOf(nullControls);
+        }
     }
 
     static Roles roles(LiveSetup setup) {
         int baseline = -1;
-        int control = -1;
         List<Integer> judged = new ArrayList<>();
+        Map<String, Integer> controlBySelection = new LinkedHashMap<>();
         List<Combination> combos = setup.combinations();
         for (int i = 0; i < combos.size(); i++) {
             String logic = combos.get(i).profile().parameters().get("logic");
@@ -210,23 +239,50 @@ public final class LiveJudgement {
                 }
                 baseline = i;
             } else if (CONTROL_LOGIC.equals(logic)) {
-                if (control >= 0) {
-                    throw new IllegalArgumentException("대조군(logic: random) 프로필이 둘 이상입니다");
+                String key = combos.get(i).selectionKeyOrNone();
+                if (controlBySelection.putIfAbsent(key, i) != null) {
+                    throw new IllegalArgumentException("대조군(logic: random) 프로필이 둘 이상입니다"
+                            + (combos.get(i).hasSelection() ? "(선정 " + key + ")" : ""));
                 }
-                control = i;
             } else {
                 judged.add(i);
             }
         }
-        if (baseline < 0 || control < 0 || judged.isEmpty()) {
+        if (baseline < 0 || judged.isEmpty()) {
             throw new IllegalArgumentException("판정에는 기준선(logic: buy-and-hold) 하나, 대조군(logic: random) 하나, 판정 대상 "
                     + "하나 이상이 필요합니다(6단계 계획 2.1)");
         }
-        return new Roles(baseline, control, List.copyOf(judged));
+        java.util.TreeSet<Integer> nullControls = new java.util.TreeSet<>();
+        for (int i : judged) {
+            Combination c = combos.get(i);
+            Integer control = controlBySelection.get(c.selectionKeyOrNone());
+            if (control == null) {
+                if (!c.hasSelection()) {
+                    throw new IllegalArgumentException("판정에는 기준선(logic: buy-and-hold) 하나, 대조군(logic: random) 하나, "
+                            + "판정 대상 하나 이상이 필요합니다(6단계 계획 2.1)");
+                }
+                throw new IllegalArgumentException("선정 " + c.selectionKeyOrNone() + "의 판정 대상(" + c.profile().id()
+                        + ")에는 같은 선정의 대조군(logic: random) 조합이 필요합니다(ADR-012 3.3, D-124)");
+            }
+            nullControls.add(control);
+        }
+        Map<Integer, Integer> controlOf = new LinkedHashMap<>();
+        for (int i = 0; i < combos.size(); i++) {
+            Integer control = controlBySelection.get(combos.get(i).selectionKeyOrNone());
+            if (control != null) {
+                controlOf.put(i, control);
+            }
+        }
+        List<Integer> controls = controlBySelection.values().stream().sorted().toList();
+        return new Roles(baseline, controls, judged, controlOf, List.copyOf(nullControls));
     }
 
-    /** 레인 구성. {@code perturbed}는 판정 대상 계좌 번호(0부터) → 변형 쌍(만들 수 없으면 이유). */
-    record Plan(Lane base, Lane perturb, Map<Integer, Pair> perturbed, List<Lane> latency, List<Lane> nulls) {
+    /**
+     * 레인 구성. {@code perturbed}는 판정 대상 계좌 번호(0부터) → 변형 쌍(만들 수 없으면 이유). {@code nullsByControl}은 대조군 계좌
+     * 번호 → 그 대조군의 시드 레인(계좌 순서). {@code nulls}는 그것을 차례로 이은 것이다.
+     */
+    record Plan(Lane base, Lane perturb, Map<Integer, Pair> perturbed, List<Lane> latency, List<Lane> nulls,
+            Map<Integer, List<Lane>> nullsByControl) {
         List<Lane> all() {
             List<Lane> out = new ArrayList<>();
             out.add(base);
@@ -239,18 +295,25 @@ public final class LiveJudgement {
         }
     }
 
-    record Pair(String key, String lowValue, String highValue, String lowId, String highId, String note) {
+    /** @param lowIndex·highIndex PERTURB 레인 안 변형 계좌 순서(만들 수 없으면 −1) */
+    record Pair(String key, String lowValue, String highValue, String lowId, String highId, String note, int lowIndex,
+            int highIndex) {
+        Pair(String key, String lowValue, String highValue, String lowId, String highId, String note) {
+            this(key, lowValue, highValue, lowId, highId, note, -1, -1);
+        }
     }
 
     static Plan lanes(LiveSetup setup, Roles roles, String dataVersion, int nullSeeds, Consumer<String> log) {
         LivePlan plan = setup.plan();
         ExecutionSettings base = setup.execution();
         Lane baseLane = new Lane(setup.spec(ClockMode.REPLAY, dataVersion), base);
-        List<StrategyProfile> judged = roles.judged().stream().map(i -> setup.combinations().get(i).profile()).toList();
+        // 판정 대상의 변형·지연 계좌는 같은 선정을 그대로 쓴다(선정 없는 계좌는 Combination.of와 같음)
+        List<Combination> judged = roles.judged().stream().map(i -> setup.combinations().get(i)).toList();
         Map<Integer, Pair> pairs = new LinkedHashMap<>();
-        List<StrategyProfile> variants = new ArrayList<>();
+        List<Combination> variants = new ArrayList<>();
         for (int i : roles.judged()) {
-            StrategyProfile p = setup.combinations().get(i).profile();
+            Combination c = setup.combinations().get(i);
+            StrategyProfile p = c.profile();
             String key = p.parameters().get("study.key-param");
             if (key == null) {
                 pairs.put(i, new Pair(null, null, null, null, null, "study.key-param 없음"));
@@ -265,21 +328,33 @@ public final class LiveJudgement {
                 log.accept(p.id() + ": ±20% 변형이 파라미터 범위 밖이라 L7 판정 불가");
                 continue;
             }
-            variants.add(low);
-            variants.add(high);
-            pairs.put(i, new Pair(key, low.parameters().get(key), high.parameters().get(key), low.id(), high.id(), ""));
+            int lowIndex = variants.size();
+            variants.add(new Combination(c.selection(), low));
+            variants.add(new Combination(c.selection(), high));
+            pairs.put(i, new Pair(key, low.parameters().get(key), high.parameters().get(key), low.id(), high.id(), "",
+                    lowIndex, lowIndex + 1));
         }
         Lane perturb = variants.isEmpty() ? null : new Lane(spec(setup, "PERTURB", plan.seed(), variants, dataVersion), base);
         List<Lane> latency = new ArrayList<>();
         for (Duration d : LATENCIES) {
             latency.add(new Lane(spec(setup, "L" + d.toMillis(), plan.seed(), judged, dataVersion), new ExecutionSettings(d)));
         }
-        StrategyProfile control = setup.combinations().get(roles.control()).profile();
+        // 대조군 시드 레인: 선정 없음 묶음은 NULL<i>(지금까지와 같은 ID), 선정 묶음은 S<k>-NULL<i>(k는 선정 묶음 순서)
+        Map<Integer, List<Lane>> byControl = new LinkedHashMap<>();
         List<Lane> nulls = new ArrayList<>();
-        for (int i = 1; i <= nullSeeds; i++) {
-            nulls.add(new Lane(spec(setup, "NULL" + i, plan.seed() + i, List.of(control), dataVersion), base));
+        int selectionGroup = 0;
+        for (int controlIndex : roles.nullControls()) {
+            Combination control = setup.combinations().get(controlIndex);
+            String prefix = control.hasSelection() ? "S" + (++selectionGroup) + "-NULL" : "NULL";
+            List<Lane> lanes = new ArrayList<>();
+            for (int i = 1; i <= nullSeeds; i++) {
+                lanes.add(new Lane(spec(setup, prefix + i, plan.seed() + i, List.of(control), dataVersion), base));
+            }
+            byControl.put(controlIndex, List.copyOf(lanes));
+            nulls.addAll(lanes);
         }
-        return new Plan(baseLane, perturb, pairs, List.copyOf(latency), List.copyOf(nulls));
+        return new Plan(baseLane, perturb, pairs, List.copyOf(latency), List.copyOf(nulls),
+                Collections.unmodifiableMap(byControl));
     }
 
     private static boolean valid(LiveSetup setup, StrategyProfile p) {
@@ -291,11 +366,11 @@ public final class LiveJudgement {
         }
     }
 
-    private static ExperimentSpec spec(LiveSetup setup, String suffix, long seed, List<StrategyProfile> profiles,
+    private static ExperimentSpec spec(LiveSetup setup, String suffix, long seed, List<Combination> combinations,
             String dataVersion) {
         LivePlan plan = setup.plan();
-        return ExperimentSpec.ofProfiles(new ExperimentId(plan.id().value() + "-" + suffix), plan.from(), plan.to(), seed,
-                plan.seedCapital(), setup.cost().id(), dataVersion, ClockMode.REPLAY, profiles);
+        return new ExperimentSpec(new ExperimentId(plan.id().value() + "-" + suffix), plan.from(), plan.to(), seed,
+                plan.seedCapital(), setup.cost().id(), dataVersion, ClockMode.REPLAY, combinations);
     }
 
     /**
@@ -322,7 +397,7 @@ public final class LiveJudgement {
         return out;
     }
 
-    private static Map<String, SimulationReport> runGroups(LiveSetup setup, MarketEventStream journal,
+    private static Map<String, SimulationReport> runGroups(LiveSetup setup, Path sessionDir, MarketEventStream journal,
             List<List<Lane>> groups, CodeVersion code, String id, RunGate gate) {
         // 한 묶음이 실패하면 나머지 묶음도 멈추게 한다. 실행기는 스레드 중단을 보지 않으므로 취소만으로는 남은 묶음이 끝까지
         // 돈다(PR #180 architect N2). 문은 Run 시작·거래일 바뀜에서만 확인되므로, 기록 읽기도 이벤트마다 실패 표시를 보게 해
@@ -334,7 +409,9 @@ public final class LiveJudgement {
         for (int g = 0; g < groups.size(); g++) {
             List<Lane> group = groups.get(g);
             String progressId = id + "-JUDGE-G" + (g + 1);
-            tasks.add(() -> runner(setup, stoppable, code, shared).runLanes(group, progressId));
+            // 선정 공급자는 묶음마다 따로 만든다(실행기는 한 스레드에서 부른다는 계약, SelectionSource)
+            SelectionSource selections = LiveReplayCheck.selectionSource(setup, sessionDir);
+            tasks.add(() -> runner(setup, stoppable, code, shared, selections).runLanes(group, progressId));
         }
         Map<String, SimulationReport> out = new LinkedHashMap<>();
         for (List<SimulationReport> reports : runAll(tasks, id, () -> failed.set(true))) {
@@ -460,10 +537,11 @@ public final class LiveJudgement {
         };
     }
 
+    /** @param selections 선정 계좌가 없으면 null(지금까지와 같은 실행기 입력) */
     private static SimulationExperimentRunner runner(LiveSetup setup, MarketEventStream data, CodeVersion code,
-            RunGate gate) {
+            RunGate gate, SelectionSource selections) {
         return new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(), setup.risk(),
-                setup.execution(), code, 1, setup.benchmark(), null, gate);
+                setup.execution(), code, 1, setup.benchmark(), selections, gate);
     }
 
     /** 대조군 시드 수: 21m − 1(판정 가능한 최소 20m − 1에 여유 m). */
@@ -475,8 +553,8 @@ public final class LiveJudgement {
     record Recording(SimulationReport report, String note, long events, int days) {
     }
 
-    private static Recording recording(LiveSetup setup, Path recordingsRoot, List<LocalDate> journalDates, CodeVersion code,
-            RunGate gate, Consumer<String> log) {
+    private static Recording recording(LiveSetup setup, Path sessionDir, Path recordingsRoot, List<LocalDate> journalDates,
+            CodeVersion code, RunGate gate, Consumer<String> log) {
         LivePlan plan = setup.plan();
         RecordingLayout layout = new RecordingLayout(recordingsRoot.toAbsolutePath());
         LocalDate end = journalDates.get(journalDates.size() - 1);
@@ -506,7 +584,9 @@ public final class LiveJudgement {
         // 주간 점검 계좌 대조와 같은 읽기(boards·운용 기간 종목, D-088). 날짜는 입력 기록일만
         MarketEventStream stream = boards.stream("REC-BOARDS-" + plan.id() + "-" + journalDates.get(0) + ".." + end, gate);
         log.accept("녹화 리플레이(L11): 녹화 " + dirs.size() + "일, 이벤트 " + stream.eventCount());
-        SimulationReport r = runner(setup, stream, code, gate).runDetailed(setup.spec(ClockMode.REPLAY, stream.version()));
+        // 선정 계좌는 입력 기록 레인과 같은 적용 기록을 읽는다(같은 날 같은 후보)
+        SimulationReport r = runner(setup, stream, code, gate, LiveReplayCheck.selectionSource(setup, sessionDir))
+                .runDetailed(setup.spec(ClockMode.REPLAY, stream.version()));
         return new Recording(r, "", stream.eventCount(), dirs.size());
     }
 
@@ -521,14 +601,10 @@ public final class LiveJudgement {
         SimulationReport base = byId.get(lanes.base().spec().id().value());
         SimulationReport perturb = lanes.perturb() == null ? null : byId.get(lanes.perturb().spec().id().value());
         SimulationReport stress = byId.get(lanes.latency().get(LATENCIES.indexOf(t.stressLatency())).spec().id().value());
-        List<BigDecimal> nullPerTrip = new ArrayList<>();
-        for (Lane l : lanes.nulls()) {
-            BigDecimal v = LiveJudgeCriteria.perTrip(byId.get(l.spec().id().value()).runs().get(0), seed);
-            if (v != null) {
-                nullPerTrip.add(v);
-            }
-        }
-        nullPerTrip.sort(BigDecimal::compareTo);
+        // 대조군 분포는 선정 묶음마다 따로(같은 선정 + 무작위 진입). 선정 없는 등록은 묶음이 하나라 지금까지와 같다
+        Map<Integer, List<BigDecimal>> nullPerTripByControl = new LinkedHashMap<>();
+        lanes.nullsByControl().forEach((control, nullLanes) -> nullPerTripByControl.put(control,
+                nullPerTrip(nullLanes, byId, seed)));
         RunReport baseline = base.runs().get(roles.baseline());
         Map<String, LiveJudgeCriteria.Judgement> out = new LinkedHashMap<>();
         for (int i = 0; i < base.runs().size(); i++) {
@@ -539,12 +615,15 @@ public final class LiveJudgement {
             if (judgedIndex >= 0) {
                 Pair p = lanes.perturbed().get(i);
                 perturbed = p.lowId() == null ? new LiveJudgeCriteria.Perturbed(p.key(), p.lowValue(), p.highValue(), null, null, p.note())
-                        : new LiveJudgeCriteria.Perturbed(p.key(), p.lowValue(), p.highValue(), run(perturb, p.lowId()),
-                                run(perturb, p.highId()), "");
+                        : new LiveJudgeCriteria.Perturbed(p.key(), p.lowValue(), p.highValue(),
+                                perturb.runs().get(p.lowIndex()), perturb.runs().get(p.highIndex()), "");
                 stressRun = stress.runs().get(judgedIndex);
             }
             LiveJudgeCriteria.Recorded recorded = new LiveJudgeCriteria.Recorded(
                     rec.report() == null ? null : rec.report().runs().get(i), rec.note());
+            Integer control = roles.controlOf().get(i);
+            List<BigDecimal> nullPerTrip = control == null ? List.of()
+                    : nullPerTripByControl.getOrDefault(control, List.of());
             out.put(r.summary().accountId().value(), LiveJudgeCriteria.evaluate(new LiveJudgeCriteria.Evidence(r, baseline,
                     perturbed, stressRun, nullPerTrip, m, recorded, seed, plan.from(), t)));
         }
@@ -562,13 +641,17 @@ public final class LiveJudgement {
         return new Judged(out, !incidents.isEmpty(), incidents);
     }
 
-    private static RunReport run(SimulationReport report, String profileId) {
-        for (RunReport r : report.runs()) {
-            if (r.profile().id().equals(profileId)) {
-                return r;
+    /** 대조군 레인들의 왕복당 순손익(왕복 0건·실패는 뺌), 오름차순. */
+    private static List<BigDecimal> nullPerTrip(List<Lane> nullLanes, Map<String, SimulationReport> byId, BigDecimal seed) {
+        List<BigDecimal> out = new ArrayList<>();
+        for (Lane l : nullLanes) {
+            BigDecimal v = LiveJudgeCriteria.perTrip(byId.get(l.spec().id().value()).runs().get(0), seed);
+            if (v != null) {
+                out.add(v);
             }
         }
-        throw new IllegalStateException("변형 Run이 없습니다: " + profileId);
+        out.sort(BigDecimal::compareTo);
+        return out;
     }
 
     private static String codeLine(String detail) {
@@ -582,7 +665,7 @@ public final class LiveJudgement {
 
     static String render(LiveSetup setup, CodeVersion code, StreamedRecordingDataSet journal, Plan lanes,
             Map<String, SimulationReport> byId, Recording rec, Judged judged, int diff, String liveCode,
-            ScreeningThresholds t, int m, int nullSeeds) {
+            ScreeningThresholds t, int m, int nullSeeds, List<SessionSelections.Applied> applied) {
         LivePlan plan = setup.plan();
         BigDecimal seed = plan.seedCapital().amount();
         SimulationReport base = byId.get(lanes.base().spec().id().value());
@@ -609,7 +692,13 @@ public final class LiveJudgement {
         sb.append("- 판정 대상 m = ").append(m).append(", 대조군 시드 N = ").append(nullSeeds).append(" (실험 시드 + 1 ~ + ")
                 .append(nullSeeds).append(", 판정 가능 최소 ").append(20 * m - 1).append("에 여유 ").append(m)
                 .append("), L10 문턱 0.05/m = ").append(LiveJudgeCriteria.alpha(m).setScale(5,
-                        RoundingMode.HALF_EVEN).toPlainString()).append("\n\n");
+                        RoundingMode.HALF_EVEN).toPlainString()).append('\n');
+        if (setup.hasSelections()) {
+            sb.append("- 선정 조합 계좌(D-124): 모든 레인이 세션이 남긴 같은 선정 적용 기록·결과 파일을 읽는다(판정 때 다시 계산하지 ")
+                    .append("않음). 대조군 시드 N개는 판정 대상이 있는 선정 묶음마다 따로 돌리고(같은 선정 + 무작위 진입, ADR-012 3.3), ")
+                    .append("L10은 계좌와 같은 묶음의 분포로 본다. m은 묶음을 합친 판정 대상 수다\n");
+        }
+        sb.append('\n');
 
         sb.append("## 1. 무사고(I1~I3)\n\n");
         sb.append("- I3 실시간 = 입력 기록 리플레이: ").append(diff < 0 ? "같음(상세 보고서 바이트 일치, code 줄 제외)"
@@ -627,8 +716,8 @@ public final class LiveJudgement {
         for (int i = 0; i < base.runs().size(); i++) {
             RunReport r = base.runs().get(i);
             LiveJudgeCriteria.Judgement j = judged.judgements().get(r.summary().accountId().value());
-            sb.append("| ").append(r.summary().accountId()).append(" | ").append(r.profile().id()).append('@')
-                    .append(r.profile().version()).append(" | ").append(role(roles, i)).append(" | ")
+            sb.append("| ").append(r.summary().accountId()).append(" | ").append(label(r)).append(" | ")
+                    .append(role(roles, i)).append(" | ")
                     .append(roles.judged().contains(i) ? "**" + j.verdict().label() + "**" : "(참고) " + j.verdict().label());
             for (String c : List.of("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11")) {
                 sb.append(" | ").append(mark(j, c));
@@ -637,12 +726,14 @@ public final class LiveJudgement {
         }
         sb.append("\n- ○ 통과, ✕ 탈락, ? 판정 불가. 판정: 탈락이 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 보류, 모두 통과면 후보.\n");
         sb.append("- 기준선·대조군은 같은 기준의 참고다(대조군이 L1~L6을 통과하면 기준이 느슨하다는 신호, 6단계 계획 4.2).\n");
-        RunReport controlRun = base.runs().get(roles.control());
-        LiveJudgeCriteria.Judgement control = judged.judgements().get(controlRun.summary().accountId().value());
-        if (control.checks().stream().filter(c -> List.of("L1", "L2", "L3", "L4", "L5", "L6").contains(c.code()))
-                .allMatch(c -> c.outcome() == Check.Outcome.PASS)) {
-            sb.append("- **대조군 ").append(controlRun.summary().accountId()).append("이 L1~L6을 모두 통과했다. 기준이 느슨하다는 신호다. ")
-                    .append("후보가 있어도 결과를 사용자와 함께 다시 본다(6단계 계획 4.2).**\n");
+        for (int controlIndex : roles.controls()) {
+            RunReport controlRun = base.runs().get(controlIndex);
+            LiveJudgeCriteria.Judgement control = judged.judgements().get(controlRun.summary().accountId().value());
+            if (control.checks().stream().filter(c -> List.of("L1", "L2", "L3", "L4", "L5", "L6").contains(c.code()))
+                    .allMatch(c -> c.outcome() == Check.Outcome.PASS)) {
+                sb.append("- **대조군 ").append(controlRun.summary().accountId()).append("이 L1~L6을 모두 통과했다. 기준이 느슨하다는 신호다. ")
+                        .append("후보가 있어도 결과를 사용자와 함께 다시 본다(6단계 계획 4.2).**\n");
+            }
         }
         sb.append('\n');
 
@@ -650,8 +741,7 @@ public final class LiveJudgement {
         for (int i = 0; i < base.runs().size(); i++) {
             RunReport r = base.runs().get(i);
             LiveJudgeCriteria.Judgement j = judged.judgements().get(r.summary().accountId().value());
-            sb.append("### ").append(r.summary().accountId()).append(' ').append(r.profile().id()).append('@')
-                    .append(r.profile().version()).append(" (").append(role(roles, i)).append(", ").append(j.verdict().label())
+            sb.append("### ").append(r.summary().accountId()).append(' ').append(label(r)).append(" (").append(role(roles, i)).append(", ").append(j.verdict().label())
                     .append(")\n\n");
             for (Check c : j.checks()) {
                 sb.append("- ").append(c.code()).append(' ').append(c.title()).append(": ").append(label(c.outcome()))
@@ -674,7 +764,7 @@ public final class LiveJudgement {
                 }
             }
             BigDecimal perTrip = LiveJudgeCriteria.perTrip(r, seed);
-            sb.append("| ").append(r.summary().accountId()).append(" | ").append(r.profile().id()).append(" | ")
+            sb.append("| ").append(r.summary().accountId()).append(" | ").append(shortLabel(r)).append(" | ")
                     .append(mm == null ? "-" : ScreeningCriteria.pct(mm.totalReturn())).append(" | ")
                     .append(mm == null ? "-" : ScreeningCriteria.pct(mm.benchmarkReturn())).append(" | ")
                     .append(ScreeningCriteria.pct(LiveJudgeCriteria.intradayExposure(r, seed, setup.rules().zone())))
@@ -696,7 +786,7 @@ public final class LiveJudgement {
         sb.append("---:|".repeat(lanes.latency().size() + 1)).append('\n');
         for (int k = 0; k < roles.judged().size(); k++) {
             RunReport b = base.runs().get(roles.judged().get(k));
-            sb.append("| ").append(b.profile().id()).append(" | ");
+            sb.append("| ").append(shortLabel(b)).append(" | ");
             for (Lane l : lanes.latency()) {
                 sb.append(retPf(byId.get(l.spec().id().value()).runs().get(k))).append(" | ");
             }
@@ -705,10 +795,68 @@ public final class LiveJudgement {
         sb.append("\n- 칸: 총수익률 / PF. L9는 2초 칸으로 판정한다.\n\n");
 
         sb.append("## 6. 무작위 대조군 분포(L10)\n\n");
+        for (Map.Entry<Integer, List<Lane>> e : lanes.nullsByControl().entrySet()) {
+            if (setup.hasSelections()) {
+                RunReport controlRun = base.runs().get(e.getKey());
+                sb.append("### ").append(controlRun.combination().hasSelection()
+                        ? "선정 " + controlRun.combination().selectionKeyOrNone() : "선정 없음(boards 전체)")
+                        .append(" — 대조군 ").append(controlRun.summary().accountId()).append(' ').append(label(controlRun))
+                        .append(", 시드 레인 ").append(e.getValue().get(0).spec().id()).append(" ~\n\n");
+            }
+            nullDistribution(sb, e.getValue(), byId, seed);
+            sb.append('\n');
+        }
+
+        sb.append("## 7. 실시간 대 녹화(L11)\n\n");
+        if (rec.report() == null) {
+            sb.append("- 녹화 리플레이를 돌리지 못했습니다: ").append(rec.note()).append(". L11은 판정 불가다.\n");
+        } else {
+            sb.append("| 계좌 | 프로필 | 총수익률 실시간 | 총수익률 녹화 | 체결 실시간 | 체결 녹화 | 진입 일치율 | 체결가 괴리 평균 |\n");
+            sb.append("|---|---|---:|---:|---:|---:|---:|---:|\n");
+            for (int i = 0; i < base.runs().size(); i++) {
+                RunReport a = base.runs().get(i);
+                RunReport b = rec.report().runs().get(i);
+                RunMetrics ma = a.summary().metrics();
+                RunMetrics mb = b.summary().metrics();
+                LiveJudgeCriteria.TradeGap g = LiveJudgeCriteria.tradeGap(a, b);
+                sb.append("| ").append(a.summary().accountId()).append(" | ").append(shortLabel(a)).append(" | ")
+                        .append(ma == null ? "-" : ScreeningCriteria.pct(ma.totalReturn())).append(" | ")
+                        .append(mb == null ? "-" : ScreeningCriteria.pct(mb.totalReturn())).append(" | ")
+                        .append(ma == null ? "-" : ma.fillCount()).append(" | ").append(mb == null ? "-" : mb.fillCount())
+                        .append(" | ").append(g.entryMatch() == null ? "-" : ScreeningCriteria.pct(g.entryMatch()) + " ("
+                                + g.matched() + "/" + g.liveEntries() + ")")
+                        .append(" | ").append(g.priceGap() == null ? "-" : ScreeningCriteria.pct(g.priceGap())).append(" |\n");
+            }
+            sb.append("\n- 진입 일치율·체결가 괴리는 참고(D-066 4번 정의를 장중에 옮김: 진입(종목, 거래일) 중 녹화에도 있는 비율, 맞은 것의 ")
+                    .append("첫 진입 체결가 차 평균). 판정은 D-114 L11(총수익률 차·체결 수 차)로만 한다.\n");
+            sb.append("- 진입 일치는 (종목, 거래일)마다 첫 진입만 맞춘다. 하루에 같은 종목을 여러 번 드나드는 프로필은 일치율이 실제보다 ")
+                    .append("높게 나올 수 있다.\n");
+        }
+        sb.append('\n');
+
+        sb.append("## 8. 변형(L7)\n\n");
+        for (int i : roles.judged()) {
+            Pair p = lanes.perturbed().get(i);
+            sb.append("- ").append(shortLabel(base.runs().get(i))).append(": ")
+                    .append(p.key() == null ? p.note() : p.key() + " ×0.8 = " + p.lowValue() + ", ×1.2 = " + p.highValue()
+                            + (p.note().isEmpty() ? "" : " (" + p.note() + ")"))
+                    .append('\n');
+        }
+        if (setup.hasSelections()) {
+            sb.append("\n## 9. 선정(D-124)\n\n");
+            sb.append("> 판정의 모든 레인이 읽은 세션 적용 기록(`selections/<날짜>/applied.json`)이다. 막힌 신규 진입은 BASE 레인 기준이다.\n");
+            RecordingExperiment.selectionTable(sb, base, applied);
+        }
+        return sb.toString();
+    }
+
+    /** 대조군 레인들의 분포 요약(왕복당 순손익). */
+    private static void nullDistribution(StringBuilder sb, List<Lane> nullLanes, Map<String, SimulationReport> byId,
+            BigDecimal seed) {
         List<BigDecimal> nulls = new ArrayList<>();
         int failed = 0;
         int noTrips = 0;
-        for (Lane l : lanes.nulls()) {
+        for (Lane l : nullLanes) {
             RunReport r = byId.get(l.spec().id().value()).runs().get(0);
             BigDecimal v = LiveJudgeCriteria.perTrip(r, seed);
             if (v != null) {
@@ -728,48 +876,24 @@ public final class LiveJudgement {
                     .append(ScreeningCriteria.won(ScreeningCriteria.quantile(nulls, new BigDecimal("0.95")))).append("원, 최대 ")
                     .append(ScreeningCriteria.won(nulls.get(nulls.size() - 1))).append("원\n");
         }
-        sb.append('\n');
+    }
 
-        sb.append("## 7. 실시간 대 녹화(L11)\n\n");
-        if (rec.report() == null) {
-            sb.append("- 녹화 리플레이를 돌리지 못했습니다: ").append(rec.note()).append(". L11은 판정 불가다.\n");
-        } else {
-            sb.append("| 계좌 | 프로필 | 총수익률 실시간 | 총수익률 녹화 | 체결 실시간 | 체결 녹화 | 진입 일치율 | 체결가 괴리 평균 |\n");
-            sb.append("|---|---|---:|---:|---:|---:|---:|---:|\n");
-            for (int i = 0; i < base.runs().size(); i++) {
-                RunReport a = base.runs().get(i);
-                RunReport b = rec.report().runs().get(i);
-                RunMetrics ma = a.summary().metrics();
-                RunMetrics mb = b.summary().metrics();
-                LiveJudgeCriteria.TradeGap g = LiveJudgeCriteria.tradeGap(a, b);
-                sb.append("| ").append(a.summary().accountId()).append(" | ").append(a.profile().id()).append(" | ")
-                        .append(ma == null ? "-" : ScreeningCriteria.pct(ma.totalReturn())).append(" | ")
-                        .append(mb == null ? "-" : ScreeningCriteria.pct(mb.totalReturn())).append(" | ")
-                        .append(ma == null ? "-" : ma.fillCount()).append(" | ").append(mb == null ? "-" : mb.fillCount())
-                        .append(" | ").append(g.entryMatch() == null ? "-" : ScreeningCriteria.pct(g.entryMatch()) + " ("
-                                + g.matched() + "/" + g.liveEntries() + ")")
-                        .append(" | ").append(g.priceGap() == null ? "-" : ScreeningCriteria.pct(g.priceGap())).append(" |\n");
-            }
-            sb.append("\n- 진입 일치율·체결가 괴리는 참고(D-066 4번 정의를 장중에 옮김: 진입(종목, 거래일) 중 녹화에도 있는 비율, 맞은 것의 ")
-                    .append("첫 진입 체결가 차 평균). 판정은 D-114 L11(총수익률 차·체결 수 차)로만 한다.\n");
-            sb.append("- 진입 일치는 (종목, 거래일)마다 첫 진입만 맞춘다. 하루에 같은 종목을 여러 번 드나드는 프로필은 일치율이 실제보다 ")
-                    .append("높게 나올 수 있다.\n");
-        }
-        sb.append('\n');
+    /** 계좌 이름: 선정 없으면 {@code 전략@버전}, 선정 조합이면 {@code 선정@버전 x 전략@버전}. */
+    private static String label(RunReport r) {
+        return selectionPrefix(r) + r.profile().id() + "@" + r.profile().version();
+    }
 
-        sb.append("## 8. 변형(L7)\n\n");
-        for (int i : roles.judged()) {
-            Pair p = lanes.perturbed().get(i);
-            sb.append("- ").append(base.runs().get(i).profile().id()).append(": ")
-                    .append(p.key() == null ? p.note() : p.key() + " ×0.8 = " + p.lowValue() + ", ×1.2 = " + p.highValue()
-                            + (p.note().isEmpty() ? "" : " (" + p.note() + ")"))
-                    .append('\n');
-        }
-        return sb.toString();
+    /** 표의 좁은 칸용 이름: 선정 없으면 {@code 전략}, 선정 조합이면 {@code 선정@버전 x 전략}. */
+    private static String shortLabel(RunReport r) {
+        return selectionPrefix(r) + r.profile().id();
+    }
+
+    private static String selectionPrefix(RunReport r) {
+        return r.combination().hasSelection() ? r.combination().selectionKeyOrNone() + " x " : "";
     }
 
     private static String role(Roles roles, int i) {
-        return i == roles.baseline() ? "기준선" : i == roles.control() ? "대조군" : "판정 대상";
+        return i == roles.baseline() ? "기준선" : roles.controls().contains(i) ? "대조군" : "판정 대상";
     }
 
     private static String mark(LiveJudgeCriteria.Judgement j, String code) {
