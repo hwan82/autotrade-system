@@ -23,3 +23,31 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-20
+- 대상: PR #203 / 커밋 ef4b6bd(앞 검토 f80aa93 이후 ef4b6bd 하나 추가, 그 사이 검토 원문 커밋 2개) / `git diff origin/main...HEAD` 전체 다시 봄
+- 점검표: B
+- 직접 실행한 것: 새 worktree(ef4b6bd, detached)에서 `./gradlew build --continue --init-script <저장소 밖 mirror.gradle>` → **BUILD SUCCESSFUL**, 테스트 XML 합계 1811건 실패 0·오류 0·건너뜀 0(앞 검토보다 1건 많음). `LiveIntradayJudgementTest` 3/3(`intradayTableMarksDaysWhereTheRecordingRankedDifferently` 추가) 통과.
+
+ef4b6bd 변경 내용(코드로 확인):
+- 결정 번호 D-128 → D-129. `origin/claude/live02-preregistration-plan-1g6tsw`(PR #202)가 `D-128-live02-preregistration-plan.md`를 쓰고 있어 번호 충돌을 피한 것이다(원격 브랜치 전부 `docs/decisions` 확인, D-129는 이 브랜치만 씀). 이 브랜치의 `.java`·`.md`에 남은 `D-128` 참조 0건(검토 원문 제외).
+- 녹화(L11) 후보 비교를 순서 있는 목록에서 종목 집합(`TreeSet`)으로 바꿈(LiveJudgement.java:955-960). 산 종목이 같으면 같음으로 보는 것이 L11 해석 목적에 맞고, "다름" 칸 출력은 정렬된 집합이라 결정론적이다. 보고서 머리말 문구도 맞춰 고침.
+- 앞 검토 n1(다름·순위 없음 칸 시험 없음) 해소: `LiveIntradayJudgementTest#intradayTableMarksDaysWhereTheRecordingRankedDifferently`(:243)가 녹화 이벤트를 바꿔 D1은 "**다름**: 005930", D2는 "**다름**: 순위 없음"이 찍히는지 정확한 줄 끝으로 단언한다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 직접 실행, BUILD SUCCESSFUL, 1811건 실패 0 |
+| B2 | 통과 | ef4b6bd는 `autotrade-sim` 운영 코드 1파일·시험 2파일·문서만. 새 의존 없음(`Set`·`TreeSet`은 이미 import). ArchUnit·소유 표 통과 |
+| B3 | 통과 | 계약 변경 없음. 결정 번호 이동이 ADR-012 5.2·배치표 7, D-127 후속, README 표, runbook에 모두 반영됨 |
+| B4 | 통과 | 집합 비교·출력은 `TreeSet` 정렬 순서. 병렬 4 대 1 보고서 바이트 일치 시험(`#intradayAccountsAre…`) 그대로 통과 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 새 동작(집합 비교·다름 칸)에 시험 추가. 시험 삭제·건너뜀 없음(건너뜀 0) |
+| B7 | 해당 없음 | 실전 경로·보호 경로 변경 없음(바뀐 파일 중 `scripts/ci/protected-paths.txt` 패턴에 걸리는 것 없음) |
+| B8 | 통과 | 비밀값 없음 |
+
+## 점검표 밖 발견(재검토)
+- n4(문서, 막지 않음): `docs/decisions/D-129-live-judgement-intraday-at.md:6` "번호: 열린 브랜치 전부의 결정 로그 최대가 D-127이라 D-129을 쓴다"는 번호만 바꾸고 이유 문장을 고치지 않아 사실과 맞지 않는다. "최대가 D-128(PR #202)이라 D-129를 쓴다"로 고치길 권한다. 판정·코드에는 영향이 없다.
+- 앞 검토의 n2·n3(정보)은 그대로이며 조치가 필요 없다.
+
+## 판정
+승인
