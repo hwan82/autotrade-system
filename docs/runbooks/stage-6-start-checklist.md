@@ -86,7 +86,7 @@ $id = if ((Get-Date) -lt (Get-Date "2026-10-24")) { "EXP-20261020-LIVE00" } else
 
 로그에 `시세 배분`과 `실험실 시세 전달 소켓을 열었습니다`가 나와야 한다. `열지 못해 녹화만 합니다`가 나오면 [절차서](stage-6-live-session.md) 2장 1번을 본다(녹화는 그대로 된다).
 
-창 2 — 실험실(화면 `http://127.0.0.1:8480/#/live`):
+창 2 — 실험실(화면 `http://127.0.0.1:8480/#/live`, 계좌 ID를 누르면 체결 내역·거절 사유를 최근 것부터 본다. D-120이 들어간 코드로 띄운 뒤부터. 끝낸 세션은 `live-detail.txt`의 `fill` 줄):
 
 ```powershell
 .\gradlew :autotrade-app-lab:bootRun
