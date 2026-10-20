@@ -126,7 +126,8 @@ public final class WatchlistCandidatesMain {
         } catch (ExperimentStoppedException e) {
             System.err.println("[watchlist] 멈췄습니다(파일을 쓰지 않음): " + e.getMessage());
             return e.exitCode();
-        } catch (IllegalArgumentException | IllegalStateException | IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // 스냅샷을 못 읽은 UncheckedIOException 등도 입력 오류로 끝낸다(다른 실험 명령과 같다, PR #195 architect R3)
             System.err.println("[watchlist] 실패: " + e.getMessage());
             return 1;
         }

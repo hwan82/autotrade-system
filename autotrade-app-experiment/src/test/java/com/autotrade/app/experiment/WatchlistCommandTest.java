@@ -117,6 +117,16 @@ class WatchlistCommandTest {
     }
 
     @Test
+    void 없는_스냅샷이면_입력_오류로_끝나고_파일을_쓰지_않는다() throws IOException {
+        Path out = work.resolve("candidates.txt");
+        assertThat(ExperimentMain.run(args(null, out), at(ExperimentGateTest.WEEKEND), config)).isEqualTo(1);
+        assertThat(out).doesNotExist();
+        ExperimentJobFiles files = ExperimentJobFiles.in(config);
+        assertThat(files.read(files.status("WATCHLIST-CANDIDATES")).state())
+                .isEqualTo(ExperimentJobStatus.State.INPUT_ERROR);
+    }
+
+    @Test
     void 작업_ID는_고정이다() {
         assertThat(ExperimentMain.jobId("watchlist", List.of("..", SNAPSHOT, "-", "100", "x.txt")))
                 .isEqualTo("WATCHLIST-CANDIDATES");
