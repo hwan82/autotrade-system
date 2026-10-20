@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -99,6 +100,20 @@ class WatchlistCommandTest {
         assertThat(ExperimentMain.run(args("--allow-during-session", out), at(ExperimentGateTest.WEEKEND), config))
                 .isEqualTo(4);
         assertThat(out).doesNotExist();
+    }
+
+    @Test
+    void 같은_작업이_돌고_있으면_입력_오류로_거절하고_파일을_쓰지_않는다() throws Exception {
+        snapshot();
+        Path out = work.resolve("candidates.txt");
+        Clock weekend = at(ExperimentGateTest.WEEKEND);
+        try (ExperimentJob running = ExperimentJob.start("WATCHLIST-CANDIDATES", "watchlist",
+                ExperimentMain.gate(weekend, config, false), 1, weekend, ExperimentJobFiles.in(config),
+                ProcessHandle.current().pid(), Duration.ofHours(1))) {
+            assertThat(ExperimentMain.run(args(null, out), weekend, config)).isEqualTo(1);
+            assertThat(out).doesNotExist();
+            running.finish(0);
+        }
     }
 
     @Test

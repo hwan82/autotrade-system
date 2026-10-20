@@ -214,6 +214,20 @@ $t0 = Get-Date
 
 4. LIVE01 첫날(10-26) 게이트웨이를 켠 뒤 창 1 로그에 `구독 거절`이 나오면 **09:00 전에** 게이트웨이를 Ctrl+C로 끄고 `Copy-Item "$wl.before-wide" $wl -Force`로 10종목으로 되돌린 뒤 다시 켠다. 그 로그 줄을 스레드에 올린다(키는 나오지 않는다). LIVE01 결과를 지키는 쪽이 먼저다.
 
+   거절 줄 없이 일부 종목만 빠질 수도 있어(risk-ops PR #195 N1), 첫날 **09:30쯤** 새 PowerShell 창에서 LIVE01 10종목이 그날 녹화에 모두 들어왔는지 한 번 본다. 쓰는 중인 파일을 읽기만 한다.
+
+   ```powershell
+   chcp 65001 > $null; $cfg = if ($env:AUTOTRADE_CONFIG_DIR) { $env:AUTOTRADE_CONFIG_DIR } else { Join-Path $HOME ".autotrade" }
+   $keep = "005930,000660,035420,005380,373220,068270,105560,035720,247540,028300"
+   $f = Join-Path $cfg ("recordings\KRX\" + (Get-Date -Format "yyyy-MM-dd") + "\events.jsonl.gz"); $seen = @{}
+   $r = New-Object IO.StreamReader(New-Object IO.Compression.GZipStream([IO.File]::Open($f, 'Open', 'Read', 'ReadWrite'), [IO.Compression.CompressionMode]::Decompress))
+   try { while ($null -ne ($l = $r.ReadLine())) { if ($l -match '"sym":"KRX:(\w{6})"') { $seen[$Matches[1]] = 1 } } } catch { "(쓰는 중인 파일의 끝이라 읽기를 멈춤, 정상)" } finally { $r.Close() }
+   "녹화된 종목 수: $($seen.Count)"; $keep.Split(',') | Where-Object { -not $seen.ContainsKey($_) } | ForEach-Object { "안 들어온 LIVE01 종목: $_" }
+   ```
+
+   - `녹화된 종목 수`가 100 가까이고 `안 들어온 LIVE01 종목` 줄이 없으면 된다.
+   - `안 들어온 LIVE01 종목`이 하나라도 있으면 장중이라도 위와 같이 10종목으로 되돌리고 게이트웨이를 다시 켠다(재기동 공백은 녹화에 `RECORDER_RESTART`로 남는다, D-065). 출력 두 줄을 스레드에 올린다.
+
 5. 넓힌 뒤 늘어나는 부하 두 가지를 본다. 실험실은 게이트웨이가 보내는 KRX 이벤트를 모두 받은 뒤 `boards` 밖 종목을 버리므로 받는 이벤트가 약 10배가 되고(받는 큐 100,000건, `LiveLabService.INBOX_CAPACITY`), 주간 점검·녹화 판정은 그날 녹화 전체를 줄마다 읽은 뒤 `boards`만 고르므로 읽는 줄이 약 10배가 된다(`LiveWeeklyCheck.BoardsRecording`) `[추론]`.
    - 매 거래일 2.2 상태 확인에서 `inboxDropped`가 0이 아니면 그날 줄을 스레드에 올리고, 다음 거래일부터 `Copy-Item "$wl.before-wide" $wl -Force`로 10종목으로 되돌린다.
    - 첫 주간 점검(10-30)의 걸린 시간을 LIVE00 주간 점검(10-23)과 함께 올린다. 녹화 읽기가 늘어난 만큼 길어지며, 8주차 예상이 하룻밤(약 12시간)을 넘으면 Claude가 되돌릴지 정해 알린다.
