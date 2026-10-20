@@ -3,6 +3,7 @@ package com.autotrade.marketdata.recording;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.OrderBookSnapshot;
@@ -16,6 +17,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -95,9 +97,11 @@ class DayWriterRestartStreamTest {
 
     @Test
     void 정상_종료_녹화를_다시_쓴_줄은_원본_줄과_바이트가_같다() throws IOException {
+        // 소스 순번을 녹화 순번과 다르게 둔다(소스 둘, 1000·5000부터). 같으면 소스 순번 복원이 빠져도 바이트가 같다(PR #187 QA Q1)
         DayWriter first = open(OPEN);
         for (long i = 0; i < 1_000; i++) {
-            first.write("KIWOOM-WS", event(i));
+            boolean kis = i % 3 == 0;
+            first.write(kis ? "KIS-WS" : "KIWOOM-WS", EventSequences.withSequence(event(i), (kis ? 5_000 : 1_000) + i));
         }
         first.close(OPEN.plusSeconds(30));
         Path events = dayDir().resolve(RecordingLayout.EVENTS_FILE);
@@ -108,6 +112,40 @@ class DayWriterRestartStreamTest {
         second.close(OPEN.plusSeconds(61)); // 새 줄 없이 닫으면 뒤에 붙은 빈 gzip 멤버만 늘어난다
         assertThat(gunzip(events)).isEqualTo(before);
         assertThat(dayDir().resolve(RecordingLayout.EVENTS_FILE + ".tmp")).doesNotExist();
+        List<RecordingCodec.Line> lines = new ArrayList<>();
+        RecordedDayStream.read(dayDir(), lines::add);
+        assertThat(lines.get(0).sourceId()).isEqualTo("KIS-WS");
+        assertThat(lines.get(0).sourceSequence()).isEqualTo(5_000);
+        assertThat(lines.get(1).sourceId()).isEqualTo("KIWOOM-WS");
+        assertThat(lines.get(1).sourceSequence()).isEqualTo(1_001);
+    }
+
+    @Test
+    void 앞_날_정상_종료_시각이_마지막_수신보다_늦으면_그_시각부터_재기동_공백을_남긴다() throws IOException {
+        // carryRestartFrom 공백 시작이 앞 날 마지막 구간 끝을 반영하는지 고정한다(PR #187 QA Q2)
+        LocalDate prevDay = DAY.minusDays(1);
+        Path previous = new RecordingLayout(root).dayDir(Market.KRX, prevDay);
+        Instant prevOpen = OPEN.minus(Duration.ofDays(1));
+        DayWriter prev = new DayWriter(previous, Market.KRX, prevDay, SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"), "", prevOpen);
+        Instant lastRx = prevOpen.plusSeconds(10);
+        prev.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 1, prevOpen, prevOpen, BigDecimal.valueOf(70_000), 1));
+        prev.write("KIWOOM-WS", new TradeTick(Symbol.krx("000660"), 1, lastRx, lastRx, BigDecimal.valueOf(120_000), 1));
+        Instant ended = prevOpen.plus(Duration.ofHours(7)); // 마지막 수신(event(1))보다 한참 늦은 정상 종료
+        prev.close(ended);
+        assertThat(ended).isAfter(lastRx);
+
+        DayWriter w = open(OPEN);
+        w.carryRestartFrom(previous);
+        Instant resumed = OPEN.plusSeconds(5);
+        List<DataGap> gaps = w.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 1, resumed, resumed,
+                BigDecimal.valueOf(70_000), 1));
+        assertThat(gaps).extracting(DataGap::symbol).containsExactly(Symbol.krx("000660"), Symbol.krx("005930"));
+        assertThat(gaps).allSatisfy(g -> {
+            assertThat(g.gapStart()).isEqualTo(ended);
+            assertThat(g.gapEnd()).isEqualTo(resumed);
+            assertThat(g.reason()).isEqualTo(DataGap.GapReason.RECORDER_RESTART);
+        });
+        w.close(resumed.plusSeconds(1));
     }
 
     @Test
@@ -154,10 +192,16 @@ class DayWriterRestartStreamTest {
         // Windows 명령 줄 길이 한도를 피하려고 클래스패스는 인자 파일로 넘긴다
         Files.writeString(argFile, "-cp \"" + System.getProperty("java.class.path").replace("\\", "\\\\") + "\"");
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        // 출력은 파일로 받는다: 자식이 멈춰도 시간 제한이 듣게(PR #187 risk-ops N1)
+        Path log = root.resolve("probe.log");
         Process p = new ProcessBuilder(java.toString(), SMALL_HEAP, "@" + argFile, Probe.class.getName(), dir.toString())
-                .redirectErrorStream(true).start();
-        String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        assertThat(p.waitFor(5, TimeUnit.MINUTES)).as(output).isTrue();
+                .redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        boolean exited = p.waitFor(5, TimeUnit.MINUTES);
+        if (!exited) {
+            p.destroyForcibly().waitFor();
+        }
+        String output = Files.readString(log, StandardCharsets.UTF_8);
+        assertThat(exited).as(output).isTrue();
         assertThat(p.exitValue()).as(output).isZero();
         assertThat(output).contains("lastSeq=" + HEAVY_LINES);
 
