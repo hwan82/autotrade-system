@@ -15,3 +15,4 @@
 | `kr-vol-surge-quiet` | SWING, 매일 | 예시 (나) 거래량 급증·가격 정체(D-043) |
 | `kr-intraday-hot` | INTRADAY, 장전 매일 | 예시 (다) 전일 관심 종목(ADR-012 3.3, D-121) |
 | `kr-intraday-news` | INTRADAY, 장전 매일 | 예시 (라) 소식 있는 종목: 전일 공시(B·I) 1건 이상(ADR-012 3.3, D-123). 공시 스냅샷 필요 |
+| `kr-watchlist-turnover` | INTRADAY, 장전 매일 | 감시 종목 후보(20거래일 평균 거래대금 상위 `STOCK`). 매매 선정이 아니라 `runWatchlistCandidates`만 쓴다(ADR-012 배치표 0번) |
