@@ -178,6 +178,46 @@ $t0 = Get-Date
 - 종료 코드 0이면 판정 파일 `judgement.md`가 생긴다. 2면 무사고 I1~I3이 깨진 것이라 바로 알린다. 1·3·4면(입력 오류·취소·장 시간 보호) 출력 마지막 줄을 올린다. 위 두 줄(종료 코드, 걸린 시간)과 `judgement.md`도 함께 올린다.
 - 이 결과로 LIVE01 하루 디스크·메모리를 다시 계산한다. 디스크가 모자라면 10-26 전에 LIVE01 등록을 고친다(계획 2.2 되돌릴 조건).
 
+## 4.1 감시 종목 넓히기(10-24~25 주말, LIVE01 시작 전, 사용자 결정 2026-10-20)
+
+단타 선정(ADR-012) 시험용 녹화를 위해 게이트웨이 감시 종목을 **LIVE01 10종목 + 최근 20거래일 평균 거래대금 상위 보통주, 모두 100종목**으로 넓힌다(배치표 0번). LIVE01 `boards` 10종목은 그대로 받으므로 LIVE01 계좌·입력 기록은 바뀌지 않는다 `[추론]`(실험실은 `boards` 밖 종목을 기록하지 않고 세기만 한다, ADR-010). 100은 키움이 체결·호가를 종목마다 따로 세도(100 × 2 = 200) 세션 한도 200 안에 드는 값이다(`KiwoomStreamProtocol` 종목 단위 계산은 `[가정]`). 넓히는 이유와 크기는 [ADR-012](../adr/ADR-012-intraday-selection.md) 6장 0번.
+
+1. 최신 일봉 스냅샷이 있어야 한다. 금요일(10-23) 저녁이나 주말에 평소 수집(`krx-daily`)을 한 번 돌린 뒤 한다. 아래 첫 줄이 스냅샷 폴더 이름을 보여 준다.
+
+   ```powershell
+   git pull
+   $snap = (Get-ChildItem (Join-Path $cfg "snapshots\krx-daily") -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1).Name; $snap
+   $keep = "005930,000660,035420,005380,373220,068270,105560,035720,247540,028300"
+   $cand = Join-Path $cfg "watchlist-candidates.txt"
+   .\gradlew :autotrade-app-experiment:runWatchlistCandidates "-Psnapshot=$snap" "-Pkeep=$keep" -Ptotal=100 "-Pout=$cand"
+   "종료 코드: $LASTEXITCODE"
+   ```
+
+   - 출력의 `선정 기준일`이 10-23(또는 그 앞 거래일)이고 `후보 100종목`이면 된다. 종료 코드 4면 장 시간 보호 구간이니 주말에 다시 돌린다. 1이면 마지막 줄을 스레드에 올린다.
+   - 이 명령은 `watchlist.json`을 바꾸지 않는다. 목록 파일만 쓴다.
+
+2. `watchlist.json`을 이 목록으로 바꾼다. 지금 파일(LIVE00 10종목)은 `watchlist.json.before-wide`로 남기고, `held`(보유) 칸은 그대로 둔다.
+
+   ```powershell
+   $wl = Join-Path $cfg "watchlist.json"
+   Copy-Item $wl "$wl.before-wide" -Force; $old = Get-Content $wl -Raw | ConvertFrom-Json; $held = @(); if ($old.held) { $held = @($old.held) }
+   $codes = Get-Content $cand | Where-Object { $_ -match '^[0-9A-Z]{6}$' }
+   $q = { param($x) '"' + $x + '"' }
+   $json = '{"held":[' + (($held | ForEach-Object { & $q $_ }) -join ',') + '],"candidates":[' + (($codes | ForEach-Object { & $q "KRX:$_" }) -join ',') + ']}'
+   [IO.File]::WriteAllText($wl, $json, (New-Object Text.UTF8Encoding $false))
+   "후보 {0}종목, LIVE01 10종목 포함 {1}" -f $codes.Count, (($keep -split ',') | Where-Object { $codes -contains $_ }).Count
+   ```
+
+   `후보 100종목, LIVE01 10종목 포함 10`이 나와야 한다.
+
+3. 디스크: 녹화가 대략 종목 수에 비례해 늘어난다 `[추론]`. LIVE00 하루 녹화 21MB(10종목)면 100종목은 하루 약 200MB, 8주 약 8~9GB다. 1장 4번 명령으로 여유를 보고, 녹화·입력 기록 합계 8주 분량(약 10GB `[추론]`)에 20GB를 더한 것보다 적으면 넓히지 않고 `watchlist.json.before-wide`를 되돌린다(`Copy-Item "$wl.before-wide" $wl -Force`).
+
+4. LIVE01 첫날(10-26) 게이트웨이를 켠 뒤 창 1 로그에 `구독 거절`이 나오면 **09:00 전에** 게이트웨이를 Ctrl+C로 끄고 `Copy-Item "$wl.before-wide" $wl -Force`로 10종목으로 되돌린 뒤 다시 켠다. 그 로그 줄을 스레드에 올린다(키는 나오지 않는다). LIVE01 결과를 지키는 쪽이 먼저다.
+
+5. 넓힌 뒤 늘어나는 부하 두 가지를 본다. 실험실은 게이트웨이가 보내는 KRX 이벤트를 모두 받은 뒤 `boards` 밖 종목을 버리므로 받는 이벤트가 약 10배가 되고(받는 큐 100,000건, `LiveLabService.INBOX_CAPACITY`), 주간 점검·녹화 판정은 그날 녹화 전체를 줄마다 읽은 뒤 `boards`만 고르므로 읽는 줄이 약 10배가 된다(`LiveWeeklyCheck.BoardsRecording`) `[추론]`.
+   - 매 거래일 2.2 상태 확인에서 `inboxDropped`가 0이 아니면 그날 줄을 스레드에 올리고, 다음 거래일부터 `Copy-Item "$wl.before-wide" $wl -Force`로 10종목으로 되돌린다.
+   - 첫 주간 점검(10-30)의 걸린 시간을 LIVE00 주간 점검(10-23)과 함께 올린다. 녹화 읽기가 늘어난 만큼 길어지며, 8주차 예상이 하룻밤(약 12시간)을 넘으면 Claude가 되돌릴지 정해 알린다.
+
 ## 5. LIVE01(10-26 월요일부터 12-18까지)
 
 - 매 거래일 2장, 매주 금요일 3장. 11-19(목)은 수능일이라 10:00 개장·16:30 마감이다. 게이트웨이는 평소처럼 08:40 전에 켜고 16:40 뒤에 끈다.

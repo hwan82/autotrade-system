@@ -12,6 +12,7 @@ import com.autotrade.sim.recording.RecordingMain;
 import com.autotrade.sim.run.ExperimentJobFiles;
 import com.autotrade.sim.run.ExperimentLimits;
 import com.autotrade.sim.run.RunGate;
+import com.autotrade.sim.selection.WatchlistCandidatesMain;
 import com.autotrade.sim.study.StudyMain;
 import com.autotrade.sim.walkforward.WalkForwardMain;
 import java.io.IOException;
@@ -28,7 +29,8 @@ import java.util.function.ToIntFunction;
  * (broker-and-fault-design 5.2)에 들어간다: 감시가 정지 요청 파일을 만들면 시작하지 않고, 실행 중이면 Run 시작 전·거래일마다
  * 확인해 스스로 멈춘다. 장 시간 보호 구간에도 멈춘다({@link ExperimentGate}).
  *
- * <p>인자: {@code <combination|recording|study|walkforward|live-check|live-weekly|live-judge> [--allow-during-session[=true]]
+ * <p>인자: {@code <combination|recording|study|walkforward|live-check|live-weekly|live-judge|watchlist>
+ * [--allow-during-session[=true]]
  * [--max-parallel-runs=N] <나머지는 CombinationMain·
  * RecordingMain·StudyMain·WalkForwardMain·LiveCheckMain·LiveWeeklyMain·LiveJudgeMain 인자>}.
  * 해제 옵션은 값이 없거나 {@code true}일 때만 장 시간 보호를 풀고, 그 밖의 값({@code false} 포함)은 입력 오류다. Gradle 속성은
@@ -72,10 +74,10 @@ public final class ExperimentMain {
         // 상대 경로나 ..가 섞여도 상태 파일 메시지에서 설정 폴더 경로를 가릴 수 있게 한 번 정규화한다(PR #113 architect R5·risk-ops R3)
         Path configDir = givenConfigDir.toAbsolutePath().normalize();
         if (args.length == 0 || !List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly",
-                "live-judge")
+                "live-judge", "watchlist")
                 .contains(args[0])) {
-            System.err.println(
-                    "인자: <combination|recording|study|walkforward|live-check|live-weekly|live-judge> [--allow-during-session] ...");
+            System.err.println("인자: <combination|recording|study|walkforward|live-check|live-weekly|live-judge|watchlist>"
+                    + " [--allow-during-session] ...");
             return 1;
         }
         List<String> rest = new ArrayList<>();
@@ -172,6 +174,7 @@ public final class ExperimentMain {
             case "live-check" -> LiveCheckMain.run(forwarded, configDir, gate);
             case "live-weekly" -> LiveWeeklyMain.run(forwarded, configDir, gate);
             case "live-judge" -> LiveJudgeMain.run(forwarded, configDir, gate);
+            case "watchlist" -> WatchlistCandidatesMain.run(forwarded, gate);
             default -> StudyMain.run(forwarded, gate);
         };
     }
@@ -180,6 +183,9 @@ public final class ExperimentMain {
     static String jobId(String command, List<String> rest) {
         if (command.equals("study")) {
             return StudyMain.ID.value();
+        }
+        if (command.equals("watchlist")) {
+            return WatchlistCandidatesMain.ID.value(); // 감시 종목 후보 뽑기는 실험 ID가 없다(ADR-012 배치표 0번)
         }
         if (rest.size() < 4) {
             return null;
