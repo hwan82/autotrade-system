@@ -82,6 +82,40 @@ class SelectionCriteriaTest {
                 .hasMessageContaining("KRX");
     }
 
+    @Test
+    void 장중_순위_선정은_장중_지표만_쓰고_장중_지표는_장중_순위_선정에만_쓴다() {
+        SelectionCriteria c = intraday(Map.of("score.metric", "session-turnover", "score.order", "DESC"));
+        assertThat(c.gates()).isEmpty();
+        assertThat(c.session()).isTrue();
+        assertThat(c.inputKinds()).containsExactly(Metric.Kind.SESSION);
+        SelectionCriteria repo = SelectionCriteria.parse(SelectionCalculatorTest.repoProfile("kr-intraday-open-momentum"));
+        assertThat(repo.gates()).extracting(g -> g.metric().key() + " " + g.op() + " " + g.threshold().toPlainString())
+                .containsExactly("session-return GE 0.01", "session-return LE 0.15");
+        assertThat(repo.score()).hasValueSatisfying(sc -> assertThat(sc.metric()).isEqualTo(Metric.SESSION_TURNOVER));
+
+        assertThatThrownBy(() -> intraday(Map.of("gate.01.metric", "return", "gate.01.window", "1", "gate.01.op", "GE",
+                "gate.01.value", "0"))).hasMessageContaining("장중 지표");
+        assertThatThrownBy(() -> intraday(Map.of("filter.min-price", "1000", "score.metric", "session-turnover",
+                "score.order", "DESC"))).hasMessageContaining("filter");
+        assertThatThrownBy(() -> intraday(Map.of("gate.01.metric", "session-range", "gate.01.window", "5",
+                "gate.01.op", "GE", "gate.01.value", "0"))).hasMessageContaining("기간을 받지 않습니다");
+        assertThatThrownBy(() -> intraday(Map.of())).hasMessageContaining("하나 이상");
+        assertThatThrownBy(() -> parse(Map.of("gate.01.metric", "session-turnover", "gate.01.op", "GE",
+                "gate.01.value", "1"))).hasMessageContaining("INTRADAY_AT");
+        assertThatThrownBy(() -> parse(Map.of("filter.kinds", "STOCK", "score.metric", "session-return",
+                "score.order", "DESC"))).hasMessageContaining("INTRADAY_AT");
+    }
+
+    static SelectionCriteria intraday(Map<String, String> extra) {
+        TreeMap<String, String> p = new TreeMap<>();
+        p.put("hypothesis", "가설");
+        p.put("refresh", "INTRADAY_AT");
+        p.put("at", "09:30");
+        p.put("max-symbols", "3");
+        p.putAll(extra);
+        return SelectionCriteria.parse(new SelectionProfile("t", 1, Market.KRX, TradingStyle.INTRADAY, p));
+    }
+
     private static SelectionCriteria parse(Map<String, String> extra) {
         TreeMap<String, String> p = base();
         p.putAll(extra);

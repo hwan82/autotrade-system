@@ -152,6 +152,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 - 장전 동시호가 이벤트(BOOK-V5 장전 첫 이벤트, D-087)로 갭 상승률 순위도 여기서 다룬다.
 - 형태: 선정 프로필 새 갱신 주기 `INTRADAY_AT`(예: `at: "09:30"`)와 장중 지표(`session-turnover`, `session-volume-spike`, `gap`). 정한 시각까지는 그 조합의 신규 진입 0건.
 - 1차 뒤 별도 설계·PR(sim-engine·strategy-researcher). 실전 경로 변경 없음.
+- **구현([D-127](../decisions/D-127-intraday-at-selection.md))**: `INTRADAY_AT`·`at`, 장중 지표 `session-turnover`·`session-return`·`session-range`(그날 정규장 시작 ~ `at` 전 boards 체결). 순위는 `at` 이상 첫 이벤트에서 매기고 그 이벤트부터 후보에 신규 진입한다(늦게 온 `at` 전 체결은 넣지 않음). `at` 전에 시작한 정규장 누락이 있던 종목은 `SESSION_GAP`. `session-volume-spike`·`gap`(장전 동시호가)과 녹화 판정 지원은 후속이다.
 
 ### 5.3 2차-b: 시장 전체 장중 순위(Q-054)
 - 안 1: 게이트웨이가 증권사 순위 조회(키움·한국투자 "거래량 급증·거래대금 상위" 조회 `[가정]`, TR 이름·호출 상한은 공식 문서로 확인)를 주기 호출해 전달 소켓으로 내보낸다. REST 호출 한도(키움 초당 5회 `[사실]`)를 실전 엔진과 나눠 쓴다.
@@ -173,11 +174,11 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 | 2 | 지표 `day-range`·`close-strength`·`volume-spike`, 프로필 (다), selection-catalog 갱신, 골든 테스트 | strategy-researcher·sim-engine | 아님 | 없음(1과 병렬) |
 | 2b | 선정 엣지 일봉 사전 검사(3.3, D-125): T 시가 진입·T 종가 청산, 비용 차감, 무작위 선정 대조군, 워크포워드 3구간 이상. 통과한 선정만 5번으로. (다)는 EDGE01 등록, (라)·공시 대조는 공시 스냅샷 뒤 | strategy-researcher | 아님 | 2(공시 조건은 3) |
 | 3 | 공시 스냅샷 수집(`dartDisclosures`, 유형으로 좁혀 재무 수집 뒤, 하루 상한 공유)·`disclosure-count`·`gate.types`, 프로필 (라) | data-engineer → strategy-researcher | 아님 | 2 |
-| 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로) | architect·sim-engine | 아님 | 1 또는 7 |
+| 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로). **`INTRADAY_AT` 부분은 D-127로 구현**(V3). `LAG1`은 1번 결과 뒤 | architect·sim-engine | 아님 | 1 또는 7 |
 | 4 | 녹화 실험·실시간 모의 `selections`·`selection-input`, 그날 후보 ∩ `boards`, `NOT_SUBSCRIBED`·`BLACKLISTED`·`SELECTION_MISSING`, 고정 파일, 리플레이 확인. **D-124로 구현** | sim-engine(+ ui-dev 화면 표시) | 아님 | 2, (1의 결과) |
 | 5 | 0번 녹화(넓힌 watchlist)로 녹화 실험(스냅샷 ID 고정)을 돌려 2b를 통과한 선정 × 단타 전략 조합 시험 → 새 실시간 실험 `EXP-<등록일>-LIVE02` 사전 등록(조합 수 m ≤ 4, 대조군 시드 N+1 ≥ 20m, D-114 L5 왕복 30건을 8주에 채울 수 있는지 먼저 계산). 2026-10-12~ 기존 녹화(대형주 3~10종목)는 시장 전체 선정과 거의 겹치지 않아 기능 확인용으로만 쓴다 | strategy-researcher | 아님 | 0, 2b, 4 |
 | 6 | 뉴스 스냅샷(4.2), `news-count`·`news-surge` | data-engineer | 아님 | Q-055 |
-| 7 | 장중 순위 2차-a(5.2) | sim-engine·strategy-researcher | 아님 | 4 |
+| 7 | 장중 순위 2차-a(5.2). **D-127로 구현**(거래대금·수익률·변동폭, 녹화 판정·거래량 급증·갭은 후속) | sim-engine·strategy-researcher | 아님 | 4 |
 | 8 | 2차-b(5.3) | data-engineer·risk-ops | **예**(게이트웨이) | Q-054, 7 |
 
 - `boards`를 넓힌 새 watchlist(예: 최근 20거래일 평균 거래대금 상위 150종목 `[가정]`)는 0번에서 정하고 (2026-10-20 0번 착수, D-122: **LIVE01 10종목 포함 모두 100종목**으로 정함, 추천안 채택(자율). 키움이 체결·호가를 종목마다 따로 세도 100 × 2 = 200으로 세션 한도 안이라 LIVE01 구독을 잃을 위험이 없다. 목록은 `selections/kr-watchlist-turnover@1`과 `runWatchlistCandidates`로 뽑고, 사용자 결정으로 LIVE01 시작 전 주말에 바꾼다. 절차는 [6단계 시작 점검표](../runbooks/stage-6-start-checklist.md) 4.1) 5번 등록 파일의 `boards`가 그 안이어야 한다(strategy-researcher M1). watchlist는 실전 엔진과 같은 게이트웨이 구독 한도를 쓰므로, 7단계 실전 활성화 전에 risk-ops가 "실전 보유 종목 몫을 남긴 watchlist 크기 상한"을 정한다(architect F4). 그 전에는 실전이 꺼져 있어 실전 영향이 없다. watchlist 파일은 사용자 PC 설정이라 runbook에 바꾸는 법을 적는다. LIVE01이 도는 동안(2026-10-26~12-18) 게이트웨이 watchlist를 넓히면 LIVE01 `boards` 10종목은 그대로 받으므로 LIVE01 결과에는 영향이 없다 `[추론]`. 다만 구독 종목 수가 늘면 게이트웨이 부하와 녹화 크기가 늘어 시작 점검표(디스크)를 함께 본다.

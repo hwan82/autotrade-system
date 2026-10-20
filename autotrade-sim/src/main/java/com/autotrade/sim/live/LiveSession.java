@@ -22,6 +22,7 @@ import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.RunStepper;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.IntradayTracker;
 import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.selection.SelectionDays;
 import com.autotrade.sim.selection.SelectionSchedule;
@@ -99,6 +100,8 @@ public final class LiveSession implements AutoCloseable {
     /** 선정 조합 계좌의 고정 파일·적용 기록. 선정 계좌가 없으면 null(지금까지와 같은 경로). */
     private final SessionSelections selections;
     private final LiveSelectionDays selectionDays;
+    /** 장중 순위 선정 추적기(D-127). 계좌에 주기 직전에 같은 이벤트를 준다. 장중 순위 선정 계좌가 없으면 null. */
+    private final IntradayTracker intraday;
     /** 적용 기록을 쓴(또는 읽은) 마지막 거래일. */
     private LocalDate appliedDay;
     private boolean begun;
@@ -125,7 +128,9 @@ public final class LiveSession implements AutoCloseable {
             throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size());
         }
         this.selections = setup.hasSelections() ? setup.selectionFiles(sessionDir) : null;
-        this.selectionDays = selections == null ? null : new LiveSelectionDays(spec, selections);
+        this.intraday = setup.newIntradayTracker();
+        this.selectionDays = selections == null && intraday == null ? null
+                : new LiveSelectionDays(spec, selections, intraday);
         SelectionDays days = selectionDays == null ? SelectionSchedule.empty() : selectionDays;
         for (int i = 0; i < spec.combinations().size(); i++) {
             runs.add(new RunStepper(spec, i, setup.rules(), setup.cost(), setup.execution(), setup.factory(),
@@ -342,6 +347,11 @@ public final class LiveSession implements AutoCloseable {
         if (e instanceof DataGap g) {
             gaps.add(g);
         }
+        if (intraday != null) {
+            // 장중 순위는 계좌보다 먼저 이 이벤트를 본다. 순위 시각 이벤트면 여기서 순위가 정해지고 계좌는 이 이벤트부터 후보에
+            // 신규 진입할 수 있다. 리플레이 실행기도 같은 순서로 같은 추적기를 돌린다(D-127)
+            intraday.onEvent(e);
+        }
         if (e instanceof TradeTick t && t.symbol().equals(setup.benchmark())) {
             if (benchFirst == null) {
                 benchFirst = t.price();
@@ -390,9 +400,14 @@ public final class LiveSession implements AutoCloseable {
         }
         SessionSelections.Applied today = selections == null || appliedDay == null ? null
                 : selections.appliedQuietly(appliedDay).orElse(null);
+        LocalDate day = journal.currentDate();
+        List<IntradayStatus> intradayToday = new ArrayList<>();
+        if (intraday != null && day != null) {
+            intraday.status(day).forEach(st -> intradayToday.add(IntradayStatus.of(st)));
+        }
         return new Status(setup.plan().id().value(), setup.plan().from(), setup.plan().to(), position, restored,
                 skippedSymbol, skippedRange, gaps.size(), lastEventAt, journal.currentDate(), stopReason, closed,
-                progress, failures, today);
+                progress, failures, today, intradayToday);
     }
 
     /** 선정 조합 계좌가 있는 세션인지. */
@@ -449,14 +464,46 @@ public final class LiveSession implements AutoCloseable {
      * @param restored 시작 때 기록으로 되살린 이벤트 수
      * @param failures 계좌마다 실패 이유(정상이면 빈 문자열)
      * @param selections 선정 조합 계좌가 있으면 마지막으로 적용한 거래일의 적용 기록(D-124). 없으면 null
+     * @param intraday 장중 순위 선정마다 기록 중인 거래일의 상태(D-127). 없으면 빈 목록
      */
     public record Status(String experimentId, LocalDate from, LocalDate to, long events, long restored,
             long skippedSymbol, long skippedRange, int dataGaps, Instant lastEventAt, LocalDate journalDate,
             String stopReason, boolean closed, List<RunStepper.Progress> runs, List<String> failures,
-            SessionSelections.Applied selections) {
+            SessionSelections.Applied selections, List<IntradayStatus> intraday) {
         public Status {
             runs = List.copyOf(runs);
             failures = List.copyOf(failures);
+            intraday = List.copyOf(intraday);
+        }
+    }
+
+    /**
+     * 장중 순위 선정 하나의 오늘 상태(화면용, D-127).
+     *
+     * @param state {@code AWAITING}(순위 시각 전, 신규 진입 0건) 또는 {@code RANKED}
+     * @param candidates 순위를 매겼으면 신규 진입 후보(순위순), 아니면 빈 목록
+     * @param blacklisted 선정됐지만 blacklist라 뺀 종목
+     * @param selectedCount 선정 종목 수(뺀 종목 포함)
+     * @param activeFrom 순위를 매긴 이벤트 순번(이 이벤트부터 후보에 신규 진입). 순위 전이면 0
+     */
+    public record IntradayStatus(String selection, String selectionHash, String at, String state, List<String> candidates,
+            List<String> blacklisted, int selectedCount, long activeFrom, String resultHash) {
+
+        public IntradayStatus {
+            candidates = List.copyOf(candidates);
+            blacklisted = List.copyOf(blacklisted);
+        }
+
+        static IntradayStatus of(IntradayTracker.DayStatus st) {
+            IntradayTracker.Ranked r = st.ranked();
+            if (r == null) {
+                return new IntradayStatus(st.selection(), st.selectionHash(), st.at().toString(), "AWAITING", List.of(),
+                        List.of(), 0, 0, null);
+            }
+            return new IntradayStatus(st.selection(), st.selectionHash(), st.at().toString(), "RANKED",
+                    r.candidates().candidates(),
+                    r.candidates().excludedCodes(com.autotrade.sim.selection.SelectionCandidates.Exclusion.BLACKLISTED),
+                    r.candidates().selectedCount(), r.activeFrom(), r.contentHash());
         }
     }
 
@@ -543,17 +590,23 @@ public final class LiveSession implements AutoCloseable {
     private static final class LiveSelectionDays implements SelectionDays {
         private final ExperimentSpec spec;
         private final SessionSelections files;
+        private final IntradayTracker intraday;
         private final Map<LocalDate, SelectionSchedule> byDay = new HashMap<>();
 
-        LiveSelectionDays(ExperimentSpec spec, SessionSelections files) {
+        /** @param files 장전 선정이 없으면 null @param intraday 장중 순위 선정이 없으면 null */
+        LiveSelectionDays(ExperimentSpec spec, SessionSelections files, IntradayTracker intraday) {
             this.spec = spec;
             this.files = files;
+            this.intraday = intraday;
         }
 
         @Override
         public SelectionDay day(String selectionHash, LocalDate date) {
+            if (intraday != null && intraday.tracks(selectionHash)) {
+                return intraday.day(selectionHash, date); // 순위 시각 전이면 계좌가 이벤트마다 다시 묻는다(D-127)
+            }
             return byDay.computeIfAbsent(date, d -> SelectionSchedule.compute(spec.combinations(), List.of(d),
-                    files.source())).day(selectionHash, date);
+                    files == null ? null : files.source())).day(selectionHash, date);
         }
     }
 

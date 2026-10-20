@@ -40,6 +40,8 @@ import com.autotrade.sim.combo.SnapshotInputs;
 import com.autotrade.sim.selection.SelectionCandidates;
 import com.autotrade.sim.selection.SelectionPreparer;
 import com.autotrade.sim.selection.SelectionResultFile;
+import com.autotrade.sim.selection.IntradayTracker;
+import com.autotrade.sim.selection.IntradayUniverse;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.sim.selection.SessionSelections;
 import com.autotrade.sim.selection.SnapshotHeap;
@@ -170,8 +172,13 @@ public final class RecordingExperiment {
 
         // 선정 조합 계좌가 있으면 녹화일마다 고정 스냅샷으로 선정을 계산해 고정 파일·적용 기록을 만들고(실시간 모의와 같은
         // 준비→적용 경로), 실행기는 그 적용 기록을 읽는다(ADR-012 3.5·3.6, D-124)
-        SelectionStage stage = selected.isEmpty() ? null
-                : SelectionStage.prepare(plan, selectionProfiles(selected), data, calendar, snapshotsRoot, code, log, gate);
+        List<SelectionProfile> dailySelections = selectionProfiles(selected);
+        SelectionStage stage = dailySelections.isEmpty() ? null
+                : SelectionStage.prepare(plan, dailySelections, data, calendar, snapshotsRoot, code, log, gate);
+        // 장중 순위 선정은 실행기가 녹화 이벤트로 정한다. 결과 폴더에 남길 결과는 같은 추적기를 한 번 더 돌려 만든다(순수 계산, D-127)
+        IntradayUniverse intradayUniverse = new IntradayUniverse(plan.boards().keySet(), java.util.Set.copyOf(plan.blacklist()),
+                rules);
+        List<IntradayTracker.Ranked> intraday = intradayResults(selected, intradayUniverse, data.events(), log);
         SimulationReport report;
         String detail;
         String determinism = "확인 안 함(--verify-determinism으로 확인)";
@@ -182,7 +189,7 @@ public final class RecordingExperiment {
             parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
             log.accept("프로필 " + combinations.size() + "개 실행(병렬 " + parallel + ")");
             report = new SimulationExperimentRunner(data, rules, cost, factory, risk, execution, code,
-                    parallel, benchmark, source, gate).runDetailed(spec);
+                    parallel, benchmark, source, gate).intradayUniverse(intradayUniverse).runDetailed(spec);
             detail = ReportWriter.render(report);
             if (verifyDeterminism && parallel == 1) {
                 determinism = "확인 안 함(실제 병렬 수가 1이라 병렬 대 직렬 비교가 안 됨. -PmaxParallelRuns와 등록 파일 parallelism을 2 이상으로)";
@@ -191,7 +198,7 @@ public final class RecordingExperiment {
                 log.accept("결정론 확인: 병렬 1로 다시 실행");
                 gate.check();
                 String second = ReportWriter.render(new SimulationExperimentRunner(data, rules, cost, factory, risk,
-                        execution, code, 1, benchmark, source, gate).runDetailed(spec));
+                        execution, code, 1, benchmark, source, gate).intradayUniverse(intradayUniverse).runDetailed(spec));
                 determinism = second.equals(detail)
                         ? "같음(병렬 " + parallel + " vs 1, 상세 보고서 바이트 일치)" : "다름";
                 if (!second.equals(detail)) {
@@ -207,13 +214,34 @@ public final class RecordingExperiment {
         List<SessionSelections.Applied> applied = stage == null ? List.of() : stage.applied;
         Map<String, String> files = new LinkedHashMap<>();
         files.put("inputs.yaml", inputs(plan, data, symbols, cost, execution, blacklist, report, determinism, detail,
-                applied));
-        files.put("results.md", results(plan, data, cost, execution, blacklist, report, determinism, applied));
+                applied) + intradayInputs(intraday));
+        files.put("results.md", results(plan, data, cost, execution, blacklist, report, determinism, applied)
+                + intradayResultsTable(report, intraday));
         files.put("detail.txt", detail);
         if (stage != null) {
             files.putAll(stage.texts);
         }
+        for (IntradayTracker.Ranked r : intraday) {
+            files.put(SessionSelections.DIR + "/" + IntradayTracker.fileName(r), r.result().canonicalJson() + "\n");
+        }
         return new Outcome(spec, report, data, files);
+    }
+
+    /** 장중 순위 선정 결과(선정 해시순, 거래일순). 실행기와 같은 추적기를 실험 기간 이벤트에 돌린다. */
+    static List<IntradayTracker.Ranked> intradayResults(List<Combination> combinations, IntradayUniverse universe,
+            List<MarketEvent> events, Consumer<String> log) {
+        IntradayTracker tracker = new IntradayTracker(IntradayTracker.intradayProfiles(combinations), universe);
+        if (tracker.isEmpty()) {
+            return List.of();
+        }
+        events.forEach(tracker::onEvent);
+        List<IntradayTracker.Ranked> out = tracker.ranked();
+        for (IntradayTracker.Ranked r : out) {
+            log.accept("장중 순위 " + r.result().date() + " " + r.result().selection().id() + "@"
+                    + r.result().selection().version() + " " + r.result().at() + ": 선정 " + r.candidates().selectedCount()
+                    + ", 후보 " + r.candidates().candidates().size() + ", 시작 순번 " + r.activeFrom());
+        }
+        return out;
     }
 
     /**
@@ -300,8 +328,9 @@ public final class RecordingExperiment {
     }
 
     /**
-     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-124). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})만
-     * 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다(ADR-007 2.1).
+     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-124). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})과
+     * 장중 순위 선정({@code INTRADAY_AT}, D-127)만 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다
+     * (ADR-007 2.1). 장전 선정이 있으면 {@code selection-input.daily}가 있어야 한다.
      */
     public static List<Combination> selectionCombinations(Path repoRoot, RegisteredSelections selections,
             CatalogStrategyFactory factory) {
@@ -310,22 +339,24 @@ public final class RecordingExperiment {
         for (RegisteredSelections.Entry e : selections.entries()) {
             SelectionProfile s = loaded.computeIfAbsent(e.selection().text(), k -> CombinationExperiment.loadSelection(
                     repoRoot, new CombinationPlan.Ref(e.selection().id(), e.selection().version())));
-            if (s.refresh() != SelectionRefresh.PRE_OPEN_DAILY) {
-                throw new IllegalArgumentException("녹화 실험·실시간 모의의 선정은 단타 장전 선정(PRE_OPEN_DAILY)만 받습니다: "
-                        + s.key() + " = " + s.refresh());
+            if (s.refresh() != SelectionRefresh.PRE_OPEN_DAILY && s.refresh() != SelectionRefresh.INTRADAY_AT) {
+                throw new IllegalArgumentException("녹화 실험·실시간 모의의 선정은 단타 장전 선정(PRE_OPEN_DAILY)과 장중 순위 선정"
+                        + "(INTRADAY_AT)만 받습니다: " + s.key() + " = " + s.refresh());
             }
             StrategyProfile p = loadStrategy(repoRoot, e.strategy());
             factory.validate(p);
             out.add(Combination.of(s, p));
         }
+        selections.requireInputs(loaded.values().stream().anyMatch(s -> s.refresh() == SelectionRefresh.PRE_OPEN_DAILY));
         return out;
     }
 
-    /** 조합들의 선정 프로필(선정 해시마다 하나, 해시순). */
+    /** 조합들의 장전 선정 프로필(선정 해시마다 하나, 해시순). 장중 순위 선정은 고정 파일을 쓰지 않으므로 뺀다(D-127). */
     public static List<SelectionProfile> selectionProfiles(List<Combination> combinations) {
         TreeMap<String, SelectionProfile> out = new TreeMap<>();
         for (Combination c : combinations) {
-            c.selection().ifPresent(s -> out.putIfAbsent(s.selectionHash(), s));
+            c.selection().filter(s -> s.refresh() != SelectionRefresh.INTRADAY_AT)
+                    .ifPresent(s -> out.putIfAbsent(s.selectionHash(), s));
         }
         return List.copyOf(out.values());
     }
@@ -484,7 +515,8 @@ public final class RecordingExperiment {
         sb.append("seed-capital: \"").append(plan.seedCapital()).append("\"\n");
         sb.append("determinism: \"").append(determinism).append("\"\n");
         sb.append("detail-sha256: ").append(sha256(detail)).append('\n');
-        if (!plan.selections().isEmpty()) {
+        if (!plan.selections().isEmpty() && plan.selections().daily().isPresent()) {
+            // 장중 순위 선정만 있으면 선정 입력·적용 기록이 없다(D-127). 그 결과는 intradayInputs가 따로 쓴다
             selectionInputs(sb, plan.selections(), applied);
         }
         return sb.toString();
@@ -561,7 +593,7 @@ public final class RecordingExperiment {
             }
             sb.append(s.failureReason().isEmpty() ? s.status().name() : s.status() + " " + s.failureReason()).append(" |\n");
         }
-        if (!plan.selections().isEmpty()) {
+        if (!plan.selections().isEmpty() && plan.selections().daily().isPresent()) {
             selectionResults(sb, report, applied);
         }
         if (!report.dataGaps().isEmpty()) {
@@ -612,6 +644,56 @@ public final class RecordingExperiment {
                 sb.append(blocked.getOrDefault(it.selectionHash() + "|" + a.date(), 0)).append(" |\n");
             }
         }
+    }
+
+    /** inputs.yaml의 장중 순위 선정 칸(D-127): 날짜·선정별 결과 해시·후보·적용 시작 순번. 없으면 빈 문자열. */
+    static String intradayInputs(List<IntradayTracker.Ranked> intraday) {
+        if (intraday.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("intraday-selections:\n");
+        for (IntradayTracker.Ranked r : intraday) {
+            SelectionCandidates c = r.candidates();
+            sb.append("  - date: ").append(r.result().date()).append('\n');
+            sb.append("    selection: \"").append(r.result().selection().id()).append('@')
+                    .append(r.result().selection().version()).append("\"\n");
+            sb.append("    at: \"").append(r.result().at()).append("\"\n");
+            sb.append("    content-hash: ").append(r.contentHash()).append('\n');
+            sb.append("    active-from-seq: ").append(r.activeFrom()).append('\n');
+            sb.append("    candidates: \"").append(String.join(",", c.candidates())).append("\"\n");
+            sb.append("    blacklisted: \"").append(String.join(",",
+                    c.excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED))).append("\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** results.md의 장중 순위 선정 표(D-127). 순위를 매기지 못한 날(순위 시각 전 녹화가 끝남)은 표에 없고 신규 진입 0이다. */
+    static String intradayResultsTable(SimulationReport report, List<IntradayTracker.Ranked> intraday) {
+        if (intraday.isEmpty()) {
+            return "";
+        }
+        Map<String, Integer> blocked = new LinkedHashMap<>();
+        for (RunReport r : report.runs()) {
+            for (com.autotrade.sim.run.RunSelectionDay d : r.selectionDays()) {
+                blocked.merge(r.combination().selectionHashOrNone() + "|" + d.selection().date(), d.blockedEntries(),
+                        Integer::sum);
+            }
+        }
+        StringBuilder sb = new StringBuilder("\n## 장중 순위 선정(D-127)\n\n");
+        sb.append("> 그날 정규장 시작 ~ 순위 시각 전에 받은 boards 체결로 순위를 매기고, 순위 시각 이후 첫 이벤트부터 후보에 신규 진입한다. "
+                + "후보 = 선정 결과 − blacklist(메우지 않음). boards 안 순위라 시장 전체 순위가 아니다(ADR-012 5.2).\n\n");
+        sb.append("| 날짜 | 선정 | 순위 시각 | 선정 수 | 후보 | BLACKLISTED | 적용 시작 순번 | 막힌 신규 진입 |\n");
+        sb.append("|---|---|---|---:|---|---|---:|---:|\n");
+        for (IntradayTracker.Ranked r : intraday) {
+            SelectionCandidates c = r.candidates();
+            sb.append("| ").append(r.result().date()).append(" | ").append(r.result().selection().id()).append('@')
+                    .append(r.result().selection().version()).append(" | ").append(r.result().at()).append(" | ")
+                    .append(c.selectedCount()).append(" | ").append(list(c.candidates())).append(" | ")
+                    .append(list(c.excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED))).append(" | ")
+                    .append(r.activeFrom()).append(" | ")
+                    .append(blocked.getOrDefault(r.result().selection().hash() + "|" + r.result().date(), 0)).append(" |\n");
+        }
+        return sb.toString();
     }
 
     private static String list(List<String> codes) {

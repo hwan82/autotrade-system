@@ -3,6 +3,7 @@ package com.autotrade.selection.calc;
 import com.autotrade.domain.market.Market;
 import com.autotrade.marketdata.rules.InstrumentKind;
 import com.autotrade.selection.profile.SelectionProfile;
+import com.autotrade.selection.profile.SelectionRefresh;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -37,6 +38,10 @@ import java.util.regex.Pattern;
  * score.metric / score.window / score.years / score.order(DESC|ASC)   선택: 순위 지표
  * </pre>
  *
+ * <p>장중 순위 선정({@code refresh: INTRADAY_AT}, D-127)은 장중 지표({@link Metric.Kind#SESSION})만 쓰고 {@code filter.*}를 받지
+ * 않는다(유니버스가 등록 파일 boards라 상품 유형·가격·일봉 일수 필터의 입력이 없음). 자격 조건이나 순위 지표가 하나 이상 있어야
+ * 한다. 다른 갱신 주기는 장중 지표를 쓸 수 없다(일봉 계산기에 장중 입력이 없음).
+ *
  * @param kinds 비어 있으면 상품 유형 필터 없음
  * @param minPrice 없으면 null
  * @param minBarDays 0이면 없음
@@ -46,8 +51,8 @@ public record SelectionCriteria(
         Set<InstrumentKind> kinds, BigDecimal minPrice, int minBarDays, List<Condition> gates, Optional<Score> score) {
 
     private static final Pattern GATE_KEY = Pattern.compile("gate\\.(\\d{2})\\.([a-z-]+)");
-    private static final Set<String> RESERVED =
-            Set.of(SelectionProfile.HYPOTHESIS, SelectionProfile.REFRESH, SelectionProfile.MAX_SYMBOLS);
+    private static final Set<String> RESERVED = Set.of(SelectionProfile.HYPOTHESIS, SelectionProfile.REFRESH,
+            SelectionProfile.MAX_SYMBOLS, SelectionProfile.AT);
     /** 기간 상한. 일봉 창은 1년(250거래일), 사업연도는 OpenDART 수록(2015년~) 안에서 10년 `[가정]`. */
     static final int MAX_WINDOW = 250;
     static final int MAX_YEARS = 10;
@@ -66,10 +71,18 @@ public record SelectionCriteria(
     public record Score(Metric metric, int period, boolean descending) {
     }
 
-    /** 이 선정이 읽는 입력 종류. */
+    /** 장중 지표만 쓰는 선정(장중 순위 선정)인지. */
+    public boolean session() {
+        return gates.stream().anyMatch(g -> g.metric().kind() == Metric.Kind.SESSION)
+                || score.map(s -> s.metric().kind() == Metric.Kind.SESSION).orElse(false);
+    }
+
+    /** 이 선정이 읽는 입력 종류. 장중 순위 선정은 {@link Metric.Kind#SESSION}뿐이다. */
     public Set<Metric.Kind> inputKinds() {
         Set<Metric.Kind> out = EnumSet.noneOf(Metric.Kind.class);
-        out.add(Metric.Kind.BARS);
+        if (!session()) {
+            out.add(Metric.Kind.BARS);
+        }
         gates.forEach(g -> out.add(g.metric().kind()));
         score.ifPresent(s -> out.add(s.metric().kind()));
         return out;
@@ -172,7 +185,21 @@ public record SelectionCriteria(
                 throw fail(profile, k, "선정 조건 카탈로그에 없는 키입니다");
             }
         }
-        if (gates.isEmpty() && kinds.isEmpty() && minPrice == null && minBarDays == 0) {
+        boolean intradayAt = profile.refresh() == SelectionRefresh.INTRADAY_AT;
+        for (Condition g : gates) {
+            requireSession(profile, g.id(), g.metric(), intradayAt);
+        }
+        if (score.isPresent()) {
+            requireSession(profile, "score", score.get().metric(), intradayAt);
+        }
+        if (intradayAt) {
+            if (!kinds.isEmpty() || minPrice != null || minBarDays > 0) {
+                throw fail(profile, "filter", "장중 순위 선정(INTRADAY_AT)은 filter.*를 받지 않습니다(유니버스는 등록 파일 boards)");
+            }
+            if (gates.isEmpty() && score.isEmpty()) {
+                throw fail(profile, "gate", "장중 순위 선정은 자격 조건이나 순위 지표가 하나 이상 필요합니다");
+            }
+        } else if (gates.isEmpty() && kinds.isEmpty() && minPrice == null && minBarDays == 0) {
             throw fail(profile, "gate", "필터나 자격 조건이 하나 이상 필요합니다");
         }
         return new SelectionCriteria(kinds, minPrice, minBarDays, gates, score);
@@ -257,6 +284,17 @@ public record SelectionCriteria(
             throw fail(profile, id + ".types", "알파벳 순, 겹치지 않게 적어 주세요: " + v);
         }
         return out;
+    }
+
+    /** 장중 지표는 장중 순위 선정에만, 장중 순위 선정은 장중 지표만 쓴다(D-127). */
+    private static void requireSession(SelectionProfile profile, String prefix, Metric metric, boolean intradayAt) {
+        boolean session = metric.kind() == Metric.Kind.SESSION;
+        if (session && !intradayAt) {
+            throw fail(profile, prefix + ".metric", metric.key() + "는 장중 순위 선정(refresh: INTRADAY_AT)에만 씁니다");
+        }
+        if (!session && intradayAt) {
+            throw fail(profile, prefix + ".metric", "장중 순위 선정(INTRADAY_AT)은 장중 지표(session-*)만 씁니다: " + metric.key());
+        }
     }
 
     /** 재무·공시 지표는 OpenDART(국내) 출처라 KRX 선정에만 쓴다(D-041 5장, ADR-012 3.2). */

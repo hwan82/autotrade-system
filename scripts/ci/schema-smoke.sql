@@ -121,5 +121,29 @@ BEGIN
     EXCEPTION WHEN check_violation THEN
         RAISE NOTICE 'ok: intraday weekly refresh rejected';
     END;
+    -- V3 장중 순위 선정(D-127): 단타 ⇔ 단타용 갱신 주기 집합, INTRADAY_AT ⇔ at
+    INSERT INTO selection_profile VALUES (repeat('7', 64), 'kr-intraday-turnover-30m', 1, 'KRX', 'INTRADAY', 'INTRADAY_AT',
+                                          '{"max-symbols":"10","at":"09:30"}', now());
+    RAISE NOTICE 'ok: intraday-at selection accepted';
+    BEGIN
+        INSERT INTO selection_profile VALUES (repeat('6', 64), 'kr-swing-at', 1, 'KRX', 'SWING', 'INTRADAY_AT',
+                                              '{"at":"09:30"}', now());
+        RAISE EXCEPTION 'swing selection with intraday-at refresh was accepted';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'ok: swing intraday-at rejected';
+    END;
+    BEGIN
+        INSERT INTO selection_profile VALUES (repeat('5', 64), 'kr-at-missing', 1, 'KRX', 'INTRADAY', 'INTRADAY_AT', '{}', now());
+        RAISE EXCEPTION 'intraday-at selection without at was accepted';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'ok: intraday-at without at rejected';
+    END;
+    BEGIN
+        INSERT INTO selection_profile VALUES (repeat('4', 64), 'kr-pre-open-at', 1, 'KRX', 'INTRADAY', 'PRE_OPEN_DAILY',
+                                              '{"at":"09:30"}', now());
+        RAISE EXCEPTION 'pre-open selection with at was accepted';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'ok: at on pre-open rejected';
+    END;
 END $$;
 ROLLBACK;

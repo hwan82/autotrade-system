@@ -188,4 +188,49 @@ class RecordingSelectionTest {
         assertThatThrownBy(() -> RecordingPlan.parse(BASE + SELECTIONS.replace(SNAPSHOT, "latest"), "x"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("latest");
     }
+
+    @Test
+    void intradayAtSelectionRanksFromRecordedEventsWithoutSnapshot() throws IOException {
+        // 장중 순위 선정(D-127): 선정 입력 없이 녹화 이벤트로 그날 09:30 순위를 매기고, 결과 폴더에 결과를 남긴다
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        String intraday = """
+                selections:
+                  - "kr-intraday-open-momentum@1 x kr-random-control@1"
+                """;
+        Path dir = experiment("at", BASE + intraday);
+        RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, Path.of(".."), recordings, null,
+                new CodeVersion("test", false), true, m -> { }, RunGate.NONE);
+        assertThat(out.report().runs()).hasSize(3);
+        RunReport sel = out.report().runs().get(2);
+        assertThat(sel.selectionDays()).isNotEmpty().allSatisfy(d -> {
+            assertThat(d.selection().awaiting()).isFalse();
+            assertThat(d.selection().activeFrom()).isPositive();
+        });
+        assertThat(sel.fills()).filteredOn(f -> f.fill().side() == Side.BUY).allSatisfy(f -> {
+            RunSelectionDay d = sel.selectionDays().stream()
+                    .filter(x -> x.selection().date().equals(f.fill().exchangeDate())).findFirst().orElseThrow();
+            assertThat(d.selection().symbols()).contains(f.fill().symbol());
+            assertThat(f.fill().signalEventSeq()).isGreaterThanOrEqualTo(d.selection().activeFrom());
+        });
+        assertThat(out.files().get("inputs.yaml")).contains("determinism: \"같음(").doesNotContain("selection-input:")
+                .contains("intraday-selections:").contains("active-from-seq: ");
+        assertThat(out.files().get("results.md")).contains("## 장중 순위 선정(D-127)").doesNotContain("## 선정(D-124)");
+        assertThat(out.files().keySet()).filteredOn(k -> k.endsWith(".intraday.json"))
+                .hasSize(sel.selectionDays().size())
+                .allSatisfy(k -> assertThat(out.files().get(k)).contains("\"kind\":\"session-selection-result\""));
+        assertThat(out.files().keySet()).noneMatch(k -> k.endsWith(SessionSelections.APPLIED_FILE));
+        // 선정 없는 계좌는 선정 계좌를 더하지 않은 실험과 결과가 같다
+        RecordingExperiment.Outcome plain = RecordingExperiment.runAndWrite(experiment("at-plain", BASE), Path.of(".."),
+                recordings, null, new CodeVersion("test", false), false, m -> { }, RunGate.NONE);
+        for (int i = 0; i < 2; i++) {
+            assertThat(out.report().runs().get(i).fills()).isEqualTo(plain.report().runs().get(i).fills());
+        }
+        // 장중 순위 선정만 있으면 selection-input을 쓰지 않는다
+        RecordingPlan withInput = RecordingPlan.parse(BASE + intraday + "selection-input:\n  daily: \"" + SNAPSHOT + "\"\n",
+                "x");
+        assertThatThrownBy(() -> RecordingExperiment.run(withInput, Path.of(".."), recordings, snapshots(),
+                new CodeVersion("t", false), false, m -> { }, RunGate.NONE))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input");
+    }
 }

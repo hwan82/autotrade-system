@@ -52,7 +52,7 @@ export function shortHash(hash) {
 export const STATUS = { COMPLETED: '완료', FAILED: '실패', RUNNING: '실행 중', PENDING: '대기', CANCELLED: '취소' };
 export const MARKET = { KRX: '국내(KRX)', US: '미국(US)' };
 export const STYLE = { INTRADAY: '단타', SWING: '스윙', POSITION: '중기' };
-export const REFRESH = { PRE_OPEN_DAILY: '매일 장전', POST_CLOSE_DAILY: '매일 장 마감 뒤', POST_CLOSE_WEEKLY: '주간(주 마지막 거래일 마감 뒤)' };
+export const REFRESH = { PRE_OPEN_DAILY: '매일 장전', INTRADAY_AT: '장중 순위 시각(at)', POST_CLOSE_DAILY: '매일 장 마감 뒤', POST_CLOSE_WEEKLY: '주간(주 마지막 거래일 마감 뒤)' };
 /** 선정 결과가 없는 사유(ADR-007 2.6). 그날 그 계좌는 신규 진입 0건이고 보유 관리·청산은 그대로다. */
 export const VALIDITY = {
   VALID: '결과 있음', MISSING: '결과 없음', NOT_YET: '적용 전', EXPIRED: '만료', HASH_MISMATCH: '해시 불일치',

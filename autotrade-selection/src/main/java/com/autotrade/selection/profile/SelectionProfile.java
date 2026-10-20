@@ -5,10 +5,12 @@ import com.autotrade.strategy.TradingStyle;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalTime;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
@@ -23,6 +25,8 @@ import java.util.regex.Pattern;
  *   <li>{@code hypothesis}(필수): 가설 한 문장(STR-02)</li>
  *   <li>{@code refresh}(필수): {@link SelectionRefresh} 이름. 스타일과 맞아야 한다</li>
  *   <li>{@code max-symbols}(필수): 1 이상 정수. 선정 결과 종목 수 상한</li>
+ *   <li>{@code at}({@link SelectionRefresh#INTRADAY_AT}만 필수, 다른 갱신 주기에는 거부): 장중 순위 시각 {@code HH:mm}(거래소 현지).
+ *       정규장 시작 뒤 ~ 접속 매매 끝 이내(KRX 09:01~14:30, 미국 09:31~15:00)여야 한다(D-127)</li>
  * </ul>
  *
  * <p>{@link #selectionHash()}는 전략 프로필 해시와 같은 길이 접두 인코딩의 SHA-256이고, 첫 줄에
@@ -37,6 +41,7 @@ public record SelectionProfile(
     public static final String HYPOTHESIS = "hypothesis";
     public static final String REFRESH = "refresh";
     public static final String MAX_SYMBOLS = "max-symbols";
+    public static final String AT = "at";
 
     // 형식은 StrategyProfile과 같다(ADR-007 2.1)
     private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
@@ -67,13 +72,19 @@ public record SelectionProfile(
         SelectionRefresh refresh = parseRefresh(parameters.get(REFRESH), id);
         if (!refresh.allows(style)) {
             throw new IllegalArgumentException("갱신 주기 " + refresh + "는 " + style + " 선정에 쓸 수 없습니다"
-                    + "(단타는 PRE_OPEN_DAILY만, 스윙·중기는 장 마감 뒤 갱신만): " + id);
+                    + "(단타는 PRE_OPEN_DAILY·INTRADAY_AT만, 스윙·중기는 장 마감 뒤 갱신만): " + id);
         }
         parseMaxSymbols(parameters.get(MAX_SYMBOLS), id);
+        parseAt(parameters.get(AT), refresh, market, id);
     }
 
     public SelectionRefresh refresh() {
         return parseRefresh(parameters.get(REFRESH), id);
+    }
+
+    /** 장중 순위 시각({@link SelectionRefresh#INTRADAY_AT}만). 다른 갱신 주기면 비어 있다. */
+    public Optional<LocalTime> at() {
+        return Optional.ofNullable(parseAt(parameters.get(AT), refresh(), market, id));
     }
 
     public int maxSymbols() {
@@ -118,6 +129,27 @@ public record SelectionProfile(
             throw new IllegalArgumentException("max-symbols는 1 이상 정수여야 합니다: " + value + " (" + id + ")");
         }
         return Integer.parseInt(value);
+    }
+
+    private static LocalTime parseAt(String value, SelectionRefresh refresh, Market market, String id) {
+        if (refresh != SelectionRefresh.INTRADAY_AT) {
+            if (value != null) {
+                throw new IllegalArgumentException("at(장중 순위 시각)은 INTRADAY_AT 선정에만 씁니다: " + id);
+            }
+            return null;
+        }
+        if (value == null || !value.matches("([01][0-9]|2[0-3]):[0-5][0-9]")) {
+            throw new IllegalArgumentException("INTRADAY_AT 선정에는 at(HH:mm, 거래소 현지 시각)이 필요합니다: " + value + " (" + id + ")");
+        }
+        LocalTime at = LocalTime.parse(value);
+        // 정규장 시작 뒤 ~ 단타 장 마감 청산(예시 전략 exit.eod-time 15:10)보다 40분 넘게 앞(순위 뒤 진입할 구간을 남김,
+        // strategy-researcher PR #200 R1). 특수일 개장 지연은 실행 때 정규장 판정으로 다룬다
+        LocalTime first = market == Market.KRX ? LocalTime.of(9, 1) : LocalTime.of(9, 31);
+        LocalTime last = market == Market.KRX ? LocalTime.of(14, 30) : LocalTime.of(15, 0);
+        if (at.isBefore(first) || at.isAfter(last)) {
+            throw new IllegalArgumentException("at은 " + first + " ~ " + last + " 사이여야 합니다: " + value + " (" + id + ")");
+        }
+        return at;
     }
 
     /** 길이 접두 인코딩. {@code StrategyProfile.profileHash()}와 같은 방식이다. */

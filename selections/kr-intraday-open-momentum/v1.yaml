@@ -1,0 +1,24 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# 예시 (마) 장 초반 거래대금 상위(ADR-012 5.2 2차-a, D-127). 장중 순위 선정: 그날 정규장 시작 ~ 09:30 전 체결로 등록 파일 boards 안
+# 종목의 순위를 매기고 09:30 뒤 첫 이벤트부터 장 마감까지 적용한다. 수치는 모두 [가정] 출발값이다. 추천 기준이 아니다.
+# 대조군(strategy-researcher PR #200 M1): 선정 효과는 kr-intraday-open-all@1(같은 09:30, boards 전 종목) x 같은 매매지표, 진입 효과는
+# 이 선정 x kr-random-control@1. 녹화 기반 선정 사전 검사를 통과하기 전에는 실시간 모의(LIVE02)에 등록하지 않는다(D-127).
+# 상단 0.15는 가격제한폭 ±30%의 절반 근처 급등 종목을 빼려는 값이다([가정]).
+id: "kr-intraday-open-momentum"
+version: 1
+market: "KRX"
+style: "INTRADAY"
+created-at: "2026-10-20T00:00:00Z"
+parameters:
+  hypothesis: "장 시작 30분 동안 boards 안에서 거래대금이 가장 많이 몰리고 1% 이상 오른 종목은 그날 남은 시간 유동성과 장중 추세가 이어져, 같은 단타 매매지표를 같은 09:30부터 boards 전 종목에 쓴 대조 선정 kr-intraday-open-all@1보다 비용 차감 성과가 높다(기대 방향 +). 진입 규칙 효과는 같은 선정 x kr-random-control@1과 비교해 따로 본다"
+  refresh: "INTRADAY_AT"
+  at: "09:30"
+  max-symbols: "10"
+  gate.01.metric: "session-return"
+  gate.01.op: "GE"
+  gate.01.value: "0.01"
+  gate.02.metric: "session-return"
+  gate.02.op: "LE"
+  gate.02.value: "0.15"
+  score.metric: "session-turnover"
+  score.order: "DESC"

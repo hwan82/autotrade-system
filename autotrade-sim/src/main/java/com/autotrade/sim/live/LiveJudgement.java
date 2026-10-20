@@ -137,6 +137,11 @@ public final class LiveJudgement {
         Path sessionDir = sessionsRoot.toAbsolutePath().resolve(plan.id().value());
         LiveReplayCheck.ensureSessionClosed(sessionDir);
         LiveSetup setup = LiveSetup.of(plan, repoRoot);
+        if (setup.hasIntraday()) {
+            // 장중 순위 선정 계좌는 레인마다 추적기를 돌려야 해서 아직 받지 않는다(D-127 후속). 장전 선정 계좌는 받는다(D-126)
+            throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT) 계좌가 있는 등록은 아직 녹화 판정을 지원하지 않습니다(D-127 후속): "
+                    + plan.id());
+        }
         Roles roles = roles(setup);
         List<Path> days = LiveReplayCheck.journalDays(setup, sessionDir);
         if (days.isEmpty()) {

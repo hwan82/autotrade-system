@@ -70,6 +70,39 @@ class SelectionProfileTest {
                 .hasMessageContaining("POST_CLOSE_WEEKLY");
     }
 
+    static TreeMap<String, String> intradayAt(String at) {
+        TreeMap<String, String> p = new TreeMap<>(Map.of("hypothesis", "h", "max-symbols", "5", "refresh", "INTRADAY_AT"));
+        if (at != null) {
+            p.put("at", at);
+        }
+        return p;
+    }
+
+    @Test
+    void 장중_순위_선정은_단타만이고_at이_필요하다() {
+        SelectionProfile s = new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt("09:30"));
+        assertThat(s.refresh()).isEqualTo(SelectionRefresh.INTRADAY_AT);
+        assertThat(s.at()).contains(java.time.LocalTime.of(9, 30));
+        assertThat(SelectionRefresh.INTRADAY_AT.intraday()).isTrue();
+        assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.SWING, intradayAt("09:30")))
+                .hasMessageContaining("INTRADAY_AT");
+        assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt(null)))
+                .hasMessageContaining("at");
+        for (String bad : new String[] {"9:30", "09:30:00", "24:00", "09:00", "14:31", "15:20", "08:59"}) {
+            assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt(bad)))
+                    .as(bad).hasMessageContaining("at");
+        }
+        assertThat(new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt("09:01")).at())
+                .contains(java.time.LocalTime.of(9, 1));
+        assertThat(new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, intradayAt("14:30")).at())
+                .contains(java.time.LocalTime.of(14, 30));
+        assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.US, TradingStyle.INTRADAY, intradayAt("09:30")))
+                .hasMessageContaining("at");
+        // 다른 갱신 주기에는 at을 받지 않는다(해시에만 섞인 키가 결과를 어긋나게 하지 않게)
+        assertThatThrownBy(() -> swing("s", Map.of("at", "09:30"))).hasMessageContaining("INTRADAY_AT");
+        assertThat(swing("s", Map.of()).at()).isEmpty();
+    }
+
     @Test
     void ID와_키_형식은_전략_프로필과_같다() {
         assertThatThrownBy(() -> swing("Bad_ID", Map.of())).hasMessageContaining("ID");
