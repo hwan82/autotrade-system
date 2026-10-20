@@ -1,0 +1,182 @@
+package com.autotrade.marketdata.recording;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.autotrade.domain.market.Market;
+import com.autotrade.domain.market.MarketEvent;
+import com.autotrade.domain.market.OrderBookSnapshot;
+import com.autotrade.domain.market.PriceLevel;
+import com.autotrade.domain.market.Symbol;
+import com.autotrade.domain.market.TradeTick;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * 같은 날 재기동이 앞 녹화를 줄 단위로 읽으며 다시 쓴다(D-119, PR #179 risk-ops N2). 힙이 그날 녹화 크기와 상관없고,
+ * 다시 쓴 줄은 원본 줄과 바이트가 같으며, 읽다가 실패하면 원본·보관본을 건드리지 않고 tmp를 남기지 않는다.
+ */
+class DayWriterRestartStreamTest {
+
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
+    private static final LocalDate DAY = LocalDate.of(2026, 10, 21);
+    private static final Instant OPEN = Instant.parse("2026-10-21T00:00:00Z"); // 09:00 KST
+    private static final String[] CODES = {"005930", "000660", "035420", "005380", "000270", "068270", "105560", "055550",
+        "035720", "051910"};
+    /** 고치기 전 코드(하루를 통째로 올림)는 이 줄 수를 이 힙에서 다시 열지 못했다(약 1.5KB/줄, 개발 쪽 직접 실행). */
+    private static final int HEAVY_LINES = 200_000;
+    private static final String SMALL_HEAP = "-Xmx64m";
+
+    @TempDir
+    Path root;
+
+    private Path dayDir() {
+        return new RecordingLayout(root).dayDir(Market.KRX, DAY);
+    }
+
+    private DayWriter open(Instant at) {
+        return new DayWriter(dayDir(), Market.KRX, DAY, SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"), "", at);
+    }
+
+    /** 10종목 10단계 호가 90%·체결 10%(6단계 녹화와 같은 모양). */
+    private static MarketEvent event(long i) {
+        Symbol s = Symbol.krx(CODES[(int) (i % CODES.length)]);
+        Instant t = OPEN.plusMillis(i * 11);
+        long base = 50_000 + (i % CODES.length) * 10_000;
+        if (i % 10 == 0) {
+            return new TradeTick(s, i + 1, t, t.plusMillis(3), BigDecimal.valueOf(base + (i % 20) * 100), 1 + i % 500);
+        }
+        List<PriceLevel> asks = new ArrayList<>(10);
+        List<PriceLevel> bids = new ArrayList<>(10);
+        for (int k = 0; k < 10; k++) {
+            asks.add(new PriceLevel(BigDecimal.valueOf(base + (k + 1) * 100L), 100 + (i * 7 + k) % 50_000));
+            bids.add(new PriceLevel(BigDecimal.valueOf(base - k * 100L), 100 + (i * 13 + k) % 50_000));
+        }
+        return new OrderBookSnapshot(s, i + 1, t, t.plusMillis(3), asks, bids);
+    }
+
+    /** {@code n}줄을 쓰고 flush까지 한 뒤 닫지 못하고 죽은 녹화를 만든다(RecordingReplayTest와 같은 방식). */
+    private Path crashedDay(int n) throws IOException {
+        DayWriter w = open(OPEN);
+        for (long i = 0; i < n; i++) {
+            w.write("KIWOOM-WS", event(i));
+        }
+        w.flush();
+        Path dir = dayDir();
+        byte[] events = Files.readAllBytes(dir.resolve(RecordingLayout.EVENTS_FILE));
+        byte[] meta = Files.readAllBytes(dir.resolve(RecordingLayout.META_FILE));
+        w.close();
+        Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), events);
+        Files.write(dir.resolve(RecordingLayout.META_FILE), meta);
+        return dir;
+    }
+
+    private static String gunzip(Path file) throws IOException {
+        try (InputStream in = new GZIPInputStream(Files.newInputStream(file))) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    void 정상_종료_녹화를_다시_쓴_줄은_원본_줄과_바이트가_같다() throws IOException {
+        DayWriter first = open(OPEN);
+        for (long i = 0; i < 1_000; i++) {
+            first.write("KIWOOM-WS", event(i));
+        }
+        first.close(OPEN.plusSeconds(30));
+        Path events = dayDir().resolve(RecordingLayout.EVENTS_FILE);
+        String before = gunzip(events);
+
+        DayWriter second = open(OPEN.plusSeconds(60));
+        assertThat(second.lastSeq()).isEqualTo(1_000);
+        second.close(OPEN.plusSeconds(61)); // 새 줄 없이 닫으면 뒤에 붙은 빈 gzip 멤버만 늘어난다
+        assertThat(gunzip(events)).isEqualTo(before);
+        assertThat(dayDir().resolve(RecordingLayout.EVENTS_FILE + ".tmp")).doesNotExist();
+    }
+
+    @Test
+    void 앞_녹화를_읽다_실패하면_원본을_그대로_두고_tmp와_보관본을_남기지_않는다() throws IOException {
+        // 비정상 종료 녹화에서 3번째 줄 순번이 끊김: 앞 두 줄은 이미 tmp에 쓴 뒤에 실패한다
+        Path dir = dayDir();
+        Files.createDirectories(dir);
+        RecordingCodec codec = new RecordingCodec();
+        StringBuilder text = new StringBuilder();
+        for (long seq : new long[] {1, 2, 4, 5}) {
+            text.append(codec.encode(seq, "KIWOOM-WS", event(seq))).append('\n');
+        }
+        Path events = dir.resolve(RecordingLayout.EVENTS_FILE);
+        try (OutputStream out = new GZIPOutputStream(Files.newOutputStream(events))) {
+            out.write(text.toString().getBytes(StandardCharsets.UTF_8));
+        }
+        byte[] original = Files.readAllBytes(events);
+
+        assertThatThrownBy(() -> open(OPEN.plusSeconds(60))).hasMessageContaining("순번");
+        assertThat(events).hasBinaryContent(original);
+        assertThat(dir.resolve(RecordingLayout.EVENTS_FILE + ".tmp")).doesNotExist();
+        assertThat(dir.resolve(DayWriter.restartBackupName(1))).doesNotExist();
+    }
+
+    @Test
+    void 앞_날을_읽다_실패하면_재기동_공백을_넘겨받지_않는다() throws IOException {
+        Path previous = new RecordingLayout(root).dayDir(Market.KRX, DAY.minusDays(1));
+        Files.createDirectories(previous);
+        RecordingCodec codec = new RecordingCodec();
+        try (OutputStream out = new GZIPOutputStream(Files.newOutputStream(previous.resolve(RecordingLayout.EVENTS_FILE)))) {
+            out.write((codec.encode(1, "KIWOOM-WS", event(0)) + "\n" + codec.encode(3, "KIWOOM-WS", event(1)) + "\n")
+                    .getBytes(StandardCharsets.UTF_8));
+        }
+        DayWriter w = open(OPEN);
+        assertThatThrownBy(() -> w.carryRestartFrom(previous)).hasMessageContaining("순번");
+        assertThat(w.write("KIWOOM-WS", event(0))).isEmpty();
+        w.close(OPEN.plusSeconds(1));
+    }
+
+    @Test
+    void 큰_녹화도_작은_힙에서_재기동한다() throws Exception {
+        Path dir = crashedDay(HEAVY_LINES);
+        Path argFile = root.resolve("probe.args");
+        // Windows 명령 줄 길이 한도를 피하려고 클래스패스는 인자 파일로 넘긴다
+        Files.writeString(argFile, "-cp \"" + System.getProperty("java.class.path").replace("\\", "\\\\") + "\"");
+        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        Process p = new ProcessBuilder(java.toString(), SMALL_HEAP, "@" + argFile, Probe.class.getName(), dir.toString())
+                .redirectErrorStream(true).start();
+        String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(p.waitFor(5, TimeUnit.MINUTES)).as(output).isTrue();
+        assertThat(p.exitValue()).as(output).isZero();
+        assertThat(output).contains("lastSeq=" + HEAVY_LINES);
+
+        RecordedDayStream.Summary after = RecordedDayStream.read(dir, l -> { });
+        assertThat(after.truncated()).isFalse();
+        assertThat(after.lastSeq()).isEqualTo(HEAVY_LINES + CODES.length + 1L); // 재기동 공백 10 + 새 줄 1
+        assertThat(after.unmarkedRestarts()).isEmpty();
+        assertThat(dir.resolve(DayWriter.restartBackupName(2))).exists();
+    }
+
+    /** 작은 힙으로 띄운 별도 JVM에서 재기동하고 한 줄 쓴 뒤 정상 종료한다. */
+    static final class Probe {
+        public static void main(String[] args) throws IOException {
+            Path dir = Path.of(args[0]);
+            Instant at = OPEN.plusSeconds(3_600);
+            DayWriter w = new DayWriter(dir, Market.KRX, DAY, SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"), "", at);
+            System.out.println("lastSeq=" + w.lastSeq());
+            w.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 1, at, at, BigDecimal.valueOf(70_000), 1));
+            w.close(at.plusSeconds(1));
+        }
+    }
+}

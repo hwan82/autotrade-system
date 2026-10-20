@@ -34,7 +34,8 @@ import java.util.zip.GZIPOutputStream;
  * gzip은 {@code syncFlush}로 열어 {@link #flush()} 시점까지 디스크에 내려간 줄은 비정상 종료 뒤에도
  * {@link RecordedDay}가 모두 읽는다. 마지막 {@code flush()} 뒤에 쓴 줄(게이트웨이 기준 최대 1초 분량)은 남지 않을 수 있다.
  * 비정상 종료 뒤 재기동하면 끝나지 않은 멤버를 읽힌 줄까지 닫힌 멤버로 다시 쓰는데, 그 전에 원본을
- * {@link #restartBackupName(int)}로 보관한다(QA H-4).
+ * {@link #restartBackupName(int)}로 보관한다(QA H-4). 재기동 때 앞 녹화는 줄을 메모리에 쌓지 않고 한 번 읽으며 바로
+ * 다시 쓰므로, 힙은 그날 녹화 크기와 상관없다(D-119). 걸리는 시간은 줄 수에 비례한다.
  *
  * <p>이어 쓸 때는 새 구간 첫 이벤트 앞에 앞 구간에 나온 종목마다 {@link DataGap}(RECORDER_RESTART)을 남긴다(D-065).
  * 구간은 앞 프로세스가 살아 있던 마지막 시각(앞 구간 끝과 마지막 수신 중 늦은 쪽)부터 새 구간 첫 이벤트 수신 시각까지다.
@@ -80,7 +81,10 @@ final class DayWriter implements AutoCloseable {
             Files.createDirectories(dir);
             Path events = dir.resolve(RecordingLayout.EVENTS_FILE);
             if (Files.exists(events)) {
-                RecordedDay previous = RecordedDay.open(dir);
+                // 줄을 쌓지 않고 한 번 읽으면서 바로 tmp 파일에 다시 쓴다. 힙은 그날 녹화 크기와 상관없다(D-119, PR #179 risk-ops N2)
+                Path tmp = dir.resolve(RecordingLayout.EVENTS_FILE + ".tmp");
+                SortedSet<Symbol> symbols = new TreeSet<>();
+                RecordedDayStream.Summary previous = rewriteToTmp(tmp, symbols);
                 seq = previous.lastSeq();
                 eventCount = previous.eventCount();
                 gapCount = previous.gapCount();
@@ -90,7 +94,7 @@ final class DayWriter implements AutoCloseable {
                     recorderDropped = m.recorderDropped();
                 });
                 // 비정상 종료로 끝난 gzip 멤버 뒤에 이어 쓰면 읽을 수 없으므로, 읽힌 줄까지 닫힌 멤버로 다시 쓴다.
-                // 정상 종료가 아니었으면 다시 쓰기 전에 원본을 보관한다(되돌리기 어려운 녹화 손실 방지).
+                // 정상 종료가 아니었으면 원본을 바꾸기 전에 보관한다(되돌리기 어려운 녹화 손실 방지).
                 if (!previous.meta().map(RecordingMeta::complete).orElse(false)) {
                     int segmentNo = previous.meta().map(m -> m.segments().size()).orElse(0) + 1;
                     Path backup = dir.resolve(restartBackupName(segmentNo));
@@ -99,10 +103,8 @@ final class DayWriter implements AutoCloseable {
                         Files.copy(events, backup);
                     }
                 }
-                rewrite(events, previous);
-                for (RecordingCodec.Line l : previous.lines()) {
-                    restartSymbols.add(l.event().symbol());
-                }
+                Files.move(tmp, events, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                restartSymbols = symbols;
                 restartGapStart = lastAlive(segments, previous.lastReceivedAt());
             }
             sources.putAll(knownSources);
@@ -115,16 +117,30 @@ final class DayWriter implements AutoCloseable {
         }
     }
 
-    private void rewrite(Path events, RecordedDay previous) throws IOException {
-        Path tmp = dir.resolve(RecordingLayout.EVENTS_FILE + ".tmp");
+    /**
+     * 그날 녹화를 줄 단위로 읽으며 같은 줄을 닫힌 gzip 멤버 하나로 {@code tmp}에 쓰고, 나온 종목을 {@code symbols}에 모은다.
+     * 원본은 바꾸지 않는다. 읽기나 쓰기가 실패하면 tmp를 지우고 예외를 그대로 올린다(원본·보관본은 그대로).
+     */
+    private RecordedDayStream.Summary rewriteToTmp(Path tmp, SortedSet<Symbol> symbols) throws IOException {
         try (BufferedWriter w = new BufferedWriter(new OutputStreamWriter(
                 new GZIPOutputStream(Files.newOutputStream(tmp)), StandardCharsets.UTF_8))) {
-            for (RecordingCodec.Line l : previous.lines()) {
-                w.write(codec.encode(l.seq(), l.sourceId(), withSourceSequence(l)));
-                w.write('\n');
+            return RecordedDayStream.read(dir, l -> {
+                try {
+                    w.write(codec.encode(l.seq(), l.sourceId(), withSourceSequence(l)));
+                    w.write('\n');
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                symbols.add(l.event().symbol());
+            });
+        } catch (IOException | RuntimeException e) {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed);
             }
+            throw e;
         }
-        Files.move(tmp, events, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 
     /** 읽은 줄의 이벤트는 sequence가 녹화 순번이므로, 원래 소스 순번으로 되돌려 같은 줄을 만든다. */
@@ -173,11 +189,11 @@ final class DayWriter implements AutoCloseable {
         if (seq != 0 || !restartSymbols.isEmpty()) {
             throw new IllegalStateException("새 날 파일의 첫 줄 전에만 앞 날 재기동 공백을 넘겨받을 수 있습니다: " + dir);
         }
-        RecordedDay previous = RecordedDay.open(previousDayDir);
-        for (RecordingCodec.Line l : previous.lines()) {
-            restartSymbols.add(l.event().symbol());
-        }
+        // 앞 날도 줄을 쌓지 않고 종목만 모은다(D-119). 읽다가 실패하면 아무것도 넘겨받지 않는다
+        SortedSet<Symbol> symbols = new TreeSet<>();
+        RecordedDayStream.Summary previous = RecordedDayStream.read(previousDayDir, l -> symbols.add(l.event().symbol()));
         List<RecordingMeta.Segment> segs = previous.meta().map(RecordingMeta::segments).orElse(List.of());
+        restartSymbols = symbols;
         restartGapStart = lastAlive(segs, previous.lastReceivedAt());
     }
 
