@@ -93,13 +93,55 @@ public final class SelectionPreparer {
     }
 
     /**
+     * 그날 결과 파일이 없는 선정이 모두 같은 입력 스냅샷으로 이미 계산에 실패했는지(architect PR #197 R2). 계산은 같은 입력이면 같은
+     * 결과라 다시 읽어도 같은 실패다. 그러면 스냅샷을 다시 읽지 않고 남긴 사유를 돌려준다. 하나라도 처음 보는 입력이면 빈 값.
+     *
+     * @param inputs {@link #inputsKey} 값
+     */
+    public static java.util.Optional<List<Outcome>> failedWithSameInputs(SessionSelections files, LocalDate date,
+            String inputs) {
+        if (nothingToDoApplied(files, date)) {
+            return java.util.Optional.empty();
+        }
+        List<Outcome> out = new ArrayList<>();
+        boolean anyProblem = false;
+        for (SelectionProfile s : files.selections()) {
+            if (files.hasResult(date, s.selectionHash())) {
+                out.add(new Outcome(s.key(), Status.EXISTS, null, ""));
+                continue;
+            }
+            java.util.Optional<SessionSelections.Problem> p = files.readProblem(date, s.selectionHash());
+            if (p.isEmpty() || !p.get().inputs().equals(inputs)) {
+                return java.util.Optional.empty();
+            }
+            anyProblem = true;
+            out.add(new Outcome(s.key(), Status.PROBLEM, p.get().reason(), p.get().detail()));
+        }
+        return anyProblem ? java.util.Optional.of(out) : java.util.Optional.empty();
+    }
+
+    /** 사유 파일에 남기는 입력 스냅샷 키: 일봉 스냅샷 ID와 재무 스냅샷 ID(없으면 빈 칸). 스냅샷 ID는 내용 해시를 담아 바뀌지 않는다. */
+    public static String inputsKey(String dailySnapshot, java.util.Optional<String> financialsSnapshot) {
+        return "daily=" + dailySnapshot + ";financials=" + financialsSnapshot.orElse("");
+    }
+
+    /** 입력 스냅샷 키 없이(녹화 실험: 한 번만 계산한다). */
+    public static List<Outcome> prepare(SessionSelections files, LocalDate date, SelectionCalculator calculator,
+            LocalDate barsLastTradingDate, LocalDate cutoff, SelectionResultFile.Producer producer, Runnable checkpoint) {
+        return prepare(files, date, calculator, barsLastTradingDate, cutoff, producer, checkpoint, null);
+    }
+
+    /**
+     * @param inputs 계산에 쓴 입력 스냅샷 키({@link #inputsKey}). 계산 실패 사유 파일에 남겨 같은 입력이면 다시 읽지 않게 한다. null이면
+     *     남기지 않음
      * @param calculator 입력 스냅샷으로 만든 계산기
      * @param barsLastTradingDate 일봉 스냅샷 마지막 거래일
      * @param cutoff T의 직전 거래일(기준 데이터일 c)
      * @param checkpoint 선정 하나를 계산하기 전마다 부른다(정지 요청·디스크 관문, architect PR #191 N2). 던진 예외는 그대로 올라간다
      */
     public static List<Outcome> prepare(SessionSelections files, LocalDate date, SelectionCalculator calculator,
-            LocalDate barsLastTradingDate, LocalDate cutoff, SelectionResultFile.Producer producer, Runnable checkpoint) {
+            LocalDate barsLastTradingDate, LocalDate cutoff, SelectionResultFile.Producer producer, Runnable checkpoint,
+            String inputs) {
         Objects.requireNonNull(checkpoint, "checkpoint");
         List<Outcome> out = new ArrayList<>();
         if (nothingToDoApplied(files, date)) {
@@ -114,7 +156,7 @@ public final class SelectionPreparer {
             checkpoint.run();
             if (barsLastTradingDate.isBefore(cutoff)) {
                 String detail = "일봉 스냅샷 마지막 거래일 " + barsLastTradingDate + " < 기준 데이터일 " + cutoff;
-                files.writeProblem(date, s.selectionHash(), SelectionInvalidReason.STALE_INPUT, detail);
+                files.writeProblem(date, s.selectionHash(), SelectionInvalidReason.STALE_INPUT, detail, inputs);
                 out.add(new Outcome(s.key(), Status.PROBLEM, SelectionInvalidReason.STALE_INPUT, detail));
                 continue;
             }
@@ -123,7 +165,7 @@ public final class SelectionPreparer {
                 r = calculator.calculate(s, date);
             } catch (RuntimeException e) {
                 String detail = "선정 계산 실패(" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")";
-                files.writeProblem(date, s.selectionHash(), SelectionInvalidReason.PRODUCER_FAILED, detail);
+                files.writeProblem(date, s.selectionHash(), SelectionInvalidReason.PRODUCER_FAILED, detail, inputs);
                 out.add(new Outcome(s.key(), Status.PROBLEM, SelectionInvalidReason.PRODUCER_FAILED, detail));
                 continue;
             }

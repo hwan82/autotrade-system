@@ -35,7 +35,8 @@ import java.util.stream.Stream;
  * 가장 늦은 스냅샷({@link CollectionFreshness#check}와 같은 고르기), 재무는 마지막 수집 시각이 가장 늦은 스냅샷을 쓴다. 쓴 스냅샷
  * ID와 SHA-256은 결과 파일 {@code inputs}에 남는다.
  *
- * <p>스냅샷을 읽기 전에 먼저 본다: 그날 적용 기록이 있거나 결과 파일이 다 있으면 아무것도 읽지 않는다(5분마다 부르는 비용). 가장
+ * <p>스냅샷을 읽기 전에 먼저 본다: 그날 적용 기록이 있거나 결과 파일이 다 있으면 아무것도 읽지 않는다(5분마다 부르는 비용). 결과가
+ * 없는 선정이 모두 같은 입력 스냅샷으로 이미 계산에 실패했어도 읽지 않는다(architect PR #197 R2, 새 스냅샷이 나오면 다시 계산). 가장
  * 최근 일봉 스냅샷이 T의 직전 거래일을 덮지 않으면 읽지 않고 {@code STALE_INPUT} 사유를 남긴다. 일봉 행 수로 힙이 모자랄 것
  * 같으면({@code heapFits}) 읽지 않고 준비 실행 명령을 쓰라는 사유를 남긴다: 실험실 힙이 넘치면 돌던 실시간 세션까지 멈춘다.
  */
@@ -48,18 +49,15 @@ public final class LiveSelectionPrep {
     public static final LocalTime QUIET_TO = LocalTime.of(8, 30);
     private static final Pattern SNAPSHOT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,127}");
 
-    /**
-     * 일봉 한 행을 읽는 데 드는 힙 추정(바이트) `[가정]`. 워크포워드가 전체 KRX 스냅샷에 8g를 쓰는 데서 넉넉히 잡았다. 행 수 × 이 값이
-     * 최대 힙의 절반을 넘으면 읽지 않는다(실험실은 세션이 쓸 힙을, 명령은 리플레이가 쓸 힙을 남긴다).
-     */
-    public static final long HEAP_BYTES_PER_DAILY_ROW = 1024;
+    /** 일봉 한 행을 읽는 데 드는 힙 추정(바이트) `[가정]`. {@link com.autotrade.sim.selection.SnapshotHeap}와 같다. */
+    public static final long HEAP_BYTES_PER_DAILY_ROW = com.autotrade.sim.selection.SnapshotHeap.BYTES_PER_DAILY_ROW;
 
     private LiveSelectionPrep() {
     }
 
     /** 일봉 행 수를 이 힙으로 읽어도 되는지(최대 힙의 절반 안). */
     public static boolean heapFits(long dailyRows, long maxHeapBytes) {
-        return dailyRows <= maxHeapBytes / 2 / HEAP_BYTES_PER_DAILY_ROW;
+        return com.autotrade.sim.selection.SnapshotHeap.fits(dailyRows, maxHeapBytes);
     }
 
     /**
@@ -166,6 +164,14 @@ public final class LiveSelectionPrep {
             }
             financials = f;
         }
+        // 같은 입력 스냅샷으로 이미 계산에 실패했으면 다시 읽지 않는다: 같은 입력이면 같은 실패이고, 실패한 날 장 밖 동안 5분마다
+        // 일봉 전체를 다시 올리면 실험실 힙·디스크를 세션과 나눠 쓴다(architect PR #197 R2). 새 스냅샷이 나오면 다시 계산한다
+        String inputs = SelectionPreparer.inputsKey(daily, financials);
+        Optional<List<SelectionPreparer.Outcome>> failed = SelectionPreparer.failedWithSameInputs(files, date, inputs);
+        if (failed.isPresent()) {
+            return new Report(id, date, daily, financials.orElse(""), failed.get(), summary(failed.get())
+                    + " (같은 입력 스냅샷으로 이미 실패함, 새 스냅샷이 나오면 다시 계산)");
+        }
         long rows = dailyBarRows(snapshotsRoot, daily);
         if (!heapFits.test(rows)) {
             return problem(id, files, date, daily, SelectionInvalidReason.PRODUCER_FAILED, "일봉 " + rows
@@ -176,7 +182,7 @@ public final class LiveSelectionPrep {
                 log, (first, last) -> { });
         SelectionCalculator calc = new SelectionCalculator(in.selectionData());
         List<SelectionPreparer.Outcome> out = SelectionPreparer.prepare(files, date, calc, in.last(), cutoff, producer,
-                gate::check);
+                gate::check, inputs);
         Report r = new Report(id, date, daily, financials.orElse(""), out, summary(out));
         log.accept("선정 준비 " + id + " " + date + ": " + r.note());
         return r;
@@ -233,13 +239,6 @@ public final class LiveSelectionPrep {
 
     /** 일봉 스냅샷 manifest의 daily_bars 행 수(읽을 수 없으면 0: 실제 읽기에서 같은 오류가 난다). */
     static long dailyBarRows(Path snapshotsRoot, String snapshotId) {
-        try {
-            SnapshotManifest m = SnapshotFiles.readManifest(snapshotsRoot.resolve(CollectionFreshness.KRX_DAILY)
-                    .resolve(snapshotId));
-            return m.files().stream().filter(f -> f.name().equals(SnapshotManifest.DAILY_BARS))
-                    .mapToLong(SnapshotManifest.FileEntry::rows).sum();
-        } catch (IOException | RuntimeException e) {
-            return 0;
-        }
+        return com.autotrade.sim.selection.SnapshotHeap.dailyBarRows(snapshotsRoot, snapshotId);
     }
 }
