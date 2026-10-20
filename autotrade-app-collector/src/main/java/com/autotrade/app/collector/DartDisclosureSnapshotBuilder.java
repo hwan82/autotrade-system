@@ -44,12 +44,6 @@ final class DartDisclosureSnapshotBuilder {
 
     private DartDisclosureSnapshotBuilder() {}
 
-    /** 접수일 비트 위치의 기준(2000-01-01). */
-    private static final long BASE = LocalDate.of(2000, 1, 1).toEpochDay();
-
-    private static int day(LocalDate d) {
-        return (int) (d.toEpochDay() - BASE);
-    }
 
     /** KRX 종목 이력 한 구간(이름 대조용). {@code to}가 null이면 진행 중. */
     record Listing(String code, String name, LocalDate from, LocalDate to) {
@@ -101,7 +95,7 @@ final class DartDisclosureSnapshotBuilder {
         Map<String, Long> unmapped = new TreeMap<>();
         Map<Integer, long[]> byYear = new TreeMap<>();
         Map<String, Long> prefixes = new TreeMap<>();
-        Map<String, java.util.BitSet> mappedDays = new HashMap<>(); // 종목 코드 → 공시가 붙은 접수일(에포크 일 − BASE 비트)
+        Map<String, TreeSet<LocalDate>> mappedDays = new HashMap<>(); // 종목 코드 → 공시가 붙은 접수일(기준 연도 없음, PR #196 architect F4)
         LocalDate first = null;
         for (List<Path> files : windows.values()) {
             for (Path f : files) {
@@ -128,7 +122,7 @@ final class DartDisclosureSnapshotBuilder {
                         unmapped.merge(type + "|" + (cls.isEmpty() ? "-" : cls), 1L, Long::sum);
                         y[1]++;
                     } else {
-                        mappedDays.computeIfAbsent(mapped[0], k -> new java.util.BitSet()).set(day(date));
+                        mappedDays.computeIfAbsent(mapped[0], k -> new TreeSet<>()).add(date);
                     }
                     String name = n.path("report_nm").asText().strip();
                     int close = name.indexOf(']');
@@ -176,9 +170,9 @@ final class DartDisclosureSnapshotBuilder {
             if (to != null && to.isBefore(first)) {
                 continue; // 수집 구간 전에 폐지
             }
-            java.util.BitSet days = mappedDays.get(e.getKey());
-            int hit = days == null ? -1 : days.nextSetBit(Math.max(0, day(from)));
-            boolean with = hit >= 0 && (to == null || hit <= day(to));
+            TreeSet<LocalDate> days = mappedDays.get(e.getKey());
+            LocalDate hit = days == null ? null : days.ceiling(from);
+            boolean with = hit != null && (to == null || !hit.isAfter(to));
             if (isOpen) {
                 listed++;
                 listedWith += with ? 1 : 0;

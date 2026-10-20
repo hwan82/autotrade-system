@@ -119,6 +119,20 @@ class DartDisclosureSnapshotBuilderTest {
     }
 
     @Test
+    void 이천년_이전_접수일도_빌드가_멈추지_않는다() throws IOException {
+        Map<String, List<Path>> windows = Map.of("B", List.of(window("B", "1999-07-01_1999-07-31.json",
+                "Y;00000001;111111;가;보고;19990705000001;19990705")));
+        List<DartDisclosureSnapshotBuilder.Listing> krx = List.of(
+                new DartDisclosureSnapshotBuilder.Listing("111111", "가", LocalDate.of(1990, 1, 4), LocalDate.of(1999, 12, 30)));
+        List<List<String>> out = new ArrayList<>();
+        DartDisclosureSnapshotBuilder.Stats s = DartDisclosureSnapshotBuilder.build(windows, krx, out::add);
+        assertThat(out).hasSize(1);
+        assertThat(s.byYear()).containsOnlyKeys(1999);
+        assertThat(s.delisted()).isEqualTo(1);
+        assertThat(s.delistedWithDisclosure()).isEqualTo(1);
+    }
+
+    @Test
     void 같은_접수번호가_두_번이면_스냅샷을_만들지_않는다() throws IOException {
         Map<String, List<Path>> windows = Map.of("B", List.of(
                 window("B", "2026-01-01_2026-01-14.json", "Y;00000001;111111;가;보고;20260105000001;20260105"),
