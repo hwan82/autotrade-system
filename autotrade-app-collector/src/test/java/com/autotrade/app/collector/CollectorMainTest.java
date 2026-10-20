@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.daily.SnapshotDailyBarSource;
+import com.autotrade.marketdata.daily.SnapshotFiles;
 import com.autotrade.marketdata.daily.SnapshotListedShares;
 import com.autotrade.marketdata.daily.SnapshotManifest;
 import com.autotrade.marketdata.financial.SnapshotFinancials;
@@ -59,6 +60,78 @@ class CollectorMainTest {
                     : "111111;가;;5100;5100;5100;5100;0;20;200";
             return FakeHttp.ok(KrxFixtures.body(d, List.of(row)));
         });
+    }
+
+    /** {@link #krxServer()}와 같은 일봉에 실제 거래대금(ACC_TRDVAL)을 붙인 응답. */
+    private static FakeHttp krxServerWithTurnover() {
+        return new FakeHttp((u, n) -> {
+            LocalDate d = LocalDate.parse(FakeHttp.query(u, "basDd"), KrxOpenApiClient.BAS_DD);
+            if (!u.getPath().endsWith("stk_bydd_trd")) {
+                return FakeHttp.ok("{\"OutBlock_1\":[]}");
+            }
+            String row = d.isBefore(LocalDate.of(2026, 10, 7)) ? "111111;가;;9900;10100;9800;10000;0;10;100;99,500"
+                    : d.equals(LocalDate.of(2026, 10, 7)) ? "111111;가;;5000;5200;4900;5100;100;20;200;101,000"
+                    : "111111;가;;5100;5100;5100;5100;0;20;200;102,000";
+            return FakeHttp.ok(KrxFixtures.body(d, List.of(row)));
+        });
+    }
+
+    @Test
+    void krx_daily는_실제_거래대금_파일을_더하고_without_turnover면_옛_형식과_옛_ID를_다시_만든다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        String[] range = {"krx-daily", "--from", "2026-10-05", "--to", "2026-10-08"};
+        assertThat(CollectorMain.run(args(range), clock, krxServerWithTurnover(), ms -> {}, PLENTY)).isZero();
+        Path dir = only(config.resolve("snapshots").resolve("krx-daily"));
+        SnapshotManifest m = SnapshotFiles.readManifest(dir);
+        assertThat(m.schemaVersion()).isEqualTo(1);
+        assertThat(m.files()).extracting(SnapshotManifest.FileEntry::name).containsExactly("daily_bars.csv",
+                "instrument_history.csv", "listed_shares.csv", KrxDailySnapshotBuilder.TURNOVER_FILE);
+        assertThat(Files.readString(dir.resolve(KrxDailySnapshotBuilder.TURNOVER_FILE))).isEqualTo("""
+                market,code,date,turnover
+                KRX,111111,2026-10-05,99500
+                KRX,111111,2026-10-06,99500
+                KRX,111111,2026-10-07,101000
+                KRX,111111,2026-10-08,102000
+                """);
+        // 기존 읽는 쪽(일봉·상장주식수·품질 검사)은 선택 파일을 무시하고 그대로 읽는다
+        SnapshotDailyBarSource src = SnapshotDailyBarSource.load(dir);
+        assertThat(src.qualityReport().errorCount()).isZero();
+        assertThat(SnapshotListedShares.load(dir).asOf(new Symbol(Market.KRX, "111111"), LocalDate.of(2026, 10, 8))).hasValue(200);
+        String report = Files.readString(reports.resolve(m.snapshotId() + ".md"));
+        assertThat(report).contains("| 거래대금 행(`daily_turnover.csv`) | 4 |", "밖 행(경고) | 0 (0.000%) |");
+
+        // 같은 캐시로 옛 형식: 거래대금 파일 없고, ID는 일봉 파일 해시만으로(D-133 전과 같은 규칙)
+        Path legacyRoot = config.resolve("legacy");
+        FakeHttp none = krxServerWithTurnover();
+        String[] legacyArgs = {"krx-daily", "--from", "2026-10-05", "--to", "2026-10-08", "--without-turnover", "--snapshot-dir",
+                legacyRoot.toString()};
+        assertThat(CollectorMain.run(args(legacyArgs), clock, none, ms -> {}, PLENTY)).isZero();
+        Path legacy = only(legacyRoot.resolve("krx-daily"));
+        SnapshotManifest lm = SnapshotFiles.readManifest(legacy);
+        assertThat(lm.files()).extracting(SnapshotManifest.FileEntry::name).doesNotContain(KrxDailySnapshotBuilder.TURNOVER_FILE);
+        String barsSha = com.autotrade.marketdata.recording.Sha256.ofFile(legacy.resolve("daily_bars.csv"));
+        assertThat(lm.snapshotId()).isEqualTo("krx-daily-2026-10-08-" + barsSha.substring(0, 8).toLowerCase(java.util.Locale.ROOT));
+        assertThat(Files.readAllBytes(legacy.resolve("daily_bars.csv"))).isEqualTo(Files.readAllBytes(dir.resolve("daily_bars.csv")));
+        assertThat(m.snapshotId()).isNotEqualTo(lm.snapshotId());
+        assertThat(Files.readString(reports.resolve(lm.snapshotId() + ".md"))).contains("거래대금 파일 없음(`--without-turnover`");
+        assertNoKeyAnywhere();
+    }
+
+    @Test
+    void without_turnover는_krx_daily에만_쓴다() throws IOException {
+        writeKeys();
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T10:00:00Z"), ZoneOffset.UTC);
+        assertThat(CollectorMain.run(args("dart-financials", "--without-turnover"), clock, krxServer(), ms -> {}, PLENTY))
+                .isEqualTo(2);
+    }
+
+    private static Path only(Path root) throws IOException {
+        try (Stream<Path> s = Files.list(root)) {
+            List<Path> dirs = s.filter(Files::isDirectory).toList();
+            assertThat(dirs).hasSize(1);
+            return dirs.get(0);
+        }
     }
 
     @Test

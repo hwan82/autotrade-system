@@ -21,7 +21,12 @@ class KrxDailySnapshotBuilderTest {
 
     static KrxDailyRow row(LocalDate d, KrxBoard b, String code, String name, String section, String o, String h, String l,
             String c, String chg, long vol, long shares) {
-        return new KrxDailyRow(d, b, code, name, section, dec(o), dec(h), dec(l), dec(c), dec(chg), vol, shares);
+        return new KrxDailyRow(d, b, code, name, section, dec(o), dec(h), dec(l), dec(c), dec(chg), vol, shares, null);
+    }
+
+    static KrxDailyRow withTurnover(KrxDailyRow r, Long turnover) {
+        return new KrxDailyRow(r.date(), r.board(), r.code(), r.name(), r.section(), r.open(), r.high(), r.low(), r.close(),
+                r.change(), r.volume(), r.listedShares(), turnover);
     }
 
     private static BigDecimal dec(String s) {
@@ -232,5 +237,57 @@ class KrxDailySnapshotBuilderTest {
         KrxDailySnapshotBuilder.Stats s = build(m).stats();
         assertThat(s.massAdjustmentDays()).containsExactly(new KrxDailySnapshotBuilder.AdjustmentDay(mon, 40, 40, List.of(thu, fri)));
         assertThat(s.eventsAfterEmpty()).containsOnly(Map.entry(thu, 40), Map.entry(fri, 40));
+    }
+
+    @Test
+    void 실제_거래대금은_쓴_일봉_중_값이_있는_행만_원가격_그대로_따로_쓰고_범위_밖은_경고로_센다() throws IOException {
+        Map<LocalDate, List<KrxDailyRow>> m = new TreeMap<>();
+        m.put(D1, List.of(
+                // 저가×거래량 98,000 ~ 고가×거래량 101,000 안
+                withTurnover(row(D1, KrxBoard.KOSPI, "111111", "가", "", "9900", "10100", "9800", "10000", "0", 10, 100), 99_500L),
+                // 값 없음: 일봉만 쓰고 거래대금 파일에는 넣지 않음
+                row(D1, KrxBoard.KOSPI, "222222", "나", "", "500", "510", "490", "500", "0", 5, 50),
+                // 종가 없음: 일봉을 안 쓰므로 거래대금도 안 씀
+                withTurnover(row(D1, KrxBoard.KOSPI, "333333", "다", "", null, null, null, null, "0", 0, 30), 0L)));
+        m.put(D2, List.of(
+                // 거래량이 있는데 거래대금 0(범위 밖)
+                withTurnover(row(D2, KrxBoard.KOSPI, "111111", "가", "", "10000", "10000", "10000", "10000", "0", 10, 100), 0L),
+                // 거래정지(거래량 0, 가격을 종가로 채움) 거래대금 0: 범위 안(0 ~ 0)
+                withTurnover(row(D2, KrxBoard.KOSPI, "222222", "나", "", null, null, null, "500", "0", 0, 50), 0L)));
+        m.put(D3, List.of(
+                // 고가 × 거래량(5,200 × 20 = 104,000) 바로 위: 범위 밖(시간외 단일가 같은 경우)
+                withTurnover(row(D3, KrxBoard.KOSPI, "111111", "가", "", "5000", "5200", "4900", "5100", "100", 20, 200), 104_001L),
+                withTurnover(row(D3, KrxBoard.KOSPI, "222222", "나", "", "480", "480", "470", "470", "-30", 9, 50), 4_230L)));
+        List<List<String>> bars = new ArrayList<>();
+        List<List<String>> turnover = new ArrayList<>();
+        KrxDailySnapshotBuilder.Stats s = KrxDailySnapshotBuilder.build(source(m), bars::add, r -> { }, r -> { }, turnover::add);
+        assertThat(turnover).containsExactly(
+                List.of("KRX", "111111", "2026-10-05", "99500"),
+                List.of("KRX", "111111", "2026-10-06", "0"),
+                List.of("KRX", "222222", "2026-10-06", "0"),
+                List.of("KRX", "111111", "2026-10-07", "104001"),
+                List.of("KRX", "222222", "2026-10-07", "4230"));
+        assertThat(s.turnover()).isEqualTo(new KrxDailySnapshotBuilder.TurnoverStats(true, 5, 1, 2,
+                List.of("2026-10-06 111111", "2026-10-07 111111")));
+        // 일봉은 거래대금을 쓰든 안 쓰든 같다(옛 형식과 같은 daily_bars.csv, 같은 일봉 해시)
+        Out legacy = build(m);
+        assertThat(bars).isEqualTo(legacy.bars());
+        assertThat(legacy.stats().turnover().written()).isFalse();
+        assertThat(s).usingRecursiveComparison().ignoringFields("turnover").isEqualTo(legacy.stats());
+    }
+
+    @Test
+    void 범위_밖_예시는_앞_20건까지만_남기고_수는_전부_센다() throws IOException {
+        Map<LocalDate, List<KrxDailyRow>> m = new TreeMap<>();
+        List<KrxDailyRow> rows = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            rows.add(withTurnover(row(D1, KrxBoard.KOSPI, String.format("%06d", 100000 + i), "k" + i, "", "10", "10", "10", "10",
+                    "0", 1, 1), 1_000L)); // 10 × 1 = 10원인데 1,000원(천 원 단위 착오 같은 경우)
+        }
+        m.put(D1, rows);
+        KrxDailySnapshotBuilder.Stats s = KrxDailySnapshotBuilder.build(source(m), r -> { }, r -> { }, r -> { }, r -> { });
+        assertThat(s.turnover().outsideRange()).isEqualTo(25);
+        assertThat(s.turnover().outsideSamples()).hasSize(KrxDailySnapshotBuilder.OUTSIDE_SAMPLES)
+                .startsWith("2026-10-05 100000");
     }
 }

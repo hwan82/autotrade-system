@@ -29,6 +29,8 @@ import java.util.TreeMap;
  *   <li><b>이력 구간</b>: (시장, 소속부, 종목명)이 바뀌면 새 구간. 수집 마지막 날까지 나오는 종목은 끝 날짜가 비고, 그 전에
  *       사라진 종목은 마지막으로 나온 날이 끝 날짜(상장폐지 포함, 생존편향 제거).</li>
  *   <li><b>상장주식수</b>: 값이 바뀐 날(첫 날 포함)만 행으로 남긴다.</li>
+ *   <li><b>실제 거래대금</b>(D-133): 받는 쪽을 주면 일봉을 쓴 행 중 {@code ACC_TRDVAL}이 있는 행만 {@value #TURNOVER_FILE}에 쓴다.
+ *       일봉 행은 받는 쪽이 있든 없든 같다.</li>
  * </ul>
  */
 public final class KrxDailySnapshotBuilder {
@@ -53,22 +55,62 @@ public final class KrxDailySnapshotBuilder {
     public record Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose,
             long adjustmentEvents, long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate,
             List<LocalDate> emptyWeekdays, List<BoardGap> boardGaps, List<AdjustmentDay> massAdjustmentDays,
-            Map<LocalDate, Integer> eventsAfterEmpty) {
+            Map<LocalDate, Integer> eventsAfterEmpty, TurnoverStats turnover) {
 
         public Stats {
             eventsAfterEmpty = Map.copyOf(eventsAfterEmpty);
             emptyWeekdays = List.copyOf(emptyWeekdays);
             boardGaps = List.copyOf(boardGaps);
             massAdjustmentDays = List.copyOf(massAdjustmentDays);
+            turnover = turnover == null ? TurnoverStats.NOT_WRITTEN : turnover;
+        }
+
+        /** 거래대금 파일 없이(옛 형식, 합성 통계용). */
+        public Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose, long adjustmentEvents,
+                long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate,
+                List<LocalDate> emptyWeekdays, List<BoardGap> boardGaps, List<AdjustmentDay> massAdjustmentDays,
+                Map<LocalDate, Integer> eventsAfterEmpty) {
+            this(rows, bars, haltedBars, filledMissingPrice, droppedNoClose, adjustmentEvents, missingChange, reappeared,
+                    firstDate, lastTradingDate, emptyWeekdays, boardGaps, massAdjustmentDays, eventsAfterEmpty, null);
         }
 
         /** 공백 목록 없이(합성 통계용). */
         public Stats(long rows, long bars, long haltedBars, long filledMissingPrice, long droppedNoClose, long adjustmentEvents,
                 long missingChange, long reappeared, LocalDate firstDate, LocalDate lastTradingDate) {
             this(rows, bars, haltedBars, filledMissingPrice, droppedNoClose, adjustmentEvents, missingChange, reappeared,
-                    firstDate, lastTradingDate, List.of(), List.of(), List.of(), Map.of());
+                    firstDate, lastTradingDate, List.of(), List.of(), List.of(), Map.of(), null);
         }
     }
+
+    /**
+     * 실제 거래대금 파일 {@value #TURNOVER_FILE} 요약(D-133).
+     *
+     * @param written 이번 스냅샷에 거래대금 파일을 썼는지({@code --without-turnover}면 아님)
+     * @param rows 거래대금 파일 행(일봉 중 {@code ACC_TRDVAL}이 있던 행)
+     * @param missing 일봉은 썼는데 응답에 {@code ACC_TRDVAL}이 없거나 빈 행(거래대금 파일에 넣지 않음)
+     * @param outsideRange 거래대금이 저가 × 거래량 ~ 고가 × 거래량(원가격) 밖인 행. 시간외 거래가 정규장 범위 밖 가격으로
+     *     체결되면 생길 수 있어 경고로만 센다 `[추론]`
+     * @param outsideSamples 그런 행 앞 몇 개({@value #OUTSIDE_SAMPLES}개까지, "날짜 코드" 순)
+     */
+    public record TurnoverStats(boolean written, long rows, long missing, long outsideRange, List<String> outsideSamples) {
+
+        static final TurnoverStats NOT_WRITTEN = new TurnoverStats(false, 0, 0, 0, List.of());
+
+        public TurnoverStats {
+            outsideSamples = List.copyOf(outsideSamples);
+        }
+    }
+
+    /**
+     * 실제 거래대금 파일(D-133, ADR-012 후속 F1). 일봉 스냅샷의 선택 파일이다. 읽는 쪽은 다음 PR에서
+     * 선정 모듈에 만들 예정이다(D-133 6번). 수집기는 선정 모듈에 의존하지 않으므로 그때 이름·헤더를 양쪽에 같게 두고 대조 테스트를 넣는다.
+     * 값은 KRX {@code ACC_TRDVAL} 그대로(원, 원가격 기준이라 수정 계수를 곱하지 않는다). 일봉을 쓴 행 중 값이 있는 행만 둔다.
+     */
+    public static final String TURNOVER_FILE = "daily_turnover.csv";
+
+    public static final List<String> TURNOVER_HEADER = List.of("market", "code", "date", "turnover");
+
+    static final int OUTSIDE_SAMPLES = 20;
 
     /** 한 시장만 빈 날. */
     public record BoardGap(LocalDate date, KrxBoard board) {}
@@ -99,7 +141,16 @@ public final class KrxDailySnapshotBuilder {
 
     private KrxDailySnapshotBuilder() {}
 
+    /** 거래대금 파일 없이(옛 형식). */
     public static Stats build(KrxDaySource source, RowSink bars, RowSink history, RowSink shares) throws IOException {
+        return build(source, bars, history, shares, null);
+    }
+
+    /**
+     * @param turnover 실제 거래대금 행을 받는 쪽({@value #TURNOVER_FILE}). {@code null}이면 쓰지 않는다(옛 형식, 옛 스냅샷 ID 재현용)
+     */
+    public static Stats build(KrxDaySource source, RowSink bars, RowSink history, RowSink shares, RowSink turnover)
+            throws IOException {
         Map<String, SymbolState> states = new TreeMap<>();
         long rows = 0;
         long missingChange = 0;
@@ -217,6 +268,10 @@ public final class KrxDailySnapshotBuilder {
         long filled = 0;
         long dropped = 0;
         long events = 0;
+        long turnoverRows = 0;
+        long turnoverMissing = 0;
+        long outsideRange = 0;
+        List<String> outsideSamples = new ArrayList<>();
         for (SymbolState s : states.values()) {
             events += s.events.size();
         }
@@ -246,10 +301,28 @@ public final class KrxDailySnapshotBuilder {
                 bars.write(List.of(Market.KRX.name(), r.code(), d.toString(), plain(open), plain(high), plain(low),
                         plain(close), Long.toString(r.volume()), plain(factor)));
                 barCount++;
+                if (turnover != null) {
+                    if (r.turnover() == null) {
+                        turnoverMissing++;
+                    } else {
+                        turnover.write(List.of(Market.KRX.name(), r.code(), d.toString(), Long.toString(r.turnover())));
+                        turnoverRows++;
+                        BigDecimal value = BigDecimal.valueOf(r.turnover());
+                        BigDecimal volume = BigDecimal.valueOf(r.volume());
+                        if (value.compareTo(low.multiply(volume)) < 0 || value.compareTo(high.multiply(volume)) > 0) {
+                            if (outsideSamples.size() < OUTSIDE_SAMPLES) {
+                                outsideSamples.add(d + " " + r.code());
+                            }
+                            outsideRange++;
+                        }
+                    }
+                }
             }
         }
+        TurnoverStats t = turnover == null ? TurnoverStats.NOT_WRITTEN
+                : new TurnoverStats(true, turnoverRows, turnoverMissing, outsideRange, outsideSamples);
         return new Stats(rows, barCount, halted, filled, dropped, events, missingChange, reappeared, first, last,
-                emptyWeekdays, boardGaps, massDays, eventsAfterEmpty);
+                emptyWeekdays, boardGaps, massDays, eventsAfterEmpty, t);
     }
 
     /** 직전 자료 있는 날까지 거슬러 가며 만나는 빈 평일·시장 공백 날짜 전부(오름차순). 직전 자료 있는 날이 시장 공백이면 포함한다. */

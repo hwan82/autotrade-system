@@ -8,6 +8,7 @@ import java.time.LocalDate;
  *
  * @param change 전일 대비({@code CMPPREVDD_PRC}). 기준가 = 종가 − 전일 대비. 수정 계수 계산에 쓴다
  * @param section 소속부({@code SECT_TP_NM}, 코스닥 우량기업부 등). 없으면 빈 문자열
+ * @param turnover 실제 거래대금({@code ACC_TRDVAL}, 원). 응답에 칸이 없거나 비면 {@code null}(ADR-012 후속 F1, D-133)
  */
 public record KrxDailyRow(
         LocalDate date,
@@ -21,4 +22,5 @@ public record KrxDailyRow(
         BigDecimal close,
         BigDecimal change,
         long volume,
-        long listedShares) {}
+        long listedShares,
+        Long turnover) {}
