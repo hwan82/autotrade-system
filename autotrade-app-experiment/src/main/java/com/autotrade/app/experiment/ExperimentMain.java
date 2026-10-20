@@ -174,7 +174,7 @@ public final class ExperimentMain {
             case "live-check" -> LiveCheckMain.run(forwarded, configDir, gate);
             case "live-weekly" -> LiveWeeklyMain.run(forwarded, configDir, gate);
             case "live-judge" -> LiveJudgeMain.run(forwarded, configDir, gate);
-            case "watchlist" -> WatchlistCandidatesMain.run(forwarded, gate);
+            case "watchlist" -> WatchlistCandidatesMain.run(forwarded, configDir, gate);
             default -> StudyMain.run(forwarded, gate);
         };
     }

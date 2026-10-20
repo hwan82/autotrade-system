@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
 
 /**
  * 게이트웨이 감시 종목 후보 뽑기(ADR-012 배치표 0번). 수집 일봉 스냅샷의 마지막 거래일 T에 선정 프로필
- * {@code kr-watchlist-turnover@1}(최근 20거래일 평균 거래대금 상위 보통주, 기준 데이터일 c = T의 앞 거래일)을 계산하고, 꼭 넣을
+ * {@code kr-watchlist-turnover@1}(최근 20거래일 평균 거래대금 상위 {@code STOCK}, 기준 데이터일 c = T의 앞 거래일)을 계산하고, 꼭 넣을
  * 종목(LIVE01 {@code boards} 등)을 앞에 둔 뒤 순위대로 채워 {@code total}종목 목록을 파일에 쓴다. 게이트웨이 설정은 바꾸지 않는다.
  * {@code watchlist.json}은 사용자가 시작 점검표의 상자로 만든다.
  *
@@ -58,8 +58,11 @@ public final class WatchlistCandidatesMain {
             Map<String, String> turnover) {
     }
 
-    /** @param gate 정지 확인(D-063). 스냅샷을 읽기 전과 계산 전에 묻는다 */
-    public static int run(String[] args, RunGate gate) {
+    /**
+     * @param configDir 설정 폴더(실험 실행 명령이 정한 것). {@code --snapshots-dir}가 없으면 그 아래 {@code snapshots}
+     * @param gate 정지 확인(D-063). 스냅샷을 읽기 전과 계산 전에 묻는다
+     */
+    public static int run(String[] args, Path configDir, RunGate gate) {
         if (args.length < 5) {
             System.err.println("인자: <저장소 루트> <일봉 스냅샷 ID> <꼭 넣을 종목 쉼표 목록 또는 -> <총 종목 수 1~"
                     + MAX_TOTAL + "> <출력 파일> [--snapshots-dir 폴더]");
@@ -107,7 +110,7 @@ public final class WatchlistCandidatesMain {
             }
         }
         if (snapshots == null) {
-            snapshots = configDir().resolve("snapshots");
+            snapshots = configDir.resolve("snapshots");
         }
         try {
             SelectionProfile profile = profile(root);
@@ -173,14 +176,6 @@ public final class WatchlistCandidatesMain {
         }
     }
 
-    /** 설정 폴더: 시스템 속성 {@code autotrade.config-dir} → 환경 변수 {@code AUTOTRADE_CONFIG_DIR} → {@code ~/.autotrade}. */
-    static Path configDir() {
-        String p = System.getProperty("autotrade.config-dir");
-        if (p == null || p.isBlank()) {
-            p = System.getenv("AUTOTRADE_CONFIG_DIR");
-        }
-        return p == null || p.isBlank() ? Path.of(System.getProperty("user.home"), ".autotrade") : Path.of(p);
-    }
 
     private static void log(String line) {
         System.out.println("[watchlist] " + line);

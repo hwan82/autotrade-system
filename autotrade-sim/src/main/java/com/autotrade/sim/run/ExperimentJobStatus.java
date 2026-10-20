@@ -56,7 +56,8 @@ public record ExperimentJobStatus(
 
     /** 실행 명령 종류. */
     public static final List<String> COMMANDS =
-            List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly", "live-judge");
+            List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly", "live-judge",
+                    "watchlist");
 
     /** 작업 상태. 끝난 상태는 실행 명령의 종료 코드에 대응한다. */
     public enum State {

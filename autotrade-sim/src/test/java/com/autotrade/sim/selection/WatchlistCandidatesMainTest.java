@@ -78,12 +78,16 @@ class WatchlistCandidatesMainTest {
         return new String[] {"..", SNAPSHOT, keep, total, out.toString(), "--snapshots-dir", snapshots.toString()};
     }
 
+    private int run(String[] args, RunGate gate) {
+        return WatchlistCandidatesMain.run(args, tmp.resolve("config"), gate);
+    }
+
     @Test
     void 꼭_넣을_종목을_앞에_두고_거래대금_순으로_채운다() throws IOException {
         Path snapshots = snapshots();
         Path out = tmp.resolve("out").resolve("candidates.txt");
         // 000040(4위)과 000070(일봉 일수 밖)을 꼭 넣고 총 4종목: 000040, 000070, 000010, 000020
-        assertThat(WatchlistCandidatesMain.run(args("000040,000070,000040", "4", out, snapshots), RunGate.NONE)).isZero();
+        assertThat(run(args("000040,000070,000040", "4", out, snapshots), RunGate.NONE)).isZero();
         assertThat(Files.readAllLines(out, StandardCharsets.UTF_8)).containsExactly("000040", "000070", "000010", "000020");
     }
 
@@ -104,10 +108,10 @@ class WatchlistCandidatesMainTest {
     void 입력이_틀리면_파일을_쓰지_않는다() throws IOException {
         Path snapshots = snapshots();
         Path out = tmp.resolve("bad.txt");
-        assertThat(WatchlistCandidatesMain.run(args("5930", "100", out, snapshots), RunGate.NONE)).isEqualTo(1);
-        assertThat(WatchlistCandidatesMain.run(args("-", "201", out, snapshots), RunGate.NONE)).isEqualTo(1);
-        assertThat(WatchlistCandidatesMain.run(args("000010,000020", "1", out, snapshots), RunGate.NONE)).isEqualTo(1);
-        assertThat(WatchlistCandidatesMain.run(new String[] {"..", "../x", "-", "10", out.toString()}, RunGate.NONE))
+        assertThat(run(args("5930", "100", out, snapshots), RunGate.NONE)).isEqualTo(1);
+        assertThat(run(args("-", "201", out, snapshots), RunGate.NONE)).isEqualTo(1);
+        assertThat(run(args("000010,000020", "1", out, snapshots), RunGate.NONE)).isEqualTo(1);
+        assertThat(run(new String[] {"..", "../x", "-", "10", out.toString()}, RunGate.NONE))
                 .isEqualTo(1);
         assertThat(out).doesNotExist();
     }
@@ -117,7 +121,7 @@ class WatchlistCandidatesMainTest {
         Path snapshots = snapshots();
         Path out = tmp.resolve("stopped.txt");
         RunGate stop = () -> Optional.of("시험 정지");
-        assertThat(WatchlistCandidatesMain.run(args("-", "10", out, snapshots), stop)).isEqualTo(4);
+        assertThat(run(args("-", "10", out, snapshots), stop)).isEqualTo(4);
         assertThat(out).doesNotExist();
     }
 }
