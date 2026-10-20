@@ -25,3 +25,33 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-20
+- 대상: PR #184 / 브랜치 `claude/project-thread-m8gp5f` / HEAD 6c048c92(코드 변경 커밋 dfe56a0b 포함) / `git diff origin/main...HEAD` 전체(17개 파일, +332 −17)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew clean build` → BUILD SUCCESSFUL in 2m 57s(종료 코드 0). 테스트 결과 XML 합계 1,658건, 실패 0, 오류 0, 건너뜀 0. D-118 시험 5건(sim) 포함.
+  - 변이 확인: `VirtualExchange.matchAuction`의 `boolean print = !midpoint && (...)`에서 `!midpoint`를 `true`로 바꾸고 `:autotrade-sim:test --tests '*VirtualExchangeTest*'` → `시가_단일가_뒤_첫_체결이_중간가면_..._D118` FAILED(48건 중 1건). 새 시험이 권고 1 반영을 실제로 잡는다. 확인 뒤 원복(`git status` 깨끗).
+  - 보지 않은 것: CI 결과(이 세션 `gh pr checks` GraphQL 403). 판정은 로컬 빌드로 한다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자가 직접 `./gradlew clean build` 실행, BUILD SUCCESSFUL |
+| B2 | 통과 | dfe56a0b의 코드 변경은 `autotrade-sim` `exchange` 패키지 안(`VirtualExchange`, `ExecutionSettings`)뿐. 새 의존 없음, ArchUnit 통과 |
+| B3 | 통과 | 체결 규칙 계약 변경에 ADR 갱신이 있다: docs/adr/ADR-004-simulation-engine.md 2.2 제목 `BOOK-V6`, 14번 "중간가 체결"(지정가·단일가 체결 제외, 참여 표시만 지움, 평가 가격·호가 없는 종목 시장가 기준에는 사용, 반 칸 없는 데이터는 BOOK-V5와 같음, 미국 규칙에도 적용). 코드(`VirtualExchange.java:198`, `:386-397`)와 일치함을 대조했다. `ExecutionSettings.RULES_VERSION = "BOOK-V6"`(ExecutionSettings.java:32)와 Javadoc 이력, D-118 5번, 기획서 v14.54 행이 같은 내용. 남은 `BOOK-V5` 문자열은 이력 설명과 과거 결정·검토 문서뿐(grep 확인) |
+| B4 | 통과 | 판정·참여 표시 정리 모두 이벤트와 규칙만의 함수, 시계·난수 없음. 골든 리포트 변경은 `execution-model` 머리 한 줄(`BOOK-V5`→`BOOK-V6`)뿐이고 거래 내역·지표 줄은 바이트 그대로(golden/krx-golden.report diff 1줄): 반 칸 체결이 없는 데이터는 결과 무변경이라는 주장과 맞다. 실시간 세션 재시작 쪽: `autotrade-sim/.../live`는 체결 모델 ID를 대조하지 않고(`grep RULES_VERSION|executionModel` 결과 없음), LIVE00 입력 기록에는 반 칸 틱이 없으므로(거절된 이벤트는 기록 전, D-118 재시작 절) V5→V6 재생 결과가 같다 `[추론]` |
+| B5 | 통과 | 변경 없음(1차 검토와 같음). 새 경계 시험 1999.5·500500·500400은 `BigDecimal.compareTo` |
+| B6 | 통과 | 새 시험: `VirtualExchangeTest#시가_단일가_뒤_첫_체결이_중간가면_단일가_체결을_놓친_것으로_보고_다음_체결이_참여_주문을_단일가로_체결하지_않는다_D118`(70,050 중간가 첫 체결 → 체결 없음, 다음 70,100 체결은 접속 매매 통과 체결로 지정가 70,200 체결), `#중간가_판정은_정확한_반_칸만_받는다_D118` 경계 3건 추가, `RecordingExperimentTest#만원대_5원_체결가는_반_칸이라_통과하고_같은_가격의_호가가_잡는다_D118`. 버전 문자열 기대값 2곳(`RecordingExperimentTest`:69, `SimulationExperimentRunnerTest`:159)과 골든 머리 변경은 의도된 버전 갱신이며 다른 단언은 그대로. 건너뜀 0 |
+| B7 | 해당 없음 | 변경 경로 `autotrade-sim`, `autotrade-app-lab`(설정·시험), `docs/adr/ADR-004`, `docs/decisions`, `docs/spec`, `docs/reviews` 모두 `scripts/ci/protected-paths.txt` 밖. 실전 엔진·게이트웨이는 `autotrade-sim` 비의존 |
+| B8 | 통과 | 추가 diff에 비밀값·새 로그 없음 |
+
+### 1차 권고 반영 확인
+- 권고 1(시가 단일가 비대칭): 반영됨. `matchAuction`이 중간가 틱에서도 호출되어 참여 표시를 지우고 체결하지 않는다(VirtualExchange.java:198, 396-397). 다음 정상 체결이 시가 단일가로 체결하는 경로가 없어졌고 시험으로 고정됨.
+- 권고 2(미국 적용 범위): 반영됨. D-118 6번, ADR-004 2.2 14번 끝 문장.
+
+### 점검표 밖 발견 (판정에 영향 없음)
+1. D-118 "위험과 한계" 2번의 괄호 "(참여 주문은 접속 매매로 이어짐)"은 시가 쪽에만 맞다. 종가 단일가 참여 주문은 놓친 뒤 접속 매매가 없고 ADR-004 2.2 12번대로 장 마감에 만료된다(CLOSED 단계에서는 `matchTrade`를 부르지 않음, VirtualExchange.java:199-201). 다음 문서 수정 때 "시가는 접속 매매로 이어지고 종가는 만료"로 고칠 것을 권한다.
+2. ADR-004 2.2 첫 문단의 버전 계보(V1→V5) 서술에 V6 한 문장이 없다. 14번 항목에 버전과 무변경 조건이 적혀 있어 정보는 빠지지 않았다.
+
+## 판정 (재검토)
+승인
