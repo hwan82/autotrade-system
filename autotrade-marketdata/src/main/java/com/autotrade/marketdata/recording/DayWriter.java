@@ -133,8 +133,9 @@ final class DayWriter implements AutoCloseable {
      * 원본은 바꾸지 않는다. 읽기나 쓰기가 실패하면 tmp를 지우고 예외를 그대로 올린다(원본·보관본은 그대로).
      */
     private RecordedDayStream.Summary rewriteToTmp(Path tmp, SortedSet<Symbol> symbols) throws IOException {
-        try (BufferedWriter w = new BufferedWriter(new OutputStreamWriter(
-                new GZIPOutputStream(tmpOpener.open(tmp)), StandardCharsets.UTF_8))) {
+        // 파일 스트림을 따로 잡아 쓰기 실패로 위 스트림 닫기가 다시 던져도 파일 핸들은 닫는다(열린 파일은 Windows에서 못 지운다)
+        try (OutputStream raw = tmpOpener.open(tmp);
+                BufferedWriter w = new BufferedWriter(new OutputStreamWriter(new GZIPOutputStream(raw), StandardCharsets.UTF_8))) {
             return RecordedDayStream.read(dir, l -> {
                 try {
                     w.write(codec.encode(l.seq(), l.sourceId(), withSourceSequence(l)));

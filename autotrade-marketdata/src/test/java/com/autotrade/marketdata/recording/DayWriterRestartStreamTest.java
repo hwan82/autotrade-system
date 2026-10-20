@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
@@ -185,8 +186,15 @@ class DayWriterRestartStreamTest {
         byte[] original = Files.readAllBytes(events);
         Path tmp = dir.resolve(RecordingLayout.EVENTS_FILE + ".tmp");
         // gzip 머리(10바이트)는 받고 그 뒤 첫 쓰기에서 실패한다: 줄을 쓰는 중에 실패가 난다
+        AtomicBoolean fileClosed = new AtomicBoolean();
         DayWriter.TmpOpener failing = t -> new FilterOutputStream(Files.newOutputStream(t)) {
             private long written;
+
+            @Override
+            public void close() throws IOException {
+                fileClosed.set(true);
+                out.close();
+            }
 
             @Override
             public void write(int b) throws IOException {
@@ -208,6 +216,8 @@ class DayWriterRestartStreamTest {
                 .isInstanceOf(UncheckedIOException.class)
                 .hasMessage("녹화 재기동 다시 쓰기 실패: " + dir)
                 .hasRootCauseMessage("디스크 가득 참(시험)");
+        // 실패해도 파일 핸들은 닫힌다(PR #209 architect 1). 열린 채면 Windows에서 tmp를 못 지운다
+        assertThat(fileClosed).isTrue();
         assertThat(events).hasBinaryContent(original);
         assertThat(tmp).doesNotExist();
         assertThat(dir.resolve(DayWriter.restartBackupName(2))).doesNotExist();
