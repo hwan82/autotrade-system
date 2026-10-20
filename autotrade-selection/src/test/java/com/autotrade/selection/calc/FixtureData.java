@@ -74,6 +74,15 @@ final class FixtureData implements SelectionData {
         return this;
     }
 
+    /** 시가·고가·저가·종가가 다른 일봉(단타 지표 day-range·close-strength용). */
+    FixtureData ohlc(String code, LocalDate date, String open, String high, String low, String close, long volume,
+            String adj) {
+        Symbol s = sym(code);
+        bars.computeIfAbsent(s, k -> new TreeMap<>()).put(date, new DailyBar(s, date, new BigDecimal(open),
+                new BigDecimal(high), new BigDecimal(low), new BigDecimal(close), volume, new BigDecimal(adj)));
+        return this;
+    }
+
     /** {@code end}(포함)에서 끝나는 n거래일에 같은 종가·거래량 일봉. */
     FixtureData flat(String code, LocalDate end, int n, String close, long volume) {
         for (LocalDate d : days.lastN(end, n)) {

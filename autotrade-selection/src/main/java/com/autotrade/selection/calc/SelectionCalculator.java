@@ -298,6 +298,9 @@ public final class SelectionCalculator {
             case VOLUME_RATIO -> volumeRatio(ctx, period);
             case RETURN -> periodReturn(ctx, period);
             case AVG_TURNOVER -> avgTurnover(ctx, period);
+            case DAY_RANGE -> dayRange(ctx);
+            case CLOSE_STRENGTH -> closeStrength(ctx);
+            case VOLUME_SPIKE -> volumeSpike(ctx, period);
             case OP_MARGIN -> latestRatio(ctx, f -> margin(f));
             case DEBT_RATIO -> debtRatio(ctx);
             case OP_MARGIN_GROWTH -> growth(ctx, period, FinancialItem.OP_MARGIN);
@@ -368,6 +371,56 @@ public final class SelectionCalculator {
             sum = sum.add(b.close().multiply(BigDecimal.valueOf(b.volume())), WIDE);
         }
         return Value.of(sum.divide(BigDecimal.valueOf(w), WIDE), false);
+    }
+
+    /**
+     * (c 수정 고가 − c 수정 저가) ÷ c−1 수정 종가. 수정 계수가 c−1과 c 사이에서 바뀌는(분할 등) 날도 같은 기준으로 비교한다.
+     */
+    private Value dayRange(Context ctx) {
+        List<DailyBar> bars = ctx.lastBars(2);
+        if (bars == null) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal base = adjustedClose(bars.get(0));
+        if (base.signum() <= 0) {
+            return Value.missing(NO_DATA, false);
+        }
+        DailyBar c = bars.get(1);
+        BigDecimal range = c.high().subtract(c.low()).multiply(c.adjFactor(), WIDE);
+        return Value.of(range.divide(base, WIDE), false);
+    }
+
+    /**
+     * (c 종가 − c 저가) ÷ (c 고가 − c 저가). 같은 날 세 가격이라 수정 계수가 약분되어 원가격으로 계산한다. 고가 ≤ 저가(상·하한가
+     * 고정, 거래 1건, 고저 모순)는 정의되지 않아 {@code NO_DATA}다.
+     */
+    private Value closeStrength(Context ctx) {
+        DailyBar c = ctx.bars.get(ctx.cutoff);
+        if (c == null) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal span = c.high().subtract(c.low());
+        if (span.signum() <= 0) {
+            return Value.missing(NO_DATA, false);
+        }
+        return Value.of(c.close().subtract(c.low()).divide(span, WIDE), false);
+    }
+
+    /** c 수정 거래량 ÷ (c 앞 w거래일 수정 거래량 합 ÷ w). w+1거래일 중 하루라도 없거나 앞 구간 합이 0이면 {@code NO_DATA}. */
+    private Value volumeSpike(Context ctx, int w) {
+        List<DailyBar> bars = ctx.lastBars(w + 1);
+        if (bars == null) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal prior = BigDecimal.ZERO;
+        for (int i = 0; i < w; i++) {
+            prior = prior.add(adjustedVolume(bars.get(i)), WIDE);
+        }
+        if (prior.signum() == 0) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal last = adjustedVolume(bars.get(w));
+        return Value.of(last.multiply(BigDecimal.valueOf(w), WIDE).divide(prior, WIDE), false);
     }
 
     /** 재무 항목(성장률 계산용). */

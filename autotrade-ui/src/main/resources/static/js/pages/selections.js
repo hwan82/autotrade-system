@@ -17,6 +17,7 @@ const METRIC = {
   'op-margin-growth': '영업이익률 증가율', 'total-assets-growth': '자산총계 증가율', 'revenue-growth': '매출액 증가율',
   'op-margin': '영업이익률', 'debt-ratio': '부채비율', 'market-cap': '시가총액(원)', 'volume-ratio': '거래량 배율',
   return: '수익률', 'avg-turnover': '평균 거래대금(원)',
+  'day-range': '전일 변동폭', 'close-strength': '전일 종가 강도', 'volume-spike': '전일 거래량 급증 배율',
 };
 const GATE_KEY = /^gate\.(\d{2})\.([a-z-]+)$/;
 const KNOWN = new Set(['hypothesis', 'refresh', 'max-symbols', 'filter.kinds', 'filter.min-price', 'filter.min-bar-days',
