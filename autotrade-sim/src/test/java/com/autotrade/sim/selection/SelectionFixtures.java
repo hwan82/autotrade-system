@@ -63,7 +63,12 @@ public final class SelectionFixtures {
      */
     public static Path dailySnapshot(Path snapshotsRoot, String id, LocalDate last, boolean hynixJumps) {
         ExchangeCalendar krx = ExchangeCalendar.bundled(Market.KRX);
-        List<LocalDate> days = krx.tradingDays(last.minusDays(80), last);
+        // 캘린더 수록 범위(2026-01-01~) 밖은 묻지 않는다. 2026-03 녹화 시험도 30거래일이 들어간다
+        LocalDate from = last.minusDays(80);
+        List<LocalDate> days = krx.tradingDays(from.isBefore(krx.coverageFrom()) ? krx.coverageFrom() : from, last);
+        if (days.size() < 30) {
+            throw new IllegalArgumentException("캘린더 범위 안에 30거래일이 없습니다: " + last);
+        }
         days = days.subList(days.size() - 30, days.size());
         StringBuilder bars = new StringBuilder("market,code,date,open,high,low,close,volume,adj_factor\n");
         for (LocalDate d : days) {
