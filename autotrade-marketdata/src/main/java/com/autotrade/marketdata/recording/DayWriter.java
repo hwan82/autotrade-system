@@ -129,7 +129,7 @@ final class DayWriter implements AutoCloseable {
                     w.write(codec.encode(l.seq(), l.sourceId(), withSourceSequence(l)));
                     w.write('\n');
                 } catch (IOException e) {
-                    throw new UncheckedIOException(e);
+                    throw new UncheckedIOException("녹화 재기동 다시 쓰기 실패: " + dir, e);
                 }
                 symbols.add(l.event().symbol());
             });
