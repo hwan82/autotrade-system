@@ -59,6 +59,11 @@ class LiveJudgementTest {
     }
 
     private void writePlan(List<String> profiles) throws Exception {
+        writePlan(profiles, "");
+    }
+
+    /** @param extra boards 뒤에 붙일 줄(새 키 시험) */
+    private void writePlan(List<String> profiles, String extra) throws Exception {
         StringBuilder yaml = new StringBuilder(String.join("\n",
                 "id: \"" + ID + "\"",
                 "question: \"장중 프로필이 판정 기준을 넘는가\"",
@@ -72,6 +77,7 @@ class LiveJudgementTest {
                 "profiles:", ""));
         profiles.forEach(p -> yaml.append("  - \"").append(p).append("\"\n"));
         yaml.append("boards:\n  - \"005930 KOSPI\"\n  - \"000660 KOSPI\"\n");
+        yaml.append(extra);
         Files.writeString(experimentDir.resolve("experiment.yaml"), yaml, StandardCharsets.UTF_8);
         plan = LivePlan.parse(yaml.toString(), "experiment.yaml");
     }
@@ -148,6 +154,69 @@ class LiveJudgementTest {
         // 묶음 수(스레드 수)는 결과에 영향이 없다(보고서에 묶음 수를 쓰지 않아 바이트로 같음, PR #180 architect N3)
         assertThat(judge(parallel(1)).report()).isEqualTo(r);
         assertThat(judge(parallel(2)).report()).isEqualTo(r);
+    }
+
+    /**
+     * 참고 계좌(ADR-014 F1)와 묶음별 대조군 시드 수(F3): 참고 계좌는 m·변형·지연·대조군 시드에서 빠지고 L7·L9·L10이 "–"다. 판정 결과
+     * 맵에도 넣지 않는다. 시드 수를 늘려도 앞 21m − 1개 레인은 키가 없을 때와 같은 레인이다.
+     */
+    @Test
+    void referenceAccountsAreReportedButNotJudgedAndGroupSeedsOnlyAddLanes() throws Exception {
+        List<String> profiles = List.of("kr-bh-baseline@1", "kr-random-control@1", "kr-orb-30@1", "kr-vwap-reclaim@1");
+        writePlan(profiles, "references:\n  - \"kr-vwap-reclaim@1\"\ngroup-null-seeds:\n  - \"none 25\"\n");
+        operate(true);
+
+        LiveJudgement.Outcome out = judge(parallel(4));
+
+        assertThat(out.verdicts()).containsOnlyKeys(ID + "-A01", ID + "-A02", ID + "-A03");
+        String r = out.report();
+        assertThat(r).contains("- 판정 대상 m = 1, 대조군 시드 N(묶음별, 실험 시드 + 1 ~ + N): 선정 없음 25(등록 파일 "
+                        + "`group-null-seeds`); 적지 않은 묶음은 21m − 1 = 20(판정 가능 최소 19에 여유 1), L10 문턱 0.05/m = 0.05000")
+                .contains("- 참고 계좌 1개(판정하지 않음, m에 넣지 않음, 등록 파일 `references`): " + ID + "-A04. ")
+                // 레인: BASE 4 + PERTURB 2(orb만) + 지연 3 × 1 + 대조군 25 = Run 34, 레인 1 + 1 + 3 + 25
+                .contains("입력 기록 레인 30개(Run 34개), ")
+                .contains("| " + ID + "-A03 | kr-orb-30@1 | 판정 대상 | **")
+                .containsPattern("\\| " + ID + "-A04 \\| kr-vwap-reclaim@1 \\| 참고 \\| \\(참고\\) [^|]+(\\| [^|]+){6}"
+                        + "\\| – \\| [^|]+ \\| – \\| – \\| [^|]+ \\|")
+                .contains("- 참고 계좌는 판정하지 않는다(등록 파일 `references`, ADR-014 F1).")
+                .contains("### " + ID + "-A04 kr-vwap-reclaim@1 (참고, ")
+                .contains("- L7·L9·L10: – 돌리지 않음(참고 계좌. m·변형·지연·대조군 시드에서 뺌, ADR-014 3.2)")
+                .contains("## 9. 대조군 품질(ADR-014 4.2)")
+                .contains("| 선정 없음 | " + ID + "-A02 | 25 | ")
+                .doesNotContain("signal.dip-pct ×0.8"); // 참고 계좌는 변형을 돌리지 않는다
+        String referenceSection = r.substring(r.indexOf("### " + ID + "-A04 "), r.indexOf("## 4."));
+        assertThat(referenceSection).doesNotContain("- L7 ").doesNotContain("- L9 ").doesNotContain("- L10 ")
+                .contains("- L8 ").contains("- L11 ");
+        // 지연 민감도 표에는 판정 대상만
+        String latency = r.substring(r.indexOf("## 5."), r.indexOf("## 6."));
+        assertThat(latency).contains("| kr-orb-30 | ").doesNotContain("kr-vwap-reclaim");
+        assertThat(judge(parallel(1)).report()).isEqualTo(r);
+
+        // 같은 계좌 구성에서 참고 계좌만 있고 group-null-seeds가 없을 때의 레인(m = 1 → N = 20)과 비교: 시드 레인은 ID·시드·계좌가 앞에서부터 같다
+        LiveSetup keyed = LiveSetup.of(plan, REPO);
+        JudgeRoles.Roles keyedRoles = LiveJudgement.roles(keyed);
+        LiveJudgement.Plan keyedLanes = LiveJudgement.lanes(keyed, keyedRoles, "v",
+                LiveJudgement.nullSeeds(keyedRoles.m()), m -> { });
+        writePlan(profiles, "references:\n  - \"kr-vwap-reclaim@1\"\n");
+        LiveSetup plain = LiveSetup.of(plan, REPO);
+        JudgeRoles.Roles plainRoles = LiveJudgement.roles(plain);
+        LiveJudgement.Plan plainLanes = LiveJudgement.lanes(plain, plainRoles, "v", LiveJudgement.nullSeeds(plainRoles.m()),
+                m -> { });
+        assertThat(keyedLanes.nulls()).hasSize(25);
+        assertThat(plainLanes.nulls()).hasSize(20);
+        assertThat(keyedLanes.nulls().subList(0, 20)).isEqualTo(plainLanes.nulls());
+    }
+
+    /** 빈 references·group-null-seeds는 키가 없는 것과 같다: 판정 결과 파일이 바이트로 같다(LIVE01 판정 보호, ADR-014 2장 ⑤). */
+    @Test
+    void emptyNewKeysLeaveTheJudgementByteForByteUnchanged() throws Exception {
+        operate(true);
+        String without = judge(parallel(2)).report();
+        writePlan(List.of("kr-bh-baseline@1", "kr-random-control@1", "kr-orb-30@1", "kr-vwap-reclaim@1"),
+                "references:\ngroup-null-seeds:\n");
+        assertThat(judge(parallel(2)).report()).isEqualTo(without);
+        assertThat(without).doesNotContain("참고 계좌").doesNotContain("대조군 품질").doesNotContain("N(묶음별")
+                .doesNotContain(" | – |");
     }
 
     @Test

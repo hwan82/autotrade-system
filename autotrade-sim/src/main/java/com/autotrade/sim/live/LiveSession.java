@@ -24,6 +24,7 @@ import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
 import com.autotrade.selection.calc.SessionSelectionCalculator;
 import com.autotrade.sim.selection.IntradayTracker;
+import com.autotrade.sim.selection.SelectionCandidates;
 import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.selection.SelectionDays;
 import com.autotrade.sim.selection.SelectionSchedule;
@@ -417,11 +418,14 @@ public final class LiveSession implements AutoCloseable {
     }
 
     /**
-     * 장전 선정의 고정 파일 폴더(화면의 다음 거래일 준비 표, 읽기만). 세션 잠금을 잡지 않는다: 처리 스레드를 기다리게 하지 않고, 파일
-     * 읽기는 {@link SessionSelections}가 스스로 안전하게 한다. 장전 선정 계좌가 없으면 빈 값.
+     * 그날 장전 선정마다 세션 폴더에 놓인 파일 상태(화면의 다음 거래일 준비 표, {@link SessionSelections#prepared}). 읽기만 하는
+     * 결과만 돌려준다: 쓰기 메서드가 있는 {@link SessionSelections}를 세션 밖에 내주지 않는다(PR #201 architect N1). 세션 잠금을
+     * 잡지 않는다: 처리 스레드를 기다리게 하지 않고, 파일 읽기는 {@link SessionSelections}가 스스로 안전하게 한다.
+     *
+     * @return 선정 해시순. 장전 선정 계좌가 없으면 빈 값
      */
-    public Optional<SessionSelections> selectionFiles() {
-        return Optional.ofNullable(selections);
+    public Optional<List<SessionSelections.Prepared>> preparedSelections(LocalDate date) {
+        return selections == null ? Optional.empty() : Optional.of(selections.prepared(date));
     }
 
     /** 그날 적용 기록(화면용). 선정 계좌가 없거나 적용 기록이 없으면 빈 값. */
@@ -514,7 +518,7 @@ public final class LiveSession implements AutoCloseable {
             }
             return new IntradayStatus(st.selection(), st.selectionHash(), st.at().toString(), "RANKED",
                     r.candidates().candidates(),
-                    r.candidates().excludedCodes(com.autotrade.sim.selection.SelectionCandidates.Exclusion.BLACKLISTED),
+                    r.candidates().excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED),
                     r.candidates().selectedCount(), r.activeFrom(), r.contentHash(), r.result().universe(),
                     (int) r.result().evaluations().stream()
                             .filter(e -> e.reasons().contains(SessionSelectionCalculator.SESSION_GAP)).count());

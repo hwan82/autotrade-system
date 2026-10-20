@@ -4,6 +4,7 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.selection.profile.Combination;
+import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.ExperimentSpec;
@@ -20,9 +21,12 @@ import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.RunSelectionDay;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationExperimentRunner.Lane;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.IntradayTracker;
+import com.autotrade.sim.selection.SelectionCandidates;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.sim.selection.SessionSelections;
 import com.autotrade.sim.study.Check;
@@ -44,6 +48,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -68,15 +73,17 @@ import java.util.function.Consumer;
  *   <li>BASE: 등록 파일 그대로(기본 지연 0.5초)</li>
  *   <li>PERTURB: 판정 대상 프로필마다 {@code study.key-param} ×0.8·×1.2(L7, 4단계 C7과 같은 변형 규칙)</li>
  *   <li>L0·L1500·L2000: 판정 대상 프로필을 주문 지연 0·1.5·2초로(STR-13. L9는 2초)</li>
- *   <li>NULL1~NULLN: 무작위 대조군을 시드 = 실험 시드 + i로(L10, N = 21m − 1: 판정 가능한 최소 20m − 1에 여유 m)</li>
+ *   <li>NULL1~NULLN: 무작위 대조군을 시드 = 실험 시드 + i로(L10, N = 21m − 1: 판정 가능한 최소 20m − 1에 여유 m. 등록 파일
+ *   {@code group-null-seeds}가 묶음별로 늘릴 수 있다, ADR-014 F3)</li>
  *   <li>REC: 등록 파일 그대로 같은 날 게이트웨이 녹화(boards만)로(L11, 주간 점검 계좌 대조와 같은 입력)</li>
  * </ul>
  * 입력 기록 레인들은 실행기의 레인 경로({@link SimulationExperimentRunner#runLanes})로 기록을 한 번 읽어 함께 돈다. 레인을 몇 묶음으로
  * 나눠 묶음마다 스레드 하나가 기록을 따로 읽는다(묶음 수 = 병렬 Run 상한과 {@value #MAX_GROUPS} 중 작은 쪽). 레인은 서로 아무것도
  * 공유하지 않아 묶음 나누기는 결과에 영향이 없다. 메모리는 기간과 상관없고(D-115) Run 수에 비례한다.
  *
- * <p>판정 대상은 등록 계좌 중 기준선({@code logic: buy-and-hold})과 대조군({@code logic: random})을 뺀 것이고, 기준선은 하나 있어야
- * 한다. 대조군은 선정 묶음(선정 없음, 선정 프로필마다)마다 하나까지이고, 판정 대상이 있는 묶음에는 하나 있어야 한다. 무사고
+ * <p>판정 대상은 등록 계좌 중 기준선({@code logic: buy-and-hold})·대조군({@code logic: random})·참고 계좌(등록 파일
+ * {@code references}, ADR-014 F1)를 뺀 것이고, 기준선은 하나 있어야 한다. 참고 계좌는 BASE·REC 레인에만 있고 m·변형·지연·대조군
+ * 시드에서 빠진다(L7·L9·L10 "–"). 역할 계산은 {@link JudgeRoles}가 한다. 대조군은 선정 묶음(선정 없음, 선정 프로필마다)마다 하나까지이고, 판정 대상이 있는 묶음에는 하나 있어야 한다. 무사고
  * I4(주간 점검)·I5(유효 운용일)는 주간 점검 결과로 본다(이 명령은 계산하지 않음).
  *
  * <p>선정 조합 계좌(D-124)가 있으면 모든 레인(BASE·PERTURB·지연·대조군·REC)이 세션이 남긴 같은 적용 기록과 결과 파일
@@ -94,8 +101,10 @@ public final class LiveJudgement {
     static final List<Duration> LATENCIES = List.of(Duration.ZERO, Duration.ofMillis(1500), Duration.ofSeconds(2));
     /** 기록을 따로 읽는 묶음 수 상한(디스크·CPU). */
     static final int MAX_GROUPS = 4;
-    static final String BASELINE_LOGIC = "buy-and-hold";
-    static final String CONTROL_LOGIC = "random";
+    /** 참고 계좌는 돌리지 않는 항목(변형·지연·대조군 시드, ADR-014 3.2). 표에는 "–"로 적는다. */
+    static final List<String> NOT_RUN_FOR_REFERENCE = List.of("L7", "L9", "L10");
+    /** 돌리지 않은 항목 표시(판정 불가 "?"와 구분). */
+    static final String NOT_RUN = "–";
 
     private LiveJudgement() {
     }
@@ -105,7 +114,7 @@ public final class LiveJudgement {
      */
     public record Outcome(boolean incident, Map<String, String> verdicts, String report) {
         public Outcome {
-            verdicts = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(verdicts));
+            verdicts = Collections.unmodifiableMap(new LinkedHashMap<>(verdicts));
         }
     }
 
@@ -137,12 +146,7 @@ public final class LiveJudgement {
         Path sessionDir = sessionsRoot.toAbsolutePath().resolve(plan.id().value());
         LiveReplayCheck.ensureSessionClosed(sessionDir);
         LiveSetup setup = LiveSetup.of(plan, repoRoot);
-        if (setup.hasIntraday()) {
-            // 장중 순위 선정 계좌는 레인마다 추적기를 돌려야 해서 아직 받지 않는다(D-127 후속). 장전 선정 계좌는 받는다(D-126)
-            throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT) 계좌가 있는 등록은 아직 녹화 판정을 지원하지 않습니다(D-127 후속): "
-                    + plan.id());
-        }
-        Roles roles = roles(setup);
+        JudgeRoles.Roles roles = roles(setup);
         List<Path> days = LiveReplayCheck.journalDays(setup, sessionDir);
         if (days.isEmpty()) {
             throw new IllegalArgumentException("입력 기록이 없습니다: " + sessionDir.resolve(LiveSession.JOURNAL_DIR));
@@ -184,13 +188,24 @@ public final class LiveJudgement {
                 LiveReplayCheck.withoutCodeLine(detail));
 
         gate.check();
+        // 장중 순위 선정(D-127): 실행기는 레인마다 추적기를 따로 돌려 순위를 매긴다(D-129). 보고서에 남길 순위는 같은 추적기를 입력
+        // 기록에 한 번 더 돌려 만든다(순수 계산이라 레인과 같은 값). 장중 순위 선정이 없으면 읽지 않는다
+        List<IntradayTracker.Ranked> intraday = intradayRanks(setup, journal);
+        gate.check();
         Recording rec = recording(setup, sessionDir, recordingsRoot, journalDates, code, gate, log);
 
         Judged judged = judge(setup, roles, lanes, byId, rec, t, m);
         String report = render(setup, code, journal, lanes, byId, rec, judged, diff, codeLine(liveDetail), t, m, nullSeeds,
-                applied);
+                applied, intraday);
+        // 참고 계좌는 판정 결과에 넣지 않는다(ADR-014 3.2). 결과 파일 표에는 "(참고)"로 남는다
+        Set<String> referenceIds = new TreeSet<>();
+        roles.references().forEach(i -> referenceIds.add(base.runs().get(i).summary().accountId().value()));
         Map<String, String> verdicts = new LinkedHashMap<>();
-        judged.judgements().forEach((k, v) -> verdicts.put(k, v.verdict().label()));
+        judged.judgements().forEach((k, v) -> {
+            if (!referenceIds.contains(k)) {
+                verdicts.put(k, v.verdict().label());
+            }
+        });
         return new Outcome(judged.incident() || diff >= 0, verdicts, report);
     }
 
@@ -208,73 +223,9 @@ public final class LiveJudgement {
         return out;
     }
 
-    /**
-     * 계좌 역할(계좌 순서). 선정 묶음(선정 없음, 선정 프로필마다, D-124)마다 대조군이 하나까지 있고, 판정 대상의 L10은 같은 묶음
-     * 대조군의 시드 분포로 본다(ADR-012 3.3 "같은 선정 + 무작위 진입").
-     *
-     * @param controls 대조군 계좌 번호(계좌 순서)
-     * @param controlOf 계좌 번호 → 같은 선정 묶음의 대조군 계좌 번호(묶음에 대조군이 없으면 빠짐)
-     * @param nullControls 시드 분포를 돌릴 대조군(판정 대상이 있는 묶음의 대조군, 계좌 순서)
-     */
-    record Roles(int baseline, List<Integer> controls, List<Integer> judged, Map<Integer, Integer> controlOf,
-            List<Integer> nullControls) {
-        Roles {
-            controls = List.copyOf(controls);
-            judged = List.copyOf(judged);
-            controlOf = Collections.unmodifiableMap(new LinkedHashMap<>(controlOf));
-            nullControls = List.copyOf(nullControls);
-        }
-    }
-
-    static Roles roles(LiveSetup setup) {
-        int baseline = -1;
-        List<Integer> judged = new ArrayList<>();
-        Map<String, Integer> controlBySelection = new LinkedHashMap<>();
-        List<Combination> combos = setup.combinations();
-        for (int i = 0; i < combos.size(); i++) {
-            String logic = combos.get(i).profile().parameters().get("logic");
-            if (BASELINE_LOGIC.equals(logic)) {
-                if (baseline >= 0) {
-                    throw new IllegalArgumentException("기준선(logic: buy-and-hold) 프로필이 둘 이상입니다");
-                }
-                baseline = i;
-            } else if (CONTROL_LOGIC.equals(logic)) {
-                String key = combos.get(i).selectionKeyOrNone();
-                if (controlBySelection.putIfAbsent(key, i) != null) {
-                    throw new IllegalArgumentException("대조군(logic: random) 프로필이 둘 이상입니다"
-                            + (combos.get(i).hasSelection() ? "(선정 " + key + ")" : ""));
-                }
-            } else {
-                judged.add(i);
-            }
-        }
-        if (baseline < 0 || judged.isEmpty()) {
-            throw new IllegalArgumentException("판정에는 기준선(logic: buy-and-hold) 하나, 대조군(logic: random) 하나, 판정 대상 "
-                    + "하나 이상이 필요합니다(6단계 계획 2.1)");
-        }
-        java.util.TreeSet<Integer> nullControls = new java.util.TreeSet<>();
-        for (int i : judged) {
-            Combination c = combos.get(i);
-            Integer control = controlBySelection.get(c.selectionKeyOrNone());
-            if (control == null) {
-                if (!c.hasSelection()) {
-                    throw new IllegalArgumentException("판정에는 기준선(logic: buy-and-hold) 하나, 대조군(logic: random) 하나, "
-                            + "판정 대상 하나 이상이 필요합니다(6단계 계획 2.1)");
-                }
-                throw new IllegalArgumentException("선정 " + c.selectionKeyOrNone() + "의 판정 대상(" + c.profile().id()
-                        + ")에는 같은 선정의 대조군(logic: random) 조합이 필요합니다(ADR-012 3.3, D-124)");
-            }
-            nullControls.add(control);
-        }
-        Map<Integer, Integer> controlOf = new LinkedHashMap<>();
-        for (int i = 0; i < combos.size(); i++) {
-            Integer control = controlBySelection.get(combos.get(i).selectionKeyOrNone());
-            if (control != null) {
-                controlOf.put(i, control);
-            }
-        }
-        List<Integer> controls = controlBySelection.values().stream().sorted().toList();
-        return new Roles(baseline, controls, judged, controlOf, List.copyOf(nullControls));
+    /** 계좌 역할(기준선 필수, 참고 계좌·묶음별 시드 수 포함). 계산은 {@link JudgeRoles} 한 곳이다(ADR-014 2장 ⑤). */
+    static JudgeRoles.Roles roles(LiveSetup setup) {
+        return JudgeRoles.of(setup);
     }
 
     /**
@@ -303,7 +254,7 @@ public final class LiveJudgement {
         }
     }
 
-    static Plan lanes(LiveSetup setup, Roles roles, String dataVersion, int nullSeeds, Consumer<String> log) {
+    static Plan lanes(LiveSetup setup, JudgeRoles.Roles roles, String dataVersion, int nullSeeds, Consumer<String> log) {
         LivePlan plan = setup.plan();
         ExecutionSettings base = setup.execution();
         Lane baseLane = new Lane(setup.spec(ClockMode.REPLAY, dataVersion), base);
@@ -347,7 +298,9 @@ public final class LiveJudgement {
             Combination control = setup.combinations().get(controlIndex);
             String prefix = control.hasSelection() ? "S" + (++selectionGroup) + "-NULL" : "NULL";
             List<Lane> lanes = new ArrayList<>();
-            for (int i = 1; i <= nullSeeds; i++) {
+            // 묶음별 N(ADR-014 F3). 레인 ID·시드 규칙이 같아 N을 늘려도 앞 21m − 1개 레인 결과는 키가 없을 때와 같다
+            int seeds = roles.seedsFor(controlIndex, nullSeeds);
+            for (int i = 1; i <= seeds; i++) {
                 lanes.add(new Lane(spec(setup, prefix + i, plan.seed() + i, List.of(control), dataVersion), base));
             }
             byControl.put(controlIndex, List.copyOf(lanes));
@@ -537,20 +490,54 @@ public final class LiveJudgement {
         };
     }
 
-    /** @param selections 선정 계좌가 없으면 null(지금까지와 같은 실행기 입력) */
+    /**
+     * @param selections 장전 선정 계좌가 없으면 null(지금까지와 같은 실행기 입력). 장중 순위 선정 계좌는 실행기가 레인마다 그 레인
+     *     이벤트로 정한다(입력 범위는 등록 파일 boards·blacklist, D-127·D-129)
+     */
     private static SimulationExperimentRunner runner(LiveSetup setup, MarketEventStream data, CodeVersion code,
             RunGate gate, SelectionSource selections) {
         return new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(), setup.risk(),
-                setup.execution(), code, 1, setup.benchmark(), selections, gate);
+                setup.execution(), code, 1, setup.benchmark(), selections, gate)
+                .withIntradayUniverse(setup.intradayUniverse());
     }
 
-    /** 대조군 시드 수: 21m − 1(판정 가능한 최소 20m − 1에 여유 m). */
+    /**
+     * 기록 하나에 장중 순위 선정 추적기를 돌린 결과(선정 해시순, 거래일순). 실행기와 같이 운용 기간 안 이벤트를 순번 순서로 준다.
+     * 장중 순위 선정이 없으면 기록을 읽지 않고 빈 목록.
+     */
+    static List<IntradayTracker.Ranked> intradayRanks(LiveSetup setup, MarketEventStream data) {
+        IntradayTracker tracker = setup.newIntradayTracker();
+        if (tracker == null) {
+            return List.of();
+        }
+        LivePlan plan = setup.plan();
+        data.forEach(e -> {
+            LocalDate d = setup.rules().tradingDate(e.exchangeTime());
+            if (!d.isBefore(plan.from()) && !d.isAfter(plan.to())) {
+                tracker.onEvent(e);
+            }
+        });
+        return tracker.ranked();
+    }
+
+    /** 대조군 시드 수 기본값: 21m − 1(판정 가능한 최소 20m − 1에 여유 m). 등록 파일 {@code group-null-seeds}가 묶음별로 늘린다. */
     static int nullSeeds(int m) {
-        return 21 * m - 1;
+        return JudgeRoles.defaultSeeds(m);
     }
 
-    /** 녹화 리플레이(L11). 돌리지 못했으면 {@code report}가 null이고 이유가 {@code note}. */
-    record Recording(SimulationReport report, String note, long events, int days) {
+    /**
+     * 녹화 리플레이(L11). 돌리지 못했으면 {@code report}가 null이고 이유가 {@code note}.
+     *
+     * @param intraday 녹화 이벤트로 매긴 장중 순위(D-129). 장중 순위 선정이 없거나 돌리지 못했으면 빈 목록
+     */
+    record Recording(SimulationReport report, String note, long events, int days, List<IntradayTracker.Ranked> intraday) {
+        Recording {
+            intraday = List.copyOf(intraday);
+        }
+
+        Recording(SimulationReport report, String note, long events, int days) {
+            this(report, note, events, days, List.of());
+        }
     }
 
     private static Recording recording(LiveSetup setup, Path sessionDir, Path recordingsRoot, List<LocalDate> journalDates,
@@ -584,17 +571,20 @@ public final class LiveJudgement {
         // 주간 점검 계좌 대조와 같은 읽기(boards·운용 기간 종목, D-088). 날짜는 입력 기록일만
         MarketEventStream stream = boards.stream("REC-BOARDS-" + plan.id() + "-" + journalDates.get(0) + ".." + end, gate);
         log.accept("녹화 리플레이(L11): 녹화 " + dirs.size() + "일, 이벤트 " + stream.eventCount());
-        // 선정 계좌는 입력 기록 레인과 같은 적용 기록을 읽는다(같은 날 같은 후보)
+        // 장전 선정 계좌는 입력 기록 레인과 같은 적용 기록을 읽는다(같은 날 같은 후보). 장중 순위 선정 계좌는 녹화 이벤트로 따로
+        // 순위를 매긴다: 적용 시작 순번이 기록마다 달라 입력 기록의 순위를 옮길 수 없고, 실시간 대 녹화(L11) 차이에 순위 차이도
+        // 들어가는 것이 맞다(녹화만으로 같은 전략을 돌린 결과와 비교). 순위가 같은지는 보고서 10장에 적는다(D-129)
         SimulationReport r = runner(setup, stream, code, gate, LiveReplayCheck.selectionSource(setup, sessionDir))
                 .runDetailed(setup.spec(ClockMode.REPLAY, stream.version()));
-        return new Recording(r, "", stream.eventCount(), dirs.size());
+        List<IntradayTracker.Ranked> intraday = setup.hasIntraday() ? intradayRanks(setup, stream) : List.of();
+        return new Recording(r, "", stream.eventCount(), dirs.size(), intraday);
     }
 
     /** 계좌 번호(0부터) → 판정. 기준선·대조군도 같은 기준으로 판정해 참고로 낸다(6단계 계획 4.2). */
     record Judged(Map<String, LiveJudgeCriteria.Judgement> judgements, boolean incident, List<String> incidents) {
     }
 
-    private static Judged judge(LiveSetup setup, Roles roles, Plan lanes, Map<String, SimulationReport> byId,
+    private static Judged judge(LiveSetup setup, JudgeRoles.Roles roles, Plan lanes, Map<String, SimulationReport> byId,
             Recording rec, ScreeningThresholds t, int m) {
         LivePlan plan = setup.plan();
         BigDecimal seed = plan.seedCapital().amount();
@@ -622,10 +612,13 @@ public final class LiveJudgement {
             LiveJudgeCriteria.Recorded recorded = new LiveJudgeCriteria.Recorded(
                     rec.report() == null ? null : rec.report().runs().get(i), rec.note());
             Integer control = roles.controlOf().get(i);
-            List<BigDecimal> nullPerTrip = control == null ? List.of()
+            boolean reference = roles.isReference(i);
+            // 참고 계좌는 같은 묶음 분포가 있어도 L10을 내지 않는다(판정처럼 읽힘, ADR-014 3.2)
+            List<BigDecimal> nullPerTrip = control == null || reference ? List.of()
                     : nullPerTripByControl.getOrDefault(control, List.of());
-            out.put(r.summary().accountId().value(), LiveJudgeCriteria.evaluate(new LiveJudgeCriteria.Evidence(r, baseline,
-                    perturbed, stressRun, nullPerTrip, m, recorded, seed, plan.from(), t)));
+            LiveJudgeCriteria.Judgement j = LiveJudgeCriteria.evaluate(new LiveJudgeCriteria.Evidence(r, baseline,
+                    perturbed, stressRun, nullPerTrip, m, recorded, seed, plan.from(), t));
+            out.put(r.summary().accountId().value(), reference ? LiveJudgeCriteria.without(j, NOT_RUN_FOR_REFERENCE) : j);
         }
         List<String> incidents = new ArrayList<>();
         Set<String> black = new TreeSet<>(plan.blacklist());
@@ -665,11 +658,12 @@ public final class LiveJudgement {
 
     static String render(LiveSetup setup, CodeVersion code, StreamedRecordingDataSet journal, Plan lanes,
             Map<String, SimulationReport> byId, Recording rec, Judged judged, int diff, String liveCode,
-            ScreeningThresholds t, int m, int nullSeeds, List<SessionSelections.Applied> applied) {
+            ScreeningThresholds t, int m, int nullSeeds, List<SessionSelections.Applied> applied,
+            List<IntradayTracker.Ranked> intraday) {
         LivePlan plan = setup.plan();
         BigDecimal seed = plan.seedCapital().amount();
         SimulationReport base = byId.get(lanes.base().spec().id().value());
-        Roles roles = roles(setup);
+        JudgeRoles.Roles roles = roles(setup);
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 녹화 판정(6단계 T2, D-116)\n\n");
         sb.append("> 장중 승격 후보 기준 L1~L11(D-114, 6단계 계획 4.2)을 입력 기록으로 계산한 결과. ")
@@ -689,14 +683,41 @@ public final class LiveJudgement {
         sb.append("- 돌린 것: 입력 기록 레인 ").append(lanes.all().size()).append("개(Run ").append(runs).append("개), 녹화 리플레이 ")
                 .append(rec.report() == null ? "없음(" + rec.note() + ")" : rec.days() + "일 이벤트 " + rec.events())
                 .append('\n');
-        sb.append("- 판정 대상 m = ").append(m).append(", 대조군 시드 N = ").append(nullSeeds).append(" (실험 시드 + 1 ~ + ")
-                .append(nullSeeds).append(", 판정 가능 최소 ").append(20 * m - 1).append("에 여유 ").append(m)
-                .append("), L10 문턱 0.05/m = ").append(LiveJudgeCriteria.alpha(m).setScale(5,
-                        RoundingMode.HALF_EVEN).toPlainString()).append('\n');
+        String threshold = LiveJudgeCriteria.alpha(m).setScale(5, RoundingMode.HALF_EVEN).toPlainString();
+        if (roles.seedsByControl().isEmpty()) {
+            sb.append("- 판정 대상 m = ").append(m).append(", 대조군 시드 N = ").append(nullSeeds).append(" (실험 시드 + 1 ~ + ")
+                    .append(nullSeeds).append(", 판정 가능 최소 ").append(20 * m - 1).append("에 여유 ").append(m)
+                    .append("), L10 문턱 0.05/m = ").append(threshold).append('\n');
+        } else {
+            // 묶음별 N(ADR-014 4.2). 키가 없으면 위 문장 그대로(바이트 동일)
+            List<String> groups = new ArrayList<>();
+            for (int control : roles.nullControls()) {
+                Integer set = roles.seedsByControl().get(control);
+                groups.add(groupLabel(base.runs().get(control)) + " " + roles.seedsFor(control, nullSeeds)
+                        + (set == null ? "" : "(등록 파일 `group-null-seeds`)"));
+            }
+            sb.append("- 판정 대상 m = ").append(m).append(", 대조군 시드 N(묶음별, 실험 시드 + 1 ~ + N): ")
+                    .append(String.join(", ", groups)).append("; 적지 않은 묶음은 21m − 1 = ").append(nullSeeds)
+                    .append("(판정 가능 최소 ").append(20 * m - 1).append("에 여유 ").append(m).append("), L10 문턱 0.05/m = ")
+                    .append(threshold).append('\n');
+        }
+        if (!roles.references().isEmpty()) {
+            sb.append("- 참고 계좌 ").append(roles.references().size()).append("개(판정하지 않음, m에 넣지 않음, 등록 파일 `references`): ")
+                    .append(String.join(", ", roles.references().stream()
+                            .map(i -> base.runs().get(i).summary().accountId().value()).toList()))
+                    .append(". 변형·지연·대조군 시드를 돌리지 않아 L7·L9·L10은 ").append(NOT_RUN).append("이다(ADR-014 3.2)\n");
+        }
         if (setup.hasSelections()) {
             sb.append("- 선정 조합 계좌(D-124): 모든 레인이 세션이 남긴 같은 선정 적용 기록·결과 파일을 읽는다(판정 때 다시 계산하지 ")
                     .append("않음). 대조군 시드 N개는 판정 대상이 있는 선정 묶음마다 따로 돌리고(같은 선정 + 무작위 진입, ADR-012 3.3), ")
                     .append("L10은 계좌와 같은 묶음의 분포로 본다. m은 묶음을 합친 판정 대상 수다\n");
+        }
+        if (setup.hasIntraday()) {
+            sb.append("- 장중 순위 선정 계좌(D-127, D-129): 입력 기록 레인마다 같은 추적기를 따로 돌려 그날 순위 시각 이후 첫 이벤트부터 ")
+                    .append("후보에 신규 진입한다(입력 기록 레인은 모두 같은 순위). 대조군 시드 N개는 같은 장중 선정 + 무작위 진입으로 ")
+                    .append("묶음마다 돌린다. 녹화 리플레이(L11)는 녹화 이벤트로 따로 순위를 매긴다(").append(intradaySection(setup))
+                    .append("장). m에는 장중 순위 선정 묶음의 판정 대상도 들어간다(묶음을 늘릴수록 L10 문턱이 엄격해지고 대조군 시드 Run이 ")
+                    .append("는다)\n");
         }
         sb.append('\n');
 
@@ -719,13 +740,18 @@ public final class LiveJudgement {
             sb.append("| ").append(r.summary().accountId()).append(" | ").append(label(r)).append(" | ")
                     .append(role(roles, i)).append(" | ")
                     .append(roles.judged().contains(i) ? "**" + j.verdict().label() + "**" : "(참고) " + j.verdict().label());
+            boolean reference = roles.isReference(i);
             for (String c : List.of("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11")) {
-                sb.append(" | ").append(mark(j, c));
+                sb.append(" | ").append(reference && NOT_RUN_FOR_REFERENCE.contains(c) ? NOT_RUN : mark(j, c));
             }
             sb.append(" |\n");
         }
         sb.append("\n- ○ 통과, ✕ 탈락, ? 판정 불가. 판정: 탈락이 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 보류, 모두 통과면 후보.\n");
         sb.append("- 기준선·대조군은 같은 기준의 참고다(대조군이 L1~L6을 통과하면 기준이 느슨하다는 신호, 6단계 계획 4.2).\n");
+        if (!roles.references().isEmpty()) {
+            sb.append("- 참고 계좌는 판정하지 않는다(등록 파일 `references`, ADR-014 F1). ").append(NOT_RUN)
+                    .append("는 돌리지 않은 항목이다(판정 불가 ?와 다름). 판정 칸은 남은 항목으로 낸 값이다.\n");
+        }
         for (int controlIndex : roles.controls()) {
             RunReport controlRun = base.runs().get(controlIndex);
             LiveJudgeCriteria.Judgement control = judged.judgements().get(controlRun.summary().accountId().value());
@@ -738,14 +764,25 @@ public final class LiveJudgement {
         sb.append('\n');
 
         sb.append("## 3. 항목별 근거\n\n");
+        // 장중 순위 계좌의 L11 줄에 순위 다른 날 수(PR #203 strategy-researcher R2). 판정 값은 바꾸지 않는 표시다
+        Map<Integer, String> rankNotes = rankNotes(setup, journal, base, intraday, rec);
         for (int i = 0; i < base.runs().size(); i++) {
             RunReport r = base.runs().get(i);
             LiveJudgeCriteria.Judgement j = judged.judgements().get(r.summary().accountId().value());
             sb.append("### ").append(r.summary().accountId()).append(' ').append(label(r)).append(" (").append(role(roles, i)).append(", ").append(j.verdict().label())
                     .append(")\n\n");
+            String rankNote = rankNotes.get(i);
             for (Check c : j.checks()) {
                 sb.append("- ").append(c.code()).append(' ').append(c.title()).append(": ").append(label(c.outcome()))
-                        .append(" — ").append(c.detail()).append('\n');
+                        .append(" — ").append(c.detail());
+                if (rankNote != null && c.code().equals("L11")) {
+                    sb.append(rankNote);
+                }
+                sb.append('\n');
+            }
+            if (roles.isReference(i)) {
+                sb.append("- ").append(String.join("·", NOT_RUN_FOR_REFERENCE)).append(": ").append(NOT_RUN)
+                        .append(" 돌리지 않음(참고 계좌. m·변형·지연·대조군 시드에서 뺌, ADR-014 3.2)\n");
             }
             sb.append('\n');
         }
@@ -796,7 +833,7 @@ public final class LiveJudgement {
 
         sb.append("## 6. 무작위 대조군 분포(L10)\n\n");
         for (Map.Entry<Integer, List<Lane>> e : lanes.nullsByControl().entrySet()) {
-            if (setup.hasSelections()) {
+            if (setup.hasSelections() || setup.hasIntraday()) {
                 RunReport controlRun = base.runs().get(e.getKey());
                 sb.append("### ").append(controlRun.combination().hasSelection()
                         ? "선정 " + controlRun.combination().selectionKeyOrNone() : "선정 없음(boards 전체)")
@@ -847,7 +884,167 @@ public final class LiveJudgement {
             sb.append("> 판정의 모든 레인이 읽은 세션 적용 기록(`selections/<날짜>/applied.json`)이다. 막힌 신규 진입은 BASE 레인 기준이다.\n");
             RecordingExperiment.selectionTable(sb, base, applied);
         }
+        if (setup.hasIntraday()) {
+            intradayTable(sb, setup, journal, base, intraday, rec);
+        }
+        // 대조군 품질(ADR-014 4.2, 계획 7.3). 선정 없는 LIVE01 판정도 바꾸므로 새 키가 있는 등록에서만 쓴다(바이트 동일 원칙)
+        if (plan.hasJudgeKeys() && !lanes.nullsByControl().isEmpty()) {
+            controlQuality(sb, setup, lanes, base, byId, seed, m);
+        }
         return sb.toString();
+    }
+
+    /** 장중 순위 선정 장 번호: 장전 선정 표(9장)가 있으면 10, 없으면 9. */
+    private static int intradaySection(LiveSetup setup) {
+        return setup.hasSelections() ? 10 : 9;
+    }
+
+    /**
+     * 장중 순위 선정 표(D-127·D-129): 입력 기록이 있는 거래일 × 장중 선정마다 입력 기록 순위(모든 입력 기록 레인이 쓴 값)와 녹화
+     * 리플레이(L11)가 매긴 순위가 같은지.
+     */
+    private static void intradayTable(StringBuilder sb, LiveSetup setup, StreamedRecordingDataSet journal, SimulationReport base,
+            List<IntradayTracker.Ranked> intraday, Recording rec) {
+        Map<String, Integer> blocked = new LinkedHashMap<>();
+        for (RunReport r : base.runs()) {
+            for (RunSelectionDay d : r.selectionDays()) {
+                blocked.merge(r.combination().selectionHashOrNone() + "|" + d.selection().date(), d.blockedEntries(),
+                        Integer::sum);
+            }
+        }
+        Map<String, IntradayTracker.Ranked> recorded = byKey(rec.intraday());
+        Map<String, IntradayTracker.Ranked> journalRanks = byKey(intraday);
+        sb.append("\n## ").append(intradaySection(setup)).append(". 장중 순위 선정(D-127)\n\n");
+        sb.append("> 그날 정규장 시작 ~ 순위 시각 전에 받은 boards 체결로 순위를 매기고, 순위 시각 이후 첫 이벤트(적용 시작 순번)부터 후보에 ")
+                .append("신규 진입한다. 입력 기록 레인(BASE·PERTURB·지연·대조군)은 레인마다 추적기를 따로 돌려 모두 이 순위를 쓴다. 막힌 ")
+                .append("신규 진입은 BASE 레인에서 그 선정을 쓰는 계좌들의 합이다. 녹화 칸은 녹화 리플레이(L11)가 녹화 이벤트로 매긴 후보 종목 ")
+                .append("집합이 입력 기록 후보와 같은지다(순위 순서와 적용 시작 순번은 기록마다 달라 비교하지 않음).\n\n");
+        sb.append("| 날짜 | 선정 | 순위 시각 | 선정 수 | 후보 | BLACKLISTED | 적용 시작 순번 | 막힌 신규 진입 | 녹화(L11) 후보 |\n");
+        sb.append("|---|---|---|---:|---|---|---:|---:|---|\n");
+        for (SelectionProfile p : IntradayTracker.intradayProfiles(setup.combinations())) {
+            for (RecordedMarketDataSet.DayInfo day : journal.days()) {
+                LocalDate d = day.date();
+                String key = p.selectionHash() + "|" + d;
+                IntradayTracker.Ranked j = journalRanks.get(key);
+                sb.append("| ").append(d).append(" | ").append(p.key()).append(" | ").append(p.at().orElseThrow())
+                        .append(" | ");
+                if (j == null) {
+                    sb.append("- | 순위 없음(순위 시각 전에 기록이 끝남, 신규 진입 0) | - | - | ");
+                } else {
+                    SelectionCandidates c = j.candidates();
+                    sb.append(c.selectedCount()).append(" | ").append(codes(c.candidates())).append(" | ")
+                            .append(codes(c.excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED))).append(" | ")
+                            .append(j.activeFrom()).append(" | ");
+                }
+                sb.append(blocked.getOrDefault(key, 0)).append(" | ");
+                if (rec.report() == null) {
+                    sb.append("- |\n");
+                    continue;
+                }
+                IntradayTracker.Ranked r = recorded.get(key);
+                // 종목 집합으로 비교한다: 같은 종목을 순서만 다르게 뽑은 날은 산 종목이 같다(strategy-researcher PR #203 n1)
+                if (sameCandidates(j, r)) {
+                    sb.append(j == null ? "같음(순위 없음)" : "같음").append(" |\n");
+                } else {
+                    sb.append("**다름**: ").append(r == null ? "순위 없음" : codes(List.copyOf(new TreeSet<>(r.candidates().candidates()))))
+                            .append(" |\n");
+                }
+            }
+        }
+    }
+
+    /** 대조군 품질 장 번호: 장전 선정 표·장중 순위 표 다음. */
+    private static int qualitySection(LiveSetup setup) {
+        return 9 + (setup.hasSelections() ? 1 : 0) + (setup.hasIntraday() ? 1 : 0);
+    }
+
+    /** 묶음 이름: 선정 없으면 "선정 없음", 있으면 "선정 id@버전". */
+    private static String groupLabel(RunReport control) {
+        return control.combination().hasSelection() ? "선정 " + control.combination().selectionKeyOrNone() : "선정 없음";
+    }
+
+    /**
+     * 대조군 품질 표(ADR-014 4.2, 계획 7.3): 묶음마다 시드 수 N, 왕복 0건 시드 수·비율, 실패, 왕복당 순손익을 쓴 수 N′, L10 판정
+     * 가능 여부(N′ + 1 ≥ 20m).
+     */
+    private static void controlQuality(StringBuilder sb, LiveSetup setup, Plan lanes, SimulationReport base,
+            Map<String, SimulationReport> byId, BigDecimal seed, int m) {
+        sb.append("\n## ").append(qualitySection(setup)).append(". 대조군 품질(ADR-014 4.2)\n\n");
+        sb.append("| 묶음 | 대조군 | N | 왕복 0건 | 왕복 0건 비율 | 실패 | N′ | L10 판정 가능(N′ + 1 ≥ ").append(20 * m).append(") |\n");
+        sb.append("|---|---|---:|---:|---:|---:|---:|---|\n");
+        for (Map.Entry<Integer, List<Lane>> e : lanes.nullsByControl().entrySet()) {
+            RunReport control = base.runs().get(e.getKey());
+            int n = e.getValue().size();
+            int failed = 0;
+            int noTrips = 0;
+            int used = 0;
+            for (Lane l : e.getValue()) {
+                RunReport r = byId.get(l.spec().id().value()).runs().get(0);
+                if (LiveJudgeCriteria.perTrip(r, seed) != null) {
+                    used++;
+                } else if (r.summary().metrics() == null) {
+                    failed++;
+                } else {
+                    noTrips++;
+                }
+            }
+            sb.append("| ").append(groupLabel(control)).append(" | ").append(control.summary().accountId()).append(" | ").append(n)
+                    .append(" | ").append(noTrips).append(" | ")
+                    .append(ScreeningCriteria.pct(BigDecimal.valueOf(noTrips).divide(BigDecimal.valueOf(n), 6,
+                            RoundingMode.HALF_EVEN)))
+                    .append(" | ").append(failed).append(" | ").append(used).append(" | ")
+                    .append(used + 1L >= 20L * m ? "예" : "**아니오**").append(" |\n");
+        }
+        sb.append("\n- N′: 완료되고 왕복 1건 이상인 시드 수(L10 분포에 쓴 수). 왕복 0건 비율이 높으면 다음 등록에서 그 묶음 ")
+                .append("`group-null-seeds`를 늘린다(계획 6.2).\n");
+    }
+
+    /**
+     * 장중 순위 선정 계좌 번호 → L11 줄에 덧붙일 "(순위 다른 날 k/n일, 10장)". 녹화 리플레이를 돌리지 못했거나 장중 순위 선정이
+     * 없으면 빈 맵. 다른 날은 장중 순위 표의 "다름"과 같은 기준(후보 종목 집합, 순위 없음 포함)이다.
+     */
+    private static Map<Integer, String> rankNotes(LiveSetup setup, StreamedRecordingDataSet journal, SimulationReport base,
+            List<IntradayTracker.Ranked> intraday, Recording rec) {
+        Map<Integer, String> out = new LinkedHashMap<>();
+        if (!setup.hasIntraday() || rec.report() == null) {
+            return out;
+        }
+        Map<String, IntradayTracker.Ranked> recorded = byKey(rec.intraday());
+        Map<String, IntradayTracker.Ranked> journalRanks = byKey(intraday);
+        int days = journal.days().size();
+        for (int i = 0; i < base.runs().size(); i++) {
+            List<SelectionProfile> mine = IntradayTracker.intradayProfiles(List.of(setup.combinations().get(i)));
+            if (mine.isEmpty()) {
+                continue;
+            }
+            String hash = mine.get(0).selectionHash();
+            int differ = 0;
+            for (RecordedMarketDataSet.DayInfo day : journal.days()) {
+                String key = hash + "|" + day.date();
+                if (!sameCandidates(journalRanks.get(key), recorded.get(key))) {
+                    differ++;
+                }
+            }
+            out.put(i, " (순위 다른 날 " + differ + "/" + days + "일, " + intradaySection(setup) + "장)");
+        }
+        return out;
+    }
+
+    private static Map<String, IntradayTracker.Ranked> byKey(List<IntradayTracker.Ranked> ranks) {
+        Map<String, IntradayTracker.Ranked> out = new LinkedHashMap<>();
+        ranks.forEach(r -> out.put(r.result().selection().hash() + "|" + r.result().date(), r));
+        return out;
+    }
+
+    /** 입력 기록 순위와 녹화 순위의 후보 종목 집합이 같은지(둘 다 순위 없음도 같음, strategy-researcher PR #203 n1). */
+    private static boolean sameCandidates(IntradayTracker.Ranked journal, IntradayTracker.Ranked recorded) {
+        Set<String> mine = journal == null ? null : new TreeSet<>(journal.candidates().candidates());
+        Set<String> theirs = recorded == null ? null : new TreeSet<>(recorded.candidates().candidates());
+        return Objects.equals(mine, theirs);
+    }
+
+    private static String codes(List<String> codes) {
+        return codes.isEmpty() ? "-" : String.join(", ", codes);
     }
 
     /** 대조군 레인들의 분포 요약(왕복당 순손익). */
@@ -892,8 +1089,9 @@ public final class LiveJudgement {
         return r.combination().hasSelection() ? r.combination().selectionKeyOrNone() + " x " : "";
     }
 
-    private static String role(Roles roles, int i) {
-        return i == roles.baseline() ? "기준선" : roles.controls().contains(i) ? "대조군" : "판정 대상";
+    private static String role(JudgeRoles.Roles roles, int i) {
+        return i == roles.baseline() ? "기준선" : roles.controls().contains(i) ? "대조군"
+                : roles.isReference(i) ? "참고" : "판정 대상";
     }
 
     private static String mark(LiveJudgeCriteria.Judgement j, String code) {

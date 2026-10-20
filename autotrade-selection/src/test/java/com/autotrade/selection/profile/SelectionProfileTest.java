@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.domain.market.Market;
+import com.autotrade.marketdata.calendar.ExchangeCalendar;
+import com.autotrade.marketdata.calendar.TradingSession;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.TradingStyle;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.Map;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
@@ -101,6 +105,27 @@ class SelectionProfileTest {
         // 다른 갱신 주기에는 at을 받지 않는다(해시에만 섞인 키가 결과를 어긋나게 하지 않게)
         assertThatThrownBy(() -> swing("s", Map.of("at", "09:30"))).hasMessageContaining("INTRADAY_AT");
         assertThat(swing("s", Map.of()).at()).isEmpty();
+    }
+
+    @Test
+    void at_범위_표는_시장마다_있고_거래소_캘린더_정규장과_맞는다() {
+        // architect PR #200 R2: 시장 분기는 AT_RANGES 한 곳. 시작은 정규장 시작 + 1분, 끝은 정규장 끝보다 앞(순위 뒤 진입할 구간)
+        assertThat(SelectionProfile.AT_RANGES).containsOnlyKeys(Market.values());
+        for (Market m : Market.values()) {
+            ExchangeCalendar calendar = ExchangeCalendar.bundled(m);
+            LocalDate day = calendar.coverageFrom();
+            TradingSession regular = null;
+            for (; regular == null || !regular.note().isEmpty(); day = day.plusDays(1)) {
+                regular = calendar.session(day).orElse(null);
+            }
+            SelectionProfile.AtRange range = SelectionProfile.AT_RANGES.get(m);
+            assertThat(range.first()).as(m.name()).isEqualTo(regular.open().plusMinutes(1));
+            assertThat(range.last()).as(m.name()).isBefore(regular.close().minusMinutes(30));
+        }
+        assertThat(new SelectionProfile("s", 1, Market.US, TradingStyle.INTRADAY, intradayAt("09:31")).at())
+                .contains(LocalTime.of(9, 31));
+        assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.US, TradingStyle.INTRADAY, intradayAt("15:01")))
+                .hasMessageContaining("09:31 ~ 15:00");
     }
 
     @Test

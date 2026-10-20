@@ -19,6 +19,7 @@ import com.autotrade.selection.calc.SnapshotSelectionData;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.selection.profile.SelectionProfileYaml;
+import com.autotrade.selection.profile.SelectionRefresh;
 import com.autotrade.selection.result.SelectionResult;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentSpec;
@@ -148,7 +149,7 @@ public final class CombinationExperiment {
             if (e.selection().isPresent()) {
                 SelectionProfile s = selectionCache.computeIfAbsent(e.selection().get().text(),
                         k -> loadSelection(repoRoot, e.selection().get()));
-                if (s.refresh() == com.autotrade.selection.profile.SelectionRefresh.INTRADAY_AT) {
+                if (s.refresh() == SelectionRefresh.INTRADAY_AT) {
                     // 일봉 조합 실험에는 장중 체결 입력이 없다. 장중 순위 선정은 녹화 실험·실시간 모의만(D-127)
                     throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT)은 조합 실험에 쓸 수 없습니다(녹화 실험·실시간 모의만): "
                             + s.key());

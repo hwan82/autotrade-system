@@ -18,6 +18,7 @@ import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.daily.SnapshotTradingDays;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.selection.CalculatedSelectionSource;
+import com.autotrade.sim.selection.SnapshotHeap;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.Map;
@@ -63,7 +64,7 @@ public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDat
             Optional<String> disclosuresSnapshot, Path snapshotsRoot, ExchangeCalendar calendar, RunGate gate, Consumer<String> log,
             BiConsumer<LocalDate, LocalDate> rangeCheck) {
         gate.check(); // 힙을 크게 쓰는 스냅샷 읽기 전에 먼저 본다
-        Path barsDir = snapshotsRoot.resolve("krx-daily").resolve(barsSnapshot);
+        Path barsDir = snapshotsRoot.resolve(SnapshotHeap.KRX_DAILY).resolve(barsSnapshot);
         log.accept("일봉 스냅샷 읽기: " + barsDir);
         SnapshotDailyBarSource bars = SnapshotDailyBarSource.load(barsDir);
         if (!bars.snapshotId().equals(barsSnapshot)) {

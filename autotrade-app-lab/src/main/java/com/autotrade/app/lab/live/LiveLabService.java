@@ -6,6 +6,7 @@ import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.ConnectionState;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.feed.FeedClient;
+import com.autotrade.sim.live.JudgeRoles;
 import com.autotrade.sim.live.LivePlan;
 import com.autotrade.sim.live.LiveSelectionPrep;
 import com.autotrade.sim.live.LiveSession;
@@ -176,6 +177,9 @@ public class LiveLabService implements AutoCloseable {
         if (!plan.id().value().equals(id)) {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다");
         }
+        // 참고 계좌·묶음별 대조군 시드 수(references·group-null-seeds)가 있으면 판정과 같은 역할 계산을 지금 한 번 돌린다. 틀린 것이
+        // 8주 뒤 판정 때 처음 드러나면 되돌릴 수 없다(ADR-014 4.3). 두 키가 없는 등록은 아무것도 보지 않는다
+        JudgeRoles.check(plan, repoRoot);
         Running r = new Running(plan);
         running = r;
         lastStopReason = "";
@@ -345,8 +349,7 @@ public class LiveLabService implements AutoCloseable {
      * 범위 밖이면 빈 값(화면은 멈추지 않는다).
      */
     private Optional<NextDay> nextDay(Running r) {
-        Optional<com.autotrade.sim.selection.SessionSelections> files = r.session.selectionFiles();
-        if (files.isEmpty()) {
+        if (!r.session.hasSelections()) {
             return Optional.empty();
         }
         try {
@@ -357,7 +360,7 @@ public class LiveLabService implements AutoCloseable {
             if (date.isBefore(r.plan.from()) || date.isAfter(r.plan.to())) {
                 return Optional.empty();
             }
-            return Optional.of(new NextDay(date, files.get().prepared(date)));
+            return r.session.preparedSelections(date).map(items -> new NextDay(date, items));
         } catch (RuntimeException e) {
             return Optional.empty();
         }

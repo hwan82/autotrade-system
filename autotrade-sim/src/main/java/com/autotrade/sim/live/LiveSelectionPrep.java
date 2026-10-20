@@ -32,8 +32,9 @@ import java.util.stream.Stream;
  * 준비 실행 명령({@code runLiveSelectionPrepare})이 같은 코드를 쓴다. 날짜 전환 지점은 계산하지 않고 이 파일을 읽기만 한다.
  *
  * <p>입력: 등록 파일 {@code selection-input}. {@value RegisteredSelections#LATEST}이면 수집 스냅샷 폴더에서 일봉은 마지막 거래일이
- * 가장 늦은 스냅샷({@link CollectionFreshness#check}와 같은 고르기), 재무는 마지막 수집 시각이 가장 늦은 스냅샷을 쓴다. 쓴 스냅샷
- * ID와 SHA-256은 결과 파일 {@code inputs}에 남는다.
+ * 가장 늦은 스냅샷({@link CollectionFreshness#check}와 같은 고르기), 재무와 공시(ADR-014 F9)는 마지막 수집 시각이 가장 늦은
+ * 스냅샷을 쓴다. 쓴 스냅샷 ID와 SHA-256은 결과 파일 {@code inputs}에 남는다. 공시 스냅샷이 T 전날까지를 담지 않으면 선정 계산이
+ * {@code STALE_INPUT}으로 실패하고 그날 그 묶음 신규 진입은 0이다(ADR-012 3.2).
  *
  * <p>스냅샷을 읽기 전에 먼저 본다: 그날 적용 기록이 있거나 결과 파일이 다 있으면 아무것도 읽지 않는다(5분마다 부르는 비용). 결과가
  * 없는 선정이 모두 같은 입력 스냅샷으로 이미 계산에 실패했어도 읽지 않는다(architect PR #197 R2, 새 스냅샷이 나오면 다시 계산). 가장
@@ -44,6 +45,8 @@ public final class LiveSelectionPrep {
 
     /** 재무 스냅샷 하위 폴더 이름(수집기, ADR-008 2.4). */
     static final String DART_FINANCIALS = "dart-financials";
+    /** 공시 스냅샷 하위 폴더 이름(수집기 {@code dart-disclosures}, D-123). */
+    static final String DART_DISCLOSURES = "dart-disclosures";
     /** 장 밖 준비 창 시작·끝(거래소 현지). 끝 시각 전이면 그날이 T다 `[가정]`(ADR-012 3.5 "16:00 ~ 다음 날 08:30"). */
     public static final LocalTime QUIET_FROM = LocalTime.of(16, 0);
     public static final LocalTime QUIET_TO = LocalTime.of(8, 30);
@@ -64,16 +67,18 @@ public final class LiveSelectionPrep {
      * 준비 한 번의 결과.
      *
      * @param dailySnapshot 쓴(또는 쓰려던) 일봉 스냅샷 ID. 읽지 않았으면 빈 문자열
+     * @param disclosuresSnapshot 쓴 공시 스냅샷 ID(ADR-014 F9). 공시 입력이 없거나 읽지 않았으면 빈 문자열
      * @param note 사람에게 보일 한 줄 요약
      */
     public record Report(String experimentId, LocalDate date, String dailySnapshot, String financialsSnapshot,
-            List<SelectionPreparer.Outcome> outcomes, String note) {
+            String disclosuresSnapshot, List<SelectionPreparer.Outcome> outcomes, String note) {
 
         public Report {
             Objects.requireNonNull(experimentId, "experimentId");
             Objects.requireNonNull(date, "date");
             dailySnapshot = dailySnapshot == null ? "" : dailySnapshot;
             financialsSnapshot = financialsSnapshot == null ? "" : financialsSnapshot;
+            disclosuresSnapshot = disclosuresSnapshot == null ? "" : disclosuresSnapshot;
             outcomes = List.copyOf(outcomes);
             note = note == null ? "" : note;
         }
@@ -140,7 +145,7 @@ public final class LiveSelectionPrep {
         SessionSelections files = setup.selectionFiles(sessionsRoot.toAbsolutePath().resolve(id));
         if (SelectionPreparer.nothingToDo(files, date)) {
             List<SelectionPreparer.Outcome> out = SelectionPreparer.current(files, date);
-            return new Report(id, date, "", "", out, Files.exists(files.appliedFile(date))
+            return new Report(id, date, "", "", "", out, Files.exists(files.appliedFile(date))
                     ? "이미 적용함(그날 적용 기록이 있음)" : "이미 준비됨(결과 파일이 모두 있음)");
         }
         LocalDate cutoff = setup.calendar().previousTradingDay(date);
@@ -166,12 +171,23 @@ public final class LiveSelectionPrep {
             }
             financials = f;
         }
+        // 공시 latest는 마지막 수집 시각이 가장 늦은 공시 스냅샷이다. 그 스냅샷이 T 전날까지를 담는지는 선정 계산이 유형·구간마다
+        // 본다(못 담으면 STALE_INPUT, ADR-014 6장). 스냅샷이 아예 없으면 공시 없이 계산을 이어 간다: 공시 조건 선정만 계산기가
+        // STALE_INPUT으로 실패하고 같은 등록의 다른 선정은 그대로 만든다("그날 그 묶음"만 0, architect PR #206 R1). 입력 키에 공시
+        // 칸이 없으므로 공시 스냅샷이 생기면 키가 달라져 다시 계산한다
+        Optional<String> disclosures = sel.disclosures();
+        if (disclosures.isPresent() && disclosures.get().equals(RegisteredSelections.LATEST)) {
+            disclosures = latestDisclosures(snapshotsRoot);
+            if (disclosures.isEmpty()) {
+                log.accept("선정 준비 " + id + " " + date + ": 읽을 수 있는 공시 스냅샷이 없어 공시 조건 선정은 STALE_INPUT");
+            }
+        }
         // 같은 입력 스냅샷으로 이미 계산에 실패했으면 다시 읽지 않는다: 같은 입력이면 같은 실패이고, 실패한 날 장 밖 동안 5분마다
         // 일봉 전체를 다시 올리면 실험실 힙·디스크를 세션과 나눠 쓴다(architect PR #197 R2). 새 스냅샷이 나오면 다시 계산한다
-        String inputs = SelectionPreparer.inputsKey(daily, financials);
+        String inputs = SelectionPreparer.inputsKey(daily, financials, disclosures);
         Optional<List<SelectionPreparer.Outcome>> failed = SelectionPreparer.failedWithSameInputs(files, date, inputs);
         if (failed.isPresent()) {
-            return new Report(id, date, daily, financials.orElse(""), failed.get(), summary(failed.get())
+            return new Report(id, date, daily, financials.orElse(""), disclosures.orElse(""), failed.get(), summary(failed.get())
                     + " (같은 입력 스냅샷으로 이미 실패함, 새 스냅샷이 나오면 다시 계산)");
         }
         long rows = dailyBarRows(snapshotsRoot, daily);
@@ -180,12 +196,12 @@ public final class LiveSelectionPrep {
                     + "행을 실험실 힙으로 읽기에 모자랄 수 있어 계산하지 않음. 준비 실행 명령(runLiveSelectionPrepare)으로 만드세요", log);
         }
         gate.check(); // 힙을 크게 쓰는 스냅샷 읽기 전에 먼저 본다
-        SnapshotInputs in = SnapshotInputs.load(plan.market(), daily, financials, snapshotsRoot, setup.calendar(), gate,
-                log, (first, last) -> { });
+        SnapshotInputs in = SnapshotInputs.load(plan.market(), daily, financials, disclosures, snapshotsRoot,
+                setup.calendar(), gate, log, (first, last) -> { });
         SelectionCalculator calc = new SelectionCalculator(in.selectionData());
         List<SelectionPreparer.Outcome> out = SelectionPreparer.prepare(files, date, calc, in.last(), cutoff, producer,
                 gate::check, inputs);
-        Report r = new Report(id, date, daily, financials.orElse(""), out, summary(out));
+        Report r = new Report(id, date, daily, financials.orElse(""), disclosures.orElse(""), out, summary(out));
         log.accept("선정 준비 " + id + " " + date + ": " + r.note());
         return r;
     }
@@ -193,7 +209,7 @@ public final class LiveSelectionPrep {
     private static Report problem(String id, SessionSelections files, LocalDate date, String daily,
             SelectionInvalidReason reason, String detail, Consumer<String> log) {
         List<SelectionPreparer.Outcome> out = SelectionPreparer.problem(files, date, reason, detail);
-        Report r = new Report(id, date, daily, "", out, summary(out));
+        Report r = new Report(id, date, daily, "", "", out, summary(out));
         log.accept("선정 준비 " + id + " " + date + ": " + r.note() + " (" + detail + ")");
         return r;
     }
@@ -207,7 +223,15 @@ public final class LiveSelectionPrep {
 
     /** 마지막 수집 시각이 가장 늦은 재무 스냅샷(같으면 ID가 큰 쪽). */
     static Optional<String> latestFinancials(Path snapshotsRoot) {
-        Path dir = snapshotsRoot.resolve(DART_FINANCIALS);
+        return latestCollected(snapshotsRoot.resolve(DART_FINANCIALS), "재무");
+    }
+
+    /** 마지막 수집 시각이 가장 늦은 공시 스냅샷(같으면 ID가 큰 쪽). 고르는 규칙은 재무와 같다. */
+    static Optional<String> latestDisclosures(Path snapshotsRoot) {
+        return latestCollected(snapshotsRoot.resolve(DART_DISCLOSURES), "공시");
+    }
+
+    private static Optional<String> latestCollected(Path dir, String label) {
         if (!Files.isDirectory(dir)) {
             return Optional.empty();
         }
@@ -234,7 +258,7 @@ public final class LiveSelectionPrep {
                 }
             }
         } catch (IOException e) {
-            throw new UncheckedIOException("재무 스냅샷 폴더를 읽을 수 없습니다: " + dir, e);
+            throw new UncheckedIOException(label + " 스냅샷 폴더를 읽을 수 없습니다: " + dir, e);
         }
         return Optional.ofNullable(bestId);
     }

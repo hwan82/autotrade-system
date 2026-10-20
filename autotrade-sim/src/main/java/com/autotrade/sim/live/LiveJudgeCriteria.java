@@ -16,6 +16,7 @@ import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,9 +43,10 @@ import java.util.TreeMap;
  *   <tr><td>L11</td><td>실시간 대 같은 날 게이트웨이 녹화 리플레이: 총수익률 차 ≤ 2%p, 체결 수 차 ≤ 실시간 체결 수의 10%</td></tr>
  * </table>
  *
- * <p>판정: 탈락(FAIL)이 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 보류, 모두 통과면 후보. 4단계 워크포워드(C5 미달 → 보류)와
- * 달리 L5 미달은 탈락이다(D-114 L5 = C5 그대로, ScreeningCriteria C5와 같음). 대부분 L5 미달이면 기준을 낮추지 않고 등록을
- * 늘리는 안을 사용자에게 묻는다(6단계 계획 4.2 되돌릴 조건).
+ * <p>판정: 탈락(FAIL)이 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 보류, 모두 통과면 후보. L5 미달은 탈락이 아니라 표본
+ * 부족으로 판정 불가다(PR #180 strategy-researcher M2): 다른 항목에 탈락이 없으면 보류, 있으면 탈락이다. 4단계 워크포워드(C5
+ * 미달이면 다른 항목과 상관없이 보류)와는 다르다.
+ * 대부분 L5 미달이면 기준을 낮추지 않고 등록을 늘리는 안을 사용자에게 묻는다(6단계 계획 4.2 되돌릴 조건).
  */
 final class LiveJudgeCriteria {
 
@@ -137,6 +139,12 @@ final class LiveJudgeCriteria {
         checks.add(l10(perTrip(ev.base(), ev.seed()), ev.nullPerTrip(), ev.m()));
         checks.add(l11(ev.base(), ev.recorded()));
         return new Judgement(verdict(checks), checks);
+    }
+
+    /** 돌리지 않은 항목({@code codes})을 뺀 판정. 판정은 남은 항목으로 다시 낸다(참고 계좌, ADR-014 3.2). */
+    static Judgement without(Judgement j, Collection<String> codes) {
+        List<Check> kept = j.checks().stream().filter(c -> !codes.contains(c.code())).toList();
+        return new Judgement(verdict(kept), kept);
     }
 
     static Verdict verdict(List<Check> checks) {

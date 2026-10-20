@@ -17,3 +17,4 @@
 | [ADR-011](ADR-011-watchdog-heartbeat.md) | 감시 프로세스 1차: 하트비트 파일 계약, 감시 설정 파일(틀리면 기동 거부), 감시 에이전트 코어 의존 | 제안(D-092, 사용자 머지) |
 | [ADR-012](ADR-012-intraday-selection.md) | 단타 종목 선정: 장전 일봉·공시 선정과 실시간·녹화 실험 연결, 뉴스 신호 앞으로 전용 수집, 장중 순위 선정(2차) | 채택(D-121) |
 | [ADR-013](ADR-013-strategy-entry-admission.md) | 전략 문맥으로 신규 진입 허용 여부를 미리 알림(선정 계좌의 막힌 신호가 한도를 쓰지 않게, F7) | 제안(D-130, 사용자 머지) |
+| [ADR-014](ADR-014-live02-judgement-roles-precheck.md) | LIVE02 등록 전 판정 계약: 참고 계좌 역할 `references`, 대조군 시드 수 `group-null-seeds`, 녹화 사전 검사 명령, 공시 입력 키 | 채택(D-131) |

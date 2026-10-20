@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -130,6 +131,52 @@ class LiveLabServiceTest {
         assertThat(service.status().stopReason()).isEqualTo("끝냄");
         assertThat(service.status().stopKind()).isEqualTo(LiveLabService.StopKind.NORMAL);
         await(() -> gateway.subscriberCount() == 0); // 끝내면 전달 연결도 끊는다
+    }
+
+    /** 참고 계좌·묶음별 시드 수가 있는 등록은 판정과 같은 역할 계산을 시작 때 돌려, 틀렸으면 세션을 열지 않는다(ADR-014 4.3). */
+    @Test
+    void judgementKeysAreCheckedBeforeTheSessionStarts() throws Exception {
+        Path dir = Files.createDirectories(experiments.resolve("EXP-TEST-LIVE02R"));
+        String head = String.join("\n",
+                "id: \"EXP-TEST-LIVE02R\"",
+                "question: \"q\"",
+                "input: \"live\"",
+                "market: \"KRX\"",
+                "from: \"2026-10-14\"",
+                "to: \"2026-10-14\"",
+                "seed: \"1\"",
+                "seed-capital: \"10000000\"",
+                "benchmark: \"005930\"",
+                "profiles:",
+                "  - \"kr-bh-baseline@1\"",
+                "  - \"kr-random-control@1\"",
+                "  - \"kr-orb-30@1\"",
+                "  - \"kr-vwap-reclaim@1\"",
+                "boards:",
+                "  - \"005930 KOSPI\"",
+                "");
+        // 기준선을 참고로 적음 → 판정 때 거절될 등록이라 시작하지 않는다
+        Files.writeString(dir.resolve("experiment.yaml"), head + "references:\n  - \"kr-bh-baseline@1\"\n",
+                StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-LIVE02R")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("references에 기준선");
+        assertThat(service.status().session()).isEmpty();
+        // 시드 수를 21m − 1(m = 1 → 20)보다 적게 적음
+        Files.writeString(dir.resolve("experiment.yaml"), head + "references:\n  - \"kr-vwap-reclaim@1\"\n"
+                + "group-null-seeds:\n  - \"none 19\"\n", StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> service.start("EXP-TEST-LIVE02R")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("21m − 1 = 20");
+        // 맞는 등록은 시작한다
+        Files.writeString(dir.resolve("experiment.yaml"), head + "references:\n  - \"kr-vwap-reclaim@1\"\n"
+                + "group-null-seeds:\n  - \"none 20\"\n", StandardCharsets.UTF_8);
+        assertThat(service.start("EXP-TEST-LIVE02R").restoring()).isTrue();
+    }
+
+    /** 두 키가 없는 등록은 시작 때 역할을 보지 않는다(기준선만 있는 시험 등록, LIVE00·LIVE01 모양). */
+    @Test
+    void registrationsWithoutJudgementKeysStartWithoutRoleCheck() {
+        // setUp의 등록은 기준선 하나뿐이라 판정 역할로는 거절될 모양이다
+        assertThat(service.start(ID).restoring()).isTrue();
     }
 
     @Test
@@ -333,9 +380,35 @@ class LiveLabServiceTest {
             assertThat(p.state()).isEqualTo(com.autotrade.sim.selection.SessionSelections.Prepared.State.PROBLEM);
             assertThat(p.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
         });
+        assertScreenFields(view);
         service.prepareNow(); // 다시 요청해도 이벤트 처리와 별도 스레드에서 한다
         service.stop("시험");
         assertThatThrownBy(service::prepareNow).isInstanceOf(IllegalStateException.class);
+    }
+
+    /**
+     * #/live 화면(live.js dailySelections)이 읽는 JSON 이름이 서버 레코드와 맞는지(PR #201 N2). 화면 시험(e2e 04)은 이 이름으로 만든
+     * 가짜 응답을 쓰므로, 이름이 바뀌면 여기서 먼저 걸린다. 실험실과 같게 Optional은 값으로, 날짜는 ISO 문자열로 쓴다.
+     */
+    private static void assertScreenFields(LiveLabService.View view) throws Exception {
+        com.fasterxml.jackson.databind.JsonNode json = com.fasterxml.jackson.databind.json.JsonMapper.builder()
+                .findAndAddModules()
+                .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .build().valueToTree(view);
+        assertThat(json.get("dailySelections").asBoolean()).isTrue();
+        com.fasterxml.jackson.databind.JsonNode prep = json.get("prepare");
+        assertThat(prep.get("date").asText()).isEqualTo("2026-10-14");
+        for (String key : List.of("note", "dailySnapshot", "financialsSnapshot", "disclosuresSnapshot")) {
+            assertThat(prep.has(key)).as("prepare.%s", key).isTrue();
+        }
+        com.fasterxml.jackson.databind.JsonNode next = json.get("nextDay");
+        assertThat(next.get("date").asText()).isEqualTo("2026-10-14");
+        com.fasterxml.jackson.databind.JsonNode item = next.get("items").get(0);
+        assertThat(item.get("selection").asText()).isEqualTo("kr-intraday-hot@1");
+        assertThat(item.get("state").asText()).isEqualTo("PROBLEM");
+        assertThat(item.get("reason").asText()).isEqualTo("STALE_INPUT");
+        assertThat(item.has("detail")).isTrue();
+        assertThat(item.has("inputs")).isTrue();
     }
 
     @Test
