@@ -15,6 +15,7 @@
 | `kr-vol-surge-quiet` | SWING, 매일 | 예시 (나) 거래량 급증·가격 정체(D-043) |
 | `kr-intraday-hot` | INTRADAY, 장전 매일 | 예시 (다) 전일 관심 종목(ADR-012 3.3, D-121) |
 | `kr-intraday-news` | INTRADAY, 장전 매일 | 예시 (라) 소식 있는 종목: 전일 공시(B·I) 1건 이상(ADR-012 3.3, D-123). 공시 스냅샷 필요 |
+| `kr-intraday-news-nodisc` | INTRADAY, 장전 매일 | (라)에서 공시 조건만 뺀 대조 선정. 선정 엣지 사전 검사(배치표 2b) EDGE03 전용(D-125) |
 | `kr-intraday-open-momentum` | INTRADAY, 장중 순위(`INTRADAY_AT` 09:30) | 예시 (마) 장 초반 거래대금 상위: 09:30 전 체결로 boards 안 순위(ADR-012 5.2, D-127). 녹화 실험·실시간 모의만 |
 | `kr-intraday-open-all` | INTRADAY, 장중 순위(`INTRADAY_AT` 09:30) | (마)의 대조 선정: 09:30 전 체결이 있는 boards 전 종목(D-127, strategy-researcher PR #200 M1) |
 | `kr-watchlist-turnover` | INTRADAY, 장전 매일 | 감시 종목 후보(20거래일 평균 거래대금 상위 `STOCK`). 매매 선정이 아니라 `runWatchlistCandidates`만 쓴다(ADR-012 배치표 0번) |

@@ -290,3 +290,30 @@ val runWatchlistCandidates by tasks.registering(JavaExec::class) {
         }
     })
 }
+
+// 선정 엣지 일봉 사전 검사(D-125, ADR-012 배치표 2b): ./gradlew :autotrade-app-experiment:runSelectionEdgeCheck -Pexperiment=<실험ID>
+//     [-PsnapshotsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-PmaxParallelRuns=N] [-Pheap=8g]
+// experiments/<실험ID>/edge.yaml(등록 파일)을 읽어 수집 일봉 스냅샷 위에서 선정 결과의 T 시가→T 종가 결과를 무작위 선정 대조군과
+// 비교하고 results.md·windows.tsv·days.tsv·null.tsv·inputs.yaml을 같은 폴더에 쓴다. 판정이 탈락이어도 종료 코드 0, 결정론 불일치 2.
+val runSelectionEdgeCheck by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "선정 프로필의 일봉 엣지(T 시가→종가)를 무작위 선정 대조군과 비교한다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "8g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
+    val verify = providers.gradleProperty("verifyDeterminism")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            add("selection-edge")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
+            if (verify.isPresent) add("--verify-determinism")
+        }
+    })
+}

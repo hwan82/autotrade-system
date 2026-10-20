@@ -11,7 +11,7 @@ const POLL_MS = 5000;
 const COMMAND = {
   combination: '조합 실험', recording: '녹화 실험', study: '합성 시세 비교', walkforward: '워크포워드',
   'live-check': '실시간 모의 점검', 'live-weekly': '주간 점검', 'live-judge': '녹화 판정', 'live-prepare': '선정 준비',
-  watchlist: '감시 종목 후보',
+  watchlist: '감시 종목 후보', 'selection-edge': '선정 엣지 검사',
 };
 
 // 상태 이름과 배지. NEEDS_REVIEW는 결과는 썼지만 결정론 재실행 등 확인할 것이 남은 끝
