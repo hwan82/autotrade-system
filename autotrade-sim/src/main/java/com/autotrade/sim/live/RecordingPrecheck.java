@@ -588,20 +588,24 @@ public final class RecordingPrecheck {
         return -1;
     }
 
-    /** 한도 도달: 신규 진입 체결 수가 한도에 닿은 날 수, 체결 직후 보유 종목 수가 한도에 닿은 날 수(체결 기준). */
+    /**
+     * 한도 도달: 신규 진입 주문 수(그날 신규 진입 체결의 서로 다른 주문 키 수. 한 주문이 여러 체결로 나뉘어도 한 건,
+     * {@code limits.max-entries-per-day}는 하루 진입 주문 수 상한이라서, PR #210 strategy-researcher M1)가 한도에 닿은 날 수, 체결
+     * 직후 보유 종목 수가 한도에 닿은 날 수(체결 기준).
+     */
     record Limits(String entryDays, String positionDays, Map<String, Integer> rejections) {
     }
 
     static Limits limits(RunReport r) {
         Integer maxEntries = intParam(r, MAX_ENTRIES);
         Integer maxPositions = intParam(r, MAX_POSITIONS);
-        Map<LocalDate, Integer> entries = new TreeMap<>();
+        Map<LocalDate, Set<String>> entries = new TreeMap<>();
         Set<LocalDate> fullDays = new TreeSet<>();
         Map<String, Long> open = new HashMap<>();
         for (AppliedFill af : r.fills()) {
             Fill f = af.fill();
             if (f.intent() == OrderIntent.ENTRY) {
-                entries.merge(f.exchangeDate(), 1, Integer::sum);
+                entries.computeIfAbsent(f.exchangeDate(), d -> new TreeSet<>()).add(f.key().toString());
             }
             open.merge(f.symbol().code(), f.side() == Side.BUY ? f.quantity() : -f.quantity(), Long::sum);
             long held = open.values().stream().filter(q -> q > 0).count();
@@ -610,7 +614,7 @@ public final class RecordingPrecheck {
             }
         }
         String entryDays = maxEntries == null ? "–"
-                : entries.values().stream().filter(n -> n >= maxEntries).count() + "일(한도 " + maxEntries + ")";
+                : entries.values().stream().filter(keys -> keys.size() >= maxEntries).count() + "일(한도 " + maxEntries + ")";
         String positionDays = maxPositions == null ? "–" : fullDays.size() + "일(한도 " + maxPositions + ")";
         Map<String, Integer> rejections = new TreeMap<>();
         for (OrderRejection o : r.rejections()) {
@@ -888,7 +892,8 @@ public final class RecordingPrecheck {
     /** 7장: 판정 대상·참고 계좌마다 한도 도달 날 수와 거절 사유별 건수. */
     private static void limitsSection(StringBuilder sb, JudgeRoles.Roles roles, SimulationReport base) {
         sb.append("## 7. 한도 도달·거절 사유\n\n");
-        sb.append("> 체결 기준이다: 신규 진입 체결 수가 `").append(MAX_ENTRIES).append("`에 닿은 날, 체결 직후 보유 종목 수가 `")
+        sb.append("> 체결 기준이다: 그날 체결된 신규 진입 주문 수(한 주문의 나뉜 체결은 한 건)가 `").append(MAX_ENTRIES)
+                .append("`에 닿은 날, 체결 직후 보유 종목 수가 `")
                 .append(MAX_POSITIONS).append("`에 닿은 날. 신호가 한도에 막힌 날은 실행 결과에 기록이 없어 세지 못한다 `[추론]`. ")
                 .append("한도 키가 없는 프로필은 –.\n\n");
         sb.append("| 계좌 | 역할 | 진입 한도 도달 | 보유 한도 도달 | 거절 사유(건) |\n|---|---|---:|---:|---|\n");

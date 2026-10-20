@@ -14,11 +14,18 @@ class PrecheckMathTest {
         String[] q = {"0", "0.05", "0.1", "0.3"};
         int[] m4 = {83, 89, 96, 130};
         int[] m2 = {41, 45, 49, 68};
+        // m = 1·3(PR #210 strategy-researcher R1, 정확 이항으로 다시 센 값)
+        int[] m1 = {20, 23, 25, 36};
+        int[] m3 = {62, 67, 73, 100};
         for (int i = 0; i < q.length; i++) {
             assertThat(PrecheckMath.liveSeeds(new BigDecimal(q[i]), 4, 999)).as("q=" + q[i] + ", m=4")
                     .isEqualTo(OptionalInt.of(m4[i]));
             assertThat(PrecheckMath.liveSeeds(new BigDecimal(q[i]), 2, 999)).as("q=" + q[i] + ", m=2")
                     .isEqualTo(OptionalInt.of(m2[i]));
+            assertThat(PrecheckMath.liveSeeds(new BigDecimal(q[i]), 1, 999)).as("q=" + q[i] + ", m=1")
+                    .isEqualTo(OptionalInt.of(m1[i]));
+            assertThat(PrecheckMath.liveSeeds(new BigDecimal(q[i]), 3, 999)).as("q=" + q[i] + ", m=3")
+                    .isEqualTo(OptionalInt.of(m3[i]));
         }
         // q가 1에 가까우면 999 안에서 끝나지 않는다(R1)
         assertThat(PrecheckMath.liveSeeds(new BigDecimal("0.9"), 4, 999)).isEmpty();

@@ -372,27 +372,34 @@ class RecordingPrecheckTest {
                 new com.autotrade.sim.recording.RecordingPlan.ProfileRef("kr-orb-30", 1));
         assertThat(orb.parameters()).containsEntry(RecordingPrecheck.MAX_ENTRIES, "6")
                 .containsEntry(RecordingPrecheck.MAX_POSITIONS, "3");
-        // D1: 세 종목을 사 보유 3(한도 도달), 하나를 팔고 D2에 다시 사 보유 3(도달). 진입은 날마다 6건 미만
-        List<com.autotrade.sim.account.AppliedFill> fills = List.of(fill("005930", D1, com.autotrade.domain.order.Side.BUY),
-                fill("000660", D1, com.autotrade.domain.order.Side.BUY), fill("035720", D1, com.autotrade.domain.order.Side.BUY),
-                fill("035720", D1, com.autotrade.domain.order.Side.SELL), fill("035420", D2, com.autotrade.domain.order.Side.BUY));
+        // D1: 세 종목을 사 보유 3(한도 도달), 하나를 팔고 D2에 다시 사 보유 3(도달). D1 진입 주문 3건은 체결이 7개로
+        // 나뉘어도 3건이다(한도 6 미만, strategy-researcher M1). D2는 서로 다른 진입 주문 6건으로 한도에 닿는다
+        com.autotrade.domain.order.Side buy = com.autotrade.domain.order.Side.BUY;
+        List<com.autotrade.sim.account.AppliedFill> fills = new ArrayList<>(List.of(fill("005930", D1, buy, 1),
+                fill("005930", D1, buy, 1), fill("005930", D1, buy, 1), fill("000660", D1, buy, 1), fill("000660", D1, buy, 1),
+                fill("035720", D1, buy, 1), fill("035720", D1, buy, 1),
+                fill("035720", D1, com.autotrade.domain.order.Side.SELL, 1)));
+        for (int seq = 1; seq <= 6; seq++) {
+            fills.add(fill("035420", D2, buy, seq));
+        }
         List<com.autotrade.sim.run.OrderRejection> rejections = List.of(rejection("RISK_DAILY_LOSS"), rejection("CASH"),
                 rejection("CASH"));
         com.autotrade.sim.run.RunReport r = new com.autotrade.sim.run.RunReport(new com.autotrade.sim.RunResult("R",
                 new com.autotrade.domain.account.AccountId("R"), orb.profileHash(), 1L, com.autotrade.sim.RunStatus.FAILED,
                 Money.of(10_000_000L, Money.KRW), "시험(지표 없음)", null), orb, fills, List.of(), List.of(), rejections);
         RecordingPrecheck.Limits l = RecordingPrecheck.limits(r);
-        assertThat(l.entryDays()).isEqualTo("0일(한도 6)");
+        assertThat(l.entryDays()).isEqualTo("1일(한도 6)");
         assertThat(l.positionDays()).isEqualTo("2일(한도 3)");
         assertThat(l.rejections()).containsExactly(java.util.Map.entry("CASH", 2), java.util.Map.entry("RISK_DAILY_LOSS", 1));
     }
 
-    private static com.autotrade.sim.account.AppliedFill fill(String code, LocalDate date, com.autotrade.domain.order.Side side) {
+    private static com.autotrade.sim.account.AppliedFill fill(String code, LocalDate date, com.autotrade.domain.order.Side side,
+            int seq) {
         Symbol s = Symbol.krx(code);
         BigDecimal p = new BigDecimal("10000");
         Instant t = date.atTime(10, 0).atZone(KRX.zone()).toInstant();
         com.autotrade.sim.exchange.Fill f = new com.autotrade.sim.exchange.Fill(
-                com.autotrade.domain.order.IdempotencyKey.of(date, s, side, 1), 1, s, side,
+                com.autotrade.domain.order.IdempotencyKey.of(date, s, side, seq), 1, s, side,
                 side == com.autotrade.domain.order.Side.BUY ? com.autotrade.domain.order.OrderIntent.ENTRY
                         : com.autotrade.domain.order.OrderIntent.EXIT, 1, p,
                 com.autotrade.sim.cost.CostModels.krDefault(x -> com.autotrade.sim.cost.KrxBoard.KOSPI).fees(side, s, date, p, 1),
