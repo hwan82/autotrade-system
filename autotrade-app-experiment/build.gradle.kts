@@ -260,3 +260,33 @@ val runLiveJudgement by tasks.registering(JavaExec::class) {
         }
     })
 }
+
+// 감시 종목 후보 뽑기(ADR-012 배치표 0번): ./gradlew :autotrade-app-experiment:runWatchlistCandidates -Psnapshot=<일봉 스냅샷 ID>
+//     -Pkeep=<꼭 넣을 종목 쉼표 목록> -Ptotal=100 -Pout=<출력 파일> [-PsnapshotsDir=폴더] [-PallowDuringSession] [-Pheap=6g]
+// 스냅샷 마지막 거래일에 selections/kr-watchlist-turnover@1(20거래일 평균 거래대금 상위 보통주)을 계산해 꼭 넣을 종목 + 순위로
+// total종목 코드 목록을 출력 파일에 쓴다. watchlist.json은 바꾸지 않는다(시작 점검표 상자가 만든다).
+val runWatchlistCandidates by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "거래대금 상위 감시 종목 후보 목록을 수집 스냅샷에서 뽑아 파일에 쓴다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "6g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val snapshot = providers.gradleProperty("snapshot")
+    val keep = providers.gradleProperty("keep")
+    val total = providers.gradleProperty("total")
+    val out = providers.gradleProperty("out")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
+    argumentProviders.add(CommandLineArgumentProvider {
+        buildList {
+            add("watchlist")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            add(repoRoot.absolutePath)
+            add(snapshot.orNull ?: throw GradleException("-Psnapshot=<일봉 스냅샷 ID>가 필요합니다"))
+            add(keep.orNull ?: "-")
+            add(total.orNull ?: "100")
+            add(out.orNull ?: throw GradleException("-Pout=<출력 파일>이 필요합니다"))
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
+        }
+    })
+}

@@ -80,6 +80,7 @@
 | (가) 재무 4조건 | `selections/kr-fin-quality-growth/v1.yaml` | POSITION, 주간 | 영업이익률 증가율(3년) ≥ 0.5, 자산 증가율(3년) ≥ 0.3, 시가총액 ≥ 3,000억, 부채비율 ≤ 1.5, 보통주(`STOCK`) | 영업이익률 증가율 큰 순, 50종목 |
 | (나) 거래량 급증·가격 정체 | `selections/kr-vol-surge-quiet/v1.yaml` | SWING, 매일 | 20거래일 거래량 비율 ≥ 3.0, 20거래일 수익률 < 0.03(하락 포함), `STOCK` | 거래량 비율 큰 순, 30종목 |
 | (다) 전일 관심 종목 | `selections/kr-intraday-hot/v1.yaml` | INTRADAY, 장전 매일(`PRE_OPEN_DAILY`) | 전일 거래대금(`avg-turnover` w1) ≥ 100억, 전일 거래량 급증(`volume-spike` w20) ≥ 2, 전일 등락률(`return` w1) 0.03 이상 0.25 이하, `STOCK`, c 종가 ≥ 1,000원, 21거래일 일봉 | 전일 거래대금 큰 순, 20종목 |
+| (감시 후보, 매매용 아님) | `selections/kr-watchlist-turnover/v1.yaml` | INTRADAY, 장전 매일 | 20거래일 평균 거래대금(`avg-turnover` w20) ≥ 10억, `STOCK`, c 종가 ≥ 1,000원, 20거래일 일봉 | 20거래일 평균 거래대금 큰 순, 200종목. `runWatchlistCandidates`만 쓴다(D-122) |
 
 (다)의 수치는 ADR-012 3.3의 `[가정]` 출발값이다(상한 0.25는 국내 가격제한폭 ±30% 기준. 2015-06-15 시행 `[사실]`, `KrxMarketRules`. 그 전 ±15% 구간에서는 이 상한이 아무것도 거르지 않는다). 실시간 모의 등록 전에 선정 엣지 일봉 사전 검사(ADR-012 배치표 2b)를 거친다.
 

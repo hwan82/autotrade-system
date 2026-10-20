@@ -18,7 +18,7 @@ import java.util.stream.Stream;
  * 이전 형식 {@value #FORMAT_V1}(명령 전체 실험 수 {@code experiments-planned} 없음)도 읽는다(D-098). 그때 전체 실험 수는 0(모름).
  *
  * @param job 작업 ID = 실험 ID(결과 폴더 이름)
- * @param command 실행 명령 종류(combination, recording, study, walkforward, live-check, live-weekly, live-judge, live-prepare)
+ * @param command 실행 명령 종류(combination, recording, study, walkforward, live-check, live-weekly, live-judge, live-prepare, watchlist)
  * @param state 작업 상태
  * @param pid 실행 명령 프로세스 ID(표시용. 실험실은 이 값으로 프로세스에 아무것도 하지 않는다)
  * @param startedAt 시작 시각
@@ -56,7 +56,8 @@ public record ExperimentJobStatus(
 
     /** 실행 명령 종류. */
     public static final List<String> COMMANDS =
-            List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly", "live-judge", "live-prepare");
+            List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly", "live-judge",
+                    "live-prepare", "watchlist");
 
     /** 작업 상태. 끝난 상태는 실행 명령의 종료 코드에 대응한다. */
     public enum State {
