@@ -121,7 +121,7 @@ BEGIN
     EXCEPTION WHEN check_violation THEN
         RAISE NOTICE 'ok: intraday weekly refresh rejected';
     END;
-    -- V3 장중 순위 선정(D-125): 단타 ⇔ 단타용 갱신 주기 집합, INTRADAY_AT ⇔ at
+    -- V3 장중 순위 선정(D-127): 단타 ⇔ 단타용 갱신 주기 집합, INTRADAY_AT ⇔ at
     INSERT INTO selection_profile VALUES (repeat('7', 64), 'kr-intraday-turnover-30m', 1, 'KRX', 'INTRADAY', 'INTRADAY_AT',
                                           '{"max-symbols":"10","at":"09:30"}', now());
     RAISE NOTICE 'ok: intraday-at selection accepted';

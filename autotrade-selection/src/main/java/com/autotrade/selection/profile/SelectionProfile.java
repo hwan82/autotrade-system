@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  *   <li>{@code refresh}(필수): {@link SelectionRefresh} 이름. 스타일과 맞아야 한다</li>
  *   <li>{@code max-symbols}(필수): 1 이상 정수. 선정 결과 종목 수 상한</li>
  *   <li>{@code at}({@link SelectionRefresh#INTRADAY_AT}만 필수, 다른 갱신 주기에는 거부): 장중 순위 시각 {@code HH:mm}(거래소 현지).
- *       정규장 시작 뒤 ~ 접속 매매 끝 이내(KRX 09:01~15:20, 미국 09:31~16:00)여야 한다(D-125)</li>
+ *       정규장 시작 뒤 ~ 접속 매매 끝 이내(KRX 09:01~15:20, 미국 09:31~16:00)여야 한다(D-127)</li>
  * </ul>
  *
  * <p>{@link #selectionHash()}는 전략 프로필 해시와 같은 길이 접두 인코딩의 SHA-256이고, 첫 줄에

@@ -74,7 +74,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final SelectionSource selections;
     private final int warmupDays;
     private final boolean settleAtWindowEnd;
-    /** 장중 순위 선정 입력 범위(D-125). 장중 순위 선정 조합이 없으면 null이어도 된다. */
+    /** 장중 순위 선정 입력 범위(D-127). 장중 순위 선정 조합이 없으면 null이어도 된다. */
     private IntradayUniverse intradayUniverse;
 
     /**
@@ -170,7 +170,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     }
 
     /**
-     * 장중 순위 선정({@code INTRADAY_AT}) 조합의 입력 범위(등록 파일 boards·blacklist)를 정한다(D-125). 실행 전에 한 번 부른다. 장중
+     * 장중 순위 선정({@code INTRADAY_AT}) 조합의 입력 범위(등록 파일 boards·blacklist)를 정한다(D-127). 실행 전에 한 번 부른다. 장중
      * 순위 선정 조합이 있는데 정하지 않으면 실험을 시작하지 않는다.
      *
      * @return 이 실행기
@@ -338,7 +338,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size()
                     + " > " + MAX_COMBINATIONS);
         }
-        // 장중 순위 선정(INTRADAY_AT)은 공급자 없이 시세로 정한다(D-125). 장전 선정이 있을 때만 공급자가 필요하다
+        // 장중 순위 선정(INTRADAY_AT)은 공급자 없이 시세로 정한다(D-127). 장전 선정이 있을 때만 공급자가 필요하다
         boolean daily = spec.combinations().stream().anyMatch(c -> c.selection()
                 .filter(sel -> sel.refresh() != SelectionRefresh.INTRADAY_AT).isPresent());
         if (daily && selections == null) {
@@ -492,7 +492,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             return schedule;
         }
         // 장중 순위 선정은 실험 기간 이벤트를 순번 순서로 한 번 읽어 정한다. 실시간 모의가 계좌에 주기 직전에 같은 추적기를 돌리는
-        // 것과 같은 값이 나온다(D-125)
+        // 것과 같은 값이 나온다(D-127)
         for (MarketEvent e : events) {
             tracker.onEvent(e);
         }
@@ -627,7 +627,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                     ? SelectionSchedule.compute(spec.combinations(), scan.dates, selections, gate::check)
                     : SelectionSchedule.empty();
             if (tracker != null && spec.hasSelections()) {
-                schedules[l] = schedules[l].withIntraday(tracker); // 첫 번째 읽기에서 다 받았다(D-125)
+                schedules[l] = schedules[l].withIntraday(tracker); // 첫 번째 읽기에서 다 받았다(D-127)
             }
         }
         Progress progress = new Progress(gate, progressId, total, scan.dayChanges);

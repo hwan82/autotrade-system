@@ -17,7 +17,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
-/** 장중 순위 선정 계산(D-125) 골든 테스트: 손 계산 값, 경계값, 순위 자르기, 결측·누락 사유, 내용 해시 결정론. */
+/** 장중 순위 선정 계산(D-127) 골든 테스트: 손 계산 값, 경계값, 순위 자르기, 결측·누락 사유, 내용 해시 결정론. */
 class SessionSelectionCalculatorTest {
 
     private static final LocalDate D = LocalDate.of(2026, 10, 14);

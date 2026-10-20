@@ -25,7 +25,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * 장중 순위 선정 추적기(D-125): 정규장 시작 ~ at 전 boards 체결만 모으고, at 이상 첫 이벤트(누락 표시 제외)에서 그 이벤트를 넣기 전
+ * 장중 순위 선정 추적기(D-127): 정규장 시작 ~ at 전 boards 체결만 모으고, at 이상 첫 이벤트(누락 표시 제외)에서 그 이벤트를 넣기 전
  * 순위를 매긴다. 늦게 온 at 전 체결·장전 체결·boards 밖 체결은 넣지 않고, 정규장 누락 종목은 SESSION_GAP, blacklist는 메우지 않고 뺀다.
  *
  * <p>손 계산(예시 (마): session-return 0.01~0.15, session-turnover 내림차순, 최대 10종목)

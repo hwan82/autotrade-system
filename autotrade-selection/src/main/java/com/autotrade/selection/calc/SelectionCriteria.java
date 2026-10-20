@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
  * score.metric / score.window / score.years / score.order(DESC|ASC)   선택: 순위 지표
  * </pre>
  *
- * <p>장중 순위 선정({@code refresh: INTRADAY_AT}, D-125)은 장중 지표({@link Metric.Kind#SESSION})만 쓰고 {@code filter.*}를 받지
+ * <p>장중 순위 선정({@code refresh: INTRADAY_AT}, D-127)은 장중 지표({@link Metric.Kind#SESSION})만 쓰고 {@code filter.*}를 받지
  * 않는다(유니버스가 등록 파일 boards라 상품 유형·가격·일봉 일수 필터의 입력이 없음). 자격 조건이나 순위 지표가 하나 이상 있어야
  * 한다. 다른 갱신 주기는 장중 지표를 쓸 수 없다(일봉 계산기에 장중 입력이 없음).
  *
@@ -286,7 +286,7 @@ public record SelectionCriteria(
         return out;
     }
 
-    /** 장중 지표는 장중 순위 선정에만, 장중 순위 선정은 장중 지표만 쓴다(D-125). */
+    /** 장중 지표는 장중 순위 선정에만, 장중 순위 선정은 장중 지표만 쓴다(D-127). */
     private static void requireSession(SelectionProfile profile, String prefix, Metric metric, boolean intradayAt) {
         boolean session = metric.kind() == Metric.Kind.SESSION;
         if (session && !intradayAt) {

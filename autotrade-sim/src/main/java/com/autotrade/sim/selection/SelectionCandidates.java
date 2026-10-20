@@ -53,7 +53,7 @@ public record SelectionCandidates(List<String> candidates, List<Excluded> exclud
         return of(result.selected(), boards, blacklist);
     }
 
-    /** 선정 순위 목록으로 만든다(장중 순위 선정 결과도 같은 규칙, D-125). */
+    /** 선정 순위 목록으로 만든다(장중 순위 선정 결과도 같은 규칙, D-127). */
     public static SelectionCandidates of(List<SelectionResult.Selected> selected, Set<String> boards,
             Set<String> blacklist) {
         List<String> candidates = new ArrayList<>();

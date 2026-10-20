@@ -86,7 +86,7 @@ public final class SelectionCalculator {
             throw new IllegalArgumentException("선정 프로필과 데이터의 시장이 다릅니다: " + profile.market() + " ≠ " + data.market());
         }
         if (profile.refresh() == SelectionRefresh.INTRADAY_AT) {
-            // 장중 순위 선정은 일봉 스냅샷이 아니라 그날 입력 기록으로 계산한다(SessionSelectionCalculator, D-125)
+            // 장중 순위 선정은 일봉 스냅샷이 아니라 그날 입력 기록으로 계산한다(SessionSelectionCalculator, D-127)
             throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT)은 일봉 선정 계산기로 계산하지 않습니다(녹화 실험·실시간 모의만): "
                     + profile.key());
         }

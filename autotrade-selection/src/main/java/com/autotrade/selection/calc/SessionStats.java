@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.util.Objects;
 
 /**
- * 한 종목의 장중 순위 구간(그날 정규장 시작 ~ 순위 시각 {@code at} 전) 체결 요약(D-125). 장중 지표({@link Metric.Kind#SESSION})의
+ * 한 종목의 장중 순위 구간(그날 정규장 시작 ~ 순위 시각 {@code at} 전) 체결 요약(D-127). 장중 지표({@link Metric.Kind#SESSION})의
  * 입력이다. 체결이 하나도 없는 종목은 이 값을 두지 않는다(지표 NO_DATA).
  *
  * @param first 구간 첫 체결가(보통 시가 단일가 체결)

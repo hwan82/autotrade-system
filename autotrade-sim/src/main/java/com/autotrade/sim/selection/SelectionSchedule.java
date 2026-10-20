@@ -31,7 +31,7 @@ public final class SelectionSchedule implements SelectionDays {
 
     /** 선정 해시 → (거래일 → 판정). */
     private final Map<String, NavigableMap<LocalDate, SelectionDay>> days;
-    /** 장중 순위 선정 판정(D-125). 다 읽은 뒤에만 넘겨받으므로 이후 바뀌지 않는다. 없으면 null. */
+    /** 장중 순위 선정 판정(D-127). 다 읽은 뒤에만 넘겨받으므로 이후 바뀌지 않는다. 없으면 null. */
     private final IntradayTracker intraday;
 
     private SelectionSchedule(Map<String, NavigableMap<LocalDate, SelectionDay>> days, IntradayTracker intraday) {
@@ -73,7 +73,7 @@ public final class SelectionSchedule implements SelectionDays {
             Runnable checkpoint) {
         Objects.requireNonNull(checkpoint, "checkpoint");
         // 선정 해시 순으로 처리해 공급자 호출 순서가 조합 목록 순서와 무관하게 정해진다. 장중 순위 선정은 공급자가 아니라
-        // 이벤트로 정하므로 건너뛴다({@link #withIntraday}, D-125)
+        // 이벤트로 정하므로 건너뛴다({@link #withIntraday}, D-127)
         TreeMap<String, SelectionProfile> selections = new TreeMap<>();
         for (Combination c : combinations) {
             c.selection().filter(s -> s.refresh() != SelectionRefresh.INTRADAY_AT)

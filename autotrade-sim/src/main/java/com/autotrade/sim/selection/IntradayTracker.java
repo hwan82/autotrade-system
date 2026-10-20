@@ -28,7 +28,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
- * 장중 순위 선정({@code INTRADAY_AT}, ADR-012 5.2 2차-a, D-125)을 시세 이벤트 흐름 위에서 정한다. 이벤트를 순번 순서대로 한 번씩
+ * 장중 순위 선정({@code INTRADAY_AT}, ADR-012 5.2 2차-a, D-127)을 시세 이벤트 흐름 위에서 정한다. 이벤트를 순번 순서대로 한 번씩
  * 받는다({@link #onEvent}). 실시간 모의는 계좌에 주기 직전에, 리플레이 실행기는 Run을 시작하기 전 한 번 읽기에서 같은 이벤트를 같은
  * 순서로 주므로 두 쪽의 순위와 적용 시작 순번이 같다.
  *

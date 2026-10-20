@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 장중 순위 선정({@code INTRADAY_AT}) 하루의 결과(ADR-012 5.2, D-125, 스키마 {@value #SCHEMA}). 일봉 선정 결과
+ * 장중 순위 선정({@code INTRADAY_AT}) 하루의 결과(ADR-012 5.2, D-127, 스키마 {@value #SCHEMA}). 일봉 선정 결과
  * ({@link SelectionResult})와 달리 입력이 스냅샷이 아니라 그날 입력 기록의 체결이라 {@code inputs} 칸이 없고 순위 시각 {@code at}을
  * 담는다. 적용 범위는 {@code date} 하루, 그중 {@code at} 뒤 첫 이벤트부터다(그 이벤트 순번은 결과가 아니라 실행 기록에 남는다).
  *

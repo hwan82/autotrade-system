@@ -100,7 +100,7 @@ public final class LiveSession implements AutoCloseable {
     /** 선정 조합 계좌의 고정 파일·적용 기록. 선정 계좌가 없으면 null(지금까지와 같은 경로). */
     private final SessionSelections selections;
     private final LiveSelectionDays selectionDays;
-    /** 장중 순위 선정 추적기(D-125). 계좌에 주기 직전에 같은 이벤트를 준다. 장중 순위 선정 계좌가 없으면 null. */
+    /** 장중 순위 선정 추적기(D-127). 계좌에 주기 직전에 같은 이벤트를 준다. 장중 순위 선정 계좌가 없으면 null. */
     private final IntradayTracker intraday;
     /** 적용 기록을 쓴(또는 읽은) 마지막 거래일. */
     private LocalDate appliedDay;
@@ -349,7 +349,7 @@ public final class LiveSession implements AutoCloseable {
         }
         if (intraday != null) {
             // 장중 순위는 계좌보다 먼저 이 이벤트를 본다. 순위 시각 이벤트면 여기서 순위가 정해지고 계좌는 이 이벤트부터 후보에
-            // 신규 진입할 수 있다. 리플레이 실행기도 같은 순서로 같은 추적기를 돌린다(D-125)
+            // 신규 진입할 수 있다. 리플레이 실행기도 같은 순서로 같은 추적기를 돌린다(D-127)
             intraday.onEvent(e);
         }
         if (e instanceof TradeTick t && t.symbol().equals(setup.benchmark())) {
@@ -464,7 +464,7 @@ public final class LiveSession implements AutoCloseable {
      * @param restored 시작 때 기록으로 되살린 이벤트 수
      * @param failures 계좌마다 실패 이유(정상이면 빈 문자열)
      * @param selections 선정 조합 계좌가 있으면 마지막으로 적용한 거래일의 적용 기록(D-124). 없으면 null
-     * @param intraday 장중 순위 선정마다 기록 중인 거래일의 상태(D-125). 없으면 빈 목록
+     * @param intraday 장중 순위 선정마다 기록 중인 거래일의 상태(D-127). 없으면 빈 목록
      */
     public record Status(String experimentId, LocalDate from, LocalDate to, long events, long restored,
             long skippedSymbol, long skippedRange, int dataGaps, Instant lastEventAt, LocalDate journalDate,
@@ -478,7 +478,7 @@ public final class LiveSession implements AutoCloseable {
     }
 
     /**
-     * 장중 순위 선정 하나의 오늘 상태(화면용, D-125).
+     * 장중 순위 선정 하나의 오늘 상태(화면용, D-127).
      *
      * @param state {@code AWAITING}(순위 시각 전, 신규 진입 0건) 또는 {@code RANKED}
      * @param candidates 순위를 매겼으면 신규 진입 후보(순위순), 아니면 빈 목록
@@ -603,7 +603,7 @@ public final class LiveSession implements AutoCloseable {
         @Override
         public SelectionDay day(String selectionHash, LocalDate date) {
             if (intraday != null && intraday.tracks(selectionHash)) {
-                return intraday.day(selectionHash, date); // 순위 시각 전이면 계좌가 이벤트마다 다시 묻는다(D-125)
+                return intraday.day(selectionHash, date); // 순위 시각 전이면 계좌가 이벤트마다 다시 묻는다(D-127)
             }
             return byDay.computeIfAbsent(date, d -> SelectionSchedule.compute(spec.combinations(), List.of(d),
                     files == null ? null : files.source())).day(selectionHash, date);

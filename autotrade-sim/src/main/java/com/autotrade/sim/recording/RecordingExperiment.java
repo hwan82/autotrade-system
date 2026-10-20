@@ -175,7 +175,7 @@ public final class RecordingExperiment {
         List<SelectionProfile> dailySelections = selectionProfiles(selected);
         SelectionStage stage = dailySelections.isEmpty() ? null
                 : SelectionStage.prepare(plan, dailySelections, data, calendar, snapshotsRoot, code, log, gate);
-        // 장중 순위 선정은 실행기가 녹화 이벤트로 정한다. 결과 폴더에 남길 결과는 같은 추적기를 한 번 더 돌려 만든다(순수 계산, D-125)
+        // 장중 순위 선정은 실행기가 녹화 이벤트로 정한다. 결과 폴더에 남길 결과는 같은 추적기를 한 번 더 돌려 만든다(순수 계산, D-127)
         IntradayUniverse intradayUniverse = new IntradayUniverse(plan.boards().keySet(), java.util.Set.copyOf(plan.blacklist()),
                 rules);
         List<IntradayTracker.Ranked> intraday = intradayResults(selected, intradayUniverse, data.events(), log);
@@ -329,7 +329,7 @@ public final class RecordingExperiment {
 
     /**
      * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-124). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})과
-     * 장중 순위 선정({@code INTRADAY_AT}, D-125)만 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다
+     * 장중 순위 선정({@code INTRADAY_AT}, D-127)만 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다
      * (ADR-007 2.1). 장전 선정이 있으면 {@code selection-input.daily}가 있어야 한다.
      */
     public static List<Combination> selectionCombinations(Path repoRoot, RegisteredSelections selections,
@@ -351,7 +351,7 @@ public final class RecordingExperiment {
         return out;
     }
 
-    /** 조합들의 장전 선정 프로필(선정 해시마다 하나, 해시순). 장중 순위 선정은 고정 파일을 쓰지 않으므로 뺀다(D-125). */
+    /** 조합들의 장전 선정 프로필(선정 해시마다 하나, 해시순). 장중 순위 선정은 고정 파일을 쓰지 않으므로 뺀다(D-127). */
     public static List<SelectionProfile> selectionProfiles(List<Combination> combinations) {
         TreeMap<String, SelectionProfile> out = new TreeMap<>();
         for (Combination c : combinations) {
@@ -516,7 +516,7 @@ public final class RecordingExperiment {
         sb.append("determinism: \"").append(determinism).append("\"\n");
         sb.append("detail-sha256: ").append(sha256(detail)).append('\n');
         if (!plan.selections().isEmpty() && plan.selections().daily().isPresent()) {
-            // 장중 순위 선정만 있으면 선정 입력·적용 기록이 없다(D-125). 그 결과는 intradayInputs가 따로 쓴다
+            // 장중 순위 선정만 있으면 선정 입력·적용 기록이 없다(D-127). 그 결과는 intradayInputs가 따로 쓴다
             selectionInputs(sb, plan.selections(), applied);
         }
         return sb.toString();
@@ -646,7 +646,7 @@ public final class RecordingExperiment {
         }
     }
 
-    /** inputs.yaml의 장중 순위 선정 칸(D-125): 날짜·선정별 결과 해시·후보·적용 시작 순번. 없으면 빈 문자열. */
+    /** inputs.yaml의 장중 순위 선정 칸(D-127): 날짜·선정별 결과 해시·후보·적용 시작 순번. 없으면 빈 문자열. */
     static String intradayInputs(List<IntradayTracker.Ranked> intraday) {
         if (intraday.isEmpty()) {
             return "";
@@ -667,7 +667,7 @@ public final class RecordingExperiment {
         return sb.toString();
     }
 
-    /** results.md의 장중 순위 선정 표(D-125). 순위를 매기지 못한 날(순위 시각 전 녹화가 끝남)은 표에 없고 신규 진입 0이다. */
+    /** results.md의 장중 순위 선정 표(D-127). 순위를 매기지 못한 날(순위 시각 전 녹화가 끝남)은 표에 없고 신규 진입 0이다. */
     static String intradayResultsTable(SimulationReport report, List<IntradayTracker.Ranked> intraday) {
         if (intraday.isEmpty()) {
             return "";
@@ -679,7 +679,7 @@ public final class RecordingExperiment {
                         Integer::sum);
             }
         }
-        StringBuilder sb = new StringBuilder("\n## 장중 순위 선정(D-125)\n\n");
+        StringBuilder sb = new StringBuilder("\n## 장중 순위 선정(D-127)\n\n");
         sb.append("> 그날 정규장 시작 ~ 순위 시각 전에 받은 boards 체결로 순위를 매기고, 순위 시각 이후 첫 이벤트부터 후보에 신규 진입한다. "
                 + "후보 = 선정 결과 − blacklist(메우지 않음). boards 안 순위라 시장 전체 순위가 아니다(ADR-012 5.2).\n\n");
         sb.append("| 날짜 | 선정 | 순위 시각 | 선정 수 | 후보 | BLACKLISTED | 적용 시작 순번 | 막힌 신규 진입 |\n");

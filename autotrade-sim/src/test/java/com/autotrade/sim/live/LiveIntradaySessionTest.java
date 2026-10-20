@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 실시간 모의의 장중 순위 선정 계좌(D-125, ADR-012 5.2 2차-a): 그날 09:30 전 받은 체결로 boards 안 순위를 매기고, 순위를 매긴
+ * 실시간 모의의 장중 순위 선정 계좌(D-127, ADR-012 5.2 2차-a): 그날 09:30 전 받은 체결로 boards 안 순위를 매기고, 순위를 매긴
  * 이벤트부터 후보만 새로 산다. 장 중간 재기동과 리플레이 확인은 같은 기록으로 같은 순위·같은 계좌를 낸다. 선정 입력(selection-input)
  * 없이 등록한다. 선정이 없는 계좌는 선정 계좌를 더해도 결과가 같다.
  */
@@ -206,7 +206,7 @@ class LiveIntradaySessionTest {
     @Test
     void restartBeforeAtMarksEveryBoardSymbolAsGap() throws Exception {
         // 실험실이 꺼져 있던 동안 받지 못한 체결이 있을 수 있어 재기동 공백 표시가 boards 전 종목에 붙는다. 그날 순위는 SESSION_GAP으로
-        // 후보 0(신규 진입 0)이 된다. 값을 믿을 수 없는 순위로 사지 않는다(D-125)
+        // 후보 0(신규 진입 0)이 된다. 값을 믿을 수 없는 순위로 사지 않는다(D-127)
         Path sessions = tmp.resolve("live-sessions");
         experimentDir(tmp, true);
         List<MarketEvent> events = events();

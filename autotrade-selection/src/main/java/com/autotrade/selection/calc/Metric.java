@@ -39,7 +39,7 @@ public enum Metric {
     DISCLOSURE_COUNT("disclosure-count", Kind.DISCLOSURE, Param.WINDOW),
     /**
      * 장중 누적 거래대금: 그날 정규장 시작부터 순위 시각 {@code at} 전까지 받은 체결의 가격 × 수량 합(원가격, 원). 체결이 없으면
-     * NO_DATA({@code INTRADAY_AT} 선정만, ADR-012 5.2, D-125).
+     * NO_DATA({@code INTRADAY_AT} 선정만, ADR-012 5.2, D-127).
      */
     SESSION_TURNOVER("session-turnover", Kind.SESSION, Param.NONE),
     /** 장중 수익률: 구간 마지막 체결가 ÷ 구간 첫 체결가(보통 시가) − 1. 체결이 없으면 NO_DATA({@code INTRADAY_AT}만). */

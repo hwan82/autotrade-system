@@ -128,7 +128,7 @@ public final class RunStepper {
         if (!d.equals(day) && combination.hasSelection()) {
             state.openSelectionDay(schedule.day(combination.selectionHashOrNone(), d));
         } else if (state.selectionDay != null && state.selectionDay.awaiting()) {
-            // 장중 순위 선정의 순위 시각 전: 이벤트마다 다시 묻는다. 실시간 모의는 이 이벤트 앞에서 순위가 정해졌을 수 있다(D-125).
+            // 장중 순위 선정의 순위 시각 전: 이벤트마다 다시 묻는다. 실시간 모의는 이 이벤트 앞에서 순위가 정해졌을 수 있다(D-127).
             // 막은 신규 진입 수는 그대로 이어 센다
             state.selectionDay = schedule.day(combination.selectionHashOrNone(), d);
         }

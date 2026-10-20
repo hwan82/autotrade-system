@@ -63,7 +63,7 @@ public record RegisteredSelections(List<Entry> entries, Optional<String> daily, 
         entries = List.copyOf(entries);
         Objects.requireNonNull(daily, "daily");
         Objects.requireNonNull(financials, "financials");
-        // 일봉 스냅샷이 필요한지는 선정 프로필을 읽은 뒤 안다(장중 순위 선정만 있으면 필요 없음, D-125): requireInputs
+        // 일봉 스냅샷이 필요한지는 선정 프로필을 읽은 뒤 안다(장중 순위 선정만 있으면 필요 없음, D-127): requireInputs
         if (entries.isEmpty() && (daily.isPresent() || financials.isPresent())) {
             throw new IllegalArgumentException("selection-input은 selections가 있을 때만 씁니다");
         }
@@ -71,7 +71,7 @@ public record RegisteredSelections(List<Entry> entries, Optional<String> daily, 
 
     /**
      * 읽은 선정 프로필로 입력을 확인한다. 장전 선정({@code PRE_OPEN_DAILY})이 있으면 {@code selection-input.daily}가 필요하고,
-     * 장중 순위 선정({@code INTRADAY_AT})만 있으면 {@code selection-input}을 쓰지 않는다(입력 기록만 씀, D-125).
+     * 장중 순위 선정({@code INTRADAY_AT})만 있으면 {@code selection-input}을 쓰지 않는다(입력 기록만 씀, D-127).
      *
      * @param dailySelections 장전 선정이 하나 이상 있는지
      */

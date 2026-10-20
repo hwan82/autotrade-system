@@ -191,7 +191,7 @@ class RecordingSelectionTest {
 
     @Test
     void intradayAtSelectionRanksFromRecordedEventsWithoutSnapshot() throws IOException {
-        // 장중 순위 선정(D-125): 선정 입력 없이 녹화 이벤트로 그날 09:30 순위를 매기고, 결과 폴더에 결과를 남긴다
+        // 장중 순위 선정(D-127): 선정 입력 없이 녹화 이벤트로 그날 09:30 순위를 매기고, 결과 폴더에 결과를 남긴다
         Path recordings = tmp.resolve("recordings");
         FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
         String intraday = """
@@ -215,7 +215,7 @@ class RecordingSelectionTest {
         });
         assertThat(out.files().get("inputs.yaml")).contains("determinism: \"같음(").doesNotContain("selection-input:")
                 .contains("intraday-selections:").contains("active-from-seq: ");
-        assertThat(out.files().get("results.md")).contains("## 장중 순위 선정(D-125)").doesNotContain("## 선정(D-124)");
+        assertThat(out.files().get("results.md")).contains("## 장중 순위 선정(D-127)").doesNotContain("## 선정(D-124)");
         assertThat(out.files().keySet()).filteredOn(k -> k.endsWith(".intraday.json"))
                 .hasSize(sel.selectionDays().size())
                 .allSatisfy(k -> assertThat(out.files().get(k)).contains("\"kind\":\"session-selection-result\""));
