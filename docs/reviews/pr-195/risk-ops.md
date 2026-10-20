@@ -35,3 +35,36 @@
 수정 필요(R1)
 
 - 범위 메모: 이 원문을 push하려 할 때 브랜치에 `f1a960d`(architect R1·R2·M1·M2 반영, `WatchlistCommandTest.java` 추가 등 12파일)가 새로 올라와 있었다. 그 커밋은 이 검토에 들어가지 않았다. R1이 그 커밋으로 풀렸는지는 재검토로 판정한다.
+
+## 재검토 2026-10-20
+- 대상: PR #195 / 커밋 `ba8b409`(앞 검토 뒤 `f1a960d`·`895cb29`·`ba8b409`, 그 사이 architect 원문 `a219088`) / `git diff origin/main...ba8b409` 전체. 앞 검토 대비 바뀐 것은 `git diff bf420b0 ba8b409`로 따로 봤다(검토 원문 빼고 12파일).
+- 점검표: A
+- 직접 실행한 것:
+  - 별도 worktree(`git worktree add --detach … origin/claude/project-thread-62fag0` = `ba8b409`, 커밋 안 된 변경 없음)에서 `./gradlew --init-script <scratchpad>/mirror.gradle build` → **BUILD SUCCESSFUL**(3분 59초). 새 worktree라 모든 테스트가 실제로 돌았다.
+  - 테스트 결과 XML 집계(실패·오류·건너뜀 0): `:autotrade-risk:test` 55, `:autotrade-architecture-test:test` 46, `:autotrade-app-engine:test` 68, `:autotrade-sim:test` 363, `:autotrade-app-experiment:test` 47(새 `WatchlistCommandTest` 5건 포함), `:autotrade-app-gateway:test` 55.
+  - 런북 N1 확인 명령의 전제를 코드로 확인함: 녹화 파일 이름 `events.jsonl.gz`(`RecordingLayout.java:14`), 줄 모양 `"sym":"KRX:005930"`(`RecordingCodec.java:26,48`), gzip `syncFlush`와 약 1초마다 `flush`(`DayWriter.java:34-35,113`, `MarketEventRecorder.java:155`). 그래서 쓰는 중인 파일을 장중에 읽어도 1초 전까지의 줄이 보인다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 앞 검토와 같음. 추가 커밋도 `autotrade-risk`·`autotrade-control`·`autotrade-config`를 건드리지 않음. `:autotrade-risk:test` 55건 통과 |
+| A2 | 통과 | 추가 커밋에 주문 경로 참조 없음. `:autotrade-architecture-test:test` 46건 통과, 해당 모듈 변경 없음 |
+| A3 | 해당 없음 | 주문 경로 변경 없음(앞 검토와 같음) |
+| A4 | 해당 없음 | 주문·타임아웃 경로 변경 없음 |
+| A5 | 해당 없음 | 주문 생성 경로 변경 없음 |
+| A6 | 통과 | 앞 검토와 같음. 런북 4.1 4번 추가 확인 명령은 녹화 파일을 읽기만 하고 `watchlist.json`·블랙리스트를 바꾸지 않음. 되돌리기는 기존 `before-wide` 복사본(`held` 그대로)으로만 함 |
+| A7 | 해당 없음 | 주문 큐·토큰 버킷 변경 없음 |
+| A8 | 통과 | `ExperimentMain.dispatch`가 이제 실험 명령이 정한 `configDir`을 넘김(`ExperimentMain.java` `case "watchlist"`, `WatchlistCandidatesMain.run(String[], Path, RunGate)`). 정지 요청 폴더와 스냅샷 기본 폴더가 같은 설정 폴더에서 나온다(앞 N3 해소). 작업 잠금·장 시간 보호·정지 요청을 진입점에서 거치는 것이 시험으로 고정됨(아래 A11) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절·`SourcePlanner` 보유 우선 규칙 변경 없음 |
+| A10 | 통과 | 추가 diff에 키·계좌번호·토큰 없음. 실패 로그는 `e.getMessage()`인데 이 명령은 증권사·비밀값을 읽지 않는다(스냅샷 파일·선정 프로필만) |
+| A11 | 통과 | 앞 R1 해소. `WatchlistCommandTest`(운영 진입점 `ExperimentMain.run`): `장_시간과_정지_요청에는_시작하지_않고_파일을_쓰지_않는다`(장 시간 4, 정지 요청 파일 있으면 `--allow-during-session`이어도 4, 출력 파일 없음), `같은_작업이_돌고_있으면_입력_오류로_거절하고_파일을_쓰지_않는다`(같은 ID 작업이 있으면 1·파일 없음), `작업_ID는_고정이다`(`WATCHLIST-CANDIDATES`), `장_밖에는_끝까지_돌아_목록_파일을_쓰고_작업_상태를_남긴다`(COMPLETED), `없는_스냅샷이면_입력_오류로_끝나고_파일을_쓰지_않는다`(INPUT_ERROR) 5건 모두 통과. 보호 테스트 삭제·약화·고정 값 갱신 없음. `catch (IOException \| RuntimeException)`으로 넓혔지만 `ExperimentStoppedException`(RuntimeException 하위, `ExperimentStoppedException.java:7`)을 먼저 잡으므로 정지 4가 1로 바뀌지 않는다(`WatchlistCandidatesMainTest#정지_확인이_멈추라면_파일을_쓰지_않고_4로_끝난다` 통과) |
+| A12 | 통과 | 장애표 17종·O1~O8·장애 테스트 8종 전제 변경 없음. 런북 4.1 4번에 "거절 없이 LIVE01 종목이 빠지는 경우" 확인과 되돌리기가 더해졌다(앞 N1 해소). 장중 되돌리기의 게이트웨이 재기동은 기존 #9 처리(녹화 `RECORDER_RESTART`, 실험실 `DISCONNECTED` 공백)를 따르고 실전 엔진은 게이트웨이 시세를 쓰지 않아 영향 없음 |
+| A13 | 해당 없음 | KRX만 |
+| A14 | 통과 | D-122에 `STOCK` 정의(우선주·KONEX 포함), 키움 예약 시 KIS 41건 문제(앞 N2)를 7단계 상한에 넣는다는 문장, `KiwoomDailyMain` 100회(앞 N4), 되돌릴 조건에 "LIVE01 종목이 녹화에 없음"이 더해짐. 작업 상태 명령 목록(`ExperimentJobStatus.COMMANDS`)과 화면 이름(`jobs.js`)이 새 명령과 맞음. 기획서 MD-04와 충돌 없음 |
+
+### 점검표 밖 발견
+- 앞 R1·N1·N3 해소, N2·N4는 D-122 위험 절에 기록됨(7단계 상한 숙제로 남음, 지금은 실전이 꺼져 있어 영향 없음).
+- N5(참고): 런북 4.1 4번 확인 명령은 `\w{6}`로 종목을 세므로 우선주(예: `005935`)도 함께 센다. `녹화된 종목 수`가 100 가까이인지만 보므로 판단에는 지장이 없다.
+- N6(참고): 장중(09:30) 되돌리기는 그날 LIVE01에 재기동 공백을 남긴다. 계좌 안전 문제는 아니고, 런북이 "LIVE01 결과를 지키는 쪽이 먼저"라고 정한 대로다.
+
+### 판정
+승인
