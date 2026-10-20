@@ -220,7 +220,7 @@ class IntradayTrackerTest {
     @Test
     void gapEndingExactlyAtOpenIsStillSessionGap() {
         // architect PR #200 n1: 끝이 정확히 09:00:00(정규장 첫 순간)인 공백은 잃은 체결이 없을 수도 있지만 SESSION_GAP으로 둔다(보수적,
-        // D-128). 1초 앞(08:59:59)에 끝난 공백은 개장 전이라 표시하지 않는다
+        // D-129). 1초 앞(08:59:59)에 끝난 공백은 개장 전이라 표시하지 않는다
         IntradayTracker t = tracker();
         t.onEvent(trade("005930", 1, at(D1, 8, 40, 0), 100, 1));
         t.onEvent(new DataGap(Symbol.krx("000660"), 2, at(D1, 9, 0, 0), at(D1, 9, 0, 0), at(D1, 8, 30, 0),

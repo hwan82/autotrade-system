@@ -1,9 +1,9 @@
-# D-128 녹화 판정이 장중 순위 선정 계좌를 받는다: 입력 기록 레인마다 추적기를 따로 돌린다(D-127 후속)
+# D-129 녹화 판정이 장중 순위 선정 계좌를 받는다: 입력 기록 레인마다 추적기를 따로 돌린다(D-127 후속)
 
 - 날짜: 2026-10-20
 - 상태: 확정 · **추천안 채택(자율)**(지침 8장). `autotrade-sim`과 `autotrade-selection`(시각 범위 표 정리)만 바꾼다. 실전 경로, RealTradingGuard, 블랙리스트 규칙, 리스크 한도, 게이트웨이, 보호 경로는 바꾸지 않는다. 등록 파일에 장중 순위 선정이 없으면 판정·녹화 실험 결과 파일이 지금과 바이트로 같다(선정 없는 등록, `PRE_OPEN_DAILY` 선정만 있는 등록 모두 main과 `cmp`로 확인).
 - 담당: sim-engine. 교차 검토: architect(코드), strategy-researcher(판정 해석)
-- 근거: [D-127](D-127-intraday-at-selection.md) 7·12번(녹화 판정 후속), [D-126](D-126-live-judgement-selection-accounts.md)(선정 계좌 판정), [D-116](D-116-stage-6-recording-judgement.md)(녹화 판정), [ADR-012](../adr/ADR-012-intraday-selection.md) 3.3·5.2, architect PR #200 R1·R2·R3·R5·R6·n1, architect PR #199 R3·R4, strategy-researcher PR #199 R5. 번호: 열린 브랜치 전부의 결정 로그 최대가 D-127이라 D-128을 쓴다.
+- 근거: [D-127](D-127-intraday-at-selection.md) 7·12번(녹화 판정 후속), [D-126](D-126-live-judgement-selection-accounts.md)(선정 계좌 판정), [D-116](D-116-stage-6-recording-judgement.md)(녹화 판정), [ADR-012](../adr/ADR-012-intraday-selection.md) 3.3·5.2, architect PR #200 R1·R2·R3·R5·R6·n1, architect PR #199 R3·R4, strategy-researcher PR #199 R5. 번호: 열린 브랜치 전부의 결정 로그 최대가 D-127이라 D-129을 쓴다.
 
 ## 결정
 

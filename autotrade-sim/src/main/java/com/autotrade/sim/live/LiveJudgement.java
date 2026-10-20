@@ -184,7 +184,7 @@ public final class LiveJudgement {
                 LiveReplayCheck.withoutCodeLine(detail));
 
         gate.check();
-        // 장중 순위 선정(D-127): 실행기는 레인마다 추적기를 따로 돌려 순위를 매긴다(D-128). 보고서에 남길 순위는 같은 추적기를 입력
+        // 장중 순위 선정(D-127): 실행기는 레인마다 추적기를 따로 돌려 순위를 매긴다(D-129). 보고서에 남길 순위는 같은 추적기를 입력
         // 기록에 한 번 더 돌려 만든다(순수 계산이라 레인과 같은 값). 장중 순위 선정이 없으면 읽지 않는다
         List<IntradayTracker.Ranked> intraday = intradayRanks(setup, journal);
         gate.check();
@@ -543,7 +543,7 @@ public final class LiveJudgement {
 
     /**
      * @param selections 장전 선정 계좌가 없으면 null(지금까지와 같은 실행기 입력). 장중 순위 선정 계좌는 실행기가 레인마다 그 레인
-     *     이벤트로 정한다(입력 범위는 등록 파일 boards·blacklist, D-127·D-128)
+     *     이벤트로 정한다(입력 범위는 등록 파일 boards·blacklist, D-127·D-129)
      */
     private static SimulationExperimentRunner runner(LiveSetup setup, MarketEventStream data, CodeVersion code,
             RunGate gate, SelectionSource selections) {
@@ -579,7 +579,7 @@ public final class LiveJudgement {
     /**
      * 녹화 리플레이(L11). 돌리지 못했으면 {@code report}가 null이고 이유가 {@code note}.
      *
-     * @param intraday 녹화 이벤트로 매긴 장중 순위(D-128). 장중 순위 선정이 없거나 돌리지 못했으면 빈 목록
+     * @param intraday 녹화 이벤트로 매긴 장중 순위(D-129). 장중 순위 선정이 없거나 돌리지 못했으면 빈 목록
      */
     record Recording(SimulationReport report, String note, long events, int days, List<IntradayTracker.Ranked> intraday) {
         Recording {
@@ -624,7 +624,7 @@ public final class LiveJudgement {
         log.accept("녹화 리플레이(L11): 녹화 " + dirs.size() + "일, 이벤트 " + stream.eventCount());
         // 장전 선정 계좌는 입력 기록 레인과 같은 적용 기록을 읽는다(같은 날 같은 후보). 장중 순위 선정 계좌는 녹화 이벤트로 따로
         // 순위를 매긴다: 적용 시작 순번이 기록마다 달라 입력 기록의 순위를 옮길 수 없고, 실시간 대 녹화(L11) 차이에 순위 차이도
-        // 들어가는 것이 맞다(녹화만으로 같은 전략을 돌린 결과와 비교). 순위가 같은지는 보고서 10장에 적는다(D-128)
+        // 들어가는 것이 맞다(녹화만으로 같은 전략을 돌린 결과와 비교). 순위가 같은지는 보고서 10장에 적는다(D-129)
         SimulationReport r = runner(setup, stream, code, gate, LiveReplayCheck.selectionSource(setup, sessionDir))
                 .runDetailed(setup.spec(ClockMode.REPLAY, stream.version()));
         List<IntradayTracker.Ranked> intraday = setup.hasIntraday() ? intradayRanks(setup, stream) : List.of();
@@ -741,7 +741,7 @@ public final class LiveJudgement {
                     .append("L10은 계좌와 같은 묶음의 분포로 본다. m은 묶음을 합친 판정 대상 수다\n");
         }
         if (setup.hasIntraday()) {
-            sb.append("- 장중 순위 선정 계좌(D-127, D-128): 입력 기록 레인마다 같은 추적기를 따로 돌려 그날 순위 시각 이후 첫 이벤트부터 ")
+            sb.append("- 장중 순위 선정 계좌(D-127, D-129): 입력 기록 레인마다 같은 추적기를 따로 돌려 그날 순위 시각 이후 첫 이벤트부터 ")
                     .append("후보에 신규 진입한다(입력 기록 레인은 모두 같은 순위). 대조군 시드 N개는 같은 장중 선정 + 무작위 진입으로 ")
                     .append("묶음마다 돌린다. 녹화 리플레이(L11)는 녹화 이벤트로 따로 순위를 매긴다(").append(intradaySection(setup))
                     .append("장)\n");
@@ -907,7 +907,7 @@ public final class LiveJudgement {
     }
 
     /**
-     * 장중 순위 선정 표(D-127·D-128): 입력 기록이 있는 거래일 × 장중 선정마다 입력 기록 순위(모든 입력 기록 레인이 쓴 값)와 녹화
+     * 장중 순위 선정 표(D-127·D-129): 입력 기록이 있는 거래일 × 장중 선정마다 입력 기록 순위(모든 입력 기록 레인이 쓴 값)와 녹화
      * 리플레이(L11)가 매긴 순위가 같은지.
      */
     private static void intradayTable(StringBuilder sb, LiveSetup setup, StreamedRecordingDataSet journal, SimulationReport base,
@@ -926,8 +926,8 @@ public final class LiveJudgement {
         sb.append("\n## ").append(intradaySection(setup)).append(". 장중 순위 선정(D-127)\n\n");
         sb.append("> 그날 정규장 시작 ~ 순위 시각 전에 받은 boards 체결로 순위를 매기고, 순위 시각 이후 첫 이벤트(적용 시작 순번)부터 후보에 ")
                 .append("신규 진입한다. 입력 기록 레인(BASE·PERTURB·지연·대조군)은 레인마다 추적기를 따로 돌려 모두 이 순위를 쓴다. 막힌 ")
-                .append("신규 진입은 BASE 레인 기준이다. 녹화 칸은 녹화 리플레이(L11)가 녹화 이벤트로 매긴 후보가 입력 기록 후보와 같은지다 ")
-                .append("(적용 시작 순번은 기록마다 달라 비교하지 않음).\n\n");
+                .append("신규 진입은 BASE 레인에서 그 선정을 쓰는 계좌들의 합이다. 녹화 칸은 녹화 리플레이(L11)가 녹화 이벤트로 매긴 후보 종목 ")
+                .append("집합이 입력 기록 후보와 같은지다(순위 순서와 적용 시작 순번은 기록마다 달라 비교하지 않음).\n\n");
         sb.append("| 날짜 | 선정 | 순위 시각 | 선정 수 | 후보 | BLACKLISTED | 적용 시작 순번 | 막힌 신규 진입 | 녹화(L11) 후보 |\n");
         sb.append("|---|---|---|---:|---|---|---:|---:|---|\n");
         for (SelectionProfile p : IntradayTracker.intradayProfiles(setup.combinations())) {
@@ -951,12 +951,13 @@ public final class LiveJudgement {
                     continue;
                 }
                 IntradayTracker.Ranked r = recorded.get(key);
-                List<String> mine = j == null ? null : j.candidates().candidates();
-                List<String> theirs = r == null ? null : r.candidates().candidates();
+                // 종목 집합으로 비교한다: 같은 종목을 순서만 다르게 뽑은 날은 산 종목이 같다(strategy-researcher PR #203 n1)
+                Set<String> mine = j == null ? null : new TreeSet<>(j.candidates().candidates());
+                Set<String> theirs = r == null ? null : new TreeSet<>(r.candidates().candidates());
                 if (Objects.equals(mine, theirs)) {
                     sb.append(j == null ? "같음(순위 없음)" : "같음").append(" |\n");
                 } else {
-                    sb.append("**다름**: ").append(theirs == null ? "순위 없음" : codes(theirs)).append(" |\n");
+                    sb.append("**다름**: ").append(theirs == null ? "순위 없음" : codes(List.copyOf(theirs))).append(" |\n");
                 }
             }
         }

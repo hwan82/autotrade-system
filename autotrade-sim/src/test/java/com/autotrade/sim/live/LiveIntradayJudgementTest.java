@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 녹화 판정의 장중 순위 선정 계좌(D-128, D-127 후속). 장전 선정(D-124)과 장중 순위 선정이 한 등록에 함께 있는 경우(architect PR #200
+ * 녹화 판정의 장중 순위 선정 계좌(D-129, D-127 후속). 장전 선정(D-124)과 장중 순위 선정이 한 등록에 함께 있는 경우(architect PR #200
  * R3)로 본다: 장전 선정 계좌는 세션 고정 파일을, 장중 순위 계좌는 레인마다 따로 돈 추적기를 쓴다. 변형·지연·대조군 레인의 장중
  * 계좌도 실시간 계좌와 같은 날 같은 후보를 같은 순번부터 산다. 대조군 분포는 선정 묶음마다 따로 돌린다.
  */
@@ -91,6 +91,11 @@ class LiveIntradayJudgementTest {
 
     /** 장전 선정은 D1 결과(005930)만 놓는다(D2는 SELECTION_MISSING). 장중 순위는 세션이 매긴다. 녹화도 같은 이벤트. */
     private void operate() throws Exception {
+        operate(e -> e);
+    }
+
+    /** @param recorded 게이트웨이 녹화에 쓸 이벤트(입력 기록과 다르게 하려면 바꾼 것, 빼려면 null) */
+    private void operate(java.util.function.UnaryOperator<MarketEvent> recorded) throws Exception {
         LiveSetup setup = LiveSetup.of(plan, REPO);
         SelectionProfile hot = SelectionFixtures.intradayHot(REPO);
         setup.selectionFiles(sessions.resolve(ID)).writeResult(SelectionFixtures.result(hot, D1, List.of("005930")), PRODUCER);
@@ -105,7 +110,10 @@ class LiveIntradayJudgementTest {
         Files.writeString(experimentDir.resolve(LiveSession.LIVE_DETAIL_FILE), ReportWriter.render(live), StandardCharsets.UTF_8);
         JournalWriter w = new JournalWriter(new RecordingLayout(recordings), Market.KRX, SEOUL, Map.of(SRC, "테스트 녹화"), "테스트");
         for (MarketEvent e : events) {
-            w.append(SRC, e, e.receivedAt());
+            MarketEvent r = recorded.apply(e);
+            if (r != null) {
+                w.append(SRC, r, r.receivedAt());
+            }
         }
         w.close(events.get(events.size() - 1).receivedAt());
     }
@@ -140,7 +148,7 @@ class LiveIntradayJudgementTest {
         assertThat(r).contains("- I3 실시간 = 입력 기록 리플레이: 같음")
                 .contains("판정 대상 m = 2, 대조군 시드 N = 41")
                 .contains("- 선정 조합 계좌(D-124): ")
-                .contains("- 장중 순위 선정 계좌(D-127, D-128): ")
+                .contains("- 장중 순위 선정 계좌(D-127, D-129): ")
                 // 레인: BASE 6 + PERTURB 4 + 지연 3 × 2 + 대조군 41 × 선정 묶음 2(kr-intraday-hot, momentum) = Run 98, 레인 1 + 1 + 3 + 82
                 .contains("입력 기록 레인 87개(Run 98개), ")
                 .contains("| " + ID + "-A05 | " + momentum + " x kr-orb-30@1 | 판정 대상 | **")
@@ -229,5 +237,30 @@ class LiveIntradayJudgementTest {
             SimulationReport one = alone.runLanes(List.of(lanes.all().get(i)), "y").get(0);
             assertThat(ReportWriter.render(one)).isEqualTo(ReportWriter.render(reports.get(i)));
         }
+    }
+
+    @Test
+    void intradayTableMarksDaysWhereTheRecordingRankedDifferently() throws Exception {
+        // architect PR #203 n1: 녹화(L11)가 다른 후보를 매긴 날과 순위를 못 매긴 날이 표에 "다름"으로 나온다
+        java.time.Instant d1Open = D1.atTime(9, 0, 0, 500_000_000).atZone(SEOUL).toInstant();
+        operate(e -> {
+            var local = e.exchangeTime().atZone(SEOUL);
+            if (local.toLocalDate().equals(D2) && !local.toLocalTime().isBefore(java.time.LocalTime.of(9, 30))) {
+                return null; // D2는 순위 시각 전에 녹화가 끝남
+            }
+            if (e instanceof com.autotrade.domain.market.TradeTick t && t.exchangeTime().equals(d1Open)
+                    && t.symbol().code().equals("000660")) {
+                // D1 SK하이닉스 첫 체결가를 낮춰 녹화에서는 장중 수익률이 상한(0.15)을 넘게 한다
+                return new com.autotrade.domain.market.TradeTick(t.symbol(), t.sequence(), t.exchangeTime(), t.receivedAt(),
+                        new java.math.BigDecimal("140000"), t.quantity());
+            }
+            return e;
+        });
+        String r = judge(2).report();
+        List<String> rows = r.substring(r.indexOf("## 10. 장중 순위 선정(D-127)")).lines()
+                .filter(l -> l.startsWith("| 2026-")).toList();
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0)).startsWith("| " + D1 + " |").endsWith(" | **다름**: 005930 |");
+        assertThat(rows.get(1)).startsWith("| " + D2 + " |").endsWith(" | **다름**: 순위 없음 |");
     }
 }
