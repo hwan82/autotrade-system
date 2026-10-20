@@ -89,6 +89,8 @@ public record SelectionCriteria(
             case VOLUME_RATIO -> 2 * period;
             case RETURN -> period + 1;
             case AVG_TURNOVER -> period;
+            case DAY_RANGE -> 2;
+            case VOLUME_SPIKE -> period + 1;
             default -> 1;
         };
     }

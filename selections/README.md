@@ -13,3 +13,4 @@
 |---|---|---|
 | `kr-fin-quality-growth` | POSITION, 주간 | 예시 (가) 재무 4조건(D-043) |
 | `kr-vol-surge-quiet` | SWING, 매일 | 예시 (나) 거래량 급증·가격 정체(D-043) |
+| `kr-intraday-hot` | INTRADAY, 장전 매일 | 예시 (다) 전일 관심 종목(ADR-012 3.3, D-121) |
