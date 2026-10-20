@@ -21,6 +21,7 @@ import com.autotrade.sim.exchange.MidpointTrades;
 import com.autotrade.sim.exchange.VirtualExchange;
 import com.autotrade.sim.RunResult;
 import com.autotrade.sim.metrics.RunMetrics;
+import com.autotrade.sim.recording.RecordedMarketDataSet;
 import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.run.CodeVersion;
@@ -720,6 +721,8 @@ public final class LiveWeeklyCheck {
         // 선정 조합 계좌는 두 리플레이 모두 세션이 남긴 같은 적용 기록을 읽는다(D-124). 맞지 않으면 대조하지 않고 멈춘다
         Path sessionDir = journal.root().getParent();
         LiveReplayCheck.verifiedSelections(setup, sessionDir, log);
+        LiveReplayCheck.requireApplied(setup, sessionDir, live.days().stream().filter(d -> d.recordedEvents() > 0)
+                .map(RecordedMarketDataSet.DayInfo::date).toList());
         SelectionSource selections = LiveReplayCheck.selectionSource(setup, sessionDir);
         log.accept("계좌 대조: 입력 기록 리플레이(이벤트 " + live.eventCount() + ")");
         SimulationReport a = replay(setup, live, end, code, selections, gate);

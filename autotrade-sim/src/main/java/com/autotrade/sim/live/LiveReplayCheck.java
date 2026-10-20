@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.LinkedHashMap;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -126,6 +127,8 @@ public final class LiveReplayCheck {
         }
         gate.check();
         List<SessionSelections.Applied> applied = verifiedSelections(setup, sessionDir, log);
+        requireApplied(setup, sessionDir, data.days().stream().filter(d -> d.recordedEvents() > 0)
+                .map(RecordedMarketDataSet.DayInfo::date).toList());
         ExperimentSpec spec = setup.spec(ClockMode.REPLAY, data.version());
         SimulationReport replay = new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(),
                 setup.risk(), setup.execution(), code, 1, setup.benchmark(), selectionSource(setup, sessionDir), gate)
@@ -203,6 +206,27 @@ public final class LiveReplayCheck {
         }
         log.accept("선정 적용 기록 " + out.size() + "일 확인(결과 파일·내용 해시·후보 일치)");
         return List.copyOf(out);
+    }
+
+    /**
+     * 입력 기록이 있는 날마다 선정 적용 기록이 있는지 본다(architect PR #197 N1). 날짜 전환 지점은 그날 첫 줄을 기록하기 전에 적용
+     * 기록을 쓰므로, 줄이 있는데 기록이 없으면 누가 지웠거나 옮긴 것이다. 그대로 두면 되살리기·리플레이는 그날을 조용히
+     * {@code SELECTION_MISSING}으로 보고, 같은 날 이어 받으면 늦게 온 결과로 새 기록을 써서 실시간과 리플레이가 다른 선정을 본다.
+     *
+     * @param recordedDays 입력 기록에 줄이 있는 거래일
+     * @throws IllegalStateException 적용 기록이 없는 기록일이 있을 때
+     */
+    static void requireApplied(LiveSetup setup, Path sessionDir, Collection<LocalDate> recordedDays) {
+        if (!setup.hasSelections()) {
+            return;
+        }
+        SessionSelections files = setup.selectionFiles(sessionDir);
+        for (LocalDate d : recordedDays) {
+            if (files.readApplied(d).isEmpty()) {
+                throw new IllegalStateException("입력 기록이 있는 " + d + "의 선정 적용 기록(" + SessionSelections.DIR + "/" + d
+                        + "/" + SessionSelections.APPLIED_FILE + ")이 없습니다. 그날 계좌가 본 선정을 알 수 없습니다(D-124)");
+            }
+        }
     }
 
     /**

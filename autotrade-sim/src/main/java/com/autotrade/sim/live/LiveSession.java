@@ -228,6 +228,8 @@ public final class LiveSession implements AutoCloseable {
             });
             if (data.eventCount() > 0) {
                 lastWithLines = day;
+                // 적용 기록 없이 줄이 있는 날이면 열지 않는다(architect PR #197 N1)
+                LiveReplayCheck.requireApplied(setup, sessionDir, List.of(LocalDate.parse(day.getFileName().toString())));
             }
             offset += data.eventCount();
         }

@@ -266,6 +266,28 @@ class LiveSelectionSessionTest {
     }
 
     @Test
+    void sessionDoesNotOpenWhenAppliedRecordOfRecordedDayIsMissing() throws Exception {
+        // architect PR #197 N1: 줄이 있는 날의 적용 기록을 지우면 그날을 MISSING으로 되살리지 않고 열지 않는다
+        Path sessions = tmp.resolve("live-sessions");
+        SessionSelections files = prepareDayOne(sessions);
+        List<MarketEvent> events = LiveSessionTest.twoDays();
+        try (LiveSession s = LiveSession.open(plan(true), REPO, sessions, clock, m -> { })) {
+            for (int n = 0; n < 50; n++) {
+                clock.now = events.get(n).receivedAt();
+                s.accept("KIWOOM-WS", events.get(n));
+            }
+        }
+        Files.delete(files.appliedFile(D1));
+        assertThatThrownBy(() -> LiveSession.open(plan(true), REPO, sessions, clock, m -> { }))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("적용 기록").hasMessageContaining(D1.toString());
+        LiveSetup setup = LiveSetup.of(plan(true), REPO);
+        assertThatThrownBy(() -> LiveReplayCheck.requireApplied(setup, sessions.resolve(ID), List.of(D1)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("적용 기록");
+        // 줄이 없는 날은 적용 기록이 없어도 된다(그날 첫 줄 전에 죽었거나 아직 오지 않은 날)
+        LiveReplayCheck.requireApplied(setup, sessions.resolve(ID), List.of());
+    }
+
+    @Test
     void sessionStopsWithoutRecordingWhenAppliedRecordCannotBeWritten() throws Exception {
         Path sessions = tmp.resolve("live-sessions");
         prepareDayOne(sessions);
