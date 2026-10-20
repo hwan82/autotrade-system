@@ -67,3 +67,35 @@
 
 ## 판정
 수정 필요(R3)
+
+## 재검토 2026-10-20 (2차)
+- 대상: PR #195 / 헤드 커밋 ba8b409 / 병합 기준 main e9a7ee2 대비 diff 전체. 1차 재검토(a219088) 뒤 커밋 2개: 895cb29(risk-ops R1·N1~N4 반영), ba8b409(architect R3·m1 반영). 두 커밋 합계 4파일 +46 −3(`WatchlistCommandTest.java`, `WatchlistCandidatesMain.java`, D-122, 시작 점검표)
+- 점검표: B
+- 직접 실행한 것:
+  - `git diff origin/main...HEAD` 전체와 `git diff a219088..ba8b409`를 읽음. 보호 경로(`scripts/ci/protected-paths.txt`)에 드는 파일은 여전히 없다.
+  - 다른 세션과 빌드 폴더가 겹치지 않게 별도 worktree(`<scratchpad>/wt195arch`, detached ba8b409)에서 `./gradlew --init-script <scratchpad>/mirror.gradle clean build`: **BUILD SUCCESSFUL in 4m 10s**(161 actionable tasks: 138 executed, 23 up-to-date). 시험 결과 XML 합계 1,693건, 실패 0, 오류 0, 건너뜀 0. `WatchlistCommandTest` 5건 통과.
+  - **변이 확인**: worktree에서 `WatchlistCandidatesMain`의 catch만 1차 때 모양(`IllegalArgumentException | IllegalStateException | IOException`)으로 되돌리고 `:autotrade-app-experiment:test --tests '*WatchlistCommandTest'` → "5 tests completed, 1 failed". 새 시험 `없는_스냅샷이면_입력_오류로_끝나고_파일을_쓰지_않는다`가 R3을 잡는다. 되돌림(`git status` 깨끗함).
+  - **실제 진입점 실행**(worktree, 09:34 UTC): `runWatchlistCandidates -Psnapshot=krx-daily-none ...` → `[watchlist] 실패: 스냅샷을 읽을 수 없습니다: <cfg3>/snapshots/krx-daily/krx-daily-none` 한 줄, 스택 추적 없음, 종료 코드 1, 상태 파일 `state: INPUT_ERROR`, `message: 종료 코드 1`.
+  - runbook 4.1 4번에 새로 들어간 첫날 녹화 확인 명령을 코드와 대조: 파일 위치 `<설정>/recordings/KRX/<yyyy-MM-dd>/events.jsonl.gz`(`GatewayMain.java:45` `RECORDINGS_DIR = "recordings"`, `RecordingLayout.java:9,14`), 줄의 `"sym":"KRX:005930"` 형식(`RecordingCodec.java:26,48`, `Symbol.toString` = `market:code`)과 맞다. 녹화기는 gzip을 `syncFlush`로 열고 주기마다 `flush()`하므로(`DayWriter.java:34-35,113`, `MarketEventRecorder.java:154-155`) 쓰는 중인 파일도 마지막 flush까지는 읽힌다. 그래서 09:30 확인이 "아직 디스크에 안 내려가서 안 보임"으로 거짓 경보를 낼 위험은 작다 `[추론]`. 끝 부분이 잘린 gzip에서 나는 예외는 명령이 잡아 정상으로 안내한다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 worktree `clean build` 성공, 1,693건 실패 0(미러 init script 사용, 사유는 1회째와 같음) |
+| B2 | 통과 | 반영분은 catch 한 줄과 시험·문서뿐이다. 새 의존 없음. `ArchitectureTest`·`ModuleOwnershipTest` 통과 |
+| B3 | 통과 | 계약 변경 추가 없음. 1차 재검토와 같음 |
+| B4 | 통과 | 반영분에 시계·난수 없음. 새 시험은 `Clock.fixed`(`at(ExperimentGateTest.WEEKEND)`) |
+| B5 | 통과 | 1회째와 같음 |
+| B6 | 통과 | `없는_스냅샷이면_입력_오류로_끝나고_파일을_쓰지_않는다`(종료 1, 파일 없음, 상태 `INPUT_ERROR`), `같은_작업이_돌고_있으면_입력_오류로_거절하고_파일을_쓰지_않는다`(같은 JVM에서 잠금을 쥔 채로 실행하면 `AlreadyRunningException` → 1, 파일 없음). 변이 확인으로 R3 회귀를 잡음을 확인 |
+| B7 | 해당 없음 | 실전 경로·보호 경로 변경 없음. risk-ops가 같은 PR을 검토했음을 커밋 895cb29 제목과 반영 내용(N1~N4)으로 보았으나, 그 원문의 판정은 내 판정 범위 밖이다 |
+| B8 | 통과 | 새 오류 출력은 예외 메시지(스냅샷 경로)뿐이다. `SnapshotInputs`·`SnapshotDailyBarSource` 예외에는 키·계좌가 섞일 경로가 없다(설정 비밀값을 읽지 않는 명령). runbook 확인 명령도 종목 코드만 출력한다 |
+
+### 1차 재검토 항목 처리
+- R3 해결: `WatchlistCandidatesMain.java:129-133`이 `IOException | RuntimeException`을 잡아 `[watchlist] 실패: ...`와 1을 돌려준다. `ExperimentStoppedException`은 그 앞 catch(:126-128)가 먼저 잡으므로 종료 코드 3·4는 그대로다. `CombinationMain.java:87-89`와 같은 방식이다.
+- m1 해결: D-122 "위험과 한계"가 "대형 우선주는 상위에 들 수 있다, 첫 목록에서 세어 적는다"로 바뀌었고, runbook 4.1 1번에 세는 명령이 있다.
+
+### 점검표 밖 발견
+- n1(권고) runbook의 우선주 세기 기준 "코드 끝자리가 0이 아닌 종목"은 셈용 근사다. 끝자리 0인 우선주나 영숫자 새 코드가 있으면 조금 틀릴 수 있다. 목록은 바꾸지 않고 숫자를 기록만 하므로 영향은 없다.
+- n2(권고) 첫날 녹화 확인 명령은 `[IO.File]::Open(..., 'Read', 'ReadWrite')`로 연다. Delete 공유를 주지 않으므로, 읽는 몇 초 사이에 게이트웨이가 같은 날 재기동해 tmp → 이름 바꾸기(D-119)를 하면 그 이름 바꾸기가 실패할 수 있다 `[추론]`. 확인은 게이트웨이를 다시 켜는 중이 아닐 때 한 번만 하라는 안내 한 줄이면 충분하다. 막지 않는다.
+
+## 판정
+승인
