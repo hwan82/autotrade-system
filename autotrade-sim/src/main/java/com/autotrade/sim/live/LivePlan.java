@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
  *   - "005930 KOSPI"
  * blacklist:                     # 선택. 세션 시작 시점 제외 종목(RSK-12)
  *   - "000660"
- * selections:                    # 선택(D-122). 선정 x 전략 조합 계좌. profiles 계좌 뒤에 번호를 매긴다
+ * selections:                    # 선택(D-124). 선정 x 전략 조합 계좌. profiles 계좌 뒤에 번호를 매긴다
  *   - "kr-intraday-hot@1 x kr-volume-surge@1"
  * selection-input:               # selections가 있으면 필수
  *   daily: "latest"              # 준비 시점에 기준 데이터일을 덮는 가장 최근 일봉 스냅샷(스냅샷 ID도 됨)
@@ -162,7 +162,7 @@ public record LivePlan(
                 List.copyOf(black), RegisteredSelections.read(y, true));
     }
 
-    /** 선정 조합 계좌가 없는 등록(D-122 전 모양). */
+    /** 선정 조합 계좌가 없는 등록(D-124 전 모양). */
     public LivePlan(ExperimentId id, String question, Market market, LocalDate from, LocalDate to, long seed,
             Money seedCapital, Optional<String> benchmark, List<RecordingPlan.ProfileRef> profiles,
             Map<String, KrxBoard> boards, List<String> blacklist) {

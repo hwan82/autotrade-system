@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * 실시간 모의 선정 준비 작업(ADR-012 3.5 "준비 작업", D-122): 다음 거래일 T의 선정 결과를 세션 폴더
+ * 실시간 모의 선정 준비 작업(ADR-012 3.5 "준비 작업", D-124): 다음 거래일 T의 선정 결과를 세션 폴더
  * {@code selections/<T>/}에 미리 만든다. 실험실의 준비 스레드(세션을 열 때 한 번, 장 밖 5분마다, 화면의 "선정 다시 준비")와
  * 준비 실행 명령({@code runLiveSelectionPrepare})이 같은 코드를 쓴다. 날짜 전환 지점은 계산하지 않고 이 파일을 읽기만 한다.
  *
@@ -48,7 +48,18 @@ public final class LiveSelectionPrep {
     public static final LocalTime QUIET_TO = LocalTime.of(8, 30);
     private static final Pattern SNAPSHOT_ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,127}");
 
+    /**
+     * 일봉 한 행을 읽는 데 드는 힙 추정(바이트) `[가정]`. 워크포워드가 전체 KRX 스냅샷에 8g를 쓰는 데서 넉넉히 잡았다. 행 수 × 이 값이
+     * 최대 힙의 절반을 넘으면 읽지 않는다(실험실은 세션이 쓸 힙을, 명령은 리플레이가 쓸 힙을 남긴다).
+     */
+    public static final long HEAP_BYTES_PER_DAILY_ROW = 1024;
+
     private LiveSelectionPrep() {
+    }
+
+    /** 일봉 행 수를 이 힙으로 읽어도 되는지(최대 힙의 절반 안). */
+    public static boolean heapFits(long dailyRows, long maxHeapBytes) {
+        return dailyRows <= maxHeapBytes / 2 / HEAP_BYTES_PER_DAILY_ROW;
     }
 
     /**

@@ -63,7 +63,7 @@ record LiveSetup(
             factory.validate(p);
             combinations.add(Combination.of(p));
         }
-        // 선정 조합 계좌는 profiles 계좌 뒤에 등록 파일 순서로 번호를 매긴다(D-122). 선정 없는 계좌의 번호·시드는 그대로다
+        // 선정 조합 계좌는 profiles 계좌 뒤에 등록 파일 순서로 번호를 매긴다(D-124). 선정 없는 계좌의 번호·시드는 그대로다
         List<Combination> selected = RecordingExperiment.selectionCombinations(repoRoot, plan.selections(), factory);
         combinations.addAll(selected);
         List<BlacklistEntry> black = plan.blacklist().stream()
@@ -80,7 +80,7 @@ record LiveSetup(
         return !selectionProfiles.isEmpty();
     }
 
-    /** 세션 폴더의 선정 고정 파일·적용 기록(D-122). */
+    /** 세션 폴더의 선정 고정 파일·적용 기록(D-124). */
     SessionSelections selectionFiles(Path sessionDir) {
         return new SessionSelections(sessionDir, selectionProfiles, plan.boards().keySet(), Set.copyOf(plan.blacklist()),
                 calendar::previousTradingDay);

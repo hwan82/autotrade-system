@@ -717,7 +717,7 @@ public final class LiveWeeklyCheck {
         List<Path> dirs = days.stream().map(d -> journal.dayDir(setup.plan().market(), d)).toList();
         // 날마다 디스크에서 다시 읽는다(D-115). 목록으로 모으던 때(RecordedMarketDataSet)와 같은 이벤트·같은 버전이다
         StreamedRecordingDataSet live = StreamedRecordingDataSet.open(setup.plan().market(), dirs, gate::check, e -> { });
-        // 선정 조합 계좌는 두 리플레이 모두 세션이 남긴 같은 적용 기록을 읽는다(D-122). 맞지 않으면 대조하지 않고 멈춘다
+        // 선정 조합 계좌는 두 리플레이 모두 세션이 남긴 같은 적용 기록을 읽는다(D-124). 맞지 않으면 대조하지 않고 멈춘다
         Path sessionDir = journal.root().getParent();
         LiveReplayCheck.verifiedSelections(setup, sessionDir, log);
         SelectionSource selections = LiveReplayCheck.selectionSource(setup, sessionDir);

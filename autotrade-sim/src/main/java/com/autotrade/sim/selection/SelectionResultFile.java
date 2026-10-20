@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -16,7 +15,7 @@ import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 /**
- * 선정 결과 고정 파일의 JSON 읽기·쓰기(ADR-007 2.6 결과 파일 형식, ADR-012 3.6, D-122). 실험실 쪽(실시간 모의 세션 폴더와 녹화
+ * 선정 결과 고정 파일의 JSON 읽기·쓰기(ADR-007 2.6 결과 파일 형식, ADR-012 3.6, D-124). 실험실 쪽(실시간 모의 세션 폴더와 녹화
  * 실험 결과 폴더)에서만 쓴다. 필드는 ADR-007 2.6 예시와 같다: {@link SelectionResult#canonicalJson()}의 모든 필드에
  * {@code content_hash}와 {@code producer}를 더한다. 실전 엔진이 읽는 결과 파일 코덱·{@code SelectionValidity}(실전 관련
  * PR)가 들어오면 그 코덱으로 바꾼다.
@@ -117,9 +116,7 @@ public final class SelectionResultFile {
                 reasons.add(r.asText());
             }
             TreeMap<String, String> values = new TreeMap<>();
-            Iterator<Map.Entry<String, JsonNode>> it = object(e, "values").fields();
-            while (it.hasNext()) {
-                Map.Entry<String, JsonNode> v = it.next();
+            for (Map.Entry<String, JsonNode> v : object(e, "values").properties()) {
                 if (!v.getValue().isTextual()) {
                     throw new IllegalArgumentException("평가 값은 문자열이어야 합니다: " + v.getKey());
                 }

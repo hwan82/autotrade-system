@@ -12,7 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 녹화 실험·실시간 모의 등록 파일의 선정 조합 계좌와 선정 입력(ADR-012 3.5, D-122). 두 등록 파일이 같은 키를 쓴다.
+ * 녹화 실험·실시간 모의 등록 파일의 선정 조합 계좌와 선정 입력(ADR-012 3.5, D-124). 두 등록 파일이 같은 키를 쓴다.
  *
  * <pre>
  * selections:                       # 선정 x 전략 조합 계좌. profiles 계좌 뒤에 이 순서로 계좌 번호를 매긴다

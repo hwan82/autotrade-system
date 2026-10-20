@@ -2,7 +2,7 @@
 // 모의 계좌만 다룬다. 실전 주문 경로와 무관하고 증권사를 직접 부르지 않는다(시세는 게이트웨이 전달 소켓으로만 받음).
 // 실시간 갱신은 3초 폴링이다(SSE는 UI-01 이연 항목, D-079). 화면을 떠나면 폴링을 멈춘다.
 // 계좌 ID를 누르면 그 계좌의 체결 내역과 거절 사유를 본다(#/live/runs/<계좌>, D-120). 표 모양은 실험 계좌 상세와 같다.
-// 선정 조합 계좌(D-122)는 계좌 순서 뒤쪽에 "선정@버전 x 전략@버전"으로 보이고, 그날 적용한 선정(후보 수, 뺀 종목 NOT_SUBSCRIBED·
+// 선정 조합 계좌(D-124)는 계좌 순서 뒤쪽에 "선정@버전 x 전략@버전"으로 보이고, 그날 적용한 선정(후보 수, 뺀 종목 NOT_SUBSCRIBED·
 // BLACKLISTED, SELECTION_MISSING 사유)과 다음 거래일 선정 준비 결과를 따로 보인다. 계산은 서버 준비 스레드가 하고 화면은 읽기만 한다.
 import { h, toast, table } from '../dom.js';
 import { get, post } from '../api.js';
@@ -187,7 +187,7 @@ function sessionView(view, gaps, act) {
       fact('계좌 순서', view.profiles.join(', '))));
 }
 
-/** 선정 상태 문구(D-122). 서버 사유 이름은 그대로 보인다. */
+/** 선정 상태 문구(D-124). 서버 사유 이름은 그대로 보인다. */
 const EXCLUSION = { NOT_SUBSCRIBED: 'boards 밖', BLACKLISTED: '블랙리스트' };
 
 function selectionsSection(view, s, act) {

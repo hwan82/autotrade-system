@@ -34,7 +34,7 @@ import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
- * 실시간 모의 세션(또는 녹화 실험)의 선정 결과 고정 파일과 적용 기록(ADR-012 3.5·3.6, D-122). 폴더 모양:
+ * 실시간 모의 세션(또는 녹화 실험)의 선정 결과 고정 파일과 적용 기록(ADR-012 3.5·3.6, D-124). 폴더 모양:
  *
  * <pre>
  * &lt;기준 폴더&gt;/selections/&lt;거래일&gt;/&lt;selection_hash&gt;.json          준비 작업이 만든 선정 결과(ADR-007 2.6 형식)

@@ -63,7 +63,7 @@ import java.util.function.Consumer;
  *
  * <p><b>받지 않는 이벤트</b>: 등록 파일 boards에 없는 종목, 운용 기간(거래일과 수신 날짜 모두) 밖. 기록에도 쓰지 않고 건수만 센다.
  *
- * <p><b>선정 조합 계좌</b>(D-122, ADR-012 3.5·3.6). 등록 파일에 {@code selections}가 있으면 거래일이 바뀌는 첫 이벤트를 기록에 쓰기
+ * <p><b>선정 조합 계좌</b>(D-124, ADR-012 3.5·3.6). 등록 파일에 {@code selections}가 있으면 거래일이 바뀌는 첫 이벤트를 기록에 쓰기
  * <b>전에</b> 그날 적용 기록({@link SessionSelections#apply})을 쓴다. 계산하지 않고 준비 작업이 미리 놓은 결과 파일을 읽기만 한다.
  * 계좌는 그 적용 기록에서 나온 판정({@link SelectionDays})으로 신규 진입을 거른다. 리플레이 확인도 같은 적용 기록을 읽으므로 같은
  * 결과가 나온다. 적용 기록을 쓰지 못하면 그 이벤트를 기록하지 않고 세션을 멈춘다. 되살릴 때는 기록일마다 적용 기록과 결과 파일이
@@ -446,7 +446,7 @@ public final class LiveSession implements AutoCloseable {
      * @param events 계좌에 준 이벤트 수(기록 줄 수, 되살린 것 포함)
      * @param restored 시작 때 기록으로 되살린 이벤트 수
      * @param failures 계좌마다 실패 이유(정상이면 빈 문자열)
-     * @param selections 선정 조합 계좌가 있으면 마지막으로 적용한 거래일의 적용 기록(D-122). 없으면 null
+     * @param selections 선정 조합 계좌가 있으면 마지막으로 적용한 거래일의 적용 기록(D-124). 없으면 null
      */
     public record Status(String experimentId, LocalDate from, LocalDate to, long events, long restored,
             long skippedSymbol, long skippedRange, int dataGaps, Instant lastEventAt, LocalDate journalDate,

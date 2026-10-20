@@ -51,7 +51,7 @@ import org.slf4j.LoggerFactory;
  *   <li>입력 기록으로 계좌를 되살리는 일은 요청 스레드가 아니라 가장 낮은 우선순위의 별도 스레드에서 기록일 하나씩 하고, 날마다 정지
  *       요청과 디스크를 본다(risk-ops PR #87 R2). 그동안 상태는 {@code restoring}이고 게이트웨이 연결은 아직 열지 않는다.</li>
  *   <li>세션은 한 번에 하나다. 실험실이 다시 뜨면 자동으로 다시 시작하지 않는다(다시 시작하면 입력 기록으로 계좌를 되살린다).</li>
- *   <li><b>선정 준비</b>(D-122, ADR-012 3.5). 등록 파일에 {@code selections}가 있으면 세션이 연결된 뒤 가장 낮은 우선순위의 준비
+ *   <li><b>선정 준비</b>(D-124, ADR-012 3.5). 등록 파일에 {@code selections}가 있으면 세션이 연결된 뒤 가장 낮은 우선순위의 준비
  *       스레드가 장 밖 창({@link LiveSelectionPrep#QUIET_FROM} ~ 다음 날 {@link LiveSelectionPrep#QUIET_TO})에서
  *       {@value #PREPARE_INTERVAL_MINUTES}분마다, 또 화면의 "지금 준비"로 다음 거래일 선정 결과 고정 파일을 만든다. 정지 요청·디스크
  *       관문을 스냅샷을 읽기 전과 선정 하나마다 본다(architect PR #191 N2). 일봉 스냅샷이 실험실 힙에 비해 크면 읽지 않고 준비 실행
@@ -74,11 +74,6 @@ public class LiveLabService implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(LiveLabService.class);
     /** 준비 스레드가 장 밖 창에서 다시 보는 간격(분). */
     public static final int PREPARE_INTERVAL_MINUTES = 5;
-    /**
-     * 일봉 한 행을 읽는 데 드는 힙 추정(바이트) `[가정]`. 워크포워드가 전체 KRX 스냅샷에 8g를 쓰는 데서 넉넉히 잡았다. 행 수 × 이 값이
-     * 실험실 최대 힙의 절반을 넘으면 실험실에서 읽지 않는다(세션이 쓸 힙을 남긴다).
-     */
-    static final long HEAP_BYTES_PER_DAILY_ROW = 1024;
 
     /** 디스크 여유 바이트. 테스트는 고정값을 넣는다. */
     @FunctionalInterface
@@ -358,17 +353,14 @@ public class LiveLabService implements AutoCloseable {
         java.util.concurrent.locks.LockSupport.unpark(running.prep);
     }
 
-    /** 계좌 순서대로 이름: profiles 계좌 뒤에 선정 조합 계좌({@code 선정@버전 x 전략@버전}, D-122). */
+    /** 계좌 순서대로 이름: profiles 계좌 뒤에 선정 조합 계좌({@code 선정@버전 x 전략@버전}, D-124). */
     static List<String> accounts(LivePlan plan) {
         List<String> out = new ArrayList<>(plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList());
         plan.selections().entries().forEach(e -> out.add(e.text()));
         return List.copyOf(out);
     }
 
-    /** 일봉 행 수를 이 실험실 힙으로 읽어도 되는지(최대 힙의 절반 안). */
-    static boolean heapFits(long dailyRows, long maxHeapBytes) {
-        return dailyRows <= maxHeapBytes / 2 / HEAP_BYTES_PER_DAILY_ROW;
-    }
+
 
     /**
      * 멈춘 이유의 종류. 화면은 문구가 아니라 이것으로 경고 색을 고른다(PR #96 R5).
@@ -392,7 +384,7 @@ public class LiveLabService implements AutoCloseable {
      * @param inboxDropped 받는 큐가 차서 버린 수(공백으로 남음)
      * @param stopReason 마지막 멈춘 이유(감시 정지 요청, 디스크 부족, 기록 실패, 시작 실패 등)
      * @param stopKind {@code stopReason}의 종류. 세션이 도는 중에는 세션이 스스로 멈췄을 때만 {@link StopKind#PROBLEM}
-     * @param prepare 선정 조합 계좌가 있으면 마지막 선정 준비 결과(D-122). 아직 준비하지 않았으면 비어 있다
+     * @param prepare 선정 조합 계좌가 있으면 마지막 선정 준비 결과(D-124). 아직 준비하지 않았으면 비어 있다
      */
     public record View(String experimentId, String market, List<String> profiles, boolean restoring,
             Optional<LiveSession.Status> session, ConnectionState feedState, String feedError, long feedReconnects,
@@ -644,7 +636,8 @@ public class LiveLabService implements AutoCloseable {
                 long maxHeap = Runtime.getRuntime().maxMemory();
                 lastPrep = LiveSelectionPrep.prepare(plan, repoRoot, sessionsRoot, sessionsRoot.getParent()
                         .resolve(SNAPSHOTS_DIR), date, new SelectionResultFile.Producer(code.commit(), code.dirty(), now),
-                        LiveLabService.this::stopReason, rows -> heapFits(rows, maxHeap), m -> log.info("실시간 모의: {}", m));
+                        LiveLabService.this::stopReason, rows -> LiveSelectionPrep.heapFits(rows, maxHeap),
+                        m -> log.info("실시간 모의: {}", m));
             } catch (RuntimeException e) {
                 // 정지 관문으로 멈춘 경우도 여기로 온다. 다음 차례에 다시 본다. 메시지에 경로가 있을 수 있어 로그에만
                 log.warn("선정 준비를 하지 못했습니다: {} ({}: {})", plan.id(), e.getClass().getSimpleName(), e.getMessage());

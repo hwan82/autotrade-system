@@ -111,7 +111,7 @@ public final class RecordingExperiment {
     }
 
     /**
-     * @param snapshotsRoot 수집 스냅샷 폴더({@code <설정 폴더>/snapshots}). 선정 조합 계좌가 있을 때만 쓴다(D-122)
+     * @param snapshotsRoot 수집 스냅샷 폴더({@code <설정 폴더>/snapshots}). 선정 조합 계좌가 있을 때만 쓴다(D-124)
      */
     public static Outcome run(RecordingPlan plan, Path repoRoot, Path recordingsRoot, Path snapshotsRoot,
             CodeVersion code, boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
@@ -155,7 +155,7 @@ public final class RecordingExperiment {
             factory.validate(p);
             combinations.add(Combination.of(p));
         }
-        // 선정 조합 계좌는 profiles 계좌 뒤에 등록 파일 순서로(D-122). 선정 없는 계좌의 번호·시드는 그대로다
+        // 선정 조합 계좌는 profiles 계좌 뒤에 등록 파일 순서로(D-124). 선정 없는 계좌의 번호·시드는 그대로다
         List<Combination> selected = selectionCombinations(repoRoot, plan.selections(), factory);
         combinations.addAll(selected);
         List<BlacklistEntry> black = plan.blacklist().stream()
@@ -168,7 +168,7 @@ public final class RecordingExperiment {
         ExecutionSettings execution = ExecutionSettings.defaults();
 
         // 선정 조합 계좌가 있으면 녹화일마다 고정 스냅샷으로 선정을 계산해 고정 파일·적용 기록을 만들고(실시간 모의와 같은
-        // 준비→적용 경로), 실행기는 그 적용 기록을 읽는다(ADR-012 3.5·3.6, D-122)
+        // 준비→적용 경로), 실행기는 그 적용 기록을 읽는다(ADR-012 3.5·3.6, D-124)
         SelectionStage stage = selected.isEmpty() ? null
                 : SelectionStage.prepare(plan, selectionProfiles(selected), data, calendar, snapshotsRoot, code, log, gate);
         SimulationReport report;
@@ -296,7 +296,7 @@ public final class RecordingExperiment {
     }
 
     /**
-     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-122). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})만
+     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-124). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})만
      * 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다(ADR-007 2.1).
      */
     public static List<Combination> selectionCombinations(Path repoRoot, RegisteredSelections selections,
@@ -371,7 +371,7 @@ public final class RecordingExperiment {
     }
 
     /**
-     * @param snapshotsRoot 수집 스냅샷 폴더. 선정 조합 계좌가 있으면 필요하다(D-122). 선정 고정 파일은 결과 폴더
+     * @param snapshotsRoot 수집 스냅샷 폴더. 선정 조합 계좌가 있으면 필요하다(D-124). 선정 고정 파일은 결과 폴더
      *     {@code selections/}에 쓴다(저장소에는 커밋하지 않음: 종목 전체 평가가 들어 있어 크다. 내용 해시는 inputs.yaml에 남는다)
      */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path recordingsRoot, Path snapshotsRoot,
@@ -454,7 +454,7 @@ public final class RecordingExperiment {
         return sb.toString();
     }
 
-    /** inputs.yaml의 선정 칸(D-122): 등록 파일 선정 입력과 날짜·선정별 적용 기록. */
+    /** inputs.yaml의 선정 칸(D-124): 등록 파일 선정 입력과 날짜·선정별 적용 기록. */
     private static void selectionInputs(StringBuilder sb, RegisteredSelections sel, List<SessionSelections.Applied> applied) {
         sb.append("selection-input:\n");
         sb.append("  daily: \"").append(sel.daily().orElse("")).append("\"\n");
@@ -540,7 +540,7 @@ public final class RecordingExperiment {
     }
 
     /**
-     * results.md 선정 표(D-122, ADR-012 3.5): 날짜·선정마다 상태, 그날 후보, 구독 밖({@code NOT_SUBSCRIBED})·블랙리스트
+     * results.md 선정 표(D-124, ADR-012 3.5): 날짜·선정마다 상태, 그날 후보, 구독 밖({@code NOT_SUBSCRIBED})·블랙리스트
      * ({@code BLACKLISTED})로 뺀 종목, 구독 커버리지, 그 선정을 쓰는 계좌들이 막힌 신규 진입 신호 수 합.
      */
     private static void selectionResults(StringBuilder sb, SimulationReport report, List<SessionSelections.Applied> applied) {
@@ -551,7 +551,7 @@ public final class RecordingExperiment {
                         Integer::sum);
             }
         }
-        sb.append("\n## 선정(D-122)\n\n");
+        sb.append("\n## 선정(D-124)\n\n");
         sb.append("> 그날 후보 = 선정 결과 ∩ boards − blacklist. 뺀 자리는 다음 순위로 메우지 않는다. 커버리지는 선정 종목 중 boards 안 "
                 + "비율이다. 성과를 시장 전체 선정의 성과로 읽지 않는다(ADR-012 6장 R2).\n\n");
         sb.append("| 날짜 | 선정 | 상태 | 후보 | NOT_SUBSCRIBED | BLACKLISTED | 커버리지 | 막힌 신규 진입 |\n");
@@ -566,7 +566,7 @@ public final class RecordingExperiment {
                             .append(list(c.excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED))).append(" | ")
                             .append(c.coverage()).append(" | ");
                 } else {
-                    sb.append(it.status()).append(" ").append(it.reason()).append(" | - | - | - | - | ");
+                    sb.append(it.status()).append("(").append(it.reason()).append(") | - | - | - | - | ");
                 }
                 sb.append(blocked.getOrDefault(it.selectionHash() + "|" + a.date(), 0)).append(" |\n");
             }

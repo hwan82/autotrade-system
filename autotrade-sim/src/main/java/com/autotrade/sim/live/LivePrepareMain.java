@@ -14,7 +14,7 @@ import java.time.format.DateTimeParseException;
 import java.util.regex.Pattern;
 
 /**
- * 실시간 모의 선정 준비 명령(D-122, ADR-012 3.5 "준비 작업")의 본체. 실험실 힙(기본 4g)으로 전체 일봉 스냅샷을 읽기 어려울 때
+ * 실시간 모의 선정 준비 명령(D-124, ADR-012 3.5 "준비 작업")의 본체. 실험실 힙(기본 4g)으로 전체 일봉 스냅샷을 읽기 어려울 때
  * 실험실 밖에서 거래일 T의 선정 결과 고정 파일을 세션 폴더에 놓는다. 프로세스 진입점은
  * {@code com.autotrade.app.experiment.ExperimentMain}({@code ./gradlew :autotrade-app-experiment:runLiveSelectionPrepare
  * -Pexperiment=<실험ID> -Pdate=YYYY-MM-DD})이고 그쪽이 장 시간 보호와 정지 요청 파일을 {@link RunGate}로 넣는다(D-063).
