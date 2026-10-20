@@ -43,7 +43,7 @@
 |---|---|---|---|---|
 | `day-range` | 일봉 | — | (c 고가 − c 저가) ÷ c−1 종가, 모두 수정 가격 | c 또는 c−1 일봉 없음, c−1 종가 0 → `NO_DATA` |
 | `close-strength` | 일봉 | — | (c 종가 − c 저가) ÷ (c 고가 − c 저가). 1이면 고가 마감 | 고가 = 저가(상·하한가 고정, 거래 1건 등) → `NO_DATA` |
-| `volume-spike` | 일봉 | window w | c 수정 거래량 ÷ (c 앞 w거래일 수정 거래량 평균). 기존 `volume-ratio`(w일 합 ÷ 앞 w일 합)와 달리 **c 하루**를 본다 | w+1거래일 중 하루라도 없음, 앞 구간 합 0 → `NO_DATA` |
+| `volume-spike` | 일봉 | window w | c 수정 거래량 ÷ (c 앞 w거래일 수정 거래량 평균). 기존 `volume-ratio`(w일 합 ÷ 앞 w일 합)와 달리 **c 하루**를 본다 | w+1거래일 중 하루라도 없음, 또는 거래량 0 이하인 날(거래정지일은 거래량 0 일봉, PR #193 strategy-researcher M1·architect-2 F1) → `NO_DATA` |
 | `disclosure-count` | 공시 | window w, `types` | c에서 끝나는 w거래일 구간(앞 거래일 다음 날 ~ c, 휴장일 접수분은 다음 거래일 구간에 포함)에 접수된 그 종목 공시 건수. `types`는 OpenDART 공시 유형 코드 쉼표 목록(`B` 주요사항보고, `I` 거래소공시 등). **정정 공시 규칙(판정 가능한 형태)**: 수집은 `last_reprt_at=N`(정정 포함)으로 받고, 보고서명(`report_nm`)이 `[기재정정]`·`[첨부정정]`·`[첨부추가]`·`[변경등록]`·`[연장결정]` 같은 대괄호 머리말로 시작하는 행은 세지 않는다. 나머지 행은 그 행의 접수일로 1건씩 센다(`list.json`에 원공시 연결 필드가 없어 "원공시로 묶기"는 하지 않는다, architect F5) | 공시 스냅샷 coverage가 c 미만이면 계산 실패(`STALE_INPUT`, 0건으로 내지 않음). 프로필 `types`에 스냅샷이 받지 않은 유형이 있으면 계산 실패(`INPUT_TYPE_MISSING`, manifest의 수집 유형 목록과 대조, strategy-researcher m3). 공시 0건은 정상값 `0` |
 
 - 전일 거래대금 = `avg-turnover`의 `window: 1`(c 종가 × 거래량 근사). KRX 응답의 실제 거래대금(`ACC_TRDVAL`)은 지금 수집하지 않는다 `[사실]`(`KrxOpenApiClient` 필드 목록). 근사와 실제 값의 차이(장중 가격 변동 반영 여부)가 순위를 흔들 수 있어, 수집 필드 추가를 data-engineer 변경 제안으로 남긴다(6장 후속 F1). 추가되면 새 지표 `turnover`로 넣고 기존 `avg-turnover`는 그대로 둔다(해시 불변).
@@ -57,7 +57,7 @@
 
 수치는 모두 `[가정]` 출발값이다. 실험으로 비교하려고 두는 것이지 추천 기준이 아니다.
 
-- (다) `kr-intraday-hot@1`: 전일 관심 종목. 가설(`hypothesis`): "전일 거래대금이 크고 거래량이 평소의 2배 넘게 터지며 3% 이상 오른 종목은 다음 날 장중 변동성과 유동성이 커서, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)." `filter.kinds: STOCK`, `filter.min-price: 1000`, `filter.min-bar-days: 21`(`volume-spike` w20은 c 포함 21거래일이 필요, strategy-researcher m1), gate `avg-turnover`(w1) ≥ 100억 원, `volume-spike`(w20) ≥ 2, `return`(w1) ≥ 0.03, `return`(w1) ≤ 0.25(상한가 근접 제외: 국내 가격제한폭 ±30% `[가정]`, KRX 공식 안내로 확인), score `avg-turnover`(w1) `DESC`, `max-symbols: 20`.
+- (다) `kr-intraday-hot@1`: 전일 관심 종목. 가설(`hypothesis`): "전일 거래대금이 크고 거래량이 평소의 2배 넘게 터지며 3% 이상 오른 종목은 다음 날 장중 변동성과 유동성이 커서, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)." `filter.kinds: STOCK`, `filter.min-price: 1000`, `filter.min-bar-days: 21`(`volume-spike` w20은 c 포함 21거래일이 필요, strategy-researcher m1), gate `avg-turnover`(w1) ≥ 100억 원, `volume-spike`(w20) ≥ 2, `return`(w1) ≥ 0.03, `return`(w1) ≤ 0.25(상한가 근접 제외: 국내 가격제한폭 ±30% `[사실]`, 2015-06-15 시행, `KrxMarketRules`), score `avg-turnover`(w1) `DESC`, `max-symbols: 20`.
 - (라) `kr-intraday-news@1`: 소식 있는 종목. 가설: "전일 주요사항보고·거래소공시가 있었고 거래대금이 50억 원 이상인 종목은 다음 날 정보 반영 거래로 장중 방향성이 생겨, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)." (다)의 필터 + gate `disclosure-count`(w1, `types: B,I`) ≥ 1, `avg-turnover`(w1) ≥ 50억 원, score `volume-spike`(w20) `DESC`, `max-symbols: 20`.
 - 대조군(STR-17): 같은 선정 + 단타 무작위 진입(`random` 로직, 기존), 같은 매매지표 + 선정 없음(`boards` 전체). 조합 실험 절차는 [combination-experiments.md](../strategy/combination-experiments.md) 그대로(대조군 두 축, 본페로니).
 - **조합 수와 대조군 시드 수는 사전 등록에 고정**한다. 조합 수 m ≤ 4로 시작하고(3.7에서 두 갱신 주기를 함께 돌리면 그것도 m에 셈), 무작위 대조군 시드 수 N은 N+1 ≥ 20m을 지킨다(본페로니 1 − 0.05/m 분위를 대조군 분포에서 읽기 위한 최소 표본, strategy-researcher R1).
