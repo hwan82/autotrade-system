@@ -102,3 +102,49 @@ C4의 L7은 `signal.range-minutes` ±20%(24분·36분)인데 선정 시각 `at: 
 수정 필요(M1 막힌 신규 진입의 하루 진입 한도 소진을 `[사실]`로 고치고 후속 항목·G1 반영, M2 F1·F3·F4의 ADR 선행 조건 명시; m1~m5는 같이 고치기를 권함). 또한 B1 `./gradlew build`를 직접 실행하지 못해 확인 못 함이 남아 있어 그 자체로도 승인할 수 없다. 재검토 때 빌드를 직접 돌릴 수 있게 해 달라.
 
 판정: 수정 필요
+
+## 재검토 2026-10-20
+- 대상: PR #202 / 커밋 4584e06(`origin/claude/live02-preregistration-plan-1g6tsw`와 같음) / main 대비 diff `git diff origin/main...HEAD`(5파일: D-128, decisions/README, live02 계획, docs/reviews/pr-202/architect.md·strategy-researcher.md). 이전 검토 뒤 바뀐 것은 `git diff be14c61 4584e06`로 따로 읽음. 코드·설정·스키마·보호 경로 변경 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --console=plain`(작업 폴더): **실패**. build-logic 의존성 해석에서 Maven Central `429 Too Many Requests`(kotlin-compiler-embeddable 2.0.21 등). 코드와 무관한 환경 문제.
+  - 그래서 B1은 같은 커밋의 CI 결과로 판정했다: `gh api repos/hwan82/autotrade-system/commits/4584e06/check-runs` → "Gradle build" `success`(run 39444266217, job 118701889375), "DB schema" `success`, "Lab screens" `success`, "Secret scan and collector boundary" `success`. 컨테이너 429 때 CI로 빌드를 확인한 선례: D-124 57행, docs/qa/stage-1-completion-check.md 21행.
+  - 6.2 이항 표 재계산(Python, N을 21m − 1부터 늘리며 이항(N, 1 − q) 하위 1% 분위 ≥ 20m − 1인 첫 N): m = 4 → 83·89·96·130, m = 2 → 41·45·49·68. 문서 표와 같음.
+  - P2 산수: N′ = 199면 (k+1)/200 ≤ 0.0125 ⇔ k ≤ 1. 왕복 0건 120개면 N′ + 1 = 80. 문서와 같음.
+  - 새 인용 확인: `ManagedStrategy.java:264-266`(`entriesToday++`, funnel, `pendingEntryNotional.put`), `LiveJudgeCriteria.java:337-344` `perTrip` = (최종 평가금액 − 시드) ÷ 왕복 수, `scripts/ci/protected-paths.txt:13`(`autotrade-domain/*`)·`:15`(`autotrade-strategy/*`), `LiveJudgement.java:346-351`, `krx.json` `specialSessions` 2026-11-19 10:00 개장(2구간 11-09~11-20 안).
+  - 지금까지 선정 계좌로 판정한 실험이 없다는 주장: `experiments/` 아래 `selections:`가 있는 등록 파일 없음(EDGE01 `edge.yaml`은 선정 엣지 검사라 해당 없음).
+
+### 이전 지적 처리
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| M1 막힌 신호의 하루 진입 한도 소진 | 해결 | 계획 3.1 둘째·셋째 글머리가 `[사실]`로 바뀌고 코드 근거·L10·P2·P3 영향을 적음. 8장 F7(안 (가)(나)(다), 보호 경로·사용자 머지 명시), G1 선행 조건, 11장 "F7 일정" 위험, D-128 7번·README 행 반영 |
+| M2 F1·F3·F4 ADR 선행 | 해결 | 8장 머리 "F1·F3·F4는 … ADR을 먼저 쓴다", G1 "ADR을 먼저 쓴 뒤 구현·머지, 순서 F2 → F4", D-128 7번 |
+| m1 대조군 Run 수 | 해결 | 3.2 "g × N", 3 × 83 = 249, `LiveJudgement.java` 346~351행 근거 |
+| m2 6.2 결정 순서 | 해결 | 6.2 1~3번(묶음 빼기 → m 확정 → N_k) |
+| m3 11-19 (마) 후보 0 | 해결 | 4.1 구간 글머리 |
+| m4 C4 L7 비대칭 | 해결 | 6.1 L7 행 |
+| m5 실험실 받는 큐 실측 | 해결 | G5 행 |
+
+### 점검표 B
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(CI 근거) | 로컬 `./gradlew build`는 Maven 429로 실패(환경). 같은 커밋 4584e06 CI "Gradle build" success(run 39444266217). 변경이 문서뿐이라 빌드 결과에 영향 줄 코드 변경도 없음 |
+| B2 | 해당 없음 | Java·Gradle·ArchUnit 변경 없음 |
+| B3 | 해당 없음(이 PR) | 계약 변경 없음. 후속 계약 변경(F1·F3·F4·F7)의 ADR 선행 조건이 문서에 들어감 |
+| B4 | 해당 없음(이 PR) | 코드 변경 없음. 계획의 시드 규칙(실험 시드 + i)·결과 전 고정·바이트 재현 요구는 결정론 원칙과 맞음 |
+| B5 | 해당 없음 | 코드 변경 없음 |
+| B6 | 해당 없음 | 코드·테스트 변경 없음 |
+| B7 | 해당 없음(이 PR) | 실전 경로·RealTradingGuard·블랙리스트 규칙·리스크 한도·게이트웨이·보호 경로 변경 없음. 후속 F7 (가)(나)는 보호 경로(`autotrade-strategy/*` 등)라 그 PR에서 risk-ops 검토 필요(문서에 적힘) |
+| B8 | 통과 | 수정분 포함 diff에 API Key·토큰·계좌번호 없음. 종목 코드·실험 시드만 |
+
+### 점검표 밖 발견(경미, 머지를 막지 않음)
+- n1: G1이 "F7 … 머지"를 조건으로 두는데, F7 안 (다)(받아들이고 문서화)는 머지할 코드가 없다. "F7 안 결정(ADR), (가)(나)면 머지"로 다듬으면 좋다. 등록 전 다음 문서 수정 때 같이.
+- n2: 6.2의 "기대값만 맞추는 식은 m = 4, q = 0.3에서 판정 불가 확률이 약 20%"는 내 재계산(N = ⌈84 ÷ 0.7⌉ − 1 = 120, P(N′ ≤ 78), N′ ~ 이항(120, 0.7))으로 약 13.7%다. q 추정 불확실성을 넣으면 커질 수 있다. 판정 수치가 아니라 이유 설명이고, 통계 판단은 strategy-researcher 몫이라 참고로만 적는다.
+- n3: F7 "(가)(나)는 `autotrade-strategy`·`autotrade-domain`을 바꾼다"에서 `StrategyContext`는 `autotrade-strategy/src/main/java/com/autotrade/strategy/StrategyContext.java`에 있어 (가)는 `autotrade-strategy`만 바꿀 수도 있다(첫 검토의 내 문구도 같은 부정확함). 어느 쪽이든 보호 경로라 결론(실전 관련 PR·사용자 머지)은 같다.
+
+## 판정
+승인(n1~n3은 경미, 후속 문서 수정 때 반영 권함)
+
+판정: 승인
