@@ -25,7 +25,13 @@ public enum Metric {
     /** 직전 {@code window}거래일 수익률: 마지막 수정 종가 ÷ 구간 시작 전날 수정 종가 − 1. */
     RETURN("return", Kind.BARS, Param.WINDOW),
     /** 직전 {@code window}거래일 평균 거래대금(원가격 종가 × 거래량). */
-    AVG_TURNOVER("avg-turnover", Kind.BARS, Param.WINDOW);
+    AVG_TURNOVER("avg-turnover", Kind.BARS, Param.WINDOW),
+    /** 직전 거래일 변동폭: (c 수정 고가 − c 수정 저가) ÷ c−1 수정 종가(ADR-012 3.2, 단타). */
+    DAY_RANGE("day-range", Kind.BARS, Param.NONE),
+    /** 직전 거래일 종가 강도: (c 종가 − c 저가) ÷ (c 고가 − c 저가). 1이면 고가 마감(ADR-012 3.2, 단타). */
+    CLOSE_STRENGTH("close-strength", Kind.BARS, Param.NONE),
+    /** 직전 거래일 거래량 급증: c 수정 거래량 ÷ c 앞 {@code window}거래일 수정 거래량 평균(ADR-012 3.2, 단타). */
+    VOLUME_SPIKE("volume-spike", Kind.BARS, Param.WINDOW);
 
     /** 지표가 읽는 입력. */
     public enum Kind { BARS, SHARES, FINANCIAL }

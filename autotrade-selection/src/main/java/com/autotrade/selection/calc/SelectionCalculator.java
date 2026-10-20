@@ -298,6 +298,9 @@ public final class SelectionCalculator {
             case VOLUME_RATIO -> volumeRatio(ctx, period);
             case RETURN -> periodReturn(ctx, period);
             case AVG_TURNOVER -> avgTurnover(ctx, period);
+            case DAY_RANGE -> dayRange(ctx);
+            case CLOSE_STRENGTH -> closeStrength(ctx);
+            case VOLUME_SPIKE -> volumeSpike(ctx, period);
             case OP_MARGIN -> latestRatio(ctx, f -> margin(f));
             case DEBT_RATIO -> debtRatio(ctx);
             case OP_MARGIN_GROWTH -> growth(ctx, period, FinancialItem.OP_MARGIN);
@@ -368,6 +371,59 @@ public final class SelectionCalculator {
             sum = sum.add(b.close().multiply(BigDecimal.valueOf(b.volume())), WIDE);
         }
         return Value.of(sum.divide(BigDecimal.valueOf(w), WIDE), false);
+    }
+
+    /**
+     * (c 수정 고가 − c 수정 저가) ÷ c−1 수정 종가. 수정 계수가 c−1과 c 사이에서 바뀌는(분할 등) 날도 같은 기준으로 비교한다.
+     */
+    private Value dayRange(Context ctx) {
+        List<DailyBar> bars = ctx.lastBars(2);
+        if (bars == null) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal base = adjustedClose(bars.get(0));
+        if (base.signum() <= 0) {
+            return Value.missing(NO_DATA, false);
+        }
+        DailyBar c = bars.get(1);
+        BigDecimal range = c.high().subtract(c.low()).multiply(c.adjFactor(), WIDE);
+        return Value.of(range.divide(base, WIDE), false);
+    }
+
+    /**
+     * (c 종가 − c 저가) ÷ (c 고가 − c 저가). 같은 날 세 가격이라 수정 계수가 약분되어 원가격으로 계산한다. 고가 = 저가(상·하한가
+     * 고정, 거래 1건)는 정의되지 않아 {@code NO_DATA}다. 고가 < 저가 같은 고저 모순 행은 스냅샷 품질 검사가 오류로 먼저 빼므로
+     * ({@code SnapshotDailyBarSource}) 여기서는 방어로만 같은 결측으로 둔다.
+     */
+    private Value closeStrength(Context ctx) {
+        DailyBar c = ctx.bars.get(ctx.cutoff);
+        if (c == null) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal span = c.high().subtract(c.low());
+        if (span.signum() <= 0) {
+            return Value.missing(NO_DATA, false);
+        }
+        return Value.of(c.close().subtract(c.low()).divide(span, WIDE), false);
+    }
+
+    /**
+     * c 수정 거래량 ÷ (c 앞 w거래일 수정 거래량 합 ÷ w). w+1거래일 중 하루라도 일봉이 없거나 <b>거래량 0 이하인 날</b>(거래정지일은
+     * 거래량 0 일봉으로 저장됨, ADR-008)이 있으면 {@code NO_DATA}다. 정지일이 평균에 들어가면 배율이 20 ÷ (20 − k)배로 부풀어
+     * 재개 뒤 평소 거래량만으로 급증 조건을 넘기 때문이다(PR #193 strategy-researcher M1). 음수 거래량 행은 품질 검사가 경고로만
+     * 남겨 적재되므로 같은 결측으로 막아 분모가 0 이하가 되지 않게 한다(PR #193 architect-2 F1).
+     */
+    private Value volumeSpike(Context ctx, int w) {
+        List<DailyBar> bars = ctx.lastBars(w + 1);
+        if (bars == null || bars.stream().anyMatch(b -> b.volume() <= 0)) {
+            return Value.missing(NO_DATA, false);
+        }
+        BigDecimal prior = BigDecimal.ZERO;
+        for (int i = 0; i < w; i++) {
+            prior = prior.add(adjustedVolume(bars.get(i)), WIDE);
+        }
+        BigDecimal last = adjustedVolume(bars.get(w));
+        return Value.of(last.multiply(BigDecimal.valueOf(w), WIDE).divide(prior, WIDE), false);
     }
 
     /** 재무 항목(성장률 계산용). */
