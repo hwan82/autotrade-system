@@ -29,7 +29,7 @@
 
 ### 2.2 가상 체결 규칙 `BOOK-V6` (`autotrade-sim`, `exchange.VirtualExchange`)
 
-`BOOK-V1`(1~10번)에 시세 공백 처리(11번)를 더한 것이 `BOOK-V2`다([D-068](../decisions/D-068-recording-adapter-gap-handling.md)). 공백이 없는 데이터의 결과는 두 버전이 같다. 여기에 매매 단계(12번)를 더한 것이 `BOOK-V3`다([D-069](../decisions/D-069-session-phases-recording-experiment.md)). 단일가 구간이 없는 규칙(정규장 내내 접속 매매)으로 돌린 결과는 BOOK-V2와 같다. 평가 가격과 단일가 체결 창(13번)을 더한 것이 `BOOK-V4`다([D-075](../decisions/D-075-book-v4-auction-print-window.md)). 장 밖 체결과 장중 시작이 없는 데이터의 결과는 BOOK-V3과 같다. 13번의 장중 시작 판정에서 장 밖 이벤트와 접수 구간의 체결 이벤트를 빼고 종가 단일가 구간이 없는 시장의 종가 크로스를 평가에 쓴 것이 `BOOK-V5`다([D-087](../decisions/D-087-book-v5-premarket-first-event-us-close.md)). 장전 시간외 이벤트 뒤 장중 시작이 없고 종가 단일가 구간이 있는 시장(KRX)의 데이터 결과는 BOOK-V4와 같다.
+`BOOK-V1`(1~10번)에 시세 공백 처리(11번)를 더한 것이 `BOOK-V2`다([D-068](../decisions/D-068-recording-adapter-gap-handling.md)). 공백이 없는 데이터의 결과는 두 버전이 같다. 여기에 매매 단계(12번)를 더한 것이 `BOOK-V3`다([D-069](../decisions/D-069-session-phases-recording-experiment.md)). 단일가 구간이 없는 규칙(정규장 내내 접속 매매)으로 돌린 결과는 BOOK-V2와 같다. 평가 가격과 단일가 체결 창(13번)을 더한 것이 `BOOK-V4`다([D-075](../decisions/D-075-book-v4-auction-print-window.md)). 장 밖 체결과 장중 시작이 없는 데이터의 결과는 BOOK-V3과 같다. 13번의 장중 시작 판정에서 장 밖 이벤트와 접수 구간의 체결 이벤트를 빼고 종가 단일가 구간이 없는 시장의 종가 크로스를 평가에 쓴 것이 `BOOK-V5`다([D-087](../decisions/D-087-book-v5-premarket-first-event-us-close.md)). 장전 시간외 이벤트 뒤 장중 시작이 없고 종가 단일가 구간이 있는 시장(KRX)의 데이터 결과는 BOOK-V4와 같다. 호가 단위의 정확한 반 칸 체결(중간가 체결, 14번)을 지정가·단일가 체결에서 뺀 것이 `BOOK-V6`다([D-118](../decisions/D-118-midpoint-trade-ticks.md)). 반 칸 체결이 없는 데이터의 결과는 BOOK-V5와 같다.
 
 `VirtualExchange`는 계좌 하나의 `OrderGateway` 가상 구현이다. 증권사 주문 API를 호출하지 않는다(SIM-01, ArchUnit `시뮬레이션은_증권사_플러그인을_모른다`).
 
