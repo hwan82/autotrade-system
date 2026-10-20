@@ -57,3 +57,38 @@
 
 ## 판정
 수정 필요(F1, F2, F3, F4)
+
+## 재검토 2026-10-20
+- 대상: PR #200 / 커밋 `e7a5a46`(직전 검토 `d867bcb` 이후 `762d718` strategy-researcher M1·M2·R1·R2 반영, `e7a5a46` architect F1~F4 반영) / `git diff origin/main...HEAD` 전체를 다시 보고, `git diff d867bcb e7a5a46`(17개 파일)는 줄 단위로 봤다
+- 점검표: B
+- 직접 실행한 것
+  - `e7a5a46`를 따로 꺼낸 깨끗한 worktree에서 `./gradlew --init-script <mirror> clean build` → **BUILD SUCCESSFUL**(161 tasks). selection 57, sim 402(+3: `IntradayTrackerTest#dayFirstObservedAfterOpenGraceMarksEveryBoardSymbolAsGap`, `#gapOverlappingWindowMarksSymbolEvenIfItEndsAfterClose`, `#eventOfEarlierTradingDayDoesNotReopenRankedDay`), architecture-test 46, app-lab 256, 실패·건너뜀 0
+  - SQL·스키마 smoke는 이번 수정에서 바뀌지 않았다(직전 검토의 PG16 V1→V3 + smoke 통과가 그대로 유효)
+  - 임시 시험(worktree 안, 커밋 안 함, 실행 뒤 지움)으로 직전 F1 시나리오를 다시 돌렸다
+    - 날을 넘긴 재기동, 09:10 재개(gapStart D0 15:35, gapEnd D1 09:10) → 두 종목 모두 `SESSION_GAP`(직전에는 통과·선정. 고쳐짐)
+    - 개장 전 08:50 재개 → 표시 안 함, 정상 선정(맞음)
+    - `kr-intraday-open-all@1`이 `SelectionProfile`·`SelectionCriteria` 검증을 통과해 읽힘
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `clean build` |
+| B2 | 통과 | 새 의존은 sim 안의 `VirtualExchange.AUCTION_PRINT_GRACE`(같은 모듈)뿐. ArchUnit 통과 |
+| B3 | 통과 | ADR-005 `GET /api/live/status`에 `session.intraday` 모양·순위 전 값(빈 목록·0·null)을 적었고, `POST /api/live/selections/prepare`의 409 조건에 "장전 선정 조합 계좌 없음(장중만 포함)"을 더했다. 코드와 맞다: `LiveSelectionPrep.hasSelections`(LiveSelectionPrep.java:112-115)가 `daily().isPresent()`까지 보고, `LiveLabService.java:227`이 이것으로 준비 스레드를 정한다. 시험은 `LiveIntradaySessionTest` 133줄. `at` 범위 변경(KRX 09:01~14:30, 미국 09:31~15:00)은 SelectionProfile·ADR-007·D-127·카탈로그가 같다 |
+| B4 | 통과 | F1·F2 해소(아래). 판정은 이벤트만의 순수 함수라 실시간·리플레이가 같은 값을 낸다(개장 + 60초 판정도 이벤트 거래소 시각만 씀). 골든 테스트 통과 |
+| B5 | 통과 | 바뀐 금액 계산 없음 |
+| B6 | 통과 | 위 시험 3개 추가, `SelectionProfileTest`의 범위 경계 갱신(14:30 허용, 14:31·15:20 거부). 지우거나 끈 시험 없음 |
+| B7 | 해당 없음 | 실전 경로·보호 경로 변경 없음(17개 파일 모두 selection·sim·문서·선정 프로필) |
+| B8 | 통과 | 비밀값 없음 |
+
+### 직전 지적 처리
+- **F1 해소**: `overlapsWindow`(IntradayTracker.java:156)가 `gapStart`를 오늘 `at`의 Instant와 비교한다. 그래서 전날 시작한 공백도 정규장 안에서 끝나면 표시된다. 장중에 처음 연 날은 개장 + 60초 판정(117줄)으로 전 종목이 표시된다. 위 임시 시험으로 확인했다.
+- **F2 해소**: 지난 거래일 이벤트는 무시하고(108줄), (선정, 거래일)은 `putIfAbsent`로 한 번만 정한다(174줄). 시험 `#eventOfEarlierTradingDayDoesNotReopenRankedDay`는 순위 결과·`activeFrom` 20이 그대로임을 확인한다. `RunStepper`가 거꾸로 가는 이벤트에서 날을 다시 여는 것은 기존 동작이다. 이때도 추적기가 같은 값을 돌려주므로 실시간과 리플레이가 같다.
+- **F3 해소**: 위 B3.
+- **F4 해소**: runbook 2장 7번이 "처음 받는 이벤트가 09:01 뒤이거나 09:00 ~ `at` 사이 재기동이면 후보 0"으로 고쳐져 코드(117줄·`overlapsWindow`)와 맞다. D-127 결정 5에도 같은 내용과 개장 지연일(후보 0) 설명이 들어갔다.
+
+### 남은 것(권고, 판정에 넣지 않음)
+- 직전 R1(인자 하나짜리 `allowsEntry`), R3(장전 + 장중이 섞인 등록의 끝단 시험), R4(패키지 전체 이름 import), R5(실행기 가변 필드), R6(스트림 레인끼리 추적기 공유, 녹화 판정 지원 때 처리)은 그대로 남았다. R2는 `at` 상한 조정과 개장 지연일 문서화로 대부분 처리됐다. 시장 분기 하드코딩(SelectionProfile.java:146-148)만 남았다.
+- 새 관찰 n1: 재기동 공백이 **정확히 09:00:00**에 끝나도(`gapEnd`가 정규장 첫 순간) `isRegularSession(gapEnd)`가 참이라 `SESSION_GAP`이 된다. 임시 시험으로 확인했다. 실제로 잃은 체결이 없을 수 있는 경계라 표본만 빠지는 보수적 동작이다. 안전 쪽이라 판정과는 상관없고, 필요하면 "끝이 개장 + 유예 안이면 제외"로 다듬는다.
+
+## 판정
+승인
