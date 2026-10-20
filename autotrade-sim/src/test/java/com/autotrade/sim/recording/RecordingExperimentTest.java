@@ -127,17 +127,37 @@ class RecordingExperimentTest {
 
     @Test
     void 주식_호가_단위에_맞지_않는_가격이_있으면_시작하지_않는다(@TempDir Path tmp) throws IOException {
+        // D-118: 180,050은 100원 단위의 반 칸이라 중간가 체결로 받으므로 반 칸도 아닌 5원 단위 가격(180,005)으로 본다
         // architect PR #74 R2: ETF(5원 단위) 같은 가격이 녹화에 있으면 주식 호가 단위로 돌리지 않고 거절한다
         List<MarketEvent> events = new ArrayList<>(EVENTS);
         MarketEvent last = events.get(events.size() - 1);
         events.add(new TradeTick(Symbol.krx("000660"), last.sequence() + 1, last.exchangeTime().plusSeconds(1),
-                last.receivedAt().plusSeconds(1), new BigDecimal("180050"), 1));
+                last.receivedAt().plusSeconds(1), new BigDecimal("180005"), 1));
         Path recordings = tmp.resolve("recordings");
         FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), events);
         RecordingPlan plan = RecordingPlan.parse(PLAN, "t");
         assertThatThrownBy(() -> RecordingExperiment.run(plan, Path.of(".."), recordings, new CodeVersion("t", false),
                 false, m -> { }, RunGate.NONE))
-                .hasMessageContaining("주식 호가 단위에 맞지 않는 녹화 가격입니다: 000660 180050");
+                .hasMessageContaining("주식 호가 단위에 맞지 않는 녹화 가격입니다: 000660 180005");
+    }
+
+    @Test
+    void 중간가_체결과_단위_밖_가격과_호가를_같은_검사가_가른다_D118() {
+        var rules = TestKrxRules.INSTANCE;
+        Symbol s = Symbol.krx("005930");
+        java.time.Instant t = java.time.Instant.parse("2026-03-03T01:00:00Z");
+        // 218,750 = 218,500과 219,000의 중간(500원 단위): 체결이면 통과
+        assertThat(RecordingExperiment.offStockTick(rules, new TradeTick(s, 1, t, t, new BigDecimal("218750"), 1))).isEmpty();
+        // 반 칸이 아닌 단위 밖 체결은 그대로 걸린다
+        assertThat(RecordingExperiment.offStockTick(rules, new TradeTick(s, 1, t, t, new BigDecimal("218700"), 1)))
+                .hasValueSatisfying(p -> assertThat(p).isEqualByComparingTo("218700"));
+        // 같은 반 칸 가격이라도 호가 가격이면 걸린다
+        var book = new com.autotrade.domain.market.OrderBookSnapshot(s, 1, t, t,
+                List.of(new com.autotrade.domain.market.PriceLevel(new BigDecimal("218750"), 5)),
+                List.of(new com.autotrade.domain.market.PriceLevel(new BigDecimal("218500"), 5)));
+        assertThat(RecordingExperiment.offStockTick(rules, book)).hasValueSatisfying(p -> assertThat(p).isEqualByComparingTo("218750"));
+        assertThatThrownBy(() -> RecordingExperiment.requireStockTicks(rules, book))
+                .hasMessageContaining("주식 호가 단위에 맞지 않는 녹화 가격입니다: 005930 218750");
     }
 
     @Test

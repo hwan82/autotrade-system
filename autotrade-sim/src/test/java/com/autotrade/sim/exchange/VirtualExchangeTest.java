@@ -535,6 +535,33 @@ class VirtualExchangeTest {
     }
 
     @Test
+    void 중간가_체결은_주문을_체결시키지_않는다_D118() {
+        event(book(1000, asks("70200x60"), bids("70000x400")));
+        submit(Side.BUY, OrderType.LIMIT, "70100", 10);
+        event(book(2000, asks("70200x60"), bids("70000x400")));
+        // 70,050은 호가 단위 100의 반 칸: 일반 체결이면 지정가 70,100을 통과해 체결되지만 중간가 체결은 체결 근거가 아니다
+        assertThat(event(trade(3000, "70050", 1000))).isEmpty();
+        assertThat(ex.hasOpenOrder(S)).isTrue();
+        assertThat(ex.markPrice(S)).isEqualByComparingTo("70050"); // 평가 가격에는 쓴다
+        // 단위에 맞는 체결은 그대로 체결(통과한 70,000 체결은 지정가 70,100 체결)
+        assertThat(event(trade(4000, "70000", 100))).singleElement()
+                .satisfies(a -> assertThat(a.fill().quantity()).isEqualTo(10));
+    }
+
+    @Test
+    void 중간가_판정은_정확한_반_칸만_받는다_D118() {
+        MarketRules r = TestKrxRules.INSTANCE;
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("218750"))).isTrue(); // 500원 단위의 반 칸
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("70050"))).isTrue(); // 100원 단위의 반 칸
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("199950"))).isTrue(); // 구간 경계 아래 100원 단위
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("70000"))).isFalse(); // 단위에 맞음
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("70060"))).isFalse(); // 반 칸 아님
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("60005"))).isFalse(); // ETF 5원
+        assertThat(MidpointTrades.isMidpoint(r, S, new BigDecimal("218751"))).isFalse();
+        assertThat(MidpointTrades.isMidpoint(r, S, BigDecimal.ZERO)).isFalse();
+    }
+
+    @Test
     void 표시_범위_밖_지정가는_그_가격이_표시될_때까지_앞선_잔량을_정하지_않는다() {
         event(book(1000, asks("70100x60"), bids("70000x400", "69900x300")));
         submit(Side.BUY, OrderType.LIMIT, "69800", 10);
