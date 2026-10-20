@@ -53,4 +53,26 @@ class KrxOpenApiClientTest {
         String bad = KrxFixtures.body(D, List.of("59;A;;1;1;1;1;0;1;1"));
         assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSPI, D, bad)).hasMessageContaining("코드");
     }
+
+    @Test
+    void 실제_거래대금을_읽고_칸이_없거나_비면_null이다() throws IOException {
+        String body = KrxFixtures.body(D, List.of(
+                "005930;삼성전자;;61,000;62,000;60,500;61,500;500;1,234,567;5,969,782,550;75,432,100,000",
+                "000660;SK하이닉스;;1;1;1;1;0;0;1;",
+                "035420;NAVER;;1;1;1;1;0;0;1;-",
+                "035720;카카오;;1;1;1;1;0;0;1"));
+        List<KrxDailyRow> rows = KrxOpenApiClient.parse(KrxBoard.KOSPI, D, body);
+        assertThat(rows.get(0).turnover()).isEqualTo(75_432_100_000L);
+        assertThat(rows.get(1).turnover()).isNull();
+        assertThat(rows.get(2).turnover()).isNull();
+        assertThat(rows.get(3).turnover()).isNull();
+    }
+
+    @Test
+    void 실제_거래대금이_음수거나_소수면_멈춘다() {
+        String negative = KrxFixtures.body(D, List.of("005930;A;;1;1;1;1;0;1;1;-5"));
+        assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSPI, D, negative)).hasMessageContaining("ACC_TRDVAL 값이 음수");
+        String fraction = KrxFixtures.body(D, List.of("005930;A;;1;1;1;1;0;1;1;10.5"));
+        assertThatThrownBy(() -> KrxOpenApiClient.parse(KrxBoard.KOSPI, D, fraction)).hasMessageContaining("정수가 아닙니다");
+    }
 }

@@ -68,4 +68,17 @@ class CollectorReportsTest {
         assertThat(CollectorReports.gapSections(s, CAL, Set.of())).contains("| - | 0 | 0 | 0 | 0 | 0 | 0 | |").contains("없음\n");
         assertThat(CollectorReports.warnings(s, CAL, Set.of()).any()).isFalse();
     }
+
+    @Test
+    void 실제_거래대금_칸은_행_수_결측_범위_밖_비율과_예시를_적는다() {
+        String md = CollectorReports.turnoverSection(new KrxDailySnapshotBuilder.TurnoverStats(true, 2000, 3, 4,
+                List.of("2026-10-06 111111")));
+        assertThat(md).contains("## 실제 거래대금(ACC_TRDVAL, D-133)", "| 거래대금 행(`daily_turnover.csv`) | 2000 |",
+                "ACC_TRDVAL이 없거나 빈 행(파일에 넣지 않음) | 3 |", "밖 행(경고) | 4 (0.200%) |", "| 범위 밖 앞 1건 | 2026-10-06 111111 |")
+                .doesNotContain("응답에 ACC_TRDVAL이 없습니다");
+        String none = CollectorReports.turnoverSection(new KrxDailySnapshotBuilder.TurnoverStats(true, 0, 7, 0, List.of()));
+        assertThat(none).contains("**KRX 응답에 ACC_TRDVAL이 없습니다.**");
+        assertThat(CollectorReports.turnoverSection(new KrxDailySnapshotBuilder.TurnoverStats(false, 0, 0, 0, List.of())))
+                .contains("거래대금 파일 없음(`--without-turnover`");
+    }
 }

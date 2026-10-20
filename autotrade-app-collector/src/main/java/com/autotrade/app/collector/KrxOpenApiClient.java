@@ -16,8 +16,10 @@ import java.util.Map;
  * 응답 {@code {"OutBlock_1":[{...}]}}. 휴장일은 빈 목록이다.
  *
  * <p>[가정] 기본 주소 {@code https://data-dbg.krx.co.kr}, 헤더 이름, 필드 이름(BAS_DD, ISU_CD, ISU_NM, MKT_NM, SECT_TP_NM,
- * TDD_OPNPRC, TDD_HGPRC, TDD_LWPRC, TDD_CLSPRC, CMPPREVDD_PRC, ACC_TRDVOL, LIST_SHRS)은 공개 클라이언트 예제 기준이고 이
+ * TDD_OPNPRC, TDD_HGPRC, TDD_LWPRC, TDD_CLSPRC, CMPPREVDD_PRC, ACC_TRDVOL, ACC_TRDVAL, LIST_SHRS)은 공개 클라이언트 예제 기준이고 이
  * 환경에서 원문을 받지 못했다. 키 발급 뒤 첫 호출로 확인한다(runbook). 응답 모양이 다르면 조용히 넘기지 않고 예외로 멈춘다.
+ * 실제 거래대금 {@code ACC_TRDVAL}(D-133)만 예외로, 칸이 없거나 비면 {@code null}로 두고 수집 요약에 센다(옛 캐시 응답도 그대로
+ * 다시 읽어야 하고, 칸이 없다고 일봉까지 멈출 이유는 없다).
  */
 public final class KrxOpenApiClient {
 
@@ -59,7 +61,7 @@ public final class KrxOpenApiClient {
             }
             out.add(new KrxDailyRow(date, board, shortCode(text(n, "ISU_CD")), text(n, "ISU_NM"), text(n, "SECT_TP_NM"),
                     decimal(n, "TDD_OPNPRC"), decimal(n, "TDD_HGPRC"), decimal(n, "TDD_LWPRC"), decimal(n, "TDD_CLSPRC"),
-                    decimal(n, "CMPPREVDD_PRC"), whole(n, "ACC_TRDVOL"), whole(n, "LIST_SHRS")));
+                    decimal(n, "CMPPREVDD_PRC"), whole(n, "ACC_TRDVOL"), whole(n, "LIST_SHRS"), optionalWhole(n, "ACC_TRDVAL")));
         }
         return out;
     }
@@ -97,6 +99,22 @@ public final class KrxOpenApiClient {
     private static BigDecimal decimal(JsonNode n, String field) {
         String s = text(n, field).replace(",", "");
         return s.isEmpty() || s.equals("-") ? null : new BigDecimal(s);
+    }
+
+    /** 칸이 없거나 비면 {@code null}. 음수·소수는 원자료 이상이라 예외. */
+    static Long optionalWhole(JsonNode n, String field) throws IOException {
+        BigDecimal d = decimal(n, field);
+        if (d == null) {
+            return null;
+        }
+        if (d.signum() < 0) {
+            throw new IOException(field + " 값이 음수입니다: " + d.toPlainString());
+        }
+        try {
+            return d.longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IOException(field + " 값이 정수가 아닙니다: " + d.toPlainString(), e);
+        }
     }
 
     private static long whole(JsonNode n, String field) {
