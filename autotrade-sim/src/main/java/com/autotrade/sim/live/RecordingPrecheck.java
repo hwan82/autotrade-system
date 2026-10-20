@@ -398,12 +398,17 @@ public final class RecordingPrecheck {
             if (!p3Items.isEmpty()) {
                 applied.add(p3Item);
             }
-            String result = applied.stream().anyMatch(x -> x.outcome().equals(FAIL)) ? FAIL
-                    : applied.stream().anyMatch(x -> x.outcome().equals(NOT_AVAILABLE)) ? NOT_AVAILABLE : CANDIDATE;
+            String result = result(applied);
             accounts.put(i, new AccountResult(p0, p1, p2Item, p3Item, result));
             verdicts.put(r.summary().accountId().value(), result);
         }
         return new Evaluated(accounts, verdicts, segments, crossing);
+    }
+
+    /** 결과: 걸린 P에 탈락이 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 판정 불가, 모두 통과면 통과(LIVE02 후보). */
+    static String result(List<Item> applied) {
+        return applied.stream().anyMatch(x -> x.outcome().equals(FAIL)) ? FAIL
+                : applied.stream().anyMatch(x -> x.outcome().equals(NOT_AVAILABLE)) ? NOT_AVAILABLE : CANDIDATE;
     }
 
     /** 대조군 시드 레인들의 왕복당 순손익(왕복 0건·실패는 뺌), 오름차순. */
@@ -517,7 +522,7 @@ public final class RecordingPrecheck {
     }
 
     /** 한 계좌에 P3 쌍이 여럿이면: 탈락 하나라도 있으면 탈락, 아니면 판정 불가가 있으면 판정 불가. */
-    private static Item combine(List<Item> items) {
+    static Item combine(List<Item> items) {
         if (items.isEmpty()) {
             return Item.NONE;
         }
@@ -796,19 +801,27 @@ public final class RecordingPrecheck {
                     .append(n - x).append(" | ")
                     .append(BigDecimal.valueOf(x).divide(BigDecimal.valueOf(n), 4, RoundingMode.HALF_EVEN).toPlainString())
                     .append(" | ").append(PrecheckMath.display(upper)).append(" |");
-            boolean drop = 2L * x >= n;
             for (int m = 1; m <= PrecheckMath.MAX_M; m++) {
-                if (drop) {
-                    sb.append(" 묶음 빼기 |");
-                    continue;
-                }
-                OptionalInt need = PrecheckMath.liveSeeds(upper, m, LivePlan.MAX_GROUP_NULL_SEEDS);
-                sb.append(' ').append(need.isPresent() ? String.valueOf(need.getAsInt())
-                        : LivePlan.MAX_GROUP_NULL_SEEDS + " 초과").append(" |");
+                sb.append(' ').append(liveSeedsCell(x, n, upper, m)).append(" |");
             }
             sb.append('\n');
         }
         sb.append('\n');
+    }
+
+    /** LIVE02 N 표 한 칸: x/N ≥ 0.5면 "묶음 빼기"(계획 6.2 1번), 999를 넘으면 "999 초과", 아니면 N. */
+    static String liveSeedsCell(int x, int n, BigDecimal upper, int m) {
+        if (2L * x >= n) {
+            return "묶음 빼기";
+        }
+        OptionalInt need = PrecheckMath.liveSeeds(upper, m, LivePlan.MAX_GROUP_NULL_SEEDS);
+        return need.isPresent() ? String.valueOf(need.getAsInt()) : LivePlan.MAX_GROUP_NULL_SEEDS + " 초과";
+    }
+
+    /** 구독 커버리지 알림: 구간 평균들의 평균이 50% 미만(구간 평균이 하나도 없으면 알리지 않음). */
+    static boolean coverageAlert(List<BigDecimal> segmentAverages) {
+        BigDecimal overall = mean(segmentAverages);
+        return overall != null && overall.compareTo(COVERAGE_ALERT) < 0;
     }
 
     /** 6장: 장전 선정 묶음마다 구독 커버리지(선정 ∩ boards ÷ 선정 수)의 구간 평균, 제외·빠진 날 수. */
@@ -866,7 +879,7 @@ public final class RecordingPrecheck {
             BigDecimal overall = mean(averages);
             sb.append(' ').append(overall == null ? "–" : ScreeningCriteria.pct(overall)).append(" | ").append(notSubscribed)
                     .append(" | ").append(blacklisted).append(" | ").append(missing).append(" |\n");
-            if (overall != null && overall.compareTo(COVERAGE_ALERT) < 0) {
+            if (coverageAlert(averages)) {
                 alerts.add(s.key());
             }
         }

@@ -58,7 +58,7 @@ class RecordingPrecheckTest {
             to: "2026-03-04"
             seed: "7"
             seed-capital: "10000000"
-            parallelism: "2"
+            parallelism: "4"
             profiles:
               - "kr-orb-30@1"
               - "kr-random-control@1"
@@ -114,7 +114,7 @@ class RecordingPrecheckTest {
     @Test
     void registrationParsesAllRecordingKeysAndThePrecheckValuesWithoutDouble() {
         PrecheckPlan plan = parse(PLAN);
-        assertThat(plan.recording().parallelism()).isEqualTo(2);
+        assertThat(plan.recording().parallelism()).isEqualTo(4);
         assertThat(plan.live().references()).hasSize(2);
         assertThat(plan.live().groupNullSeeds()).containsEntry("none", 4).containsEntry("kr-intraday-hot@1", 4);
         assertThat(plan.alpha()).isEqualByComparingTo("0.75");
@@ -197,6 +197,90 @@ class RecordingPrecheckTest {
         assertThat(RecordingPrecheck.p2Outcome(0, 41, 3, new BigDecimal("0.07"))).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
         assertThat(RecordingPrecheck.p2Outcome(0, 42, 3, new BigDecimal("0.07"))).isEqualTo(RecordingPrecheck.PASS); // 3 ≤ 3.01
         assertThat(RecordingPrecheck.p2Outcome(1, 42, 3, new BigDecimal("0.07"))).isEqualTo(RecordingPrecheck.FAIL);
+    }
+
+    /** 왕복 수·최종 평가금액만 있는 완료 Run(경계 시험용). */
+    private static com.autotrade.sim.run.RunReport completed(String id, int trips, String finalEquity) {
+        com.autotrade.strategy.StrategyProfile orb = com.autotrade.sim.recording.RecordingExperiment.loadStrategy(REPO,
+                new com.autotrade.sim.recording.RecordingPlan.ProfileRef("kr-orb-30", 1));
+        Money eq = Money.of(finalEquity, Money.KRW);
+        com.autotrade.sim.metrics.RunMetrics m = new com.autotrade.sim.metrics.RunMetrics(eq, BigDecimal.ZERO, null,
+                BigDecimal.ZERO, null, null, null, BigDecimal.ZERO, 2 * trips, trips, BigDecimal.ZERO, Money.zero(Money.KRW),
+                null, null, null);
+        return new com.autotrade.sim.run.RunReport(new com.autotrade.sim.RunResult(id,
+                new com.autotrade.domain.account.AccountId(id), orb.profileHash(), 1L, com.autotrade.sim.RunStatus.COMPLETED,
+                eq, "", m), orb, List.of(), List.of(), List.of(), List.of());
+    }
+
+    private static com.autotrade.sim.run.RunReport failed(String id) {
+        com.autotrade.strategy.StrategyProfile orb = com.autotrade.sim.recording.RecordingExperiment.loadStrategy(REPO,
+                new com.autotrade.sim.recording.RecordingPlan.ProfileRef("kr-orb-30", 1));
+        return new com.autotrade.sim.run.RunReport(new com.autotrade.sim.RunResult(id,
+                new com.autotrade.domain.account.AccountId(id), orb.profileHash(), 1L, com.autotrade.sim.RunStatus.FAILED,
+                Money.of(10_000_000L, Money.KRW), "시험 실패", null), orb, List.of(), List.of(), List.of(), List.of());
+    }
+
+    @Test
+    void p0AndP1BoundariesFollowAdr014NineThree() {
+        // P0: 왕복 수 = 기준이면 통과, 하나 모자라면 탈락, 실패한 Run은 판정 불가
+        assertThat(RecordingPrecheck.p0(completed("A", 45, "10000000"), 45).outcome()).isEqualTo(RecordingPrecheck.PASS);
+        assertThat(RecordingPrecheck.p0(completed("A", 44, "10000000"), 45).outcome()).isEqualTo(RecordingPrecheck.FAIL);
+        assertThat(RecordingPrecheck.p0(failed("A"), 45).outcome()).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+        // P1: 왕복당 순손익 0(같음)은 탈락, 1원이라도 > 0이면 통과, 왕복 0건·실패는 판정 불가
+        assertThat(RecordingPrecheck.p1(completed("A", 10, "10000000"), SEED).outcome()).isEqualTo(RecordingPrecheck.FAIL);
+        assertThat(RecordingPrecheck.p1(completed("A", 10, "10000010"), SEED).outcome()).isEqualTo(RecordingPrecheck.PASS);
+        assertThat(RecordingPrecheck.p1(completed("A", 10, "9999990"), SEED).outcome()).isEqualTo(RecordingPrecheck.FAIL);
+        assertThat(RecordingPrecheck.p1(completed("A", 0, "10000010"), SEED).outcome())
+                .isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+        assertThat(RecordingPrecheck.p1(failed("A"), SEED).outcome()).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+    }
+
+    @Test
+    void p3NeedsOverallDAboveZeroAndEnoughPositiveSegments() {
+        PrecheckPlan plan = parse(PLAN); // 구간 2개, p3-min-segments 1
+        RecordingPrecheck.SegmentValue up = new RecordingPrecheck.SegmentValue(new BigDecimal("100"), 1, new BigDecimal("100"));
+        RecordingPrecheck.SegmentValue flat = new RecordingPrecheck.SegmentValue(BigDecimal.ZERO, 1, BigDecimal.ZERO);
+        RecordingPrecheck.SegmentValue none = new RecordingPrecheck.SegmentValue(BigDecimal.ZERO, 0, null);
+        // 전체 d = (100/2) − (0/2) = 50 > 0, d_s > 0 구간 1개 ≥ 1 → 통과
+        assertThat(RecordingPrecheck.p3(completed("J", 2, "10000100"), completed("R", 2, "10000000"), List.of(up, flat),
+                List.of(flat, flat), plan, SEED).outcome()).isEqualTo(RecordingPrecheck.PASS);
+        // 전체 d = 0(같음)이면 구간이 좋아도 탈락
+        assertThat(RecordingPrecheck.p3(completed("J", 2, "10000000"), completed("R", 2, "10000000"), List.of(up, flat),
+                List.of(flat, flat), plan, SEED).outcome()).isEqualTo(RecordingPrecheck.FAIL);
+        // 전체 d > 0이어도 d_s > 0 구간이 기준보다 적으면 탈락(왕복 0건 구간은 d > 0이 아님)
+        assertThat(RecordingPrecheck.p3(completed("J", 2, "10000100"), completed("R", 2, "10000000"), List.of(none, flat),
+                List.of(flat, flat), plan, SEED).outcome()).isEqualTo(RecordingPrecheck.FAIL);
+        // 어느 쪽이든 전체 왕복 0건·실패면 판정 불가
+        assertThat(RecordingPrecheck.p3(completed("J", 0, "10000100"), completed("R", 2, "10000000"), List.of(up, flat),
+                List.of(flat, flat), plan, SEED).outcome()).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+        assertThat(RecordingPrecheck.p3(completed("J", 2, "10000100"), failed("R"), List.of(up, flat), List.of(flat, flat),
+                plan, SEED).outcome()).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+    }
+
+    @Test
+    void resultAndPairCombinationRules() {
+        RecordingPrecheck.Item pass = new RecordingPrecheck.Item(RecordingPrecheck.PASS, "");
+        RecordingPrecheck.Item fail = new RecordingPrecheck.Item(RecordingPrecheck.FAIL, "");
+        RecordingPrecheck.Item na = new RecordingPrecheck.Item(RecordingPrecheck.NOT_AVAILABLE, "");
+        assertThat(RecordingPrecheck.result(List.of(pass, pass))).isEqualTo(RecordingPrecheck.CANDIDATE);
+        assertThat(RecordingPrecheck.result(List.of(pass, na))).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+        assertThat(RecordingPrecheck.result(List.of(na, fail, pass))).isEqualTo(RecordingPrecheck.FAIL);
+        assertThat(RecordingPrecheck.combine(List.of(pass, na)).outcome()).isEqualTo(RecordingPrecheck.NOT_AVAILABLE);
+        assertThat(RecordingPrecheck.combine(List.of(na, fail)).outcome()).isEqualTo(RecordingPrecheck.FAIL);
+        assertThat(RecordingPrecheck.combine(List.of(pass, pass)).outcome()).isEqualTo(RecordingPrecheck.PASS);
+        assertThat(RecordingPrecheck.combine(List.of()).mark()).isEqualTo("–");
+    }
+
+    @Test
+    void liveSeedsCellAndCoverageAlert() {
+        // x/N ≥ 0.5면 계산하지 않고 묶음 빼기(같음 포함)
+        assertThat(RecordingPrecheck.liveSeedsCell(50, 100, PrecheckMath.upperBound(50, 100), 4)).isEqualTo("묶음 빼기");
+        assertThat(RecordingPrecheck.liveSeedsCell(49, 100, new BigDecimal("0.9"), 4)).isEqualTo("999 초과");
+        assertThat(RecordingPrecheck.liveSeedsCell(0, 199, PrecheckMath.upperBound(0, 199), 4)).isEqualTo("83");
+        // 구간 평균들의 평균 50%는 알리지 않고, 그 미만이면 알린다
+        assertThat(RecordingPrecheck.coverageAlert(List.of(new BigDecimal("0.4"), new BigDecimal("0.6")))).isFalse();
+        assertThat(RecordingPrecheck.coverageAlert(List.of(new BigDecimal("0.4"), new BigDecimal("0.59")))).isTrue();
+        assertThat(RecordingPrecheck.coverageAlert(List.of())).isFalse();
     }
 
     @Test
@@ -295,7 +379,7 @@ class RecordingPrecheckTest {
         // inputs.yaml은 녹화 실험과 같은 모양이고 결정론 확인(묶음 2 vs 1)이 같다
         assertThat(out.files().get(RecordingPrecheck.INPUTS_FILE)).contains("experiment: EXP-T-PRE\n")
                 .contains("recording-days:\n").contains("selection-input:\n").contains("intraday-selections:\n")
-                .contains("determinism: \"같음(묶음 2 vs 1, precheck.md 바이트 일치)\"");
+                .contains("determinism: \"같음(묶음 4 vs 1, precheck.md 바이트 일치)\"");
         assertThat(out.nondeterministic()).isFalse();
         assertThat(out.files().keySet()).anyMatch(k -> k.startsWith(SessionSelections.DIR + "/" + D1 + "/"));
         assertThat(dir.resolve(SessionSelections.DIR)).isDirectory();
