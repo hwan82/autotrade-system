@@ -762,7 +762,7 @@ public final class LiveWeeklyCheck {
             SelectionSource selections, RunGate gate) {
         return new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(), setup.risk(),
                 setup.execution(), code, 1, setup.benchmark(), selections, gate)
-                .intradayUniverse(setup.intradayUniverse()).runDetailed(setup.spec(ClockMode.REPLAY, data.version(), end));
+                .withIntradayUniverse(setup.intradayUniverse()).runDetailed(setup.spec(ClockMode.REPLAY, data.version(), end));
     }
 
     private static String status(RunResult r) {

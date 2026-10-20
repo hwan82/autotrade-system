@@ -34,6 +34,7 @@ import com.autotrade.sim.run.ExperimentStoppedException;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
+import com.autotrade.sim.run.RunSelectionDay;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
 import com.autotrade.sim.combo.CombinationExperiment;
@@ -59,16 +60,21 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 
 /**
@@ -98,7 +104,7 @@ public final class RecordingExperiment {
             Objects.requireNonNull(spec, "spec");
             Objects.requireNonNull(report, "report");
             Objects.requireNonNull(data, "data");
-            files = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(files));
+            files = Collections.unmodifiableMap(new LinkedHashMap<>(files));
         }
     }
 
@@ -120,6 +126,16 @@ public final class RecordingExperiment {
      */
     public static Outcome run(RecordingPlan plan, Path repoRoot, Path recordingsRoot, Path snapshotsRoot,
             CodeVersion code, boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
+        return run(plan, repoRoot, recordingsRoot, snapshotsRoot, code, verifyDeterminism, log, gate,
+                Runtime.getRuntime()::maxMemory);
+    }
+
+    /**
+     * @param maxHeap 선정 준비의 힙 검사에 쓸 최대 힙(바이트). 시험이 작은 힙을 주어 검사가 스냅샷을 읽기 전에 불리는지 본다(architect
+     *     PR #199 R3). 운영은 {@code Runtime.maxMemory}
+     */
+    static Outcome run(RecordingPlan plan, Path repoRoot, Path recordingsRoot, Path snapshotsRoot,
+            CodeVersion code, boolean verifyDeterminism, Consumer<String> log, RunGate gate, LongSupplier maxHeap) {
         ExchangeCalendar calendar = ExchangeCalendar.bundled(plan.market());
         gate.check(); // 힙을 크게 쓰는 녹화 읽기 전에 먼저 본다
         RecordingLayout layout = new RecordingLayout(recordingsRoot);
@@ -176,9 +192,10 @@ public final class RecordingExperiment {
         // 준비→적용 경로), 실행기는 그 적용 기록을 읽는다(ADR-012 3.5·3.6, D-124)
         List<SelectionProfile> dailySelections = selectionProfiles(selected);
         SelectionStage stage = dailySelections.isEmpty() ? null
-                : SelectionStage.prepare(plan, dailySelections, data, calendar, snapshotsRoot, code, log, gate);
+                : SelectionStage.prepare(plan, dailySelections, data, calendar, snapshotsRoot, code, log, gate,
+                        maxHeap.getAsLong());
         // 장중 순위 선정은 실행기가 녹화 이벤트로 정한다. 결과 폴더에 남길 결과는 같은 추적기를 한 번 더 돌려 만든다(순수 계산, D-127)
-        IntradayUniverse intradayUniverse = new IntradayUniverse(plan.boards().keySet(), java.util.Set.copyOf(plan.blacklist()),
+        IntradayUniverse intradayUniverse = new IntradayUniverse(plan.boards().keySet(), Set.copyOf(plan.blacklist()),
                 rules);
         List<IntradayTracker.Ranked> intraday = intradayResults(selected, intradayUniverse, data.events(), log);
         SimulationReport report;
@@ -191,7 +208,7 @@ public final class RecordingExperiment {
             parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
             log.accept("프로필 " + combinations.size() + "개 실행(병렬 " + parallel + ")");
             report = new SimulationExperimentRunner(data, rules, cost, factory, risk, execution, code,
-                    parallel, benchmark, source, gate).intradayUniverse(intradayUniverse).runDetailed(spec);
+                    parallel, benchmark, source, gate).withIntradayUniverse(intradayUniverse).runDetailed(spec);
             detail = ReportWriter.render(report);
             if (verifyDeterminism && parallel == 1) {
                 determinism = "확인 안 함(실제 병렬 수가 1이라 병렬 대 직렬 비교가 안 됨. -PmaxParallelRuns와 등록 파일 parallelism을 2 이상으로)";
@@ -200,7 +217,7 @@ public final class RecordingExperiment {
                 log.accept("결정론 확인: 병렬 1로 다시 실행");
                 gate.check();
                 String second = ReportWriter.render(new SimulationExperimentRunner(data, rules, cost, factory, risk,
-                        execution, code, 1, benchmark, source, gate).intradayUniverse(intradayUniverse).runDetailed(spec));
+                        execution, code, 1, benchmark, source, gate).withIntradayUniverse(intradayUniverse).runDetailed(spec));
                 determinism = second.equals(detail)
                         ? "같음(병렬 " + parallel + " vs 1, 상세 보고서 바이트 일치)" : "다름";
                 if (!second.equals(detail)) {
@@ -262,14 +279,15 @@ public final class RecordingExperiment {
         }
 
         static SelectionStage prepare(RecordingPlan plan, List<SelectionProfile> profiles, RecordedMarketDataSet data,
-                ExchangeCalendar calendar, Path snapshotsRoot, CodeVersion code, Consumer<String> log, RunGate gate) {
+                ExchangeCalendar calendar, Path snapshotsRoot, CodeVersion code, Consumer<String> log, RunGate gate,
+                long maxHeap) {
             if (snapshotsRoot == null) {
                 throw new IllegalArgumentException("선정 조합 계좌가 있는데 수집 스냅샷 폴더가 정해지지 않았습니다");
             }
             RegisteredSelections sel = plan.selections();
             // 녹화 데이터와 같은 힙에 일봉 전체를 올리므로 먼저 본다. 모자라면 읽지 않고 늘릴 힙을 알려 준다(architect PR #197 R4)
             String daily = sel.daily().orElseThrow();
-            SnapshotHeap.requireFits(SnapshotHeap.dailyBarRows(snapshotsRoot, daily), Runtime.getRuntime().maxMemory(), daily);
+            SnapshotHeap.requireFits(SnapshotHeap.dailyBarRows(snapshotsRoot, daily), maxHeap, daily);
             SnapshotInputs in = SnapshotInputs.load(plan.market(), sel.daily().orElseThrow(), sel.financials(),
                     sel.disclosures(), snapshotsRoot, calendar, gate, log, (first, last) -> { });
             Path dir;
@@ -279,13 +297,13 @@ public final class RecordingExperiment {
                 throw new UncheckedIOException("선정 준비 임시 폴더를 만들 수 없습니다", e);
             }
             SelectionStage stage = new SelectionStage(dir, new SessionSelections(dir, profiles, plan.boards().keySet(),
-                    java.util.Set.copyOf(plan.blacklist()), calendar::previousTradingDay));
+                    Set.copyOf(plan.blacklist()), calendar::previousTradingDay));
             try {
                 SelectionCalculator calc = new SelectionCalculator(in.selectionData());
                 // 결과 파일이 실행마다 같게 만든 시각은 남기지 않는다(SIM-09)
                 SelectionResultFile.Producer producer = new SelectionResultFile.Producer(code.commit(), code.dirty(), null);
                 for (RecordedMarketDataSet.DayInfo d : data.days()) {
-                    java.time.LocalDate cutoff = calendar.previousTradingDay(d.date());
+                    LocalDate cutoff = calendar.previousTradingDay(d.date());
                     for (SelectionPreparer.Outcome o : SelectionPreparer.prepare(stage.files, d.date(), calc, in.last(),
                             cutoff, producer, gate::check)) {
                         log.accept("선정 " + d.date() + " " + o.selection() + ": " + o.status()
@@ -320,7 +338,7 @@ public final class RecordingExperiment {
         @Override
         public void close() {
             try (Stream<Path> walk = Files.walk(dir)) {
-                for (Path f : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                for (Path f : walk.sorted(Comparator.reverseOrder()).toList()) {
                     Files.deleteIfExists(f);
                 }
             } catch (IOException ignored) {
@@ -452,13 +470,13 @@ public final class RecordingExperiment {
      *
      * @param written 이번에 쓸 결과 파일(등록 파일 폴더 상대 경로, {@code /} 구분)
      */
-    static void removeStaleSelections(Path experimentDir, java.util.Set<String> written, Consumer<String> log) {
+    static void removeStaleSelections(Path experimentDir, Set<String> written, Consumer<String> log) {
         Path dir = experimentDir.resolve(SessionSelections.DIR);
         if (!Files.isDirectory(dir)) {
             return;
         }
         try (Stream<Path> walk = Files.walk(dir)) {
-            for (Path f : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+            for (Path f : walk.sorted(Comparator.reverseOrder()).toList()) {
                 String rel = experimentDir.relativize(f).toString().replace('\\', '/');
                 if (Files.isDirectory(f)) {
                     try (Stream<Path> children = Files.list(f)) {
@@ -631,7 +649,7 @@ public final class RecordingExperiment {
     public static void selectionTable(StringBuilder sb, SimulationReport report, List<SessionSelections.Applied> applied) {
         Map<String, Integer> blocked = new LinkedHashMap<>();
         for (RunReport r : report.runs()) {
-            for (com.autotrade.sim.run.RunSelectionDay d : r.selectionDays()) {
+            for (RunSelectionDay d : r.selectionDays()) {
                 blocked.merge(r.combination().selectionHashOrNone() + "|" + d.selection().date(), d.blockedEntries(),
                         Integer::sum);
             }
@@ -685,7 +703,7 @@ public final class RecordingExperiment {
         }
         Map<String, Integer> blocked = new LinkedHashMap<>();
         for (RunReport r : report.runs()) {
-            for (com.autotrade.sim.run.RunSelectionDay d : r.selectionDays()) {
+            for (RunSelectionDay d : r.selectionDays()) {
                 blocked.merge(r.combination().selectionHashOrNone() + "|" + d.selection().date(), d.blockedEntries(),
                         Integer::sum);
             }

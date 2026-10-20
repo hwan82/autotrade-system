@@ -69,12 +69,10 @@ public record SelectionDay(LocalDate date, String resultHash, SelectionInvalidRe
         return reason == null;
     }
 
-    /** 이 종목에 신규 진입해도 되는지(그날 처음부터 적용하는 판정). */
-    public boolean allowsEntry(Symbol symbol) {
-        return allowsEntry(symbol, Long.MAX_VALUE);
-    }
-
-    /** 순번 {@code sequence} 이벤트가 낸 신호로 이 종목에 신규 진입해도 되는지. */
+    /**
+     * 순번 {@code sequence} 이벤트가 낸 신호로 이 종목에 신규 진입해도 되는지. 순번 없이 묻는 판정은 두지 않는다: 장중 순위 선정
+     * 날에 순위 시각 전 진입을 열 수 있어서다(architect PR #200 R1).
+     */
     public boolean allowsEntry(Symbol symbol, long sequence) {
         return reason == null && sequence >= activeFrom && symbols.contains(symbol);
     }

@@ -131,6 +131,36 @@ public record SelectionProfile(
         return Integer.parseInt(value);
     }
 
+    /**
+     * 장중 순위 시각 {@code at}의 허용 범위(거래소 현지 시각, 양 끝 포함).
+     *
+     * @param first 정규장 시작 + 1분(그 전에는 모은 체결이 없음)
+     * @param last 순위 뒤 신규 진입할 구간을 남기는 끝. 예시 단타 전략의 장 마감 청산 {@code exit.eod-time} 15:10보다 40분 넘게
+     *     앞이다(strategy-researcher PR #200 R1)
+     */
+    public record AtRange(LocalTime first, LocalTime last) {
+        public AtRange {
+            Objects.requireNonNull(first, "first");
+            Objects.requireNonNull(last, "last");
+            if (last.isBefore(first)) {
+                throw new IllegalArgumentException("at 범위 끝이 시작보다 앞입니다: " + first + " ~ " + last);
+            }
+        }
+
+        public boolean contains(LocalTime at) {
+            return !at.isBefore(first) && !at.isAfter(last);
+        }
+    }
+
+    /**
+     * 시장마다 {@code at} 허용 범위. 시장 분기는 이 표 한 곳에만 둔다(architect PR #200 R2). 정규장 시작과 맞는지는 시험이 거래소
+     * 캘린더({@code ExchangeCalendar}, MarketRules가 쓰는 정규장)와 묶어 본다. 특수일 개장 지연(예: 수능일 10:00)은 여기서 다루지
+     * 않는다: 그날 {@code at} 전 정규장이 없으면 실행 때 후보 0이 된다(D-127 결정 5).
+     */
+    public static final Map<Market, AtRange> AT_RANGES = Map.of(
+            Market.KRX, new AtRange(LocalTime.of(9, 1), LocalTime.of(14, 30)),
+            Market.US, new AtRange(LocalTime.of(9, 31), LocalTime.of(15, 0)));
+
     private static LocalTime parseAt(String value, SelectionRefresh refresh, Market market, String id) {
         if (refresh != SelectionRefresh.INTRADAY_AT) {
             if (value != null) {
@@ -142,12 +172,13 @@ public record SelectionProfile(
             throw new IllegalArgumentException("INTRADAY_AT 선정에는 at(HH:mm, 거래소 현지 시각)이 필요합니다: " + value + " (" + id + ")");
         }
         LocalTime at = LocalTime.parse(value);
-        // 정규장 시작 뒤 ~ 단타 장 마감 청산(예시 전략 exit.eod-time 15:10)보다 40분 넘게 앞(순위 뒤 진입할 구간을 남김,
-        // strategy-researcher PR #200 R1). 특수일 개장 지연은 실행 때 정규장 판정으로 다룬다
-        LocalTime first = market == Market.KRX ? LocalTime.of(9, 1) : LocalTime.of(9, 31);
-        LocalTime last = market == Market.KRX ? LocalTime.of(14, 30) : LocalTime.of(15, 0);
-        if (at.isBefore(first) || at.isAfter(last)) {
-            throw new IllegalArgumentException("at은 " + first + " ~ " + last + " 사이여야 합니다: " + value + " (" + id + ")");
+        AtRange range = AT_RANGES.get(market);
+        if (range == null) {
+            throw new IllegalArgumentException("이 시장은 장중 순위 시각 범위가 정해지지 않았습니다: " + market + " (" + id + ")");
+        }
+        if (!range.contains(at)) {
+            throw new IllegalArgumentException("at은 " + range.first() + " ~ " + range.last() + " 사이여야 합니다: " + value + " ("
+                    + id + ")");
         }
         return at;
     }

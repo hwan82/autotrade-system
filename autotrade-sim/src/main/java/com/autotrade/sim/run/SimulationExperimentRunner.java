@@ -74,8 +74,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
     private final SelectionSource selections;
     private final int warmupDays;
     private final boolean settleAtWindowEnd;
-    /** 장중 순위 선정 입력 범위(D-127). 장중 순위 선정 조합이 없으면 null이어도 된다. */
-    private IntradayUniverse intradayUniverse;
+    /** 장중 순위 선정 입력 범위(D-127). 장중 순위 선정 조합이 없으면 null이어도 된다. 바꾸지 않는다({@link #withIntradayUniverse}). */
+    private final IntradayUniverse intradayUniverse;
 
     /**
      * 실험 하나의 조합 수 상한(SIM-14 실험실 자원 상한, STR-17 "조합 수가 상한을 넘으면 시작 거부") `[가정]`. 조합마다 계좌·
@@ -167,17 +167,37 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         this.parallelism = Math.min(parallelism, cap);
         this.benchmark = benchmark;
         this.selections = selections;
+        this.intradayUniverse = null;
+    }
+
+    /** {@code base}의 설정을 그대로 두고 장중 순위 선정 입력 범위만 정한 실행기(architect PR #200 R5). */
+    private SimulationExperimentRunner(SimulationExperimentRunner base, IntradayUniverse universe) {
+        this.data = base.data;
+        this.rules = base.rules;
+        this.cost = base.cost;
+        this.strategies = base.strategies;
+        this.risk = base.risk;
+        this.execution = base.execution;
+        this.code = base.code;
+        this.parallelism = base.parallelism;
+        this.gate = base.gate;
+        this.benchmark = base.benchmark;
+        this.selections = base.selections;
+        this.warmupDays = base.warmupDays;
+        this.settleAtWindowEnd = base.settleAtWindowEnd;
+        this.intradayUniverse = Objects.requireNonNull(universe, "universe");
     }
 
     /**
-     * 장중 순위 선정({@code INTRADAY_AT}) 조합의 입력 범위(등록 파일 boards·blacklist)를 정한다(D-127). 실행 전에 한 번 부른다. 장중
-     * 순위 선정 조합이 있는데 정하지 않으면 실험을 시작하지 않는다.
-     *
-     * @return 이 실행기
+     * 장중 순위 선정({@code INTRADAY_AT}) 조합의 입력 범위(등록 파일 boards·blacklist)를 정한 새 실행기(D-127). 이 실행기는 바꾸지
+     * 않는다(architect PR #200 R5: 생성 뒤에 바뀌는 필드를 두지 않음). 장중 순위 선정 조합이 있는데 입력 범위가 없는 실행기는 실험을
+     * 시작하지 않는다.
      */
-    public SimulationExperimentRunner intradayUniverse(IntradayUniverse universe) {
-        this.intradayUniverse = Objects.requireNonNull(universe, "universe");
-        return this;
+    public SimulationExperimentRunner withIntradayUniverse(IntradayUniverse universe) {
+        if (universe.rules().market() != rules.market()) {
+            throw new IllegalArgumentException("장중 순위 선정 입력 범위의 시장이 실행기와 다릅니다");
+        }
+        return new SimulationExperimentRunner(this, universe);
     }
 
     @Override
@@ -487,7 +507,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             dates.add(rules.tradingDate(e.exchangeTime()));
         }
         SelectionSchedule schedule = SelectionSchedule.compute(spec.combinations(), dates, selections, gate::check);
-        IntradayTracker tracker = intradayTracker(List.of(spec));
+        IntradayTracker tracker = intradayTracker(spec);
         if (tracker == null) {
             return schedule;
         }
@@ -499,19 +519,17 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         return schedule.withIntraday(tracker);
     }
 
-    /** 명세들의 장중 순위 선정 추적기. 장중 순위 선정 조합이 없으면 null. */
-    private IntradayTracker intradayTracker(List<ExperimentSpec> specs) {
-        List<Combination> all = new ArrayList<>();
-        specs.forEach(s -> all.addAll(s.combinations()));
-        List<SelectionProfile> profiles = IntradayTracker.intradayProfiles(all);
+    /**
+     * 명세 하나의 장중 순위 선정 추적기(새 것). 장중 순위 선정 조합이 없으면 null. 레인마다 따로 만든다: 레인끼리 아무것도 나눠 쓰지
+     * 않아, 레인 결과가 그 레인만 {@link #runDetailed}로 돈 결과와 같다(architect PR #200 R6).
+     */
+    private IntradayTracker intradayTracker(ExperimentSpec spec) {
+        List<SelectionProfile> profiles = IntradayTracker.intradayProfiles(spec.combinations());
         if (profiles.isEmpty()) {
             return null;
         }
         if (intradayUniverse == null) {
             throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT) 조합이 있는데 입력 범위(boards)가 정해지지 않았습니다");
-        }
-        if (intradayUniverse.rules().market() != rules.market()) {
-            throw new IllegalArgumentException("장중 순위 선정 입력 범위의 시장이 실행기와 다릅니다");
         }
         return new IntradayTracker(profiles, intradayUniverse);
     }
@@ -612,8 +630,12 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             throw new IllegalArgumentException("예열 거래일은 목록 데이터셋(MarketDataSet)만 받습니다: " + data.version());
         }
         ExperimentSpec window = lanes.get(0).spec();
-        IntradayTracker tracker = intradayTracker(lanes.stream().map(Lane::spec).toList());
-        StreamScan scan = scanStream(window, tracker);
+        // 레인마다 추적기를 따로 두고 첫 번째 읽기에서 같은 이벤트를 같은 순서로 준다(architect PR #200 R6)
+        List<IntradayTracker> trackers = new ArrayList<>(lanes.size());
+        for (Lane lane : lanes) {
+            trackers.add(intradayTracker(lane.spec()));
+        }
+        StreamScan scan = scanStream(window, trackers.stream().filter(Objects::nonNull).toList());
         BigDecimal benchmarkReturn = scan.benchmarkReturn();
         int total = 0;
         for (Lane lane : lanes) {
@@ -626,8 +648,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
             schedules[l] = spec.hasSelections()
                     ? SelectionSchedule.compute(spec.combinations(), scan.dates, selections, gate::check)
                     : SelectionSchedule.empty();
-            if (tracker != null && spec.hasSelections()) {
-                schedules[l] = schedules[l].withIntraday(tracker); // 첫 번째 읽기에서 다 받았다(D-127)
+            if (trackers.get(l) != null) {
+                schedules[l] = schedules[l].withIntraday(trackers.get(l)); // 첫 번째 읽기에서 다 받았다(D-127)
             }
         }
         Progress progress = new Progress(gate, progressId, total, scan.dayChanges);
@@ -742,8 +764,8 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
         }
     }
 
-    /** @param tracker 장중 순위 선정 추적기. 실험 기간 이벤트를 순번 순서로 준다. 없으면 null */
-    private StreamScan scanStream(ExperimentSpec spec, IntradayTracker tracker) {
+    /** @param trackers 장중 순위 선정 추적기(레인마다). 실험 기간 이벤트를 순번 순서로 준다 */
+    private StreamScan scanStream(ExperimentSpec spec, List<IntradayTracker> trackers) {
         StreamScan scan = new StreamScan();
         long[] prev = {Long.MIN_VALUE};
         LocalDate[] readDay = {null};
@@ -761,7 +783,7 @@ public final class SimulationExperimentRunner implements ExperimentRunner {
                 return;
             }
             scan.count++;
-            if (tracker != null) {
+            for (IntradayTracker tracker : trackers) {
                 tracker.onEvent(e);
             }
             if (scan.firstReceivedAt == null) {

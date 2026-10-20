@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.domain.market.Market;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
+import com.autotrade.sim.selection.SnapshotHeap;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,7 +22,7 @@ class CollectionFreshnessTest {
 
     /** 수집기가 쓰는 모양의 manifest만 둔다(파일 본문은 이 점검이 읽지 않음). */
     static void writeSnapshot(Path snapshotsRoot, String id, LocalDate last) throws Exception {
-        Path dir = snapshotsRoot.resolve(CollectionFreshness.KRX_DAILY).resolve(id);
+        Path dir = snapshotsRoot.resolve(SnapshotHeap.KRX_DAILY).resolve(id);
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("manifest.json"), """
                 {"snapshotId":"%s","schemaVersion":1,"createdAt":"%sT09:00:00Z","scriptVersion":"0.1.0",
@@ -53,7 +54,7 @@ class CollectionFreshnessTest {
         assertThat(check(LocalDate.of(2026, 10, 15)).behind()).isEmpty();
 
         writeSnapshot(tmp, "krx-daily-2026-10-14-22222222", LocalDate.of(2026, 10, 14));
-        Path only = tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-15-11111111");
+        Path only = tmp.resolve(SnapshotHeap.KRX_DAILY).resolve("krx-daily-2026-10-15-11111111");
         Files.delete(only.resolve("manifest.json"));
         Files.delete(only);
         CollectionFreshness.Status behind = check(LocalDate.of(2026, 10, 16));
@@ -88,12 +89,12 @@ class CollectionFreshnessTest {
         writeSnapshot(tmp, "krx-daily-2026-10-12-44444444", LocalDate.of(2026, 10, 12));
         writeSnapshot(tmp, "krx-daily-2026-10-15-55555555", LocalDate.of(2026, 10, 15));
         writeSnapshot(tmp, "krx-daily-2026-10-14-66666666", LocalDate.of(2026, 10, 14));
-        Path broken = tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-16-77777777");
+        Path broken = tmp.resolve(SnapshotHeap.KRX_DAILY).resolve("krx-daily-2026-10-16-77777777");
         Files.createDirectories(broken);
         Files.writeString(broken.resolve("manifest.json"), "{not json", StandardCharsets.UTF_8);
         // 쓰는 중인 임시 폴더(manifest 없음)와 다른 이름은 보지 않는다
-        Files.createDirectories(tmp.resolve(CollectionFreshness.KRX_DAILY).resolve(".tmp-krx-daily-1"));
-        Files.createDirectories(tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-16-88888888"));
+        Files.createDirectories(tmp.resolve(SnapshotHeap.KRX_DAILY).resolve(".tmp-krx-daily-1"));
+        Files.createDirectories(tmp.resolve(SnapshotHeap.KRX_DAILY).resolve("krx-daily-2026-10-16-88888888"));
 
         CollectionFreshness.Status s = check(LocalDate.of(2026, 10, 16));
         assertThat(s.snapshotId()).isEqualTo("krx-daily-2026-10-15-55555555");
@@ -127,7 +128,7 @@ class CollectionFreshnessTest {
     @Test
     void oldManifestWithoutCoverageIsListedApartFromBrokenOnes() throws Exception {
         // PR #145 architect N1: ADR-008 이전 형식(coverage 없음)은 깨진 것이 아니라 셀 수 없는 것
-        Path old = tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-01-aaaaaaaa");
+        Path old = tmp.resolve(SnapshotHeap.KRX_DAILY).resolve("krx-daily-2026-10-01-aaaaaaaa");
         Files.createDirectories(old);
         Files.writeString(old.resolve("manifest.json"), """
                 {"snapshotId":"krx-daily-2026-10-01-aaaaaaaa","schemaVersion":1,"createdAt":"2026-10-01T09:00:00Z",
@@ -154,7 +155,7 @@ class CollectionFreshnessTest {
     @Test
     void coverageWithoutLastTradingDateIsOldFormatToo() throws Exception {
         // PR #147 architect 2: coverage는 있고 lastTradingDate만 없으면(다른 형식이 섞인 경우 등) 같은 옛 형식 취급
-        Path half = tmp.resolve(CollectionFreshness.KRX_DAILY).resolve("krx-daily-2026-10-02-dddddddd");
+        Path half = tmp.resolve(SnapshotHeap.KRX_DAILY).resolve("krx-daily-2026-10-02-dddddddd");
         Files.createDirectories(half);
         Files.writeString(half.resolve("manifest.json"), """
                 {"snapshotId":"krx-daily-2026-10-02-dddddddd","schemaVersion":1,"createdAt":"2026-10-02T09:00:00Z",

@@ -218,6 +218,29 @@ class IntradayTrackerTest {
     }
 
     @Test
+    void gapEndingExactlyAtOpenIsStillSessionGap() {
+        // architect PR #200 n1: 끝이 정확히 09:00:00(정규장 첫 순간)인 공백은 잃은 체결이 없을 수도 있지만 SESSION_GAP으로 둔다(보수적,
+        // D-129). 1초 앞(08:59:59)에 끝난 공백은 개장 전이라 표시하지 않는다
+        IntradayTracker t = tracker();
+        t.onEvent(trade("005930", 1, at(D1, 8, 40, 0), 100, 1));
+        t.onEvent(new DataGap(Symbol.krx("000660"), 2, at(D1, 9, 0, 0), at(D1, 9, 0, 0), at(D1, 8, 30, 0),
+                at(D1, 9, 0, 0), DataGap.GapReason.RECORDER_RESTART));
+        t.onEvent(new DataGap(Symbol.krx("051910"), 3, at(D1, 8, 59, 59), at(D1, 8, 59, 59), at(D1, 8, 30, 0),
+                at(D1, 8, 59, 59), DataGap.GapReason.RECORDER_RESTART));
+        for (String code : List.of("005930", "000660", "051910")) {
+            t.onEvent(trade(code, 10, at(D1, 9, 0, 30), 100, 10));
+            t.onEvent(trade(code, 11, at(D1, 9, 20, 0), 103, 10));
+        }
+        t.onEvent(trade("005930", 20, at(D1, 9, 30, 0), 103, 1));
+        assertThat(t.ranked()).singleElement().satisfies(r -> {
+            assertThat(evaluation(r, "000660").reasons()).containsExactly("SESSION_GAP");
+            assertThat(evaluation(r, "051910").reasons()).isEmpty();
+            assertThat(r.result().selected()).extracting(SelectionResult.Selected::code)
+                    .containsExactlyInAnyOrder("005930", "051910");
+        });
+    }
+
+    @Test
     void eventOfEarlierTradingDayDoesNotReopenRankedDay() {
         // architect PR #200 F2: 다음 날 이벤트 뒤에 전날 이벤트가 와도 전날 순위·적용 시작 순번은 그대로다
         IntradayTracker t = tracker();

@@ -41,8 +41,8 @@ class SelectionScheduleTest {
         SelectionSchedule schedule = SelectionSchedule.compute(List.of(combo(weekly)), DAYS.subList(2, 6), source);
         assertThat(calls).containsExactly(LocalDate.of(2026, 10, 7), LocalDate.of(2026, 10, 12));
         assertThat(schedule.days(weekly.selectionHash()).values()).allSatisfy(d -> assertThat(d.isValid()).isTrue());
-        assertThat(schedule.day(weekly.selectionHash(), LocalDate.of(2026, 10, 8)).allowsEntry(A)).isTrue();
-        assertThat(schedule.day(weekly.selectionHash(), LocalDate.of(2026, 10, 8)).allowsEntry(B)).isFalse();
+        assertThat(schedule.day(weekly.selectionHash(), LocalDate.of(2026, 10, 8)).allowsEntry(A, 0)).isTrue();
+        assertThat(schedule.day(weekly.selectionHash(), LocalDate.of(2026, 10, 8)).allowsEntry(B, 0)).isFalse();
     }
 
     @Test
@@ -71,7 +71,7 @@ class SelectionScheduleTest {
         // 표에 없는 날
         SelectionSchedule empty = SelectionSchedule.compute(List.of(combo(daily)), List.of(), (s, d) -> null);
         assertThat(empty.day(sh, d1).reason()).isEqualTo(SelectionInvalidReason.MISSING);
-        assertThat(empty.day(sh, d1).allowsEntry(A)).isFalse();
+        assertThat(empty.day(sh, d1).allowsEntry(A, 0)).isFalse();
     }
 
     @Test

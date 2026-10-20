@@ -14,6 +14,7 @@ import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.sim.selection.SessionSelections;
+import com.autotrade.sim.selection.SnapshotHeap;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.io.IOException;
@@ -132,7 +133,7 @@ public final class LiveReplayCheck {
         ExperimentSpec spec = setup.spec(ClockMode.REPLAY, data.version());
         SimulationReport replay = new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(),
                 setup.risk(), setup.execution(), code, 1, setup.benchmark(), selectionSource(setup, sessionDir), gate)
-                .intradayUniverse(setup.intradayUniverse()).runDetailed(spec);
+                .withIntradayUniverse(setup.intradayUniverse()).runDetailed(spec);
         String detail = ReportWriter.render(replay);
         int diff = firstDifference(withoutCodeLine(liveDetail), withoutCodeLine(detail));
         boolean same = diff < 0;
@@ -288,7 +289,7 @@ public final class LiveReplayCheck {
                 java.util.Optional<String> fin = java.util.Optional.ofNullable(fixed.inputs().financialsSnapshotId());
                 // 공시 조건 선정은 결과 파일에 적힌 공시 스냅샷으로 다시 계산한다(ADR-014 6장, D-124 결정론)
                 java.util.Optional<String> dis = java.util.Optional.ofNullable(fixed.inputs().disclosuresSnapshotId());
-                Path barsDir = snapshotsRoot.resolve(CollectionFreshness.KRX_DAILY).resolve(bars);
+                Path barsDir = snapshotsRoot.resolve(SnapshotHeap.KRX_DAILY).resolve(bars);
                 boolean present = Files.isDirectory(barsDir) && fin.map(f -> Files.isDirectory(snapshotsRoot
                         .resolve(LiveSelectionPrep.DART_FINANCIALS).resolve(f))).orElse(true)
                         && dis.map(d -> Files.isDirectory(snapshotsRoot.resolve(LiveSelectionPrep.DART_DISCLOSURES)
