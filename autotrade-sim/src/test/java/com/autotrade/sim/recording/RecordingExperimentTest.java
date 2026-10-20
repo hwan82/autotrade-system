@@ -66,7 +66,7 @@ class RecordingExperimentTest {
         assertThat(inputs)
                 .contains("data-set: \"" + first.data().version() + "\"")
                 .contains("adapter: REC-ADAPTER-V1")
-                .contains("execution-model: \"BOOK-V5;latency=PT0.5S\"")
+                .contains("execution-model: \"BOOK-V6;latency=PT0.5S\"")
                 .contains("  - date: 2026-03-03\n")
                 .contains("    recorded-events: 14\n")
                 .contains("    complete: true\n")
@@ -158,6 +158,20 @@ class RecordingExperimentTest {
         assertThat(RecordingExperiment.offStockTick(rules, book)).hasValueSatisfying(p -> assertThat(p).isEqualByComparingTo("218750"));
         assertThatThrownBy(() -> RecordingExperiment.requireStockTicks(rules, book))
                 .hasMessageContaining("주식 호가 단위에 맞지 않는 녹화 가격입니다: 005930 218750");
+    }
+
+    @Test
+    void 만원대_5원_체결가는_반_칸이라_통과하고_같은_가격의_호가가_잡는다_D118() {
+        // 5,000~20,000원 구간(10원 단위)에서 ETF·ETN 5원 단위 체결가(…5원)는 정확한 반 칸이라 체결가 검사로는 가를 수 없다
+        // (20,000~50,000원 구간의 …25원도 같다). 주식 밖 종목을 잡는 장치는 호가 가격 검사다
+        var rules = TestKrxRules.INSTANCE;
+        Symbol s = Symbol.krx("069500");
+        java.time.Instant t = java.time.Instant.parse("2026-03-03T01:00:00Z");
+        assertThat(RecordingExperiment.offStockTick(rules, new TradeTick(s, 1, t, t, new BigDecimal("10005"), 1))).isEmpty();
+        var book = new com.autotrade.domain.market.OrderBookSnapshot(s, 1, t, t,
+                List.of(new com.autotrade.domain.market.PriceLevel(new BigDecimal("10005"), 5)),
+                List.of(new com.autotrade.domain.market.PriceLevel(new BigDecimal("10000"), 5)));
+        assertThat(RecordingExperiment.offStockTick(rules, book)).hasValueSatisfying(p -> assertThat(p).isEqualByComparingTo("10005"));
     }
 
     @Test

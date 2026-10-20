@@ -23,17 +23,21 @@
 
 ## 결정
 
-1. **중간가 체결 판정 한 곳** `MidpointTrades.isMidpoint(rules, symbol, price)`(`autotrade-sim` `exchange` 패키지): 가격이 호가 단위에 맞지 않고, 바로 아래 호가 단위 가격에 그 가격의 호가 단위 절반을 더한 값과 **정확히 같을 때만** 참. 그 밖의 단위 밖 가격(ETF·ETN 5원 등)은 거짓.
-2. **입력 검사**: `RecordingExperiment.offStockTick`이 체결 틱이 중간가 체결이면 단위 밖으로 보지 않는다. 호가(`OrderBookSnapshot`) 가격은 반 칸도 계속 단위 밖(세션 멈춤·녹화 거절). 이 함수를 쓰는 모든 곳이 같은 규칙을 얻는다: `LiveSession.accept`, `RecordingExperiment.requireStockTicks`, `LiveWeeklyCheck`, `LiveReplayCheck`, `LiveJudgement`.
-3. **가상 거래소**: 중간가 체결 틱은 지정가 주문의 체결 근거(통과 체결, 같은 가격 대기열 소진)와 단일가 참여에 쓰지 않는다. 평가 가격(`markPrice`)과, 호가가 없는 종목의 시장가 체결 기준 가격(그 가격에 슬리피지를 곱하고 호가 단위로 올림·내림하므로 계좌에는 단위에 맞는 가격만 들어감)에는 쓴다. 시장가 주문 체결의 상세 규칙은 바꾸지 않았다.
+1. **중간가 체결 판정 한 곳** `MidpointTrades.isMidpoint(rules, symbol, price)`(`autotrade-sim` `exchange` 패키지): 가격이 호가 단위에 맞지 않고, 바로 아래 호가 단위 가격에 그 가격의 호가 단위 절반을 더한 값과 **정확히 같을 때만** 참. 그 밖의 단위 밖 체결가는 거짓. 단 **5,000~20,000원 구간(10원 단위)의 …5원, 20,000~50,000원 구간(50원 단위)의 …25원 체결가는 정확한 반 칸이라 참**이다: ETF·ETN 5원 단위 체결가가 이 구간에서는 체결가 검사로 가려지지 않는다(PR #184 strategy-researcher M2). 그때 주식 밖 종목을 잡는 장치는 **호가 가격 검사**(예외 없음)다. 시험 `10,005원 체결가는 통과, 10,005원 호가는 정지`로 고정.
+2. **입력 검사**: `RecordingExperiment.offStockTick`이 체결 틱이 중간가 체결이면 단위 밖으로 보지 않는다. 호가(`OrderBookSnapshot`) 가격은 반 칸도 계속 단위 밖(세션 멈춤·녹화 거절). 반 칸 아닌 단위 밖 체결가(ETF·ETN 5원이 100원 이상 단위 구간에 올 때 등)도 그대로 멈춘다. 이 함수를 쓰는 모든 곳이 같은 규칙을 얻는다: `LiveSession.accept`, `RecordingExperiment.requireStockTicks`, `LiveWeeklyCheck`, `LiveReplayCheck`, `LiveJudgement`.
+3. **가상 거래소**: 중간가 체결 틱은 지정가 주문의 체결 근거(통과 체결, 같은 가격 대기열 소진)와 단일가 체결에 쓰지 않는다. 시가·종가 단일가 참여 주문은 그 틱을 단일가 체결을 놓친 것으로 보고 참여 표시만 지운다(D-069, 다음 정상 체결이 단일가로 체결하지 않음, PR #184 architect 권고 1·strategy-researcher R1). 평가 가격(`markPrice`)과, 호가가 없는 종목의 시장가 체결 기준 가격(그 가격에 슬리피지를 곱하고 호가 단위로 올림·내림하므로 계좌에는 단위에 맞는 가격만 들어감)에는 쓴다. 시장가 주문 체결의 상세 규칙은 바꾸지 않았다.
 4. **결정론**: 판정은 가격과 시장 규칙만의 함수이고 상태가 없다. 입력 기록에는 중간가 틱이 다른 틱과 같이 쓰이고, 실시간과 리플레이가 같은 판정·같은 거래소 코드를 지나므로 D-076(리플레이 바이트 일치)이 유지된다. 미래 정보는 쓰지 않고 비용(수수료·세금·슬리피지)은 체결 때 그대로 차감된다.
-5. **기존 시험 입력 한 곳 바꿈**: `RecordingExperimentTest`의 "단위 밖 가격" 입력 180,050(100원 단위의 반 칸이라 이제 중간가 체결)을 반 칸도 아닌 180,005로 바꿨다. 검증 의도(ETF 5원 단위 가격은 거절)는 그대로이고, 반 칸 쪽은 새 시험이 맡는다. 시험을 지우거나 약화하지 않았다.
-6. **실험실 응답 인코딩**: `application.yml`에 `server.servlet.encoding.force-response: true`(charset UTF-8). JSON 응답 `Content-Type`에 `charset=UTF-8`이 붙어 Windows PowerShell 5.1 `Invoke-RestMethod`가 한글을 Latin-1로 읽어 깨뜨리지 않는다. `WebSecurityIntegrationTest`가 확인한다.
+5. **체결 규칙 버전 `BOOK-V6`**(`ExecutionSettings.RULES_VERSION`, PR #184 strategy-researcher M1): 이 규칙으로 결과가 달라질 수 있는 데이터가 생겼으므로 버전을 올린다. 반 칸 체결이 없는 데이터의 결과는 `BOOK-V5`와 같다. 체결 모델 ID 머리가 `BOOK-V6;latency=PT0.5S`가 되고 골든 리포트·시험 2곳이 따라 바뀐다. ADR-004 2.2 14번에 규칙을 적었다. LIVE01(2026-10-26) 시작 전에 올렸으므로 한 등록이 두 버전에 걸치지 않는다.
+6. **미국 시장에도 적용**(architect 권고 2): 판정이 `MarketRules`의 호가 단위로만 돌아가므로 `UsMarketRules`에서도 반 페니 체결가가 같은 규칙으로 처리된다. 미국 실시간 모의를 시작하기 전에 거래소 규칙 대조가 필요하다 `[가정]`.
+7. **기존 시험 입력 한 곳 바꿈**: `RecordingExperimentTest`의 "단위 밖 가격" 입력 180,050(100원 단위의 반 칸이라 이제 중간가 체결)을 반 칸도 아닌 180,005로 바꿨다. 검증 의도(ETF 5원 단위 가격은 거절)는 그대로이고, 반 칸 쪽은 새 시험이 맡는다. 시험을 지우거나 약화하지 않았다.
+8. **실험실 응답 인코딩**: `application.yml`에 `server.servlet.encoding.force-response: true`(charset UTF-8). JSON 응답 `Content-Type`에 `charset=UTF-8`이 붙어 Windows PowerShell 5.1 `Invoke-RestMethod`가 한글을 Latin-1로 읽어 깨뜨리지 않는다. `WebSecurityIntegrationTest`가 확인한다.
+
 
 ## 위험과 한계
 
 - `[가정]` 중간가 체결의 정확한 규칙(반올림 여부, 호가 단위 1원 구간의 처리)은 거래소 원문으로 대조하지 못했다. 1원 단위 구간(2,000원 미만)의 0.5원 가격은 반 칸으로 받는다.
-- 중간가 틱이 종가 단일가 첫 체결 표시를 소비할 수 있는 경계 사례가 이론상 있다(중간가 체결은 접속 매매에서만 생기므로 실제로는 해당 없음 `[추론]`).
+- 중간가 틱이 그날 첫 정규장 체결(시가 단일가 체결로 보는 틱)이나 종가 첫 체결 자리에 오면 단일가 체결을 놓친 것으로 처리한다(참여 주문은 접속 매매로 이어짐). 중간가 체결은 접속 매매에서만 생기므로 드물다 `[추론]`.
+- ETF·ETN 방어는 5,000~50,000원 구간에서 호가 가격 검사에 기댄다(위 1번). 체결만 받고 호가를 받지 않는 종목을 boards에 넣는 경로가 생기면 D-075 D안(상품 유형 표시)으로 간다(되돌릴 조건).
 - 이 변경은 이미 끝난 녹화 실험 결과를 바꾸지 않는다(반 칸 틱이 있는 녹화는 이전에는 거절되었음).
 
 ## 재시작

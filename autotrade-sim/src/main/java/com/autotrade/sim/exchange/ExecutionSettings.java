@@ -25,8 +25,11 @@ public record ExecutionSettings(Duration orderLatency) {
      * BOOK-V5(D-087): 장중 시작 판정에서 장 밖 이벤트와 단일가 접수 구간의 체결 이벤트(장전 시간외)를 그날 첫 이벤트로
      * 세지 않고, 종가 단일가 구간이 없는 시장(미국 기본 규칙)은 폐장 직후 창 안의 첫 체결(종가 크로스)을 평가 가격에 쓴다. 장전 시간외 이벤트 뒤 장중 시작이 없고
      * 종가 단일가 구간이 있는 시장(KRX)의 데이터 결과는 BOOK-V4와 같다.
+     * BOOK-V6(D-118): 호가 단위의 정확한 반 칸 체결(중간가 체결)은 지정가 체결(통과·같은 가격 소진)과 단일가 참여에 쓰지 않고
+     * 단일가 체결을 놓친 것으로 본다(참여 표시만 지움). 평가 가격과 호가 없는 종목의 시장가 기준에는 쓴다. 반 칸 체결이 없는
+     * 데이터의 결과는 BOOK-V5와 같다.
      */
-    public static final String RULES_VERSION = "BOOK-V5";
+    public static final String RULES_VERSION = "BOOK-V6";
 
     /**
      * 기본 주문 지연 0.5초 `[가정]`. 실측 근거가 없어 MON-04 목표(1.5초)보다 낙관적인 값으로 두고,
