@@ -345,11 +345,125 @@ class LiveSelectionSessionTest {
         }
     }
 
+    /** 선정을 (라) {@code kr-intraday-news@1}로 바꾼 등록(공시 입력 {@code disclosures}). */
+    private static String newsYaml(String disclosures) {
+        return yaml(true).replace("kr-intraday-hot@1", "kr-intraday-news@1")
+                .replace("  daily: \"latest\"\n", "  daily: \"latest\"\n  disclosures: \"" + disclosures + "\"\n");
+    }
+
     @Test
-    void registrationRejectsDisclosuresAndRecordingRejectsLatest() {
-        String disclosures = yaml(true).replace("  daily: \"latest\"\n", "  daily: \"latest\"\n  disclosures: \"latest\"\n");
-        assertThatThrownBy(() -> LivePlan.parse(disclosures, "x")).isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("disclosures");
+    void disclosureSelectionPreparedFromLatestDisclosureSnapshotAndReplayRecomputesIt() throws Exception {
+        // ADR-014 F9: 실시간 공시 latest = 마지막 수집 시각이 가장 늦은 공시 스냅샷. 결과 파일에 그 ID가 남고 세션·리플레이 확인은
+        // 그 파일을 읽는다. 공시가 T 전날까지를 담지 않은 날(D2)은 STALE_INPUT이다(일봉은 D2 기준 데이터일 D1까지 담음)
+        Path root = tmp.resolve("news");
+        Path dir = root.resolve("experiments").resolve(ID);
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("experiment.yaml"), newsYaml("latest"), StandardCharsets.UTF_8);
+        LivePlan plan = LivePlan.parse(newsYaml("latest"), "experiment.yaml");
+        SelectionProfile news = SelectionFixtures.intradayNews(REPO);
+        Path sessions = root.resolve("live-sessions");
+        Path snapshots = SelectionFixtures.dailySnapshot(root.resolve("snapshots"), "krx-daily-live-0001", D1, false);
+        LocalDate c1 = D1.minusDays(1);
+        // 앞 수집(000660 공시)과 뒤 수집(005930 공시): 뒤 것을 고른다
+        SelectionFixtures.disclosureSnapshot(snapshots, "dart-disclosures-live-0002", LocalDate.of(2026, 1, 1), c1, c1,
+                List.of("000660"), "2026-10-13T20:00:00Z");
+        SelectionFixtures.disclosureSnapshot(snapshots, "dart-disclosures-live-0001", LocalDate.of(2026, 1, 1), c1, c1,
+                List.of("005930"), "2026-10-13T22:00:00Z");
+
+        LiveSelectionPrep.Report d1 = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D1, PRODUCER, RunGate.NONE,
+                rows -> true, m -> { });
+        assertThat(d1.ready()).isTrue();
+        assertThat(d1.disclosuresSnapshot()).isEqualTo("dart-disclosures-live-0001");
+        SessionSelections files = LiveSetup.of(plan, REPO).selectionFiles(sessions.resolve(ID));
+        assertThat(Files.readString(files.resultFile(D1, news.selectionHash()))).contains("\"disclosures\":{")
+                .contains("dart-disclosures-live-0001");
+
+        LiveSelectionPrep.Report d2 = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D2, PRODUCER, RunGate.NONE,
+                rows -> true, m -> { });
+        assertThat(d2.outcomes()).singleElement().satisfies(o -> {
+            assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+            assertThat(o.detail()).contains("공시 스냅샷이 gate.01");
+        });
+        // 사유 파일 입력 키에 공시 스냅샷이 들어가 같은 입력이면 다시 읽지 않고, 새 공시 스냅샷이 나오면 다시 계산한다
+        assertThat(files.readProblem(D2, news.selectionHash())).hasValueSatisfying(p -> assertThat(p.inputs())
+                .isEqualTo("daily=krx-daily-live-0001;financials=;disclosures=dart-disclosures-live-0001"));
+        assertThat(LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D2, PRODUCER, RunGate.NONE, rows -> true,
+                m -> { }).note()).contains("같은 입력 스냅샷으로 이미 실패함");
+
+        LiveSession s = LiveSession.open(plan, REPO, sessions, clock, m -> { });
+        for (MarketEvent e : LiveSessionTest.twoDays()) {
+            clock.now = e.receivedAt();
+            s.accept("KIWOOM-WS", e);
+        }
+        assertThat(s.appliedSelections(D1)).hasValueSatisfying(a -> assertThat(a.item(news.selectionHash())
+                .candidates().candidates()).containsExactly("005930"));
+        assertThat(s.appliedSelections(D2)).hasValueSatisfying(a -> assertThat(a.item(news.selectionHash()).reason())
+                .isEqualTo(SelectionInvalidReason.STALE_INPUT));
+        SimulationReport live = s.finish(new CodeVersion("live", false));
+        Files.writeString(dir.resolve(LiveSession.LIVE_DETAIL_FILE), ReportWriter.render(live), StandardCharsets.UTF_8);
+        LiveReplayCheck.Outcome out = LiveReplayCheck.run(dir, REPO, sessions, snapshots, new CodeVersion("check", true),
+                m -> { }, RunGate.NONE);
+        assertThat(out.same()).isTrue();
+        assertThat(out.files().get("inputs.yaml")).contains("selection-recompute: \"같음 1, 다름 0, 재계산 생략 0\"");
+        // 결과 파일에 적힌 공시 스냅샷이 PC에 없으면 재계산을 생략한다(다름이 아님)
+        Path moved = snapshots.resolve("dart-disclosures").resolve("dart-disclosures-live-0001");
+        Files.move(moved, moved.resolveSibling("gone"));
+        assertThat(LiveReplayCheck.run(dir, REPO, sessions, snapshots, new CodeVersion("check", true), m -> { },
+                RunGate.NONE).files().get("inputs.yaml")).contains("재계산 생략 1");
+    }
+
+    @Test
+    void missingDisclosureSnapshotStopsOnlyTheDisclosureSelection() throws Exception {
+        // architect PR #206 R1: 공시 스냅샷이 없으면 공시 조건 선정 (라)만 STALE_INPUT이고, 같은 등록의 (다)는 그대로 만든다.
+        // 그 뒤 공시 스냅샷이 생기면 입력 키가 달라져 (라)를 다시 계산한다
+        String both = newsYaml("latest").replace("  - \"kr-intraday-news@1 x kr-random-control@1\"\n",
+                "  - \"kr-intraday-news@1 x kr-random-control@1\"\n  - \"kr-intraday-hot@1 x kr-random-control@1\"\n");
+        LivePlan plan = LivePlan.parse(both, "x");
+        SelectionProfile news = SelectionFixtures.intradayNews(REPO);
+        Path sessions = tmp.resolve("live-sessions");
+        Path snapshots = SelectionFixtures.dailySnapshot(tmp.resolve("snapshots"), "krx-daily-live-0001", D1, false);
+        LiveSelectionPrep.Report r = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D1, PRODUCER, RunGate.NONE,
+                rows -> true, m -> { });
+        assertThat(r.disclosuresSnapshot()).isEmpty();
+        assertThat(r.outcomes()).hasSize(2);
+        assertThat(r.outcomes()).filteredOn(o -> o.selection().equals(news.key())).singleElement().satisfies(o -> {
+            assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+            assertThat(o.detail()).contains("공시 입력이 없습니다");
+        });
+        assertThat(r.outcomes()).filteredOn(o -> o.selection().equals(hot.key())).singleElement()
+                .satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.WRITTEN));
+
+        SelectionFixtures.disclosureSnapshot(snapshots, "dart-disclosures-live-0001", LocalDate.of(2026, 1, 1),
+                D1.minusDays(1), D1.minusDays(1), List.of("005930"), "2026-10-13T22:00:00Z");
+        LiveSelectionPrep.Report again = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D1, PRODUCER,
+                RunGate.NONE, rows -> true, m -> { });
+        assertThat(again.ready()).isTrue();
+        assertThat(again.disclosuresSnapshot()).isEqualTo("dart-disclosures-live-0001");
+        assertThat(again.outcomes()).filteredOn(o -> o.selection().equals(news.key())).singleElement()
+                .satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.WRITTEN));
+    }
+
+    @Test
+    void disclosureInputMustMatchTheSelections() {
+        // 공시 조건 선정 (라)인데 공시 입력이 없음 → 거절. 공시 조건이 없는 (다)에 공시 입력 → 거절(ADR-014 6장)
+        String newsWithout = yaml(true).replace("kr-intraday-hot@1", "kr-intraday-news@1");
+        assertThatThrownBy(() -> LiveSetup.of(LivePlan.parse(newsWithout, "x"), REPO))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input.disclosures");
+        String hotWith = yaml(true).replace("  daily: \"latest\"\n", "  daily: \"latest\"\n  disclosures: \"latest\"\n");
+        assertThatThrownBy(() -> LiveSetup.of(LivePlan.parse(hotWith, "x"), REPO))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input.disclosures가 있습니다");
+        // 실시간은 latest와 스냅샷 ID를 모두 받는다
+        assertThat(LiveSetup.of(LivePlan.parse(newsYaml("latest"), "x"), REPO).hasSelections()).isTrue();
+        assertThat(LivePlan.parse(newsYaml("dart-disclosures-x-0001"), "x").selections().disclosures())
+                .hasValue("dart-disclosures-x-0001");
+        assertThat(plan(true).selections().disclosures()).isEmpty();
+        // 공시 입력 없는 사유 파일 입력 키는 F9 전과 같다(이미 남은 사유 파일을 다른 입력으로 보지 않음)
+        assertThat(SelectionPreparer.inputsKey("d", java.util.Optional.of("f"), java.util.Optional.empty()))
+                .isEqualTo(SelectionPreparer.inputsKey("d", java.util.Optional.of("f")));
+    }
+
+    @Test
+    void registrationRecordingRejectsLatest() {
         String noInput = yaml(true).replace("selection-input:\n  daily: \"latest\"\n", "");
         // 장전 선정이 있는데 일봉 입력이 없으면 거절한다. 선정 프로필을 읽어야 장전·장중을 알아서 설정을 만들 때 본다(D-127)
         assertThatThrownBy(() -> LiveSetup.of(LivePlan.parse(noInput, "x"), REPO))

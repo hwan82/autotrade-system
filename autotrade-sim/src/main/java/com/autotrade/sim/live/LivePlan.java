@@ -46,6 +46,7 @@ import java.util.regex.Pattern;
  *   - "kr-intraday-hot@1 x kr-volume-surge@1"
  * selection-input:               # selections가 있으면 필수
  *   daily: "latest"              # 준비 시점에 기준 데이터일을 덮는 가장 최근 일봉 스냅샷(스냅샷 ID도 됨)
+ *   disclosures: "latest"        # 공시 조건 장전 선정이 있을 때만(ADR-014 F9). 마지막 수집 시각이 가장 늦은 공시 스냅샷
  * </pre>
  *
  * <p>선정 조합 계좌는 거래일마다 준비 작업이 미리 만든 그날 선정 결과 ∩ {@code boards}에만 신규 진입한다(ADR-012 3.5,
