@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.autotrade.app.lab.web.ApiException;
 import com.autotrade.marketdata.feed.FeedSocket;
+import com.autotrade.marketdata.symbols.SymbolNames;
 import com.autotrade.sim.run.CodeVersion;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,7 +33,7 @@ class LiveSessionControllerTest {
         service = new LiveLabService(experiments, Path.of(".."), config.resolve("live-sessions"), FeedSocket.path(config),
                 config.resolve(LiveLabService.STOP_REQUEST), new CodeVersion("abc", false), Clock.systemUTC(),
                 dir -> Long.MAX_VALUE, 20);
-        controller = new LiveSessionController(service);
+        controller = new LiveSessionController(service, SymbolNames.empty());
     }
 
     @AfterEach
@@ -68,6 +69,37 @@ class LiveSessionControllerTest {
                 e -> assertThat(e.status()).isEqualTo(HttpStatus.CONFLICT));
         assertThat(controller.registrations()).isEmpty();
         assertThat(controller.gaps(100).total()).isZero();
+    }
+
+    @Test
+    void accountActivityIsNotFoundWithoutARunningSession() {
+        assertThatThrownBy(() -> controller.fills("EXP-TEST-LIVE03-A01", 0, 50)).isInstanceOfSatisfying(
+                ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.NOT_FOUND));
+        assertThatThrownBy(() -> controller.rejections("EXP-TEST-LIVE03-A01", null, null, 0, 50))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void accountActivityOfTheRunningSession() throws Exception {
+        String id = "EXP-TEST-LIVE04";
+        Path dir = Files.createDirectories(experiments.resolve(id));
+        Files.writeString(dir.resolve("experiment.yaml"), String.join("\n", "id: \"" + id + "\"", "question: \"q\"",
+                "input: \"live\"", "market: \"KRX\"", "from: \"2026-10-14\"", "to: \"2026-10-14\"", "seed: \"1\"",
+                "seed-capital: \"10000000\"", "profiles:", "  - \"kr-bh-baseline@1\"", "boards:", "  - \"005930 KOSPI\"", ""),
+                java.nio.charset.StandardCharsets.UTF_8);
+        controller.start(id);
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (service.status().session().isEmpty()) {
+            assertThat(System.nanoTime()).isLessThan(deadline);
+            Thread.sleep(20);
+        }
+        String runId = service.status().session().orElseThrow().runs().get(0).runId();
+        assertThat(controller.fills(runId, 0, 50).total()).isZero();
+        assertThat(controller.rejections(runId, null, null, 0, 50).counts()).isEmpty();
+        assertThatThrownBy(() -> controller.fills(id + "-A99", 0, 50)).isInstanceOfSatisfying(ApiException.class,
+                e -> assertThat(e.status()).isEqualTo(HttpStatus.NOT_FOUND));
+        assertThatThrownBy(() -> controller.fills(runId, 0, 0)).isInstanceOfSatisfying(ApiException.class,
+                e -> assertThat(e.status()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 
     @Test

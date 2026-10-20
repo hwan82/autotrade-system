@@ -21,6 +21,7 @@ import com.autotrade.sim.RunStatus;
 import com.autotrade.sim.account.VirtualAccount;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.exchange.ExecutionSettings;
+import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.exchange.Fill;
 import com.autotrade.sim.exchange.OrderRejectedReason;
 import com.autotrade.sim.exchange.VirtualExchange;
@@ -190,6 +191,18 @@ public final class RunStepper {
         Money equity = exchange == null ? cash : account.equity(exchange::markPrice);
         return new Progress(runId, cash, equity, account.quantities().size(), account.ledger().size(),
                 state.rejections.size(), day);
+    }
+
+    /**
+     * 화면용 체결 원장 사본(실시간 모의 계좌 상세, D-120). 결과에는 쓰지 않는다. 오래된 것부터.
+     */
+    public List<AppliedFill> fillsSnapshot() {
+        return List.copyOf(account.ledger());
+    }
+
+    /** 화면용 거절·취소 기록 사본(실시간 모의 계좌 상세, D-120). 결과에는 쓰지 않는다. 오래된 것부터. */
+    public List<OrderRejection> rejectionsSnapshot() {
+        return List.copyOf(state.rejections);
     }
 
     /** 화면용 현재 상태. {@code tradingDay}는 마지막으로 처리한 이벤트의 거래일(없으면 null). */

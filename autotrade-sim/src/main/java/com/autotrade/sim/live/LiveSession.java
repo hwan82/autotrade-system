@@ -11,10 +11,12 @@ import com.autotrade.marketdata.recording.RecordingLayout;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentResult;
 import com.autotrade.sim.ExperimentSpec;
+import com.autotrade.sim.account.AppliedFill;
 import com.autotrade.sim.recording.RecordedMarketDataSet;
 import com.autotrade.sim.recording.StreamedRecordingDataSet;
 import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.run.OrderRejection;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.RunStepper;
@@ -361,6 +363,31 @@ public final class LiveSession implements AutoCloseable {
             throw new IllegalArgumentException("limit은 1 이상이어야 합니다: " + limit);
         }
         return List.copyOf(gaps.subList(Math.max(0, gaps.size() - limit), gaps.size()));
+    }
+
+    /**
+     * 계좌 하나의 체결 원장과 거절·취소 기록 사본(화면의 계좌 상세, D-120). 결과에는 쓰지 않는다. 실패로 멈춘 계좌도 멈추기 전까지의
+     * 기록을 돌려준다. 되살린 기록으로 다시 만든 체결도 들어 있다.
+     *
+     * @param runId 계좌 ID({@link RunStepper.Progress#runId()})
+     * @return 이 세션에 없는 계좌면 비어 있음
+     */
+    public synchronized Optional<RunActivity> activity(String runId) {
+        for (RunStepper run : runs) {
+            if (run.runId().equals(runId)) {
+                return Optional.of(new RunActivity(runId, run.fillsSnapshot(), run.rejectionsSnapshot()));
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** 계좌 하나의 체결(오래된 것부터)과 거절·취소(오래된 것부터). */
+    public record RunActivity(String runId, List<AppliedFill> fills, List<OrderRejection> rejections) {
+        public RunActivity {
+            Objects.requireNonNull(runId, "runId");
+            fills = List.copyOf(fills);
+            rejections = List.copyOf(rejections);
+        }
     }
 
     /**

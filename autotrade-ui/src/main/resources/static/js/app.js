@@ -7,7 +7,7 @@ import { selectionsPage, selectionPage, newSelectionPage } from './pages/selecti
 import { profilesPage, profilePage, newProfilePage } from './pages/profiles.js';
 import { settingsPage } from './pages/settings.js';
 import { realPage } from './pages/real.js';
-import { livePage } from './pages/live.js';
+import { livePage, liveRunPage } from './pages/live.js';
 import { monitorPage } from './pages/monitor.js';
 
 const routes = [
@@ -17,6 +17,7 @@ const routes = [
   [/^#\/experiments\/([A-Z0-9-]+)\/runs\/([A-Za-z0-9-]+)$/, 'experiments', m => runPage(m[1], m[2])],
   [/^#\/experiments\/([A-Z0-9-]+)\/selection-results\/([0-9a-f]{64})$/, 'experiments', m => selectionResultPage(m[1], m[2])],
   [/^#\/live$/, 'live', () => livePage()],
+  [/^#\/live\/runs\/([A-Za-z0-9-]+)$/, 'live', m => liveRunPage(m[1])],
   [/^#\/selections$/, 'selections', () => selectionsPage()],
   [/^#\/selections\/new$/, 'selections', () => newSelectionPage()],
   [/^#\/selections\/([a-z0-9-]+)(?:\/v(\d+))?$/, 'selections', m => selectionPage(m[1], m[2] ? Number(m[2]) : null)],
