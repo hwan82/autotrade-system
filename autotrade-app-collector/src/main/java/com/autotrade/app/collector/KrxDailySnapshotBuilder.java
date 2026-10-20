@@ -102,8 +102,8 @@ public final class KrxDailySnapshotBuilder {
     }
 
     /**
-     * 실제 거래대금 파일(D-133, ADR-012 후속 F1). 일봉 스냅샷의 선택 파일이고, 읽는 쪽은
-     * {@code com.autotrade.selection.calc.SnapshotTurnover}다(수집기는 선정 모듈에 의존하지 않으므로 이름·헤더를 양쪽에 같게 둔다).
+     * 실제 거래대금 파일(D-133, ADR-012 후속 F1). 일봉 스냅샷의 선택 파일이다. 읽는 쪽은 다음 PR에서
+     * 선정 모듈에 만들 예정이다(D-133 6번). 수집기는 선정 모듈에 의존하지 않으므로 그때 이름·헤더를 양쪽에 같게 두고 대조 테스트를 넣는다.
      * 값은 KRX {@code ACC_TRDVAL} 그대로(원, 원가격 기준이라 수정 계수를 곱하지 않는다). 일봉을 쓴 행 중 값이 있는 행만 둔다.
      */
     public static final String TURNOVER_FILE = "daily_turnover.csv";
