@@ -1,0 +1,23 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# 감시 종목 넓히기용(ADR-012 배치표 0번): 최근 20거래일 평균 거래대금 상위 주식(STOCK, 수집기는 우선주·KONEX도 STOCK으로 씀). 매매 후보 선정이 아니라 게이트웨이
+# watchlist.json 후보를 뽑는 데만 쓴다(runWatchlistCandidates). 조합 실험에는 쓰지 않는다.
+id: "kr-watchlist-turnover"
+version: 1
+market: "KRX"
+style: "INTRADAY"
+created-at: "2026-10-20T00:00:00Z"
+parameters:
+  hypothesis: "감시 종목 후보용(매매 가설 없음): 최근 20거래일 평균 거래대금이 큰 주식일수록 단타 선정(kr-intraday-hot 등)에 뽑힐 가능성이 높아, 이 상위 종목을 녹화해 두면 선정 결과의 구독 커버리지가 높다"
+  refresh: "PRE_OPEN_DAILY"
+  max-symbols: "200"
+  filter.kinds: "STOCK"
+  filter.min-price: "1000"
+  filter.min-bar-days: "20"
+  # 하한만 둔다(저장소 프로필은 관문이 하나 이상이어야 한다). 거래대금 상위 100종목은 이 값보다 훨씬 크다 [추론]
+  gate.01.metric: "avg-turnover"
+  gate.01.window: "20"
+  gate.01.op: "GE"
+  gate.01.value: "1000000000"
+  score.metric: "avg-turnover"
+  score.window: "20"
+  score.order: "DESC"

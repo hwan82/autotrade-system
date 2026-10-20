@@ -176,7 +176,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 | 7 | 장중 순위 2차-a(5.2) | sim-engine·strategy-researcher | 아님 | 4 |
 | 8 | 2차-b(5.3) | data-engineer·risk-ops | **예**(게이트웨이) | Q-054, 7 |
 
-- `boards`를 넓힌 새 watchlist(예: 최근 20거래일 평균 거래대금 상위 150종목 `[가정]`)는 0번에서 정하고 5번 등록 파일의 `boards`가 그 안이어야 한다(strategy-researcher M1). watchlist는 실전 엔진과 같은 게이트웨이 구독 한도를 쓰므로, 7단계 실전 활성화 전에 risk-ops가 "실전 보유 종목 몫을 남긴 watchlist 크기 상한"을 정한다(architect F4). 그 전에는 실전이 꺼져 있어 실전 영향이 없다. watchlist 파일은 사용자 PC 설정이라 runbook에 바꾸는 법을 적는다. LIVE01이 도는 동안(2026-10-26~12-18) 게이트웨이 watchlist를 넓히면 LIVE01 `boards` 10종목은 그대로 받으므로 LIVE01 결과에는 영향이 없다 `[추론]`. 다만 구독 종목 수가 늘면 게이트웨이 부하와 녹화 크기가 늘어 시작 점검표(디스크)를 함께 본다.
+- `boards`를 넓힌 새 watchlist(예: 최근 20거래일 평균 거래대금 상위 150종목 `[가정]`)는 0번에서 정하고 (2026-10-20 0번 착수, D-122: **LIVE01 10종목 포함 모두 100종목**으로 정함, 추천안 채택(자율). 키움이 체결·호가를 종목마다 따로 세도 100 × 2 = 200으로 세션 한도 안이라 LIVE01 구독을 잃을 위험이 없다. 목록은 `selections/kr-watchlist-turnover@1`과 `runWatchlistCandidates`로 뽑고, 사용자 결정으로 LIVE01 시작 전 주말에 바꾼다. 절차는 [6단계 시작 점검표](../runbooks/stage-6-start-checklist.md) 4.1) 5번 등록 파일의 `boards`가 그 안이어야 한다(strategy-researcher M1). watchlist는 실전 엔진과 같은 게이트웨이 구독 한도를 쓰므로, 7단계 실전 활성화 전에 risk-ops가 "실전 보유 종목 몫을 남긴 watchlist 크기 상한"을 정한다(architect F4). 그 전에는 실전이 꺼져 있어 실전 영향이 없다. watchlist 파일은 사용자 PC 설정이라 runbook에 바꾸는 법을 적는다. LIVE01이 도는 동안(2026-10-26~12-18) 게이트웨이 watchlist를 넓히면 LIVE01 `boards` 10종목은 그대로 받으므로 LIVE01 결과에는 영향이 없다 `[추론]`. 다만 구독 종목 수가 늘면 게이트웨이 부하와 녹화 크기가 늘어 시작 점검표(디스크)를 함께 본다.
 - **성과 해석 한계(strategy-researcher R2)**: 실제로 거래하는 종목은 "선정 ∩ 넓힌 `boards`"라는 이중 조건이다. 성과를 시장 전체 선정의 성과로 읽지 않고, 날마다 구독 커버리지와 함께 본다. `boards`는 등록 때 고정이라 8주 동안 거래대금 상위와 표류한다. 이 차이를 판정 리포트에 적는다.
 - 후속 F1: KRX `ACC_TRDVAL`(실제 거래대금) 수집 필드 추가(data-engineer 변경 제안, 스냅샷 형식 버전 올림).
 
