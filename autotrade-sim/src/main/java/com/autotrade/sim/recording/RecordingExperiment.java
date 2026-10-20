@@ -265,9 +265,9 @@ public final class RecordingExperiment {
 
     /**
      * 녹화 실험의 선정 준비 폴더(임시). 녹화일마다 결과 파일과 적용 기록을 만들고, 실행이 끝나면 내용을 결과 폴더
-     * {@code selections/}에 쓸 파일로 옮긴 뒤 지운다.
+     * {@code selections/}에 쓸 파일로 옮긴 뒤 지운다. 녹화 사전 검사(ADR-014 5.2)도 같은 준비를 쓴다.
      */
-    private static final class SelectionStage implements AutoCloseable {
+    public static final class SelectionStage implements AutoCloseable {
         private final Path dir;
         private final SessionSelections files;
         private final List<SessionSelections.Applied> applied = new ArrayList<>();
@@ -278,7 +278,13 @@ public final class RecordingExperiment {
             this.files = files;
         }
 
-        static SelectionStage prepare(RecordingPlan plan, List<SelectionProfile> profiles, RecordedMarketDataSet data,
+        /**
+         * 녹화일마다({@code data.days()}) 고정 스냅샷으로 장전 선정을 계산해 결과 파일과 적용 기록을 임시 폴더에 쓴다.
+         *
+         * @param profiles 장전 선정 프로필({@link #selectionProfiles})
+         * @param maxHeap 선정 준비의 힙 검사에 쓸 최대 힙(바이트)
+         */
+        public static SelectionStage prepare(RecordingPlan plan, List<SelectionProfile> profiles, RecordingInput data,
                 ExchangeCalendar calendar, Path snapshotsRoot, CodeVersion code, Consumer<String> log, RunGate gate,
                 long maxHeap) {
             if (snapshotsRoot == null) {
@@ -317,6 +323,21 @@ public final class RecordingExperiment {
                 throw e;
             }
             return stage;
+        }
+
+        /** 임시 준비 폴더({@link SessionSelections}의 기준 폴더. 선정 공급자를 묶음마다 따로 만들 때 쓴다). */
+        public Path dir() {
+            return dir;
+        }
+
+        /** 녹화일별 적용 기록(날짜순). */
+        public List<SessionSelections.Applied> applied() {
+            return List.copyOf(applied);
+        }
+
+        /** 결과 폴더 상대 경로 {@code selections/<날짜>/<이름>} → 내용. */
+        public Map<String, String> texts() {
+            return Collections.unmodifiableMap(texts);
         }
 
         /** 임시 폴더의 결과 파일·적용 기록을 결과 폴더 상대 경로 {@code selections/<날짜>/<이름>}으로 모은다. */
@@ -470,7 +491,7 @@ public final class RecordingExperiment {
      *
      * @param written 이번에 쓸 결과 파일(등록 파일 폴더 상대 경로, {@code /} 구분)
      */
-    static void removeStaleSelections(Path experimentDir, Set<String> written, Consumer<String> log) {
+    public static void removeStaleSelections(Path experimentDir, Set<String> written, Consumer<String> log) {
         Path dir = experimentDir.resolve(SessionSelections.DIR);
         if (!Files.isDirectory(dir)) {
             return;
@@ -676,7 +697,7 @@ public final class RecordingExperiment {
     }
 
     /** inputs.yaml의 장중 순위 선정 칸(D-127): 날짜·선정별 결과 해시·후보·적용 시작 순번. 없으면 빈 문자열. */
-    static String intradayInputs(List<IntradayTracker.Ranked> intraday) {
+    public static String intradayInputs(List<IntradayTracker.Ranked> intraday) {
         if (intraday.isEmpty()) {
             return "";
         }
@@ -697,7 +718,7 @@ public final class RecordingExperiment {
     }
 
     /** results.md의 장중 순위 선정 표(D-127). 순위를 매기지 못한 날(순위 시각 전 녹화가 끝남)은 표에 없고 신규 진입 0이다. */
-    static String intradayResultsTable(SimulationReport report, List<IntradayTracker.Ranked> intraday) {
+    public static String intradayResultsTable(SimulationReport report, List<IntradayTracker.Ranked> intraday) {
         if (intraday.isEmpty()) {
             return "";
         }

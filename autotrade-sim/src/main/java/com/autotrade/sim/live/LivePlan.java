@@ -223,7 +223,7 @@ public record LivePlan(
     }
 
     /** {@code "<선정 id@버전 | none> <N>"} 줄들(파일 순서). 같은 묶음 두 번·모양 틀림은 거절. */
-    private static Map<String, Integer> groupNullSeeds(RegistrationYaml y) {
+    static Map<String, Integer> groupNullSeeds(RegistrationYaml y) {
         Map<String, Integer> out = new LinkedHashMap<>();
         for (String line : y.list(GROUP_NULL_SEEDS_KEY)) {
             Matcher m = GROUP_SEEDS.matcher(line);

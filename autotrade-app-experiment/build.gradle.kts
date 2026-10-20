@@ -261,6 +261,35 @@ val runLiveJudgement by tasks.registering(JavaExec::class) {
     })
 }
 
+// 녹화 사전 검사(ADR-014 F4): ./gradlew :autotrade-app-experiment:runRecordingPrecheck -Pexperiment=<실험ID>
+//     [-PrecordingsDir=폴더] [-PsnapshotsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-PmaxParallelRuns=N] [-Pheap=4g]
+// experiments/<실험ID>/experiment.yaml(input: recording-precheck)을 읽어 녹화 위에서 LIVE02 후보 조합의 P0~P3, 대조군 품질,
+// LIVE02 대조군 시드 수 표를 precheck.md에 쓴다(BASE + 묶음별 대조군 시드 레인). 녹화는 날마다 다시 읽어 기간과 상관없는 메모리다.
+val runRecordingPrecheck by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "녹화 위에서 LIVE02 후보 조합의 사전 검사(P0~P3)를 계산한다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "4g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val recordingsDir = providers.gradleProperty("recordingsDir")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
+    val verify = providers.gradleProperty("verifyDeterminism")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        buildList {
+            add("recording-precheck")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            recordingsDir.orNull?.let { addAll(listOf("--recordings-dir", it)) }
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
+            if (verify.isPresent) add("--verify-determinism")
+        }
+    })
+}
+
 // 감시 종목 후보 뽑기(ADR-012 배치표 0번): ./gradlew :autotrade-app-experiment:runWatchlistCandidates -Psnapshot=<일봉 스냅샷 ID>
 //     -Pkeep=<꼭 넣을 종목 쉼표 목록> -Ptotal=100 -Pout=<출력 파일> [-PsnapshotsDir=폴더] [-PallowDuringSession] [-Pheap=6g]
 // 스냅샷 마지막 거래일에 selections/kr-watchlist-turnover@1(20거래일 평균 거래대금 상위 보통주)을 계산해 꼭 넣을 종목 + 순위로
