@@ -16,4 +16,4 @@
 | [ADR-010](ADR-010-live-feed-and-session.md) | 실시간 시세 전달(게이트웨이 → 실험실, 로컬 소켓)과 실시간 모의 세션: 입력 기록 먼저, 리플레이 확인 명령 | 채택(D-076) |
 | [ADR-011](ADR-011-watchdog-heartbeat.md) | 감시 프로세스 1차: 하트비트 파일 계약, 감시 설정 파일(틀리면 기동 거부), 감시 에이전트 코어 의존 | 제안(D-092, 사용자 머지) |
 | [ADR-012](ADR-012-intraday-selection.md) | 단타 종목 선정: 장전 일봉·공시 선정과 실시간·녹화 실험 연결, 뉴스 신호 앞으로 전용 수집, 장중 순위 선정(2차) | 채택(D-121) |
-| [ADR-014](ADR-014-live02-judgement-roles-precheck.md) | LIVE02 등록 전 판정 계약: 참고 계좌 역할 `references`, 대조군 시드 수 `null-seeds`, 녹화 사전 검사 명령, 공시 입력 키 | 제안(D-131) |
+| [ADR-014](ADR-014-live02-judgement-roles-precheck.md) | LIVE02 등록 전 판정 계약: 참고 계좌 역할 `references`, 대조군 시드 수 `group-null-seeds`, 녹화 사전 검사 명령, 공시 입력 키 | 채택(D-131) |
