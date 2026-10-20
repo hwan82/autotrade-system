@@ -72,11 +72,12 @@ public final class ExperimentRegistrations {
      * 화면 입력. 문자열은 화면이 보낸 그대로이고 여기서 검사한다.
      *
      * @param style 이 실험의 매매 스타일. 모든 조합의 선정·전략 프로필이 이 스타일이어야 한다
+     * @param disclosuresSnapshot 공시 스냅샷 ID({@code dart-disclosures-...}). 공시 지표 선정이 있을 때만(D-123), 없으면 빈 값
      * @param combinations {@code 선정 id@버전 x 전략 id@버전}(선정 없으면 {@code none})
      */
     public record Request(String id, String question, Market market, TradingStyle style, String from, String to,
-            String seed, String seedCapital, String barsSnapshot, String financialsSnapshot, String benchmark,
-            String parallelism, List<String> combinations, List<String> blacklist) {
+            String seed, String seedCapital, String barsSnapshot, String financialsSnapshot, String disclosuresSnapshot,
+            String benchmark, String parallelism, List<String> combinations, List<String> blacklist) {
     }
 
     /**
@@ -163,17 +164,21 @@ public final class ExperimentRegistrations {
                 "병렬 수", 1, 64);
         String bars = required(r.barsSnapshot(), "일봉 스냅샷");
         String financials = r.financialsSnapshot() == null ? "" : r.financialsSnapshot().strip();
+        String disclosures = r.disclosuresSnapshot() == null ? "" : r.disclosuresSnapshot().strip();
         String benchmark = r.benchmark() == null || r.benchmark().isBlank() ? "none" : r.benchmark().strip();
 
         List<String> combos = new ArrayList<>();
         boolean needsFinancials = false;
+        boolean needsDisclosures = false;
         Set<String> seen = new LinkedHashSet<>();
         for (String c : r.combinations() == null ? List.<String>of() : r.combinations()) {
             String text = c == null ? "" : c.strip();
             if (!seen.add(text)) {
                 throw new IllegalArgumentException("같은 조합이 두 번 있습니다: " + text);
             }
-            needsFinancials |= checkCombination(text, r.market(), r.style());
+            Set<Metric.Kind> kinds = checkCombination(text, r.market(), r.style());
+            needsFinancials |= kinds.contains(Metric.Kind.FINANCIAL);
+            needsDisclosures |= kinds.contains(Metric.Kind.DISCLOSURE);
             combos.add(text);
         }
         if (combos.isEmpty()) {
@@ -184,6 +189,14 @@ public final class ExperimentRegistrations {
         }
         if (needsFinancials && financials.isEmpty()) {
             throw new IllegalArgumentException("재무 지표를 쓰는 선정 프로필이 있어 재무 스냅샷이 필요합니다");
+        }
+        // 공시 스냅샷은 공시 지표 선정이 있을 때만 받는다(선정 엣지 사전 검사와 같은 규칙, D-123). 쓰지 않는 스냅샷을 실행 명령이
+        // 읽게 두지 않는다
+        if (needsDisclosures && disclosures.isEmpty()) {
+            throw new IllegalArgumentException("공시 지표(disclosure-count)를 쓰는 선정 프로필이 있어 공시 스냅샷이 필요합니다");
+        }
+        if (!needsDisclosures && !disclosures.isEmpty()) {
+            throw new IllegalArgumentException("공시 지표를 쓰는 선정 프로필이 없어 공시 스냅샷을 비워야 합니다");
         }
         Set<String> black = new TreeSet<>();
         for (String code : r.blacklist() == null ? List.<String>of() : r.blacklist()) {
@@ -206,6 +219,9 @@ public final class ExperimentRegistrations {
         y.append("bars-snapshot: ").append(quote(bars)).append('\n');
         if (!financials.isEmpty()) {
             y.append("financials-snapshot: ").append(quote(financials)).append('\n');
+        }
+        if (!disclosures.isEmpty()) {
+            y.append("disclosures-snapshot: ").append(quote(disclosures)).append('\n');
         }
         y.append("benchmark: ").append(quote(benchmark)).append('\n');
         y.append("parallelism: ").append(quote(Integer.toString(parallelism))).append('\n');
@@ -231,8 +247,8 @@ public final class ExperimentRegistrations {
         return yaml;
     }
 
-    /** 조합 한 줄을 검사한다. 선정이 재무 지표를 쓰면 true. */
-    private boolean checkCombination(String text, Market market, TradingStyle style) {
+    /** 조합 한 줄을 검사한다. 선정이 쓰는 입력 종류(선정 없으면 빈 집합). */
+    private Set<Metric.Kind> checkCombination(String text, Market market, TradingStyle style) {
         String[] parts = text.split(" x ", -1);
         if (parts.length != 2) {
             throw new IllegalArgumentException("조합은 \"선정 id@버전 x 전략 id@버전\"(선정 없으면 none) 형식이어야 합니다: " + text);
@@ -244,7 +260,7 @@ public final class ExperimentRegistrations {
             throw new IllegalArgumentException("전략 프로필의 시장·스타일이 실험과 다릅니다(STR-02): " + strategyRef.text());
         }
         if (parts[0].equals("none")) {
-            return false;
+            return Set.of();
         }
         CombinationPlan.Ref selectionRef = ref(parts[0], text);
         StoredSelection selection = selections.find(selectionRef.id(), selectionRef.version())
@@ -256,12 +272,7 @@ public final class ExperimentRegistrations {
         if (problem.isPresent()) {
             throw new IllegalArgumentException("지금 카탈로그로 해석되지 않는 선정 프로필입니다: " + selectionRef.text());
         }
-        Set<Metric.Kind> kinds = SelectionCriteria.parse(selection.profile()).inputKinds();
-        if (kinds.contains(Metric.Kind.DISCLOSURE)) { // 화면의 공시 스냅샷 칸은 후속(D-123). 등록 파일에 직접 쓴다
-            throw new IllegalArgumentException("공시 지표(disclosure-count)를 쓰는 선정 프로필은 아직 이 화면에서 등록할 수 없습니다. "
-                    + "등록 파일에 disclosures-snapshot을 직접 적으세요: " + selectionRef.text());
-        }
-        return kinds.contains(Metric.Kind.FINANCIAL);
+        return SelectionCriteria.parse(selection.profile()).inputKinds();
     }
 
     private static CombinationPlan.Ref ref(String text, String combination) {

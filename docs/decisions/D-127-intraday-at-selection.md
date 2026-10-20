@@ -74,6 +74,6 @@
 
 ## 후속
 
-- ui-dev: `#/live` 화면에 장중 순위 상태(기다리는 중·순위 매김, 후보, 적용 시작 시각) 표시.
+- ~~ui-dev: `#/live` 화면에 장중 순위 상태(기다리는 중·순위 매김, 후보, 적용 시작 시각) 표시.~~ → 반영(실시간 화면 선정 결과 표시 PR): 선정마다 순위 시각, `AWAITING`·`RANKED`, 후보 종목, 블랙리스트로 뺀 종목, 시세 누락 `SESSION_GAP` 종목 수/boards 수(상태에 `universe`·`sessionGap` 추가), 적용 시작 이벤트 순번.
 - sim-engine: 녹화 판정의 장중 순위 계좌 지원, 리플레이 확인 `inputs.yaml`에 장중 결과 칸, `session-volume-spike`·`gap`.
 - 배치표 1번 결과(10-21)에 따라 `PRE_OPEN_DAILY_LAG1`을 이 결정과 같은 방식(새 V 파일)으로 더할지 정한다.

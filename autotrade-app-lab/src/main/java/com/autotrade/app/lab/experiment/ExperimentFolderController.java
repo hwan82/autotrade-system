@@ -56,7 +56,7 @@ public class ExperimentFolderController {
         }
     }
 
-    /** 수집 스냅샷 목록(실험 생성 화면의 고르기용). {@code kind}는 {@code krx-daily} 또는 {@code dart-financials}. */
+    /** 수집 스냅샷 목록(실험 생성 화면의 고르기용). {@code kind}는 {@code krx-daily}, {@code dart-financials}, {@code dart-disclosures}. */
     @GetMapping("/snapshots")
     public Map<String, Object> snapshots(@RequestParam String kind) {
         try {

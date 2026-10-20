@@ -40,8 +40,8 @@ class ExperimentRegistrationsTest {
 
     private static ExperimentRegistrations.Request request(String id) {
         return new ExperimentRegistrations.Request(id, "선정 없는 이동평균 추세가 비용 차감 후 이익인가", Market.KRX,
-                TradingStyle.SWING, "2026-01-02", "2026-04-30", "7", "10000000", "krx-daily-test-0001", null, "none",
-                "1", List.of("none x kr-ma-trend@1"), List.of());
+                TradingStyle.SWING, "2026-01-02", "2026-04-30", "7", "10000000", "krx-daily-test-0001", null, null,
+                "none", "1", List.of("none x kr-ma-trend@1"), List.of());
     }
 
     @ParameterizedTest
@@ -116,16 +116,40 @@ class ExperimentRegistrationsTest {
         assertThat(dir.resolve("EXP-WRITE-FAIL2")).doesNotExist();
     }
 
-    @Test
-    void 공시_지표_선정_프로필은_화면_등록을_거절하고_폴더를_만들지_않는다() {
-        ExperimentRegistrations.Request r = new ExperimentRegistrations.Request("EXP-DISCLOSURE-UI", "공시 조건 단타",
-                Market.KRX, TradingStyle.INTRADAY, "2026-01-02", "2026-04-30", "7", "10000000", "krx-daily-test-0001",
-                null, "none", "1", List.of("kr-intraday-news@1 x kr-orb-30@1"), List.of());
+    private static ExperimentRegistrations.Request disclosureRequest(String id, String combination, String disclosures) {
+        return new ExperimentRegistrations.Request(id, "공시 조건 단타", Market.KRX, TradingStyle.INTRADAY, "2026-01-02",
+                "2026-04-30", "7", "10000000", "krx-daily-test-0001", null, disclosures, "none", "1", List.of(combination),
+                List.of());
+    }
 
-        assertThatThrownBy(() -> registrations().create(r))
+    @Test
+    void 공시_지표_선정_프로필은_공시_스냅샷이_없으면_거절하고_폴더를_만들지_않는다() {
+        assertThatThrownBy(() -> registrations().create(disclosureRequest("EXP-DISCLOSURE-UI",
+                "kr-intraday-news@1 x kr-orb-30@1", "  ")))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("disclosures-snapshot")
-                .hasMessageContaining("kr-intraday-news@1");
+                .hasMessageContaining("공시 스냅샷이 필요합니다");
         assertThat(dir.resolve("EXP-DISCLOSURE-UI")).doesNotExist();
+    }
+
+    @Test
+    void 공시_스냅샷을_고르면_등록_파일에_disclosures_snapshot으로_쓴다() throws Exception {
+        ExperimentRegistrations.Registration r = registrations().create(disclosureRequest("EXP-DISCLOSURE-OK",
+                "kr-intraday-news@1 x kr-orb-30@1", " dart-disclosures-2026-10-19-0a1b2c3d "));
+
+        assertThat(r.yaml()).contains("disclosures-snapshot: \"dart-disclosures-2026-10-19-0a1b2c3d\"\n");
+        // 실행 명령이 읽는 해석기로 다시 읽어도 같은 스냅샷이다
+        String written = Files.readString(dir.resolve("EXP-DISCLOSURE-OK").resolve("experiment.yaml"));
+        assertThat(com.autotrade.sim.combo.CombinationPlan.parse(written, "experiment.yaml").disclosuresSnapshot())
+                .contains("dart-disclosures-2026-10-19-0a1b2c3d");
+    }
+
+    @Test
+    void 공시_지표_선정이_없는데_공시_스냅샷을_고르면_거절한다() {
+        assertThatThrownBy(() -> registrations().preview(disclosureRequest("EXP-DISCLOSURE-NO",
+                "kr-intraday-news-nodisc@1 x kr-orb-30@1", "dart-disclosures-2026-10-19-0a1b2c3d")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("공시 스냅샷을 비워야 합니다");
+        assertThat(request("EXP-NO-DISC").disclosuresSnapshot()).isNull();
+        assertThat(registrations().preview(request("EXP-NO-DISC")).yaml()).doesNotContain("disclosures-snapshot");
     }
 }

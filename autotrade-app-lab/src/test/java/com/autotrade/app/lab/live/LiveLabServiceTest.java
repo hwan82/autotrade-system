@@ -324,6 +324,15 @@ class LiveLabServiceTest {
             assertThat(o.status()).isEqualTo(SelectionPreparer.Status.PROBLEM);
             assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
         });
+        // 화면의 다음 거래일 표는 세션 폴더에 남은 사유 파일을 읽는다(실험실을 다시 띄워 마지막 준비 결과가 없어도 보임)
+        assertThat(view.dailySelections()).isTrue();
+        LiveLabService.NextDay next = view.nextDay().orElseThrow();
+        assertThat(next.date()).isEqualTo(java.time.LocalDate.of(2026, 10, 14));
+        assertThat(next.items()).singleElement().satisfies(p -> {
+            assertThat(p.selection()).isEqualTo("kr-intraday-hot@1");
+            assertThat(p.state()).isEqualTo(com.autotrade.sim.selection.SessionSelections.Prepared.State.PROBLEM);
+            assertThat(p.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+        });
         service.prepareNow(); // 다시 요청해도 이벤트 처리와 별도 스레드에서 한다
         service.stop("시험");
         assertThatThrownBy(service::prepareNow).isInstanceOf(IllegalStateException.class);
@@ -336,6 +345,8 @@ class LiveLabServiceTest {
         assertThatThrownBy(service::prepareNow).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("selections");
         assertThat(service.status().prepare()).isEmpty();
+        assertThat(service.status().dailySelections()).isFalse();
+        assertThat(service.status().nextDay()).isEmpty();
     }
 
     @Test

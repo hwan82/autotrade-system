@@ -190,11 +190,43 @@ function sessionView(view, gaps, act) {
 /** 선정 상태 문구(D-124). 서버 사유 이름은 그대로 보인다. */
 const EXCLUSION = { NOT_SUBSCRIBED: 'boards 밖', BLACKLISTED: '블랙리스트' };
 
+/** 다음 거래일 파일 상태(D-124·D-126, 서버 SessionSelections.Prepared.State). */
+const PREPARED = {
+  NONE: '아직 준비 안 함',
+  READY: '결과 파일 있음',
+  PROBLEM: '못 만듦',
+  APPLIED: '적용함',
+  APPLIED_MISSING: '적용함 · SELECTION_MISSING',
+  APPLIED_UNREADABLE: '적용 기록을 읽을 수 없음',
+};
+
+/** 종목 코드 목록을 짧게(앞 몇 개만, 나머지는 개수). */
+function codes(list, max = 10) {
+  if (!list || !list.length) return '–';
+  return list.length > max ? `${list.slice(0, max).join(', ')} 외 ${number(list.length - max)}개` : list.join(', ');
+}
+
+/** 사유와 자세한 내용을 한 칸에. 경고 색. */
+function reasonCell(label, detail) {
+  return h('span', { class: 'warn-text' }, detail ? `${label} · ${detail}` : label);
+}
+
 function selectionsSection(view, s, act) {
-  const applied = s.selections;
-  const prep = view.prepare;
   const hasSelections = view.profiles.some(p => p.includes(' x '));
   if (!hasSelections) return null;
+  const intraday = s.intraday || [];
+  return h('div', {},
+    h('h2', {}, '선정 조합'),
+    h('p', { class: 'muted small' }, '선정 계좌는 그날 후보이면서 boards에 있는 종목만 새로 삽니다. 뺀 자리를 다음 순위로 메우지 않습니다. 결과가 없는 날(SELECTION_MISSING)이나 순위 시각 전에는 새로 사지 않고 청산만 합니다.'),
+    view.dailySelections ? dailySelections(view, s, act) : null,
+    intraday.length ? intradaySelections(intraday, s) : null);
+}
+
+/** 장전 선정(PRE_OPEN_DAILY, D-124): 그날 적용 기록과 다음 거래일 준비. */
+function dailySelections(view, s, act) {
+  const applied = s.selections;
+  const prep = view.prepare;
+  const next = view.nextDay;
   const prepareBtn = h('button', {
     class: 'btn secondary', type: 'button',
     title: '장 밖 시간이 아니어도 다음 거래일 선정 결과를 지금 한 번 만듭니다(실험실 준비 스레드, 낮은 우선순위)',
@@ -203,33 +235,61 @@ function selectionsSection(view, s, act) {
       return '선정 준비를 요청했습니다. 끝나면 아래 "다음 거래일 준비"가 바뀝니다.';
     }),
   }, '지금 준비');
-  const todayRows = applied ? applied.items : [];
   const today = applied
     ? table([
       { label: '선정', render: it => it.selection },
-      { label: '상태', render: it => it.reason
-        ? h('span', { class: 'warn-text', title: it.detail || null }, `SELECTION_MISSING · ${it.reason}`) : 'APPLIED' },
-      { label: '후보', render: it => it.candidates ? `${number(it.candidates.candidates.length)}종목 (boards 안 ${number(it.candidates.onBoards)}/${number(it.candidates.selectedCount)})` : '–' },
+      { label: '상태', render: it => it.reason ? reasonCell(`SELECTION_MISSING · ${it.reason}`, it.detail) : 'APPLIED' },
+      { label: '후보', render: it => it.candidates
+        ? `${number(it.candidates.candidates.length)}종목 (boards 안 ${number(it.candidates.onBoards)}/${number(it.candidates.selectedCount)})` : '–' },
+      { label: '후보 종목', render: it => it.candidates ? codes(it.candidates.candidates) : '–' },
       { label: '뺀 종목', render: it => it.candidates && it.candidates.excluded.length
         ? it.candidates.excluded.map(x => `${x.code} ${x.reason}(${EXCLUSION[x.reason] || x.reason})`).join(', ') : '–' },
-    ], todayRows)
+    ], applied.items)
     : h('p', { class: 'muted small' }, '아직 이번 세션에서 적용한 거래일이 없습니다(그날 첫 이벤트를 받을 때 적용합니다).');
-  const prepView = prep
+  // 다음 거래일: 세션 폴더에 놓인 파일 상태(실험실을 다시 띄워도 보임). 마지막 준비 요약은 이번 실행에서 준비했을 때만 있다
+  const repeated = next && next.items.some(p => p.state === 'PROBLEM' && p.inputs);
+  const nextView = next
     ? h('div', {},
-      h('p', { class: 'small' }, `${prep.date}: ${prep.note}${prep.dailySnapshot ? ` · 일봉 ${prep.dailySnapshot}` : ''}${prep.financialsSnapshot ? ` · 재무 ${prep.financialsSnapshot}` : ''}`),
+      prep && prep.date === next.date
+        ? h('p', { class: 'small' }, `마지막 준비: ${prep.note}${prep.dailySnapshot ? ` · 일봉 ${prep.dailySnapshot}` : ''}${prep.financialsSnapshot ? ` · 재무 ${prep.financialsSnapshot}` : ''}`)
+        : h('p', { class: 'muted small' }, '이번 실험실 실행에서는 아직 준비하지 않았습니다. 아래는 세션 폴더에 남은 파일입니다. 장 밖 시간(16:00 ~ 다음 날 08:30)에 5분마다 준비하고, "지금 준비"로 바로 할 수 있습니다.'),
       table([
-        { label: '선정', render: o => o.selection },
-        { label: '준비', render: o => o.status === 'PROBLEM'
-          ? h('span', { class: 'warn-text', title: o.detail || null }, `${o.reason}${o.detail ? ` · ${o.detail}` : ''}`) : o.status },
-      ], prep.outcomes))
-    : h('p', { class: 'muted small' }, '아직 준비하지 않았습니다. 장 밖 시간(16:00 ~ 다음 날 08:30)에 5분마다 준비하고, "지금 준비"로 바로 할 수 있습니다.');
+        { label: '선정', render: p => p.selection },
+        { label: '상태', render: p => (p.state === 'PROBLEM' || p.state === 'APPLIED_MISSING' || p.state === 'APPLIED_UNREADABLE')
+          ? reasonCell(`${PREPARED[p.state]}${p.reason ? ` · ${p.reason}` : ''}`, p.detail) : (PREPARED[p.state] || p.state) },
+        { label: '계산에 쓴 입력', render: p => p.inputs || '–' },
+      ], next.items),
+      repeated ? h('p', { class: 'muted small' }, '"계산에 쓴 입력"이 있는 사유는 같은 스냅샷으로 다시 계산하지 않습니다. 새 스냅샷이 수집되면 다시 계산합니다. 코드를 고친 뒤 같은 스냅샷으로 다시 만들려면 세션 폴더 selections/<날짜>/의 .problem.json을 지우세요.') : null)
+    : prep
+      ? h('p', { class: 'small' }, `${prep.date}: ${prep.note}`)
+      : h('p', { class: 'muted small' }, '다음 거래일이 운용 기간 밖이거나 아직 세션에 연결하지 않았습니다.');
   return h('div', {},
-    h('h2', {}, '선정 조합'),
-    h('p', { class: 'muted small' }, '선정 계좌는 그날 후보이면서 boards에 있는 종목만 새로 삽니다. 결과가 없는 날(SELECTION_MISSING)은 새로 사지 않고 청산만 합니다.'),
-    h('h3', {}, `적용한 선정${applied ? ` · ${applied.date}` : ''}`),
+    h('h3', {}, `장전 선정 · 적용${applied ? ` ${applied.date}` : ''}`),
     today,
-    h('div', { class: 'row-actions' }, h('h3', {}, '다음 거래일 준비'), prepareBtn),
-    prepView);
+    h('div', { class: 'row-actions' }, h('h3', {}, `다음 거래일 준비${next ? ` · ${next.date}` : ''}`), prepareBtn),
+    nextView);
+}
+
+/** 장중 순위 선정(INTRADAY_AT, D-127): 오늘 순위 시각 전·후. 순위 대상은 boards뿐이라 boards 밖(NOT_SUBSCRIBED)은 없다. */
+function intradaySelections(items, s) {
+  return h('div', {},
+    h('h3', {}, `장중 순위 선정${s.journalDate ? ` · ${s.journalDate}` : ''}`),
+    h('p', { class: 'muted small' }, '정규장 시작부터 순위 시각 전까지 받은 boards 체결로 순위를 매기고, 순위를 매긴 이벤트부터 후보만 새로 삽니다. 그 구간에 시세가 빠진 종목(SESSION_GAP)은 순위에서 뺍니다. 장중에 실험실을 처음 띄웠거나 다시 띄운 날은 모든 종목이 SESSION_GAP이라 그날은 새로 사지 않습니다.'),
+    table([
+      { label: '선정', render: it => it.selection },
+      { label: '순위 시각', render: it => it.at },
+      { label: '상태', render: it => it.state === 'RANKED'
+        ? 'RANKED'
+        : h('span', { class: 'muted' }, 'AWAITING · 순위 시각 전(신규 진입 없음)') },
+      { label: '후보', render: it => it.state === 'RANKED' ? `${number(it.candidates.length)}종목 (선정 ${number(it.selectedCount)})` : '–' },
+      { label: '후보 종목', render: it => codes(it.candidates) },
+      { label: '뺀 종목', render: it => it.blacklisted.length
+        ? it.blacklisted.map(c => `${c} BLACKLISTED(블랙리스트)`).join(', ') : '–' },
+      { label: '시세 누락', render: it => it.state !== 'RANKED' ? '–'
+        : it.sessionGap ? reasonCell(`SESSION_GAP ${number(it.sessionGap)}/${number(it.universe)}`,
+          it.sessionGap === it.universe ? '모든 종목, 그날 신규 진입 없음' : '') : `0/${number(it.universe)}` },
+      { label: '적용 시작', render: it => it.state === 'RANKED' ? `이벤트 ${number(it.activeFrom)}번부터` : '–' },
+    ], items));
 }
 
 function statusBadge(view) {
