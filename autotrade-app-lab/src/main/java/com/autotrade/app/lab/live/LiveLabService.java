@@ -345,8 +345,7 @@ public class LiveLabService implements AutoCloseable {
      * 범위 밖이면 빈 값(화면은 멈추지 않는다).
      */
     private Optional<NextDay> nextDay(Running r) {
-        Optional<com.autotrade.sim.selection.SessionSelections> files = r.session.selectionFiles();
-        if (files.isEmpty()) {
+        if (!r.session.hasSelections()) {
             return Optional.empty();
         }
         try {
@@ -357,7 +356,7 @@ public class LiveLabService implements AutoCloseable {
             if (date.isBefore(r.plan.from()) || date.isAfter(r.plan.to())) {
                 return Optional.empty();
             }
-            return Optional.of(new NextDay(date, files.get().prepared(date)));
+            return r.session.preparedSelections(date).map(items -> new NextDay(date, items));
         } catch (RuntimeException e) {
             return Optional.empty();
         }

@@ -206,6 +206,15 @@ function codes(list, max = 10) {
   return list.length > max ? `${list.slice(0, max).join(', ')} 외 ${number(list.length - max)}개` : list.join(', ');
 }
 
+/**
+ * 마지막 준비가 쓴 입력 스냅샷(서버 LiveSelectionPrep.Report). 공시는 공시 조건 장전 선정이 있을 때만 있다(ADR-014 F9, PR #206 N3).
+ * 등록 파일이 latest면 준비할 때 고른 실제 스냅샷 ID가 보인다.
+ */
+function prepInputs(prep) {
+  return [['일봉', prep.dailySnapshot], ['재무', prep.financialsSnapshot], ['공시', prep.disclosuresSnapshot]]
+    .filter(([, id]) => id).map(([label, id]) => ` · ${label} ${id}`).join('');
+}
+
 /** 사유와 자세한 내용을 한 칸에. 경고 색. */
 function reasonCell(label, detail) {
   return h('span', { class: 'warn-text' }, detail ? `${label} · ${detail}` : label);
@@ -251,7 +260,7 @@ function dailySelections(view, s, act) {
   const nextView = next
     ? h('div', {},
       prep && prep.date === next.date
-        ? h('p', { class: 'small' }, `마지막 준비: ${prep.note}${prep.dailySnapshot ? ` · 일봉 ${prep.dailySnapshot}` : ''}${prep.financialsSnapshot ? ` · 재무 ${prep.financialsSnapshot}` : ''}`)
+        ? h('p', { class: 'small' }, `마지막 준비: ${prep.note}${prepInputs(prep)}`)
         : h('p', { class: 'muted small' }, '이번 실험실 실행에서는 아직 준비하지 않았습니다. 아래는 세션 폴더에 남은 파일입니다. 장 밖 시간(16:00 ~ 다음 날 08:30)에 5분마다 준비하고, "지금 준비"로 바로 할 수 있습니다.'),
       table([
         { label: '선정', render: p => p.selection },

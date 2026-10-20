@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -333,9 +334,35 @@ class LiveLabServiceTest {
             assertThat(p.state()).isEqualTo(com.autotrade.sim.selection.SessionSelections.Prepared.State.PROBLEM);
             assertThat(p.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
         });
+        assertScreenFields(view);
         service.prepareNow(); // 다시 요청해도 이벤트 처리와 별도 스레드에서 한다
         service.stop("시험");
         assertThatThrownBy(service::prepareNow).isInstanceOf(IllegalStateException.class);
+    }
+
+    /**
+     * #/live 화면(live.js dailySelections)이 읽는 JSON 이름이 서버 레코드와 맞는지(PR #201 N2). 화면 시험(e2e 04)은 이 이름으로 만든
+     * 가짜 응답을 쓰므로, 이름이 바뀌면 여기서 먼저 걸린다. 실험실과 같게 Optional은 값으로, 날짜는 ISO 문자열로 쓴다.
+     */
+    private static void assertScreenFields(LiveLabService.View view) throws Exception {
+        com.fasterxml.jackson.databind.JsonNode json = com.fasterxml.jackson.databind.json.JsonMapper.builder()
+                .findAndAddModules()
+                .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .build().valueToTree(view);
+        assertThat(json.get("dailySelections").asBoolean()).isTrue();
+        com.fasterxml.jackson.databind.JsonNode prep = json.get("prepare");
+        assertThat(prep.get("date").asText()).isEqualTo("2026-10-14");
+        for (String key : List.of("note", "dailySnapshot", "financialsSnapshot", "disclosuresSnapshot")) {
+            assertThat(prep.has(key)).as("prepare.%s", key).isTrue();
+        }
+        com.fasterxml.jackson.databind.JsonNode next = json.get("nextDay");
+        assertThat(next.get("date").asText()).isEqualTo("2026-10-14");
+        com.fasterxml.jackson.databind.JsonNode item = next.get("items").get(0);
+        assertThat(item.get("selection").asText()).isEqualTo("kr-intraday-hot@1");
+        assertThat(item.get("state").asText()).isEqualTo("PROBLEM");
+        assertThat(item.get("reason").asText()).isEqualTo("STALE_INPUT");
+        assertThat(item.has("detail")).isTrue();
+        assertThat(item.has("inputs")).isTrue();
     }
 
     @Test
