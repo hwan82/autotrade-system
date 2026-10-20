@@ -61,8 +61,13 @@ final class DartDisclosureSnapshotBuilder {
      * @param rowsByType 유형별 행 수
      * @param bySource 종목 코드 출처별 행 수({@code DART}, {@code CORP}, {@code NAME}, {@code NONE})
      * @param unmapped 못 붙인 행 수({@code <유형>|<corp_cls>} → 건수)
+     * @param byYear 접수 연도 → {전체 행, 못 붙인 행}(법인 구분 E 포함, 생존편향 점검, PR #196 strategy-researcher M2)
+     * @param prefixes 보고서명 대괄호 머리말(예 {@code [기재정정]}) → 건수. 선정에서 세지 않는 행이다(같은 리뷰 m1)
+     * @param delisted 수집 구간 안에 상장폐지된 KRX 종목 이력 구간 수
+     * @param delistedWithDisclosure 그중 상장 구간 안 접수 공시가 하나라도 그 종목 코드로 붙은 구간 수
      */
-    record Stats(Map<String, Long> rowsByType, Map<String, Long> bySource, Map<String, Long> unmapped, long rows) {}
+    record Stats(Map<String, Long> rowsByType, Map<String, Long> bySource, Map<String, Long> unmapped, long rows,
+            Map<Integer, long[]> byYear, Map<String, Long> prefixes, long delisted, long delistedWithDisclosure) {}
 
     /**
      * @param windows 유형 → 창 파일(시작일 순, {@link DartDisclosureCollector#windowFiles})
@@ -82,6 +87,16 @@ final class DartDisclosureSnapshotBuilder {
         Map<String, Long> rowsByType = new TreeMap<>();
         Map<String, Long> bySource = new TreeMap<>();
         Map<String, Long> unmapped = new TreeMap<>();
+        Map<Integer, long[]> byYear = new TreeMap<>();
+        Map<String, Long> prefixes = new TreeMap<>();
+        Map<String, java.util.BitSet> mappedYears = new HashMap<>(); // 종목 코드 → 공시가 붙은 접수 연도(2000년 기준 비트)
+        LocalDate first = null;
+        for (List<Path> files : windows.values()) {
+            for (Path f : files) {
+                LocalDate st = DartDisclosureCollector.windowStart(f);
+                first = first == null || st.isBefore(first) ? st : first;
+            }
+        }
         long total = 0;
         for (List<Object[]> month : byMonth.values()) {
             List<List<String>> rows = new ArrayList<>();
@@ -95,8 +110,18 @@ final class DartDisclosureSnapshotBuilder {
                             n.path("rcept_no").asText(), date.toString(), n.path("report_nm").asText()));
                     rowsByType.merge(type, 1L, Long::sum);
                     bySource.merge(mapped[1].isEmpty() ? "NONE" : mapped[1], 1L, Long::sum);
+                    long[] y = byYear.computeIfAbsent(date.getYear(), k -> new long[2]);
+                    y[0]++;
                     if (mapped[0].isEmpty()) {
                         unmapped.merge(type + "|" + (cls.isEmpty() ? "-" : cls), 1L, Long::sum);
+                        y[1]++;
+                    } else {
+                        mappedYears.computeIfAbsent(mapped[0], k -> new java.util.BitSet()).set(date.getYear() - 2000);
+                    }
+                    String name = n.path("report_nm").asText().strip();
+                    int close = name.indexOf(']');
+                    if (name.startsWith("[") && close > 1) {
+                        prefixes.merge(name.substring(0, close + 1), 1L, Long::sum);
                     }
                 }
             }
@@ -107,7 +132,20 @@ final class DartDisclosureSnapshotBuilder {
                 total++;
             }
         }
-        return new Stats(rowsByType, bySource, unmapped, total);
+        long delisted = 0;
+        long delistedWith = 0;
+        for (Listing l : krx) {
+            if (l.to() == null || first == null || l.to().isBefore(first)) {
+                continue;
+            }
+            delisted++;
+            java.util.BitSet years = mappedYears.get(l.code());
+            int lo = Math.max(l.from().getYear(), first.getYear()) - 2000;
+            if (years != null && lo >= 0 && years.nextSetBit(lo) >= 0 && years.nextSetBit(lo) <= l.to().getYear() - 2000) {
+                delistedWith++;
+            }
+        }
+        return new Stats(rowsByType, bySource, unmapped, total, byYear, prefixes, delisted, delistedWith);
     }
 
     /** 고유번호 → 종목 코드 → 그 코드가 나온 첫·마지막 접수일. */

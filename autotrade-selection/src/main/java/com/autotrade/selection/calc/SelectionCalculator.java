@@ -97,7 +97,7 @@ public final class SelectionCalculator {
         List<LocalDate> window = days.lastN(cutoff, criteria.lookbackDays());
         Set<Metric.Kind> kinds = criteria.inputKinds();
         checkInputs(kinds, cutoff);
-        checkDisclosures(criteria, cutoff, window);
+        checkDisclosures(criteria, applyFrom, window);
 
         List<Scored> passed = new ArrayList<>();
         Map<String, SelectionResult.Evaluation> evaluations = new TreeMap<>();
@@ -139,7 +139,7 @@ public final class SelectionCalculator {
                 data.calendarDigest(),
                 kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().snapshotId() : null,
                 kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().sha256() : null,
-                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, cutoff) : null);
+                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, applyFrom) : null);
         return new SelectionResult(SelectionResult.Selection.of(profile), applyFrom, applyToFor(profile, applyFrom),
                 inputs, selected, List.copyOf(evaluations.values()));
     }
@@ -182,7 +182,8 @@ public final class SelectionCalculator {
      * 공시 조건이 쓰는 유형을 스냅샷이 받았고, 조건 구간(첫날 ~ c)을 수집 구간이 통째로 덮는지 본다. 모자라면 "공시 0건"으로 내지 않고
      * 실패한다(0건과 미수록을 구분, ADR-012 3.2). 메시지는 {@code STALE_INPUT:}·{@code INPUT_TYPE_MISSING:}으로 시작한다.
      */
-    private void checkDisclosures(SelectionCriteria c, LocalDate cutoff, List<LocalDate> window) {
+    private void checkDisclosures(SelectionCriteria c, LocalDate applyFrom, List<LocalDate> window) {
+        LocalDate end = disclosureTo(applyFrom);
         if (!c.inputKinds().contains(Metric.Kind.DISCLOSURE)) {
             return;
         }
@@ -198,8 +199,8 @@ public final class SelectionCalculator {
                     throw new IllegalStateException(INPUT_TYPE_MISSING + ": " + g.id() + " 공시 유형 " + t + "를 공시 스냅샷이 받지 않았습니다: "
                             + in.snapshotId() + " (받은 유형 " + String.join(",", in.types()) + ")");
                 }
-                if (!in.covers(t, from, cutoff)) {
-                    throw new IllegalStateException("STALE_INPUT: 공시 스냅샷이 " + g.id() + " 구간 " + from + " ~ " + cutoff
+                if (!in.covers(t, from, end)) {
+                    throw new IllegalStateException("STALE_INPUT: 공시 스냅샷이 " + g.id() + " 구간 " + from + " ~ " + end
                             + "의 유형 " + t + "를 다 담지 않았습니다: " + in.snapshotId());
                 }
             }
@@ -207,21 +208,33 @@ public final class SelectionCalculator {
     }
 
     /** 공시 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날(선정 결과 {@code inputs.disclosures.covered_through}). */
-    private LocalDate disclosuresThrough(SelectionCriteria c, LocalDate cutoff) {
+    private LocalDate disclosuresThrough(SelectionCriteria c, LocalDate applyFrom) {
+        LocalDate end = disclosureTo(applyFrom);
         SelectionData.DisclosureInput in = data.disclosures().orElseThrow();
         LocalDate out = null;
         for (Condition g : c.gates()) {
             for (String t : g.types()) {
-                LocalDate end = in.coveredThrough(t, cutoff);
-                out = out == null || end.isBefore(out) ? end : out;
+                LocalDate through = in.coveredThrough(t, end);
+                out = out == null || through.isBefore(out) ? through : out;
             }
         }
         return out;
     }
 
-    /** {@code disclosure-count} 구간 첫날: c에서 끝나는 w거래일 중 첫 거래일의 앞 거래일 다음 날(휴장일 접수분이 다음 거래일 구간에 듦). */
+    /**
+     * {@code disclosure-count} 구간 첫날: c에서 끝나는 w거래일의 첫날. 끝날(T 전날)과 합쳐 w1이면 [c, T−1]이라, 날마다 선정하면
+     * 각 접수일이 정확히 한 번 센다(c 장 마감 뒤·c와 T 사이 휴장일 접수분은 T 선정에, c 전날 접수분은 그 앞 선정에).
+     */
     private static LocalDate disclosureFrom(List<LocalDate> window, int w) {
-        return window.get(window.size() - w - 1).plusDays(1);
+        return window.get(window.size() - w);
+    }
+
+    /**
+     * {@code disclosure-count} 구간 끝날: T 전날(달력일). c와 T 사이 휴장일(주말·연말·근로자의 날 등) 접수분도 T 선정에 든다.
+     * T 당일 접수(장 전 공시 포함)는 쓰지 않는다. 재무의 "접수일 &lt; T" 규칙과 같다(PR #196 strategy-researcher M1).
+     */
+    private static LocalDate disclosureTo(LocalDate applyFrom) {
+        return applyFrom.minusDays(1);
     }
 
     private record Scored(Symbol symbol, Eval eval) {
@@ -481,12 +494,12 @@ public final class SelectionCalculator {
     }
 
     /**
-     * 구간(첫 거래일의 앞 거래일 다음 날 ~ c)에 접수된 그 종목 공시 건수. 접수일 ≤ c만 세므로 T 당일 접수 공시(장 전 공시 포함)는
-     * 쓰지 않는다(ADR-012 3.1). 0건은 정상값 0이다(스냅샷이 구간을 덮는지는 계산 전에 {@link #checkDisclosures}로 확인).
+     * 구간(c에서 끝나는 w거래일의 첫날 ~ T 전날)에 접수된 그 종목 공시 건수. 접수일 &lt; T만 세므로 T 당일 접수 공시(장 전 공시
+     * 포함)는 쓰지 않는다(ADR-012 3.1). 0건은 정상값 0이다(스냅샷이 구간을 덮는지는 계산 전에 {@link #checkDisclosures}로 확인).
      */
     private Value disclosureCount(Context ctx, Condition g) {
         LocalDate from = disclosureFrom(ctx.window, g.period());
-        int n = data.disclosures().orElseThrow().count(ctx.symbol, g.types(), from, ctx.cutoff);
+        int n = data.disclosures().orElseThrow().count(ctx.symbol, g.types(), from, disclosureTo(ctx.applyFrom));
         return Value.of(BigDecimal.valueOf(n), false);
     }
 

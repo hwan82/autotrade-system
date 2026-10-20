@@ -49,7 +49,8 @@ class DartDisclosureSnapshotBuilderTest {
                 new DartDisclosureSnapshotBuilder.Listing("222222", "폐지회사", LocalDate.of(2010, 1, 4), LocalDate.of(2026, 9, 30)),
                 new DartDisclosureSnapshotBuilder.Listing("333331", "이름둘", LocalDate.of(2010, 1, 4), null),
                 new DartDisclosureSnapshotBuilder.Listing("333332", "이름둘", LocalDate.of(2010, 1, 4), null),
-                new DartDisclosureSnapshotBuilder.Listing("444444", "가나", LocalDate.of(2010, 1, 4), LocalDate.of(2011, 1, 4)));
+                new DartDisclosureSnapshotBuilder.Listing("444444", "가나", LocalDate.of(2010, 1, 4), LocalDate.of(2011, 1, 4)),
+                new DartDisclosureSnapshotBuilder.Listing("555555", "무공시", LocalDate.of(2010, 1, 4), LocalDate.of(2026, 9, 15)));
         List<List<String>> out = new ArrayList<>();
         DartDisclosureSnapshotBuilder.Stats s = DartDisclosureSnapshotBuilder.build(windows, krx, out::add);
         assertThat(out).containsExactly(
@@ -64,6 +65,12 @@ class DartDisclosureSnapshotBuilderTest {
         assertThat(s.bySource()).containsEntry("DART", 1L).containsEntry("CORP", 1L).containsEntry("NAME", 1L)
                 .containsEntry("NONE", 2L);
         assertThat(s.unmapped()).containsEntry("B|E", 1L).containsEntry("I|E", 1L);
+        assertThat(s.byYear()).containsOnlyKeys(2026);
+        assertThat(s.byYear().get(2026)).containsExactly(5L, 2L);
+        assertThat(s.prefixes()).containsExactly(Map.entry("[기재정정]", 1L));
+        // 수집 구간(2026-08-01~) 안 상장폐지: 222222(이름 대조로 공시 붙음)·555555(공시 없음). 444444는 2011년 폐지라 밖
+        assertThat(s.delisted()).isEqualTo(2);
+        assertThat(s.delistedWithDisclosure()).isEqualTo(1);
     }
 
     @Test

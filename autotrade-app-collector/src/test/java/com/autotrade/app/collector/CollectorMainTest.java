@@ -492,7 +492,8 @@ class CollectorMainTest {
         assertThat(lines.get(0)).isEqualTo("market,code,code_source,corp_code,corp_cls,pblntf_ty,rcept_no,rcept_dt,report_nm");
         assertThat(lines).hasSize(1 + 6);
         String report = Files.readString(reports.resolve(m.snapshotId() + ".md"));
-        assertThat(report).contains("| B | 2026-08-01 ~ 2026-09-15 | 4 |", "오늘 공시 몫 호출 | 5 |");
+        assertThat(report).contains("| B | 2026-08-01 ~ 2026-09-15 | 4 |", "오늘 공시 몫 호출 | 5 |",
+                "## 상장폐지 종목 공시 확인(생존편향)", "## 접수 연도별 못 붙인 행", "| 2026 | 6 |", "## 보고서명 대괄호 머리말");
         // 같은 캐시로 다시 만들면 같은 ID(창이 바뀌지 않음)
         assertThat(CollectorMain.run(args("dart-disclosures", "--from", "2026-08-01", "--dart-base-url", "https://dart.test/api"),
                 clock, http, ms -> {}, PLENTY)).isZero();

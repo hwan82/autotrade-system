@@ -96,8 +96,13 @@
 
 - `krx-daily`는 기본 `--to`가 서울 18:00 전이면 어제, 뒤면 오늘이다. 18:30 이후, 미국 장 보호 구간 전에 돌린다(3.5).
 - `dart-financials`는 어제까지 접수된 공시를 훑는다. **매일 돌려야** 정정 공시가 나오기 전에 원 공시 값을 받아 둔다(MD-10 기본 규칙). 건너뛴 날의 공시는 다음 실행에서 받지만, 그 사이 정정이 나오면 원 공시 값은 "값 모름"(대체 규칙 대상)이 된다.
-- `dart-disclosures`도 **어제까지** 받는다. 단타 선정(`PRE_OPEN_DAILY`)은 T의 직전 거래일 c까지 접수된 공시를 쓰므로, c 공시를 담으려면 **T 날 00:00 뒤 08:00 전**(장 시간 보호 구간 전)에 돌린다. c 저녁에 돌린 스냅샷은 c를 덮지 않아 그 스냅샷으로 T 선정을 내면 `STALE_INPUT`으로 멈춘다(0종목 결과를 내지 않는다). 예약 작업은 07:00 `[가정]`쯤 둔다. 종목 코드를 붙이려고 가장 늦은 KRX 일봉 스냅샷의 종목 이력을 읽는다(`--krx-snapshot ID`로 지정 가능). 그래서 같은 날 `krx-daily`를 먼저 돌린다.
-- 공시 품질 리포트 `<--report-dir>/dart-disclosures-<스냅샷 ID>.md`의 "종목 코드 못 붙인 행"(유형·법인 구분별)을 첫 실행 때 한 번 본다. 유가증권·코스닥(`corp_cls` Y·K) 행이 많이 남으면 메시지를 스레드에 붙인다.
+- `dart-disclosures`도 **어제까지** 받는다. 단타 선정(`PRE_OPEN_DAILY`)은 T 전날까지 접수된 공시를 쓰므로(c와 T 사이 주말·휴장일 포함), **T 날 00:00 뒤 08:00 전**(장 시간 보호 구간 전)에 돌린다. 그 전에 돌린 스냅샷은 T 전날을 덮지 않아 그 스냅샷으로 T 선정을 내면 `STALE_INPUT`으로 멈춘다(0종목 결과를 내지 않는다). 예약 작업은 07:00 `[가정]`쯤 둔다. 종목 코드를 붙이려고 가장 늦은 KRX 일봉 스냅샷의 종목 이력을 읽는다(`--krx-snapshot ID`로 지정 가능). 그래서 같은 날 `krx-daily`를 먼저 돌린다.
+- 공시 품질 리포트 `<--report-dir>/dart-disclosures-<스냅샷 ID>.md`를 첫 전체 수집 뒤 한 번 보고 아래 네 가지를 스레드에 붙인다(PR #196 strategy-researcher M2, 생존편향 확인). 이것을 확인하기 전에는 공시 조건 선정 (라)의 과거 구간 결과를 선정 엣지 근거로 쓰지 않는다.
+  1. "종목 코드" 표: 못 붙인 행을 유형·법인 구분별로 본다. 상장폐지 회사는 `E`(기타)로 나올 수 있으니 `E`도 함께 본다 `[추론]`.
+  2. "상장폐지 종목 공시 확인": 수집 구간 안에 상장폐지된 KRX 종목 중 공시가 붙은 비율.
+  3. "접수 연도별 못 붙인 행": 옛 연도일수록 비율이 오르는지.
+  4. 손 확인: KRX 종목 이력에서 2015~2020년에 상장폐지된 종목 세 개를 고른다(`instrument_history.csv`의 `valid_to`가 찬 행). DART 전자공시 누리집(`dart.fss.or.kr`) 공시 통합검색에서 그 회사 이름으로 상장 기간 중 주요사항보고·거래소공시를 찾는다. 같은 접수번호가 공시 스냅샷 `disclosures.csv`에서 그 종목 코드로 붙어 있는지 본다(키가 필요 없는 누리집이라 키가 남지 않는다). 셋 중 하나라도 코드가 비어 있으면 결과를 스레드에 붙인다.
+  - "보고서명 대괄호 머리말" 표는 선정에서 세지 않는 정정·첨부 공시의 종류별 건수다. `[연장결정]`·`[변경등록]`이 많으면 함께 붙인다(새 사건일 수 있음).
 - 예약 작업은 설치본을 **낮은 우선순위로** 돌린다. `./gradlew :autotrade-app-collector:installDist` 뒤:
   - Windows 작업 스케줄러: 동작에 `cmd /c start "" /low /wait <저장소>\autotrade-app-collector\build\install\autotrade-collector\bin\autotrade-collector.bat krx-daily --report-dir <저장소>\experiments\_data-quality --experiments-dir <저장소>\experiments --keep-snapshots 3`. 작업 설정의 우선순위도 낮게(기본 7) 둔다.
   - Linux·macOS: `nice -n 19 <저장소>/autotrade-app-collector/build/install/autotrade-collector/bin/autotrade-collector krx-daily --report-dir <저장소>/experiments/_data-quality --experiments-dir <저장소>/experiments --keep-snapshots 3`

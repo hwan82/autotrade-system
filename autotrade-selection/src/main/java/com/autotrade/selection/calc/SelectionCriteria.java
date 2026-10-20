@@ -94,7 +94,7 @@ public record SelectionCriteria(
             case AVG_TURNOVER -> period;
             case DAY_RANGE -> 2;
             case VOLUME_SPIKE -> period + 1;
-            case DISCLOSURE_COUNT -> period + 1; // 구간 시작 = 첫 거래일의 앞 거래일 다음 날
+            case DISCLOSURE_COUNT -> period; // 구간 시작 = c에서 끝나는 w거래일의 첫날
             default -> 1;
         };
     }

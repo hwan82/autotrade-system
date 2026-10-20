@@ -155,8 +155,28 @@ final class CollectorReports {
             String[] k = e.getKey().split("\\|");
             row(sb, "못 붙임: 유형 " + k[0] + ", 법인 구분 " + k[1], e.getValue());
         }
-        sb.append("\n법인 구분 Y 유가증권, K 코스닥, N 코넥스, E 기타. 거래소공시(I)인데 못 붙인 행이 많으면 상장폐지 회사 공시가 빠져 "
-                + "생존편향이 생길 수 있습니다(ADR-012 3.2).\n");
+        sb.append("\n법인 구분 Y 유가증권, K 코스닥, N 코넥스, E 기타. 상장폐지 회사는 OpenDART가 지금 정보로 E·빈 종목 코드를 줄 수 "
+                + "있어 E도 함께 봅니다 `[추론]`(PR #196 strategy-researcher M2).\n");
+        sb.append("\n## 상장폐지 종목 공시 확인(생존편향)\n\n");
+        if (s.delisted() == 0) {
+            sb.append("수집 구간 안에 상장폐지된 KRX 종목 이력이 없거나 KRX 스냅샷을 읽지 않았습니다. 확인하지 못했습니다.\n");
+        } else {
+            sb.append("| 항목 | 값 |\n|---|---|\n");
+            row(sb, "수집 구간 안에 상장폐지된 KRX 종목 구간", s.delisted());
+            row(sb, "그중 상장 구간 안 공시가 종목 코드로 붙은 구간", s.delistedWithDisclosure() + " ("
+                    + String.format(java.util.Locale.ROOT, "%.1f", 100.0 * s.delistedWithDisclosure() / s.delisted()) + "%)");
+            sb.append("\n이 비율이 상장 중인 종목보다 크게 낮으면 상장폐지 회사 공시가 0건으로 세져 (라) 같은 공시 조건 선정에서 "
+                    + "체계적으로 빠집니다. 확인 전에는 과거 구간 공시 선정 결과를 선정 엣지 근거로 쓰지 않습니다(runbook collector.md 4장).\n");
+        }
+        sb.append("\n## 접수 연도별 못 붙인 행\n\n| 연도 | 행 | 못 붙임 | 비율 |\n|---|---|---|---|\n");
+        s.byYear().forEach((y, c) -> sb.append("| ").append(y).append(" | ").append(c[0]).append(" | ").append(c[1]).append(" | ")
+                .append(String.format(java.util.Locale.ROOT, "%.1f%%", c[0] == 0 ? 0.0 : 100.0 * c[1] / c[0])).append(" |\n"));
+        sb.append("\n옛 연도일수록 비율이 오르면 상장폐지·이름 변경 회사가 빠지는 것입니다 `[추론]`.\n");
+        sb.append("\n## 보고서명 대괄호 머리말(선정에서 세지 않음)\n\n| 머리말 | 행 |\n|---|---|\n");
+        s.prefixes().forEach((k, v) -> sb.append("| `").append(k).append("` | ").append(v).append(" |\n"));
+        if (s.prefixes().isEmpty()) {
+            sb.append("| 없음 | 0 |\n");
+        }
         sb.append("\n## 이번 실행\n\n| 항목 | 값 |\n|---|---|\n");
         row(sb, "받은 창 / 쪽 / 행", r.windows() + " / " + r.pages() + " / " + r.rows());
         row(sb, "오늘 공시 몫 호출", laneUsed);
