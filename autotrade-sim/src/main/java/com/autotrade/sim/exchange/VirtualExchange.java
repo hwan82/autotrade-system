@@ -95,7 +95,7 @@ public final class VirtualExchange implements OrderGateway {
      * 종가 단일가 구간(없으면 접속 매매)이 끝나고 이 시간 안(끝 시각 제외)의 첫 체결만 종가 체결로 보고, 그날 그 종목 첫 정규장
      * 이벤트가 개장 뒤 이 시간 이상 지나 오면 시가 단일가 체결이 이미 지난 것으로 본다(D-075, D-087).
      */
-    static final Duration AUCTION_PRINT_GRACE = Duration.ofSeconds(60);
+    public static final Duration AUCTION_PRINT_GRACE = Duration.ofSeconds(60);
 
     private final AccountId account;
     private final MarketRules rules;

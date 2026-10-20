@@ -409,6 +409,99 @@ class LiveJudgementTest {
         assertThatThrownBy(stopping::check).isInstanceOf(ExperimentStoppedException.class).hasMessageContaining("장 시간");
     }
 
+    @Test
+    void abortable_stream_stops_at_the_next_event_once_failed_and_otherwise_passes_everything_through() {
+        // PR #185 architect N1: 문은 Run 시작·거래일 바뀜에서만 확인되므로, 기록 읽기가 이벤트마다 실패 표시를 봐야
+        // 한 거래일을 더 돌거나 Run이 모두 끝난 묶음이 남은 기록을 끝까지 읽지 않는다
+        List<MarketEvent> events = LiveSessionTest.twoDays();
+        com.autotrade.sim.run.MarketEventStream source = new com.autotrade.sim.run.MarketEventStream() {
+            @Override
+            public String version() {
+                return "v1";
+            }
+
+            @Override
+            public Market market() {
+                return Market.KRX;
+            }
+
+            @Override
+            public boolean exchangeTimed() {
+                return false;
+            }
+
+            @Override
+            public long eventCount() {
+                return events.size();
+            }
+
+            @Override
+            public void forEach(java.util.function.Consumer<MarketEvent> sink) {
+                events.forEach(sink);
+            }
+        };
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
+        com.autotrade.sim.run.MarketEventStream stream = LiveJudgement.abortable(source, failed);
+        assertThat(stream.version()).isEqualTo("v1");
+        assertThat(stream.market()).isEqualTo(Market.KRX);
+        assertThat(stream.exchangeTimed()).isFalse();
+        assertThat(stream.eventCount()).isEqualTo(events.size());
+        List<MarketEvent> all = new java.util.ArrayList<>();
+        stream.forEach(all::add);
+        assertThat(all).isEqualTo(events);
+
+        // 한 거래일 안(첫 날 10번째 이벤트)에서 실패 표시가 서면 바로 다음 이벤트를 넘기지 않는다
+        List<MarketEvent> seen = new java.util.ArrayList<>();
+        assertThatThrownBy(() -> stream.forEach(e -> {
+            seen.add(e);
+            if (seen.size() == 10) {
+                failed.set(true);
+            }
+        })).isInstanceOf(ExperimentStoppedException.class).hasMessageContaining("다른 판정 묶음이 실패해 멈춤");
+        assertThat(seen).hasSize(10);
+    }
+
+    @Test
+    void abortable_wrappers_override_every_method_of_their_interface() {
+        // PR #185 strategy-researcher n2: 인터페이스에 기본 메서드가 더해지면 감싼 쪽이 위임하지 않아 조용히 기본값이 된다
+        assertOverridesAll(RunGate.class, LiveJudgement.abortable(RunGate.NONE,
+                new java.util.concurrent.atomic.AtomicBoolean()).getClass());
+        com.autotrade.sim.run.MarketEventStream empty = new com.autotrade.sim.run.MarketEventStream() {
+            @Override
+            public String version() {
+                return "v";
+            }
+
+            @Override
+            public Market market() {
+                return Market.KRX;
+            }
+
+            @Override
+            public long eventCount() {
+                return 0;
+            }
+
+            @Override
+            public void forEach(java.util.function.Consumer<MarketEvent> sink) {
+            }
+        };
+        assertOverridesAll(com.autotrade.sim.run.MarketEventStream.class,
+                LiveJudgement.abortable(empty, new java.util.concurrent.atomic.AtomicBoolean()).getClass());
+    }
+
+    private static void assertOverridesAll(Class<?> api, Class<?> impl) {
+        for (java.lang.reflect.Method m : api.getMethods()) {
+            if (java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                continue;
+            }
+            assertThat(java.util.Arrays.stream(impl.getDeclaredMethods())
+                    .anyMatch(d -> d.getName().equals(m.getName())
+                            && java.util.Arrays.equals(d.getParameterTypes(), m.getParameterTypes())))
+                    .as(api.getSimpleName() + "." + m.getName() + "을 위임하지 않음").isTrue();
+        }
+    }
+
     private static void sleepUninterruptibly(long millis) {
         try {
             Thread.sleep(millis);

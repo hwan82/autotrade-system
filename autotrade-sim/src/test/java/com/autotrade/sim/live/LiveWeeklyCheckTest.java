@@ -457,24 +457,39 @@ class LiveWeeklyCheckTest {
 
     @Test
     void midpointTradeTicksAreCountedPerSymbolFromTheJournal() {
-        // PR #184 strategy-researcher R2: 반 칸 체결(D-118)의 종목별 틱 수·거래량 비중을 참고 값으로 남긴다
+        // PR #184 strategy-researcher R2: 반 칸 체결(D-118)의 종목별 틱 수·거래량 비중을 참고 값으로 남긴다.
+        // PR #185 architect N2: 비중은 정규장 접속 매매 체결로만 보고, 시가 단일가 체결(그날 첫 체결)·시간외는 따로 센다.
+        // PR #185 strategy-researcher R2: 합계 행
         List<MarketEvent> base = LiveSessionTest.twoDays().stream()
                 .filter(e -> e.receivedAt().atZone(SEOUL).toLocalDate().equals(DAY1)).toList();
         List<MarketEvent> events = new java.util.ArrayList<>();
         long samsungTicks = 0;
         long samsungVolume = 0;
         long midVolume = 0;
-        boolean replaced = false;
+        long allTicks = 0;
+        long allVolume = 0;
+        int samsungSeen = 0;
+        java.util.Set<Symbol> opened = new java.util.HashSet<>();
         for (MarketEvent e : base) {
-            if (e instanceof TradeTick t && t.symbol().equals(SAMSUNG)) {
-                samsungTicks++;
-                samsungVolume += t.quantity();
-                if (!replaced) {
-                    // 삼성전자 6만 원대 호가 단위 100원의 반 칸 위(…50원)
-                    e = new TradeTick(t.symbol(), t.sequence(), t.exchangeTime(), t.receivedAt(), t.price().add(new BigDecimal("50")),
-                            t.quantity());
-                    midVolume = t.quantity();
-                    replaced = true;
+            if (e instanceof TradeTick t) {
+                if (!opened.add(t.symbol())) {
+                    allTicks++;
+                    allVolume += t.quantity();
+                }
+                if (t.symbol().equals(SAMSUNG)) {
+                    samsungSeen++;
+                    if (samsungSeen == 1) {
+                        // 그날 첫 체결 = 시가 단일가 체결: 반 칸이어도 접속 매매 분모에 넣지 않는다
+                        e = withPrice(t, t.price().add(new BigDecimal("50")));
+                    } else {
+                        samsungTicks++;
+                        samsungVolume += t.quantity();
+                        if (samsungSeen == 2) {
+                            // 삼성전자 6만 원대 호가 단위 100원의 반 칸 위(…50원)
+                            e = withPrice(t, t.price().add(new BigDecimal("50")));
+                            midVolume = t.quantity();
+                        }
+                    }
                 }
             }
             events.add(e);
@@ -496,11 +511,65 @@ class LiveWeeklyCheckTest {
 
         assertThat(out.defect()).isFalse();
         LiveWeeklyCheck.MidpointCount c = out.days().get(0).midpoints().get(SAMSUNG);
-        assertThat(c).isEqualTo(new LiveWeeklyCheck.MidpointCount(samsungTicks, samsungVolume, 1, midVolume));
+        assertThat(c).isEqualTo(new LiveWeeklyCheck.MidpointCount(samsungTicks, samsungVolume, 1, midVolume, 1, 1));
         assertThat(out.days().get(0).midpoints().get(HYNIX).midpointTicks()).isZero();
+        assertThat(out.days().get(0).midpoints().get(HYNIX).otherTicks()).isEqualTo(1);
         assertThat(out.report()).contains("## 5. 중간가 체결(이번 주, 입력 기록, 참고)")
                 .contains("| 005930 | " + samsungTicks + " | 1 | " + LiveWeeklyCheck.share(1, samsungTicks) + " | "
-                        + samsungVolume + " | " + midVolume + " | " + LiveWeeklyCheck.share(midVolume, samsungVolume) + " |");
+                        + samsungVolume + " | " + midVolume + " | " + LiveWeeklyCheck.share(midVolume, samsungVolume)
+                        + " | 1 | 1 |")
+                .contains("| 합계 | " + allTicks + " | 1 | " + LiveWeeklyCheck.share(1, allTicks) + " | " + allVolume + " | "
+                        + midVolume + " | " + LiveWeeklyCheck.share(midVolume, allVolume) + " | 2 | 1 |")
+                // 시험 날짜(2026-10-14)는 BOOK-V6 첫날(2026-10-20) 이전이라 중간가 0이 증거가 아님을 적는다
+                .contains("D-118(BOOK-V6) 이전 코드가 쓴 구간이 있는 기록 날짜: " + DAY1);
+    }
+
+    @Test
+    void midpointTicksOutsideContinuousTradingAreCountedApart() {
+        // PR #185 architect N2: 장후 시간외(15:40 이후) 체결 틱은 접속 매매 분모에 넣지 않는다
+        LiveSetup setup = LiveSetup.of(plan, REPO);
+        Instant after = DAY1.atTime(16, 10).atZone(SEOUL).toInstant();
+        Instant open = DAY1.atTime(9, 0, 1).atZone(SEOUL).toInstant();
+        Instant mid = DAY1.atTime(10, 0).atZone(SEOUL).toInstant();
+        List<MarketEvent> events = List.of(
+                new TradeTick(SAMSUNG, 1, open, open.plusMillis(20), new BigDecimal("60000"), 10),
+                new TradeTick(SAMSUNG, 2, mid, mid.plusMillis(20), new BigDecimal("60050"), 7),
+                new TradeTick(SAMSUNG, 3, after, after.plusMillis(20), new BigDecimal("60050"), 3));
+        JournalWriter w = new JournalWriter(new RecordingLayout(recordings), Market.KRX, SEOUL, Map.of(SRC, "테스트 녹화"),
+                "테스트");
+        for (MarketEvent e : events) {
+            w.append(SRC, e, e.receivedAt());
+        }
+        w.close(events.get(events.size() - 1).receivedAt());
+        Path jDir = new RecordingLayout(recordings).dayDir(Market.KRX, DAY1);
+        LiveWeeklyCheck.DayRow row = LiveWeeklyCheck.compareDay(setup, new RecordingCodec(), DAY1, jDir, null,
+                new LiveWeeklyCheck.BoardsRecording(setup));
+        assertThat(row.midpoints().get(SAMSUNG)).isEqualTo(new LiveWeeklyCheck.MidpointCount(1, 7, 1, 7, 2, 1));
+    }
+
+    @Test
+    void openingPrintsFollowTheVirtualExchangeRuleIncludingMidSessionStart() {
+        // PR #190 architect N1·strategy-researcher R1: 시가 단일가 체결 가려내기를 가상 거래소(60초 유예)와 맞춘다
+        var rules = LiveSetup.of(plan, REPO).rules();
+        LiveWeeklyCheck.OpeningPrints p = new LiveWeeklyCheck.OpeningPrints(rules);
+        java.util.function.Function<String, Instant> at = hm -> DAY1.atTime(java.time.LocalTime.parse(hm)).atZone(SEOUL)
+                .toInstant();
+        java.util.function.BiFunction<Long, String, TradeTick> trade = (seq, hm) -> new TradeTick(SAMSUNG, seq, at.apply(hm),
+                at.apply(hm).plusMillis(20), new BigDecimal("60000"), 1);
+        // 장전 시간외 체결(08:35, 접수 구간 체결 이벤트)은 세지 않고, 개장 직후 첫 체결이 시가 단일가 체결
+        assertThat(p.isOpeningPrint(trade.apply(1L, "08:35:00"))).isFalse();
+        assertThat(p.isOpeningPrint(trade.apply(2L, "09:00:20"))).isTrue();
+        assertThat(p.isOpeningPrint(trade.apply(3L, "09:00:25"))).isFalse();
+        // 하이닉스: 개장 뒤 한참 지나 첫 이벤트(장중 시작)면 시가 단일가 체결은 지났다
+        LiveWeeklyCheck.OpeningPrints q = new LiveWeeklyCheck.OpeningPrints(rules);
+        assertThat(q.isOpeningPrint(new TradeTick(HYNIX, 4, at.apply("10:00:00"), at.apply("10:00:00"),
+                new BigDecimal("180000"), 1))).isFalse();
+        assertThat(q.isOpeningPrint(new TradeTick(HYNIX, 5, at.apply("10:00:05"), at.apply("10:00:05"),
+                new BigDecimal("180000"), 1))).isFalse();
+    }
+
+    private static TradeTick withPrice(TradeTick t, BigDecimal price) {
+        return new TradeTick(t.symbol(), t.sequence(), t.exchangeTime(), t.receivedAt(), price, t.quantity());
     }
 
     @Test
