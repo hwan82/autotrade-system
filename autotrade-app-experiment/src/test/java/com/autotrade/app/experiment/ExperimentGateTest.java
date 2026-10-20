@@ -237,6 +237,30 @@ class ExperimentGateTest {
     }
 
     @Test
+    void 선정_준비도_정지_요청과_장_시간에는_시작하지_않고_날짜가_없으면_입력_오류다(@TempDir Path root) throws IOException {
+        // D-124: 준비 명령도 실험 명령과 같은 관문을 지난다(장 시간 보호·정지 요청 파일, D-063)
+        Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261015-LIVE01"));
+        Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261015-LIVE01\n");
+        String[] tail = {root.toString(), "abc", "false", "EXP-20261015-LIVE01", "--date", "2026-10-16",
+                "--sessions-dir", root.resolve("sessions").toString(), "--snapshots-dir", root.resolve("snap").toString()};
+        Clock weekend = Clock.fixed(Instant.parse(WEEKEND), ZoneOffset.UTC);
+
+        assertThat(ExperimentMain.run(concat("live-prepare", null, tail), Clock.fixed(Instant.parse(KRX_SESSION),
+                ZoneOffset.UTC), config)).isEqualTo(4);
+        String r = root.toString();
+        assertThat(ExperimentMain.run(new String[] {"live-prepare", r, "abc", "false", "EXP-20261015-LIVE01"}, weekend,
+                config)).isEqualTo(1);
+        assertThat(ExperimentMain.run(new String[] {"live-prepare", r, "abc", "false", "EXP-20261015-LIVE01", "--date",
+                "2026-13-01"}, weekend, config)).isEqualTo(1);
+        // 등록 파일이 실시간 모의 입력이 아니면 해석 단계의 입력 오류
+        assertThat(ExperimentMain.run(concat("live-prepare", null, tail), weekend, config)).isEqualTo(1);
+        stopRequest();
+        assertThat(ExperimentMain.run(concat("live-prepare", "--allow-during-session", tail), weekend, config))
+                .isEqualTo(4);
+        assertThat(root.resolve("sessions")).doesNotExist();
+    }
+
+    @Test
     void 녹화_판정_인자가_틀리면_입력_오류다(@TempDir Path root) throws IOException {
         Path dir = Files.createDirectories(root.resolve("experiments").resolve("EXP-20261015-LIVE01"));
         Files.writeString(dir.resolve("experiment.yaml"), "id: EXP-20261015-LIVE01\n");

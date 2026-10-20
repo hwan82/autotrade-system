@@ -10,7 +10,7 @@ const POLL_MS = 5000;
 
 const COMMAND = {
   combination: '조합 실험', recording: '녹화 실험', study: '합성 시세 비교', walkforward: '워크포워드',
-  'live-check': '실시간 모의 점검', 'live-weekly': '주간 점검', 'live-judge': '녹화 판정',
+  'live-check': '실시간 모의 점검', 'live-weekly': '주간 점검', 'live-judge': '녹화 판정', 'live-prepare': '선정 준비',
   watchlist: '감시 종목 후보',
 };
 

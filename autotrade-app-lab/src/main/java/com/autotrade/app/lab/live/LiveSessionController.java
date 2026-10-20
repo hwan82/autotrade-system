@@ -103,6 +103,17 @@ public class LiveSessionController {
         }
     }
 
+    /** 선정 조합 계좌(D-124)의 다음 거래일 선정 준비를 지금 한 번 한다(준비 스레드에서, 결과는 상태의 prepare). */
+    @PostMapping("/selections/prepare")
+    public LiveLabService.View prepareSelections() {
+        try {
+            service.prepareNow();
+        } catch (IllegalStateException e) {
+            throw ApiException.conflict(e.getMessage());
+        }
+        return service.status();
+    }
+
     @PostMapping("/stop")
     public LiveLabService.View stop() {
         service.stop("화면에서 멈춤");

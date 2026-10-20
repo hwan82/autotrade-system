@@ -6,6 +6,7 @@ import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.sim.combo.CombinationMain;
 import com.autotrade.sim.live.LiveCheckMain;
 import com.autotrade.sim.live.LiveJudgeMain;
+import com.autotrade.sim.live.LivePrepareMain;
 import com.autotrade.sim.live.LiveWeeklyMain;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.recording.RecordingMain;
@@ -29,7 +30,7 @@ import java.util.function.ToIntFunction;
  * (broker-and-fault-design 5.2)에 들어간다: 감시가 정지 요청 파일을 만들면 시작하지 않고, 실행 중이면 Run 시작 전·거래일마다
  * 확인해 스스로 멈춘다. 장 시간 보호 구간에도 멈춘다({@link ExperimentGate}).
  *
- * <p>인자: {@code <combination|recording|study|walkforward|live-check|live-weekly|live-judge|watchlist>
+ * <p>인자: {@code <combination|recording|study|walkforward|live-check|live-weekly|live-judge|live-prepare|watchlist>
  * [--allow-during-session[=true]]
  * [--max-parallel-runs=N] <나머지는 CombinationMain·
  * RecordingMain·StudyMain·WalkForwardMain·LiveCheckMain·LiveWeeklyMain·LiveJudgeMain 인자>}.
@@ -74,9 +75,9 @@ public final class ExperimentMain {
         // 상대 경로나 ..가 섞여도 상태 파일 메시지에서 설정 폴더 경로를 가릴 수 있게 한 번 정규화한다(PR #113 architect R5·risk-ops R3)
         Path configDir = givenConfigDir.toAbsolutePath().normalize();
         if (args.length == 0 || !List.of("combination", "recording", "study", "walkforward", "live-check", "live-weekly",
-                "live-judge", "watchlist")
+                "live-judge", "live-prepare", "watchlist")
                 .contains(args[0])) {
-            System.err.println("인자: <combination|recording|study|walkforward|live-check|live-weekly|live-judge|watchlist>"
+            System.err.println("인자: <combination|recording|study|walkforward|live-check|live-weekly|live-judge|live-prepare|watchlist>"
                     + " [--allow-during-session] ...");
             return 1;
         }
@@ -174,6 +175,7 @@ public final class ExperimentMain {
             case "live-check" -> LiveCheckMain.run(forwarded, configDir, gate);
             case "live-weekly" -> LiveWeeklyMain.run(forwarded, configDir, gate);
             case "live-judge" -> LiveJudgeMain.run(forwarded, configDir, gate);
+            case "live-prepare" -> LivePrepareMain.run(forwarded, configDir, gate);
             case "watchlist" -> WatchlistCandidatesMain.run(forwarded, configDir, gate);
             default -> StudyMain.run(forwarded, gate);
         };

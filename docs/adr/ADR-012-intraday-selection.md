@@ -75,6 +75,8 @@
 
 **등록 파일**: `input: live`(`LivePlan`)와 녹화 실험(`RecordingPlan`)에 선택 키 `selections`를 더한다.
 
+> 구현([D-124](../decisions/D-124-selection-accounts-live-recording.md)): 아래 겹친 목록 대신 조합 실험과 같은 한 줄 `selections: ["kr-intraday-hot@1 x kr-volume-surge@1"]`을 쓴다. `disclosures`는 배치표 3번 전이라 거절하고 `financials`를 받는다. 준비 작업은 "세션을 열 때 한 번"을 빼고 장 시간 밖 5분 주기와 손 요청만 한다(장중에 연 세션이 이벤트와 같은 때 전체 일봉을 읽지 않게). 정지 요청·세션 멈춤을 관문으로 묻고, 힙이 모자라면 실험실 밖 `runLiveSelectionPrepare`로 준비한다. 적용 기록을 못 쓰면 세션을 멈춘다.
+
 ```yaml
 profiles: ["kr-volume-surge@1"]          # 기존: 선정 없는 계좌(boards 전체)
 selections:                              # 새: 선정 × 전략 조합 계좌
@@ -106,6 +108,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 - 재기동·리플레이 확인(`runLiveReplayCheck`)은 다시 계산하지 않고 고정 파일을 읽는다. 그날 "최신 스냅샷"이 재기동 사이에 바뀌어도 계좌가 본 선정은 같다. 적용 기록이 가리키는 결과 파일이 없거나 해시가 맞지 않으면 리플레이 확인 실패(종료 코드 1). `SELECTION_MISSING` 날은 리플레이도 그 조합 신규 진입 0건이어야 한다.
 - 리플레이 확인은 고정 파일의 입력 스냅샷이 PC에 남아 있으면 다시 계산해 내용 해시가 같은지도 본다(없으면 "재계산 생략"으로 적음). 계산 코드가 바뀌어 결과가 달라진 경우를 잡는다.
 - 6단계 판정 규칙 I3(실시간 결과 = 입력 기록 리플레이)이 선정 조합 계좌에도 그대로 선다.
+- 구현(D-124): 재계산 결과는 `inputs.yaml`의 `selection-recompute:` 줄에 남고, 다름이 있으면 실시간 경로 결함과 따로 종료 코드 2다. 녹화 실험 고정 파일은 만든 시각을 남기지 않아 다시 돌리면 바이트로 같다. 녹화 판정(`runLiveJudgement`)은 선정 계좌를 아직 받지 않는다(LIVE02 판정 전 후속).
 
 ### 3.7 데이터 도착 시각(가장 큰 위험)
 
@@ -170,7 +173,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 | 2b | 선정 엣지 일봉 사전 검사(3.3): T 시가 진입·T 종가 청산, 비용 차감, 무작위 선정 대조군, 워크포워드 3구간 이상. 통과한 선정만 5번으로 | strategy-researcher | 아님 | 2(공시 조건은 3) |
 | 3 | 공시 스냅샷 수집(`dartDisclosures`, 유형으로 좁혀 재무 수집 뒤, 하루 상한 공유)·`disclosure-count`·`gate.types`, 프로필 (라) | data-engineer → strategy-researcher | 아님 | 2 |
 | 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로) | architect·sim-engine | 아님 | 1 또는 7 |
-| 4 | 녹화 실험·실시간 모의 `selections`·`selection-input`, 그날 후보 ∩ `boards`, `NOT_SUBSCRIBED`·`BLACKLISTED`·`SELECTION_MISSING`, 고정 파일, 리플레이 확인 | sim-engine(+ ui-dev 화면 표시) | 아님 | 2, (1의 결과) |
+| 4 | 녹화 실험·실시간 모의 `selections`·`selection-input`, 그날 후보 ∩ `boards`, `NOT_SUBSCRIBED`·`BLACKLISTED`·`SELECTION_MISSING`, 고정 파일, 리플레이 확인. **D-124로 구현** | sim-engine(+ ui-dev 화면 표시) | 아님 | 2, (1의 결과) |
 | 5 | 0번 녹화(넓힌 watchlist)로 녹화 실험(스냅샷 ID 고정)을 돌려 2b를 통과한 선정 × 단타 전략 조합 시험 → 새 실시간 실험 `EXP-<등록일>-LIVE02` 사전 등록(조합 수 m ≤ 4, 대조군 시드 N+1 ≥ 20m, D-114 L5 왕복 30건을 8주에 채울 수 있는지 먼저 계산). 2026-10-12~ 기존 녹화(대형주 3~10종목)는 시장 전체 선정과 거의 겹치지 않아 기능 확인용으로만 쓴다 | strategy-researcher | 아님 | 0, 2b, 4 |
 | 6 | 뉴스 스냅샷(4.2), `news-count`·`news-surge` | data-engineer | 아님 | Q-055 |
 | 7 | 장중 순위 2차-a(5.2) | sim-engine·strategy-researcher | 아님 | 4 |

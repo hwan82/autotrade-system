@@ -2,6 +2,8 @@
 // 모의 계좌만 다룬다. 실전 주문 경로와 무관하고 증권사를 직접 부르지 않는다(시세는 게이트웨이 전달 소켓으로만 받음).
 // 실시간 갱신은 3초 폴링이다(SSE는 UI-01 이연 항목, D-079). 화면을 떠나면 폴링을 멈춘다.
 // 계좌 ID를 누르면 그 계좌의 체결 내역과 거절 사유를 본다(#/live/runs/<계좌>, D-120). 표 모양은 실험 계좌 상세와 같다.
+// 선정 조합 계좌(D-124)는 계좌 순서 뒤쪽에 "선정@버전 x 전략@버전"으로 보이고, 그날 적용한 선정(후보 수, 뺀 종목 NOT_SUBSCRIBED·
+// BLACKLISTED, SELECTION_MISSING 사유)과 다음 거래일 선정 준비 결과를 따로 보인다. 계산은 서버 준비 스레드가 하고 화면은 읽기만 한다.
 import { h, toast, table } from '../dom.js';
 import { get, post } from '../api.js';
 import { money, number, time } from '../format.js';
@@ -172,6 +174,7 @@ function sessionView(view, gaps, act) {
     h('h2', {}, '계좌'),
     h('p', { class: 'muted small' }, '계좌 ID를 누르면 그 계좌의 체결 내역과 거절 사유를 봅니다.'),
     accountsTable(view, s),
+    selectionsSection(view, s, act),
     h('h2', {}, '최근 공백'),
     gapsSection(gaps, market),
     h('h2', {}, '세션 정보'),
@@ -182,6 +185,51 @@ function sessionView(view, gaps, act) {
       fact('boards 밖 종목으로 뺀 이벤트', number(s.skippedSymbol)),
       fact('기간 밖으로 뺀 이벤트', number(s.skippedRange)),
       fact('계좌 순서', view.profiles.join(', '))));
+}
+
+/** 선정 상태 문구(D-124). 서버 사유 이름은 그대로 보인다. */
+const EXCLUSION = { NOT_SUBSCRIBED: 'boards 밖', BLACKLISTED: '블랙리스트' };
+
+function selectionsSection(view, s, act) {
+  const applied = s.selections;
+  const prep = view.prepare;
+  const hasSelections = view.profiles.some(p => p.includes(' x '));
+  if (!hasSelections) return null;
+  const prepareBtn = h('button', {
+    class: 'btn secondary', type: 'button',
+    title: '장 밖 시간이 아니어도 다음 거래일 선정 결과를 지금 한 번 만듭니다(실험실 준비 스레드, 낮은 우선순위)',
+    onclick: () => act('선정 준비', async () => {
+      await post('/api/live/selections/prepare');
+      return '선정 준비를 요청했습니다. 끝나면 아래 "다음 거래일 준비"가 바뀝니다.';
+    }),
+  }, '지금 준비');
+  const todayRows = applied ? applied.items : [];
+  const today = applied
+    ? table([
+      { label: '선정', render: it => it.selection },
+      { label: '상태', render: it => it.reason
+        ? h('span', { class: 'warn-text', title: it.detail || null }, `SELECTION_MISSING · ${it.reason}`) : 'APPLIED' },
+      { label: '후보', render: it => it.candidates ? `${number(it.candidates.candidates.length)}종목 (boards 안 ${number(it.candidates.onBoards)}/${number(it.candidates.selectedCount)})` : '–' },
+      { label: '뺀 종목', render: it => it.candidates && it.candidates.excluded.length
+        ? it.candidates.excluded.map(x => `${x.code} ${x.reason}(${EXCLUSION[x.reason] || x.reason})`).join(', ') : '–' },
+    ], todayRows)
+    : h('p', { class: 'muted small' }, '아직 이번 세션에서 적용한 거래일이 없습니다(그날 첫 이벤트를 받을 때 적용합니다).');
+  const prepView = prep
+    ? h('div', {},
+      h('p', { class: 'small' }, `${prep.date}: ${prep.note}${prep.dailySnapshot ? ` · 일봉 ${prep.dailySnapshot}` : ''}${prep.financialsSnapshot ? ` · 재무 ${prep.financialsSnapshot}` : ''}`),
+      table([
+        { label: '선정', render: o => o.selection },
+        { label: '준비', render: o => o.status === 'PROBLEM'
+          ? h('span', { class: 'warn-text', title: o.detail || null }, `${o.reason}${o.detail ? ` · ${o.detail}` : ''}`) : o.status },
+      ], prep.outcomes))
+    : h('p', { class: 'muted small' }, '아직 준비하지 않았습니다. 장 밖 시간(16:00 ~ 다음 날 08:30)에 5분마다 준비하고, "지금 준비"로 바로 할 수 있습니다.');
+  return h('div', {},
+    h('h2', {}, '선정 조합'),
+    h('p', { class: 'muted small' }, '선정 계좌는 그날 후보이면서 boards에 있는 종목만 새로 삽니다. 결과가 없는 날(SELECTION_MISSING)은 새로 사지 않고 청산만 합니다.'),
+    h('h3', {}, `적용한 선정${applied ? ` · ${applied.date}` : ''}`),
+    today,
+    h('div', { class: 'row-actions' }, h('h3', {}, '다음 거래일 준비'), prepareBtn),
+    prepView);
 }
 
 function statusBadge(view) {
