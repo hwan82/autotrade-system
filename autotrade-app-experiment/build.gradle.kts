@@ -70,7 +70,7 @@ val runCombinationExperiment by tasks.registering(JavaExec::class) {
 }
 
 // 녹화 실험(D-069): ./gradlew :autotrade-app-experiment:runRecordingExperiment -Pexperiment=<실험ID>
-//     [-PrecordingsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-Pheap=3g]
+//     [-PrecordingsDir=폴더] [-PsnapshotsDir=폴더] [-PverifyDeterminism] [-PallowDuringSession] [-Pheap=3g]
 // experiments/<실험ID>/experiment.yaml(input: recording)을 읽어 녹화 폴더(기본 <설정 폴더>/recordings)의 실녹화 위에서 장중
 // 프로필을 돌리고 결과를 같은 폴더에 쓴다. 녹화 파일은 결과 폴더에 쓰지 않는다(재배포 금지).
 val runRecordingExperiment by tasks.registering(JavaExec::class) {
@@ -82,6 +82,7 @@ val runRecordingExperiment by tasks.registering(JavaExec::class) {
     jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
     val experiment = providers.gradleProperty("experiment")
     val recordingsDir = providers.gradleProperty("recordingsDir")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
     val verify = providers.gradleProperty("verifyDeterminism")
     argumentProviders.add(CommandLineArgumentProvider {
         val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
@@ -91,6 +92,7 @@ val runRecordingExperiment by tasks.registering(JavaExec::class) {
             maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             recordingsDir.orNull?.let { addAll(listOf("--recordings-dir", it)) }
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
             if (verify.isPresent) add("--verify-determinism")
         }
     })
@@ -143,7 +145,8 @@ val runWalkForwardStudy by tasks.registering(JavaExec::class) {
 }
 
 // 실시간 모의 리플레이 확인(D-076, ADR-010 2.5): ./gradlew :autotrade-app-experiment:runLiveReplayCheck -Pexperiment=<실험ID>
-//     [-PsessionsDir=폴더] [-PallowDuringSession] [-Pheap=4g]
+//     [-PsessionsDir=폴더] [-PsnapshotsDir=폴더] [-PallowDuringSession] [-Pheap=4g]
+// 선정 조합 계좌(D-124)가 있으면 세션의 고정 선정 파일로 돌리고, 입력 스냅샷이 남아 있으면 다시 계산해 내용 해시도 본다.
 // 실험실에서 끝낸 실시간 모의 세션의 입력 기록(<설정 폴더>/live-sessions/<실험ID>/journal)을 리플레이 실행기로 다시 돌려, 세션이 남긴
 // experiments/<실험ID>/live-detail.txt와 바이트로 같은지 보고 inputs.yaml·results.md·detail.txt를 쓴다. 다르면 종료 코드 2(실시간 경로 결함).
 val runLiveReplayCheck by tasks.registering(JavaExec::class) {
@@ -155,6 +158,7 @@ val runLiveReplayCheck by tasks.registering(JavaExec::class) {
     jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
     val experiment = providers.gradleProperty("experiment")
     val sessionsDir = providers.gradleProperty("sessionsDir")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
     argumentProviders.add(CommandLineArgumentProvider {
         val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
         buildList {
@@ -163,6 +167,7 @@ val runLiveReplayCheck by tasks.registering(JavaExec::class) {
             maxParallelRuns.orNull?.let { add("--max-parallel-runs=$it") }
             addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
             sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
         }
     })
 }
@@ -194,6 +199,35 @@ val runLiveWeeklyCheck by tasks.registering(JavaExec::class) {
             to.orNull?.let { addAll(listOf("--to", it)) }
             sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }
             recordingsDir.orNull?.let { addAll(listOf("--recordings-dir", it)) }
+            snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
+        }
+    })
+}
+
+// 실시간 모의 선정 준비(D-124, ADR-012 3.5): ./gradlew :autotrade-app-experiment:runLiveSelectionPrepare -Pexperiment=<실험ID>
+//     -Pdate=YYYY-MM-DD [-PsessionsDir=폴더] [-PsnapshotsDir=폴더] [-PallowDuringSession] [-Pheap=8g]
+// 등록 파일에 selections가 있는 실시간 모의 세션의 거래일 T 선정 결과 고정 파일을 <설정 폴더>/live-sessions/<실험ID>/selections/T/에
+// 놓는다. 실험실 힙으로 전체 일봉 스냅샷을 읽기 어려울 때 전날 저녁 수집 뒤 돌린다. 못 만든 선정이 있으면 종료 코드 2.
+val runLiveSelectionPrepare by tasks.registering(JavaExec::class) {
+    group = "application"
+    description = "실시간 모의 세션의 거래일 T 선정 결과 고정 파일을 만든다(장 시간 보호·정지 요청 확인)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.experiment.ExperimentMain")
+    maxHeapSize = (findProperty("heap") as String?) ?: "8g"
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    val experiment = providers.gradleProperty("experiment")
+    val date = providers.gradleProperty("date")
+    val sessionsDir = providers.gradleProperty("sessionsDir")
+    val snapshotsDir = providers.gradleProperty("snapshotsDir")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val id = experiment.orNull ?: throw GradleException("-Pexperiment=<실험ID>가 필요합니다")
+        val day = date.orNull ?: throw GradleException("-Pdate=YYYY-MM-DD가 필요합니다(준비할 거래일 T)")
+        buildList {
+            add("live-prepare")
+            allowDuringSession.orNull?.let { add("--allow-during-session=$it") }
+            addAll(listOf(repoRoot.absolutePath, gitCommit.get(), gitDirty.get(), id))
+            addAll(listOf("--date", day))
+            sessionsDir.orNull?.let { addAll(listOf("--sessions-dir", it)) }
             snapshotsDir.orNull?.let { addAll(listOf("--snapshots-dir", it)) }
         }
     })

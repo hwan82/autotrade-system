@@ -9,8 +9,11 @@ import com.autotrade.domain.market.TradeTick;
 import com.autotrade.marketdata.ConnectionState;
 import com.autotrade.marketdata.feed.FeedServer;
 import com.autotrade.marketdata.feed.FeedSocket;
+import com.autotrade.selection.result.SelectionInvalidReason;
+import com.autotrade.sim.live.LiveSelectionPrep;
 import com.autotrade.sim.live.LiveSession;
 import com.autotrade.sim.run.CodeVersion;
+import com.autotrade.sim.selection.SelectionPreparer;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -276,6 +280,69 @@ class LiveLabServiceTest {
         assertThat(service.status().profiles()).containsExactly("kr-bh-baseline@1");
         service.stop("시험");
         assertThat(service.registrations().get(0).hasJournal()).isTrue();
+    }
+
+    @Test
+    void selectionAccountsAreListedAfterProfilesAndPreparedOffTheEventThread() throws Exception {
+        // D-124: 선정 조합 계좌는 profiles 뒤에 "선정 x 전략"으로 보이고, 준비는 별도 스레드가 한다. 스냅샷이 없으면 사유만 남긴다
+        String id = "EXP-TEST-LIVESEL";
+        Path dir = Files.createDirectories(experiments.resolve(id));
+        Files.writeString(dir.resolve("experiment.yaml"), String.join("\n",
+                "id: \"" + id + "\"",
+                "question: \"q\"",
+                "input: \"live\"",
+                "market: \"KRX\"",
+                "from: \"2026-10-14\"",
+                "to: \"2026-10-15\"",
+                "seed: \"1\"",
+                "seed-capital: \"10000000\"",
+                "profiles:",
+                "  - \"kr-orb-30@1\"",
+                "boards:",
+                "  - \"005930 KOSPI\"",
+                "selections:",
+                "  - \"kr-intraday-hot@1 x kr-random-control@1\"",
+                "selection-input:",
+                "  daily: \"latest\"",
+                ""), StandardCharsets.UTF_8);
+        assertThat(service.registrations()).filteredOn(r -> r.id().equals(id)).singleElement()
+                .satisfies(r -> assertThat(r.profiles()).containsExactly("kr-orb-30@1",
+                        "kr-intraday-hot@1 x kr-random-control@1"));
+        service.close();
+        // 화요일 17:00(현지): 장 밖 창이라 다음 거래일 2026-10-14를 준비한다
+        service = new LiveLabService(experiments, REPO, config.resolve("live-sessions"), FeedSocket.path(config),
+                stopRequest, new CodeVersion("abc", false), Clock.fixed(Instant.parse("2026-10-13T08:00:00Z"),
+                        ZoneOffset.UTC), dir2 -> Long.MAX_VALUE, 20);
+        service.start(id);
+        await(() -> service.status().prepare().isPresent());
+        LiveLabService.View view = service.status();
+        assertThat(view.profiles()).containsExactly("kr-orb-30@1", "kr-intraday-hot@1 x kr-random-control@1");
+        LiveSelectionPrep.Report prep = view.prepare().orElseThrow();
+        assertThat(prep.date()).isEqualTo(java.time.LocalDate.of(2026, 10, 14));
+        assertThat(prep.ready()).isFalse();
+        assertThat(prep.outcomes()).singleElement().satisfies(o -> {
+            assertThat(o.status()).isEqualTo(SelectionPreparer.Status.PROBLEM);
+            assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+        });
+        service.prepareNow(); // 다시 요청해도 이벤트 처리와 별도 스레드에서 한다
+        service.stop("시험");
+        assertThatThrownBy(service::prepareNow).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void prepareNowNeedsSelectionAccounts() throws Exception {
+        service.start(ID);
+        await(() -> service.status().session().isPresent());
+        assertThatThrownBy(service::prepareNow).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("selections");
+        assertThat(service.status().prepare()).isEmpty();
+    }
+
+    @Test
+    void heapCheckKeepsHalfTheHeapForTheSession() {
+        long fourGb = 4L << 30;
+        assertThat(LiveSelectionPrep.heapFits(1_000_000, fourGb)).isTrue();
+        assertThat(LiveSelectionPrep.heapFits(3_000_000, fourGb)).isFalse();
     }
 
     @Test

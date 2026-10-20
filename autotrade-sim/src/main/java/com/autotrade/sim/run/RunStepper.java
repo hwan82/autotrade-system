@@ -29,6 +29,7 @@ import com.autotrade.sim.metrics.EquityPoint;
 import com.autotrade.sim.metrics.MetricsCalculator;
 import com.autotrade.sim.metrics.RunMetrics;
 import com.autotrade.sim.selection.SelectionDay;
+import com.autotrade.sim.selection.SelectionDays;
 import com.autotrade.sim.selection.SelectionSchedule;
 import com.autotrade.strategy.Strategy;
 import com.autotrade.strategy.StrategyContext;
@@ -63,7 +64,7 @@ public final class RunStepper {
     private final StrategyFactory strategies;
     private final RiskChain risk;
     private final boolean exchangeTimed;
-    private final SelectionSchedule schedule;
+    private final SelectionDays schedule;
     private final Combination combination;
     private final String runId;
     private final AccountId accountId;
@@ -81,10 +82,11 @@ public final class RunStepper {
     /**
      * @param index 조합 위치(0부터). 계좌 번호({@code <실험ID>-A01}부터)와 Run 시드가 여기서 정해진다
      * @param exchangeTimed 데이터 이벤트 시각이 실제 거래소 시각인지({@link MarketDataSet#exchangeTimed()})
-     * @param schedule 선정 있는 조합의 날짜별 선정 표. 선정 없으면 {@link SelectionSchedule#empty()}
+     * @param schedule 선정 있는 조합의 날짜별 선정 판정. 리플레이는 미리 만든 {@link SelectionSchedule}, 실시간 모의는 날짜 전환
+     *     때 채우는 표(D-124). 선정 없으면 {@link SelectionSchedule#empty()}
      */
     public RunStepper(ExperimentSpec spec, int index, MarketRules rules, CostModel cost, ExecutionSettings execution,
-            StrategyFactory strategies, RiskChain risk, boolean exchangeTimed, SelectionSchedule schedule) {
+            StrategyFactory strategies, RiskChain risk, boolean exchangeTimed, SelectionDays schedule) {
         this.spec = Objects.requireNonNull(spec, "spec");
         this.rules = Objects.requireNonNull(rules, "rules");
         this.cost = Objects.requireNonNull(cost, "cost");

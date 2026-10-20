@@ -13,8 +13,9 @@ import java.util.regex.Pattern;
  * ({@code ./gradlew :autotrade-app-experiment:runRecordingExperiment -Pexperiment=<실험ID>}). 그쪽이 장 시간 보호와 감시의 정지
  * 요청 파일을 {@link RunGate}로 넣는다(D-063). 이 클래스에는 {@code main}이 없어 정지 확인 없이 돌릴 길이 없다.
  *
- * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--recordings-dir 폴더] [--verify-determinism]}.
- * 녹화 폴더 기본값은 설정 폴더 아래 {@code recordings}(게이트웨이가 녹화하는 곳, ADR-003 2.3). 설정 폴더는 시스템 속성
+ * <p>인자: {@code <저장소 루트> <커밋> <dirty true|false> <실험ID> [--recordings-dir 폴더] [--snapshots-dir 폴더] [--verify-determinism]}.
+ * 녹화 폴더 기본값은 설정 폴더 아래 {@code recordings}(게이트웨이가 녹화하는 곳, ADR-003 2.3), 스냅샷 폴더(선정 조합 계좌가 있을 때만
+ * 읽음, D-124) 기본값은 설정 폴더 아래 {@code snapshots}. 설정 폴더는 시스템 속성
  * {@code autotrade.config-dir} → 환경 변수 {@code AUTOTRADE_CONFIG_DIR} → {@code ~/.autotrade} 순서로 정한다.
  * 종료 코드: 0 완료, 1 입력 오류, 2 Run 실패나 결정론 불일치, 3 취소 요청으로 멈춤(D-089), 4 정지 확인으로 멈춤(결과 파일을 쓰지 않음, D-063).
  */
@@ -29,7 +30,8 @@ public final class RecordingMain {
     /** @param gate 정지 확인(D-063). 등록 파일을 읽기 전과 실험 중에 묻는다 */
     public static int run(String[] args, RunGate gate) {
         if (args.length < 4) {
-            System.err.println("인자: <저장소 루트> <커밋> <dirty true|false> <실험ID> [--recordings-dir 폴더] [--verify-determinism]");
+            System.err.println("인자: <저장소 루트> <커밋> <dirty true|false> <실험ID> [--recordings-dir 폴더] [--snapshots-dir 폴더] "
+                    + "[--verify-determinism]");
             return 1;
         }
         Path root = Path.of(args[0]);
@@ -40,6 +42,7 @@ public final class RecordingMain {
             return 1;
         }
         Path recordings = null;
+        Path snapshots = null;
         boolean verify = false;
         for (int i = 4; i < args.length; i++) {
             switch (args[i]) {
@@ -49,6 +52,13 @@ public final class RecordingMain {
                         return 1;
                     }
                     recordings = Path.of(args[++i]);
+                }
+                case "--snapshots-dir" -> {
+                    if (i + 1 >= args.length) {
+                        System.err.println("--snapshots-dir 뒤에 폴더가 필요합니다");
+                        return 1;
+                    }
+                    snapshots = Path.of(args[++i]);
                 }
                 case "--verify-determinism" -> verify = true;
                 default -> {
@@ -60,6 +70,9 @@ public final class RecordingMain {
         if (recordings == null) {
             recordings = configDir().resolve("recordings");
         }
+        if (snapshots == null) {
+            snapshots = configDir().resolve("snapshots");
+        }
         Path dir = root.resolve("experiments").resolve(id);
         if (!Files.isRegularFile(dir.resolve("experiment.yaml"))) {
             System.err.println("등록 파일이 없습니다: " + dir.resolve("experiment.yaml")
@@ -68,7 +81,7 @@ public final class RecordingMain {
         }
         try {
             gate.check();
-            RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, root, recordings, code, verify,
+            RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, root, recordings, snapshots, code, verify,
                     RecordingMain::log, gate);
             boolean failed = out.report().result().runs().stream().anyMatch(r -> !r.failureReason().isEmpty());
             boolean different = out.files().get("inputs.yaml").contains("determinism: \"다름\"");

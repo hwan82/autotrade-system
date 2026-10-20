@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * 형식({@code MALFORMED}) → 선정 해시({@code HASH_MISMATCH}) → 적용 시작({@code NOT_YET}) → 적용 종료({@code EXPIRED}).
  * 생산 상태 파일·입력 기준일 판정은 결과 파일을 읽는 쪽(실시간 모의·실전 엔진의 {@code SelectionValidity})이 한다.
  */
-public final class SelectionSchedule {
+public final class SelectionSchedule implements SelectionDays {
 
     private static final Pattern HEX64 = Pattern.compile("[0-9a-f]{64}");
 
@@ -74,6 +74,7 @@ public final class SelectionSchedule {
     }
 
     /** 그 선정의 그 거래일 판정. 표에 없는 날은 {@code MISSING}. */
+    @Override
     public SelectionDay day(String selectionHash, LocalDate date) {
         NavigableMap<LocalDate, SelectionDay> m = days.get(selectionHash);
         SelectionDay d = m == null ? null : m.get(date);

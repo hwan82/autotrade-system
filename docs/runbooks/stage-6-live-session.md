@@ -45,6 +45,18 @@
 4. 상태에서 `restoring`이 `false`가 된 뒤(입력 기록으로 계좌를 되살리는 중에는 `true`, 게이트웨이에 아직 붙지 않음) `feedState`가 `CONNECTED`, 장중에 `session.events`가 늘어나는지 본다. 시작이 실패하면 `stopReason`에 `시작 실패: …`가 남는다.
 5. 설정 폴더 디스크 여유가 20GB(`autotrade.lab.live.min-free-gb`)보다 적으면 시작하지 않고, 운용 중이면 멈춘다(`stopReason`). 이 값은 1GB 이상이어야 하고, 0이나 음수면 실험실이 뜨지 않는다(0이면 하한이 꺼져 실전 엔진 기록과 같은 디스크를 채울 수 있음, risk-ops PR #87 P1, QA R2).
 
+6. **선정 조합 계좌가 있는 등록(`selections`, D-124)만**: 순서는 전날 저녁 KRX 일봉 수집([수집기 runbook](collector.md)) → 세션 열림 → 준비 완료 확인이다.
+   - 세션이 열려 있으면 실험실이 장 시간 밖(16:00~08:30)에 5분마다 다음 거래일 선정을 준비한다. 장 시작 전에 `GET /api/live/status`의 `prepare`가 그 거래일이고 `outcomes`가 모두 `WRITTEN`·`EXISTS`인지 본다(화면 `#/live` "선정 조합 계좌" 구역에도 보임). 장중에 세션을 열었으면 화면의 "지금 준비"(`POST /api/live/selections/prepare`)로 손으로 준비한다.
+   - `PROBLEM`·`STALE_INPUT`이면 저녁 수집이 그날 일봉을 덮지 않은 것이다(ADR-012 3.7). 그날 그 조합 계좌는 신규 진입 0건으로 돈다.
+   - `PRODUCER_FAILED`에 힙 안내가 나오면 실험실 밖에서 준비한다(장 시간 밖, 실험실은 켜 둔 채로 됨):
+
+     ```powershell
+     ./gradlew :autotrade-app-experiment:runLiveSelectionPrepare -Pexperiment=EXP-…-LIVE02 -Pdate=2026-10-27 -Pheap=8g
+     # 종료 코드 0 준비됨, 2 못 만든 선정 있음(출력에 사유), 4 장 시간 보호·정지 요청
+     ```
+
+   - 선정 결과와 적용 기록은 `live-sessions/<ID>/selections/<날짜>/`에 쌓인다. 리플레이 확인이 이 파일을 읽으니 지우지 않는다.
+
 ## 3. 운용 중
 
 - 실험실·게이트웨이를 껐다 켜도 된다. 실험실은 세션을 자동으로 다시 열지 않으니 2-3을 다시 한다. 입력 기록으로 계좌를 되살리고 끊긴 구간은 공백으로 남는다.
@@ -70,6 +82,8 @@
 2. `./gradlew :autotrade-app-experiment:runLiveReplayCheck -Pexperiment=EXP-20261015-LIVE01`
    - 종료 코드 0이면 실시간 결과와 입력 기록 리플레이가 같다(합격). `inputs.yaml`, `results.md`, `detail.txt`가 등록 파일 옆에 생긴다.
    - 2면 실시간 경로 결함이거나 실패한 계좌가 있다. `results.md`를 보고 알린다.
+   - 선정 조합 계좌가 있으면 적용 기록이 가리키는 결과 파일이 없거나 바뀌면 1이다. 입력 스냅샷이 남아 있으면 선정을 다시 계산해 `inputs.yaml`의 `selection-recompute:` 줄에 "같음·다름·재계산 생략"을 적고, 다름이 있으면 2다(계산 코드가 바뀐 경우, 실시간 경로 결함과 따로 출력). 스냅샷 폴더가 다르면 `-PsnapshotsDir=…`.
+   - 선정 조합 계좌가 있는 등록은 아직 3번 녹화 판정을 하지 않는다(D-124 후속).
    - 장 시간에는 시작하지 않는다(D-063). 꼭 필요하면 `-PallowDuringSession`.
 3. 리플레이 확인이 0으로 끝나면 녹화 판정(D-116): `./gradlew :autotrade-app-experiment:runLiveJudgement -Pexperiment=EXP-20261015-LIVE01` → `experiments/<ID>/judgement.md`. 장중 승격 기준 L1~L11(D-114)을 계산한다. 종료 코드 0 판정함(후보 0개 포함), 1 입력 오류, 2 무사고 I1~I3 깨짐(파일은 씀), 3 취소, 4 장 시간 보호·정지 요청. LIVE01(10종목 40일)은 4코어에서 약 1.5~2시간 `[추론]`이다. 이 결과로 판정 리포트를 쓴다.
 4. 결과 세 파일, `live-detail.txt`, `judgement.md`는 커밋한다. 입력 기록(설정 폴더)은 커밋하지 않는다(녹화와 같은 재배포 금지).

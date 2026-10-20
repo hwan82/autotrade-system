@@ -20,6 +20,8 @@ experiments/**/raw/
 # 실험실 화면용 결과 묶음(D-062): 실행 명령이 다시 만든다
 experiments/**/result-bundle.jsonl.gz
 experiments/**/result-bundle.jsonl.gz.tmp
+# 녹화 실험 선정 고정 파일(D-124): 등록 파일의 스냅샷 ID로 다시 만들면 바이트로 같고, 시장 전체 평가라 크다
+experiments/*/selections/
 
 # IDE
 .idea/

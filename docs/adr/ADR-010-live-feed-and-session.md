@@ -44,11 +44,12 @@
 
 ### 2.4 실험실: 실시간 모의 세션
 
-- 등록 파일 `experiments/<실험ID>/experiment.yaml`, `input: "live"`(`LivePlan`). 키는 녹화 실험과 같고(`id, question, market, from, to, seed, seed-capital, benchmark, profiles, boards, blacklist`), `boards`가 받을 종목 목록이다. 지금은 KRX만, 선정 프로필 없음(녹화 실험과 같은 범위).
+- 등록 파일 `experiments/<실험ID>/experiment.yaml`, `input: "live"`(`LivePlan`). 키는 녹화 실험과 같고(`id, question, market, from, to, seed, seed-capital, benchmark, profiles, boards, blacklist`), `boards`가 받을 종목 목록이다. 지금은 KRX만. 선택 키 `selections`·`selection-input`으로 선정 × 전략 조합 계좌를 profiles 계좌 뒤에 더할 수 있다([D-124](../decisions/D-124-selection-accounts-live-recording.md), ADR-012 3.5). 없으면 지금과 같다.
 - 사전 등록: 운용 전에 커밋하고 운용 중 고치지 않는다. 바꾸려면 새 실험 ID.
-- 실험실 API(`/api/live`, ADR-005 웹 보안 그대로): `GET /status`, `GET /registrations`, `GET /gaps`, `GET /runs/{runId}/fills`, `GET /runs/{runId}/rejections`(D-120), `POST /sessions/{id}/start`, `POST /stop`, `POST /finish`(응답·오류는 [ADR-005](ADR-005-ui-dashboard.md) 5장 표). 한 번에 한 세션. 화면은 실험실 `#/live`(PR #96): 등록 파일 고르기, 시작·멈춤·끝내기, 계좌별 상태와 최근 공백, 3초 폴링, 계좌 ID를 누르면 그 계좌의 체결 내역·거절 사유(`#/live/runs/<계좌>`, D-120)(SSE는 UI-01 이연, D-079).
+- 실험실 API(`/api/live`, ADR-005 웹 보안 그대로): `GET /status`, `GET /registrations`, `GET /gaps`, `GET /runs/{runId}/fills`, `GET /runs/{runId}/rejections`(D-120), `POST /sessions/{id}/start`, `POST /selections/prepare`(D-124), `POST /stop`, `POST /finish`(응답·오류는 [ADR-005](ADR-005-ui-dashboard.md) 5장 표). 한 번에 한 세션. 화면은 실험실 `#/live`(PR #96): 등록 파일 고르기, 시작·멈춤·끝내기, 계좌별 상태와 최근 공백, 3초 폴링, 계좌 ID를 누르면 그 계좌의 체결 내역·거절 사유(`#/live/runs/<계좌>`, D-120)(SSE는 UI-01 이연, D-079).
 - 세션 하나 = 계좌(프로필) N개. 계좌는 리플레이 실행기와 **같은 코드**로 움직인다: 실행기의 Run 한 개 단계를 `RunStepper`(`autotrade-sim` `run` 패키지)로 떼어 리플레이 실행기(`SimulationExperimentRunner`)와 실시간 세션(`LiveSession`)이 같이 쓴다. 리스크 체인·주문 상태머신·블랙리스트·가상 거래소 그대로(지침 5장).
 - 계좌 하나가 예외로 멈춰도 그 계좌만 실패로 남고 나머지는 계속한다(계좌 격리).
+- 선정 조합 계좌(D-124): 다음 거래일 선정은 세션 처리 스레드가 아니라 실험실의 낮은 우선순위 준비 스레드가 장 시간 밖(16:00~08:30 `[가정]`)에 5분마다, 또는 `POST /selections/prepare` 요청 때 만든다. 준비는 정지 요청·세션 멈춤을 관문으로 묻고, 일봉이 힙 절반을 넘으면 계산하지 않고 실험실 밖 명령(`runLiveSelectionPrepare`)을 안내한다. 날짜 전환 지점은 고정 파일을 읽고 그날 첫 이벤트 기록 전에 적용 기록 `applied.json`을 원자적으로 쓴다(못 쓰면 세션 멈춤). 리플레이 확인(2.6)은 적용 기록과 고정 파일로 같은 선정을 다시 본다.
 
 ### 2.5 결정론: 입력 기록을 먼저 쓰고, 쓴 줄을 계좌에 준다
 
