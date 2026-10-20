@@ -57,3 +57,40 @@
 수정 필요(R1, 그에 딸린 B6 시험)
 
 R1을 고치고 선정 두 개 세션 시험을 더한 뒤 같은 검토자에게 재검토를 맡긴다. N1~N3은 막지 않는다.
+
+## 재검토 2026-10-20
+- 대상: PR #206 / 커밋 e9b7eec / main 대비 diff `git diff origin/main...HEAD`(base 8962292). 앞 검토(594983c) 뒤 바뀐 것은 `git diff 03f1bde..e9b7eec`로 `LiveSelectionPrep.java`, `LiveSelectionSessionTest.java` 2개뿐이고, 이 원문 파일은 바뀌지 않았다.
+- 점검표: B
+- 직접 실행한 것:
+  - `git pull` 뒤 전체 diff와 새 커밋 diff를 읽음.
+  - `./gradlew build --no-daemon`: **BUILD SUCCESSFUL in 13s**. sim 테스트가 UP-TO-DATE라 `./gradlew :autotrade-sim:cleanTest :autotrade-sim:test`로 다시 돌림: **BUILD SUCCESSFUL in 43s**, 436건, 실패·오류·건너뜀 0. 새 시험 `LiveSelectionSessionTest#missingDisclosureSnapshotStopsOnlyTheDisclosureSelection` 통과.
+
+### R1 처리 확인
+- 고친 내용: `LiveSelectionPrep.java:178-184`. 공시 latest 스냅샷이 없으면 `problem(...)`으로 돌아가지 않는다. `disclosures`를 빈 값으로 두고 로그만 남긴 뒤 계산을 이어 간다. 그러면 공시 조건 선정만 계산기 `checkDisclosures`가 `STALE_INPUT: 공시 조건이 있는데 공시 입력이 없습니다`로 실패하고(`SelectionPreparer.failureReason`이 `STALE_INPUT`으로 남김), 다른 선정은 정상 계산된다. 입력 키에 공시 칸이 없으므로 공시 스냅샷이 생기면 키가 달라져 다시 계산된다. 앞 검토의 추천안과 같다.
+- 시험: (라)+(다) 두 선정 등록, 공시 스냅샷 없음. 확인하는 것은 아래 셋이며, 앞 탐침 시험이 보인 결함을 직접 잡는다.
+  - `disclosuresSnapshot` 빈 값
+  - (라) STALE_INPUT(사유 "공시 입력이 없습니다"), (다) WRITTEN
+  - 공시 스냅샷을 놓고 다시 부르면 `ready`이고 (라) WRITTEN, 고른 ID가 남음
+- 남은 영향:
+  - 공시 조건 선정만 있는 등록에서 공시 스냅샷이 없으면 일봉을 한 번 읽고 실패한다(앞 구현은 읽지 않았다). 같은 입력이면 `failedWithSameInputs`가 다음 호출부터 읽지 않으므로 비용은 하루 한 번이다. 막지 않는다.
+  - runbook `stage-6-live-session.md:58`의 "공시 스냅샷이 … 없으면 그 조합은 `STALE_INPUT`"은 고친 동작과 맞는다.
+- 공시 없는 등록의 결과 바이트: 고친 코드는 `disclosures: latest`가 있을 때만 타는 분기라 공시 없는 등록에 닿지 않는다. 앞 검토의 main 대비 바이트 동일 확인이 그대로 유효하다.
+
+### B 점검표(재검토)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build` BUILD SUCCESSFUL, sim cleanTest 436건 실패 0 |
+| B2 | 통과 | 변경은 `autotrade-sim` 안뿐이고 새 의존이 없다. 전체 빌드(ArchUnit·`verifyPureDependencies`) 통과 |
+| B3 | 통과 | 계약 변경 없음(동작은 ADR-014 6장 "그 묶음"에 맞춰짐). 앞 검토 근거 그대로 |
+| B4 | 통과 | 시계·난수 없음. 같은 입력이면 같은 결과이고, 키가 바뀌면 다시 계산한다 |
+| B5 | 해당 없음 | 금액 변경 없음 |
+| B6 | 통과 | R1 시험 추가(위). 바뀐 시험은 `disclosurePreparationWithoutAnySnapshotIsStale` → `missingDisclosureSnapshotStopsOnlyTheDisclosureSelection`. 기대 동작이 바뀐 대체이고, (라) STALE_INPUT 단언은 남아 있어 약화가 아니다. `@Disabled`·assume 없음 |
+| B7 | 해당 없음 | 실전 경로·보호 경로 변경 없음 |
+| B8 | 통과 | 새 diff에 비밀값 없음 |
+
+### 남은 권고
+- N1~N3(앞 검토)은 막지 않는 권고로 그대로 둔다. 재무 latest가 없을 때 모든 선정을 막는 이전부터의 동작(`LiveSelectionPrep.java:166-172`)도 같은 방식으로 고치는 것을 별도 과제로 권한다.
+
+### 판정
+승인
