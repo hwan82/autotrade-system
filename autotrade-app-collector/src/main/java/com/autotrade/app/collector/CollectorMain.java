@@ -6,6 +6,7 @@ import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.daily.DailyBarQualityCheck;
 import com.autotrade.marketdata.daily.QualityReport;
 import com.autotrade.marketdata.daily.SnapshotDailyBarSource;
+import com.autotrade.marketdata.daily.SnapshotFiles;
 import com.autotrade.marketdata.daily.SnapshotManifest;
 import com.autotrade.marketdata.financial.FinancialFiling;
 import com.autotrade.marketdata.financial.SnapshotFinancials;
@@ -30,6 +31,7 @@ import java.util.TreeMap;
  * <pre>
  * autotrade-collector krx-daily       [--from 2010-01-04] [--to yyyy-MM-dd] [--boards KOSPI,KOSDAQ,KONEX] [--max-calls 9000]
  * autotrade-collector dart-financials [--from 2016-01-01] [--to yyyy-MM-dd] [--max-calls 10000]
+ * autotrade-collector dart-disclosures [--from 2010-01-01] [--to yyyy-MM-dd] [--types B,I] [--max-calls 2000] [--krx-snapshot ID]
  * 공통: [--config-dir 경로] [--cache-dir 경로] [--snapshot-dir 경로] [--report-dir experiments/_data-quality]
  *       [--interval-ms 200] [--no-snapshot] [--min-free-gb 20] [--keep-snapshots K] [--experiments-dir experiments] [--allow-during-session]
  * </pre>
@@ -43,8 +45,18 @@ public final class CollectorMain {
     static final String VERSION = "0.1.0";
     /** KRX Open API 이용약관 제8조 ④ 키당 하루 10,000회(D-050). */
     static final int KRX_TERMS_DAILY_LIMIT = 10_000;
-    /** OpenDART 개발가이드 "일반적으로 20,000건" `[가정]`(D-050). */
+    /** OpenDART 개발가이드 "일반적으로 20,000건" `[가정]`(D-050). 재무·공시 몫을 합친 같은 키의 하루 합 상한이다(D-122). */
     static final int DART_DAILY_LIMIT = 20_000;
+    /** 재무 몫 기본 상한(ADR-008 2장, 가이드 한도의 절반). */
+    static final int DART_FINANCIALS_DEFAULT = 10_000;
+    /** 공시 몫 기본 상한 `[가정]`(D-122). 재무 몫과 따로 세므로 재무 기본 상한을 깎지 않는다(합 12,000 ≤ 20,000). */
+    static final int DART_DISCLOSURES_DEFAULT = 2_000;
+    /** 공시 몫 상한의 최대: 재무 기본 몫 10,000회를 남기는 값(어느 쪽을 먼저 돌려도 재무 기본 몫은 늘 남는다). */
+    static final int DART_DISCLOSURES_MAX = DART_DAILY_LIMIT - DART_FINANCIALS_DEFAULT;
+    /** 공시 몫 이름(CallBudget lane). */
+    static final String DISCLOSURES_LANE = "disclosures";
+    /** 공시 스냅샷 기본 유형: 주요사항보고(B), 거래소공시(I). 예시 선정 프로필 (라)가 쓰는 유형(ADR-012 3.3). */
+    static final List<String> DEFAULT_DISCLOSURE_TYPES = List.of("B", "I");
     /** KRX 당일 자료를 받기 시작하는 서울 시각 `[가정]`: 그 전에는 기본 --to가 어제. */
     static final LocalTime KRX_SAME_DAY_FROM = LocalTime.of(18, 0);
 
@@ -53,6 +65,7 @@ public final class CollectorMain {
             "KRX Open API 이용약관(2025-12-26 시행): 비상업 목적, 제3자 제공 금지, 출처 '한국거래소 통계정보' (D-050)";
     static final String DART_SOURCE = "OpenDART 공시검색·단일회사 주요계정(사업보고서)";
     static final String DART_LICENSE = "OpenDART 이용약관(2020-01-21 시행), 개인 실험용 로컬 저장 (D-050)";
+    static final String DART_DISCLOSURE_SOURCE = "OpenDART 공시검색(공시 유형별 목록, 정정 포함)";
 
     private CollectorMain() {}
 
@@ -92,6 +105,7 @@ public final class CollectorMain {
             return switch (o.command) {
                 case "krx-daily" -> krxDaily(o, secrets, clock, http, sleeper, guard);
                 case "dart-financials" -> dartFinancials(o, secrets, clock, http, sleeper, guard);
+                case "dart-disclosures" -> dartDisclosures(o, secrets, clock, http, sleeper, guard);
                 default -> throw new IllegalStateException("모르는 명령");
             };
         } catch (RunGuard.Refused e) {
@@ -174,7 +188,9 @@ public final class CollectorMain {
         LocalDate yesterday = LocalDate.now(clock.withZone(CallBudget.SEOUL)).minusDays(1);
         LocalDate to = o.to != null ? o.to : yesterday;
         LocalDate from = o.from != null ? o.from : LocalDate.of(2016, 1, 1);
-        CallBudget budget = new CallBudget(o.budgetDir(), "opendart", o.maxCalls(10000), clock);
+        // 재무 몫은 공시 몫과 따로 센다: 공시 수집이 먼저 돌아도 재무 기본 몫을 깎지 않는다(D-122)
+        CallBudget budget = new CallBudget(o.budgetDir(), "opendart", CallBudget.MAIN, o.maxCalls(DART_FINANCIALS_DEFAULT),
+                DART_DAILY_LIMIT, clock);
         Redaction redaction = new Redaction(List.of(secrets.openDartKey()));
         OpenDartClient client = new OpenDartClient(new ApiCaller(http, budget, redaction, sleeper, o.intervalMs, guard::checkSession), budget,
                 o.dartBase, secrets.openDartKey().reveal());
@@ -216,6 +232,127 @@ public final class CollectorMain {
             System.out.println("재무 스냅샷은 지우면 재현할 수 없어 --keep-snapshots로 정리하지 않습니다");
         }
         return 0;
+    }
+
+    /**
+     * 공시 목록 수집과 공시 스냅샷(ADR-012 3.4, D-122). 같은 OpenDART 키를 쓰지만 호출은 공시 몫({@value #DISCLOSURES_LANE})으로
+     * 따로 세고, 키 전체 합은 {@value #DART_DAILY_LIMIT}회로 막는다. 상한에 닿아 멈춰도 그 전까지 다 받은 창(최근 것부터)으로
+     * 스냅샷을 만들고 종료 코드 3으로 끝난다. 재무 수집 뒤에 돌리는 것이 기본 순서다(runbook collector.md 4장).
+     */
+    static int dartDisclosures(Options o, CollectorSecrets secrets, Clock clock, HttpGetter http, ApiCaller.Sleeper sleeper,
+            RunGuard guard) throws IOException {
+        LocalDate yesterday = LocalDate.now(clock.withZone(CallBudget.SEOUL)).minusDays(1);
+        LocalDate to = o.to != null ? o.to : yesterday;
+        LocalDate from = o.from != null ? o.from : LocalDate.of(2010, 1, 1);
+        CallBudget budget = new CallBudget(o.budgetDir(), "opendart", DISCLOSURES_LANE,
+                o.maxCalls(DART_DISCLOSURES_DEFAULT), DART_DAILY_LIMIT, clock);
+        Redaction redaction = new Redaction(List.of(secrets.openDartKey()));
+        OpenDartClient client = new OpenDartClient(new ApiCaller(http, budget, redaction, sleeper, o.intervalMs, guard::checkSession), budget,
+                o.dartBase, secrets.openDartKey().reveal());
+        DartDisclosureCollector collector = new DartDisclosureCollector(client, o.cacheDir, clock);
+        DartDisclosureCollector.Result r = collector.collect(from, to, o.types);
+        System.out.println("OpenDART 공시 목록(" + String.join(",", o.types) + "): 받은 창 " + r.windows() + "개, 쪽 " + r.pages()
+                + ", 행 " + r.rows() + ", 오늘 공시 몫 호출 " + budget.usedTodayByLane() + ", 같은 키 합 " + budget.usedToday());
+        if (r.stopped() != null) {
+            System.out.println(r.stopped() + ". 다 받은 창까지로 스냅샷을 만들고 다음 실행이 이어 받습니다");
+        }
+        if (o.noSnapshot) {
+            return r.stopped() == null ? 0 : 3;
+        }
+        LocalDate last = null;
+        LocalDate first = null;
+        for (String t : o.types) {
+            List<LocalDate[]> ranges = r.scanned().get(t);
+            if (ranges == null || ranges.isEmpty()) {
+                System.out.println("공시 유형 " + t + "를 받은 구간이 없어 스냅샷을 만들지 않습니다");
+                return r.stopped() == null ? 0 : 3;
+            }
+            LocalDate end = ranges.get(ranges.size() - 1)[1];
+            last = last == null || end.isBefore(last) ? end : last;
+            first = first == null || ranges.get(0)[0].isBefore(first) ? ranges.get(0)[0] : first;
+        }
+        guard.checkSession();
+        guard.checkDisk(List.of(o.snapshotDir));
+        String created = clock.instant().toString();
+        List<SnapshotManifest.Source> sources = new ArrayList<>();
+        sources.add(new SnapshotManifest.Source(DART_DISCLOSURE_SOURCE, "https://opendart.fss.or.kr", DART_LICENSE, created));
+        Optional<Path> krxDir = krxSnapshotForNames(o);
+        List<DartDisclosureSnapshotBuilder.Listing> listings = new ArrayList<>();
+        if (krxDir.isPresent()) {
+            listings = listings(krxDir.get());
+            sources.add(new SnapshotManifest.Source("KRX 종목 이력(종목 코드 이어 붙이기, 이름 대조) " + krxDir.get().getFileName(),
+                    "https://openapi.krx.co.kr", KRX_LICENSE, created));
+        } else {
+            System.out.println("KRX 일봉 스냅샷이 없어 이름 대조로 종목 코드를 이어 붙이지 않습니다(--krx-snapshot으로 지정)");
+        }
+        Path root = o.snapshotDir.resolve("dart-disclosures");
+        Path dir;
+        DartDisclosureSnapshotBuilder.Stats stats;
+        try (SnapshotWriter w = new SnapshotWriter(root, "dart-disclosures")) {
+            SnapshotWriter.Sink rows = w.open(DartDisclosureSnapshotBuilder.FILE, DartDisclosureSnapshotBuilder.HEADER);
+            SnapshotWriter.Sink types = w.open(DartDisclosureSnapshotBuilder.TYPES_FILE, DartDisclosureSnapshotBuilder.TYPES_HEADER);
+            Map<String, List<LocalDate[]>> scanned = new TreeMap<>();
+            for (String t : o.types) {
+                scanned.put(t, r.scanned().get(t));
+            }
+            for (List<String> row : DartDisclosureSnapshotBuilder.typeRows(scanned)) {
+                types.write(row);
+            }
+            stats = DartDisclosureSnapshotBuilder.build(collector.windowFiles(o.types), listings, rows::write);
+            dir = w.commit("dart-disclosures", last.toString(),
+                    List.of(DartDisclosureSnapshotBuilder.FILE, DartDisclosureSnapshotBuilder.TYPES_FILE), created, VERSION,
+                    sources, new SnapshotManifest.Coverage(first.toString(), null, null, created));
+        }
+        Path reportFile = CollectorReports.writeDisclosures(o.reportDir, SnapshotFiles.readManifest(dir), stats, r.scanned(), r,
+                budget.usedTodayByLane(), budget.usedToday(), r.stopped());
+        System.out.println("스냅샷: " + dir + "\n품질 리포트: " + reportFile + " (종목 코드 못 붙인 행 "
+                + stats.bySource().getOrDefault("NONE", 0L) + "건)");
+        prune(o, root, "dart-disclosures", dir);
+        return r.stopped() == null ? 0 : 3;
+    }
+
+    /** 이름 대조에 쓸 KRX 일봉 스냅샷: {@code --krx-snapshot}, 없으면 가장 늦은 날짜의 것(같은 날짜면 manifest 생성 시각이 늦은 것). */
+    static Optional<Path> krxSnapshotForNames(Options o) throws IOException {
+        Path root = o.snapshotDir.resolve("krx-daily");
+        if (o.krxSnapshot != null) {
+            Path d = root.resolve(o.krxSnapshot);
+            if (!java.nio.file.Files.exists(d.resolve(SnapshotManifest.FILE_NAME))) {
+                throw new IllegalArgumentException("KRX 일봉 스냅샷이 없습니다: " + d);
+            }
+            return Optional.of(d);
+        }
+        if (!java.nio.file.Files.isDirectory(root)) {
+            return Optional.empty();
+        }
+        Path best = null;
+        String bestKey = null;
+        try (var s = java.nio.file.Files.list(root)) {
+            for (Path p : s.filter(p -> p.getFileName().toString().startsWith("krx-daily-")
+                    && java.nio.file.Files.exists(p.resolve(SnapshotManifest.FILE_NAME))).toList()) {
+                String name = p.getFileName().toString();
+                String key = name.substring("krx-daily-".length(), "krx-daily-".length() + 10) + "|"
+                        + SnapshotFiles.readManifest(p).createdAt() + "|" + name;
+                if (bestKey == null || key.compareTo(bestKey) > 0) {
+                    best = p;
+                    bestKey = key;
+                }
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /** KRX 일봉 스냅샷의 종목 이력만 읽는다(일봉은 읽지 않음). 해시가 맞지 않으면 실패. */
+    static List<DartDisclosureSnapshotBuilder.Listing> listings(Path krxDir) throws IOException {
+        SnapshotManifest m = SnapshotFiles.readManifest(krxDir);
+        List<DartDisclosureSnapshotBuilder.Listing> out = new ArrayList<>();
+        for (List<String> r : SnapshotFiles.readVerified(krxDir, m, SnapshotManifest.INSTRUMENT_HISTORY,
+                SnapshotDailyBarSource.HISTORY_HEADER)) {
+            if (r.get(0).equals("KRX")) {
+                out.add(new DartDisclosureSnapshotBuilder.Listing(r.get(1), r.get(2), LocalDate.parse(r.get(5)),
+                        r.get(6).isEmpty() ? null : LocalDate.parse(r.get(6))));
+            }
+        }
+        return out;
     }
 
     /**
@@ -273,7 +410,7 @@ public final class CollectorMain {
         };
     }
 
-    /** {@code --keep-snapshots}를 줬을 때만 옛 일봉 스냅샷을 정리한다(재무 스냅샷은 대상 아님). 실험 기록이 참조하는 ID는 남긴다({@link SnapshotRetention}). */
+    /** {@code --keep-snapshots}를 줬을 때만 옛 일봉·공시 스냅샷을 정리한다(재무 스냅샷은 대상 아님). 실험 기록이 참조하는 ID는 남긴다({@link SnapshotRetention}). */
     private static void prune(Options o, Path root, String prefix, Path current) throws IOException {
         if (o.keepSnapshots == null) {
             return;
@@ -288,8 +425,9 @@ public final class CollectorMain {
     }
 
     static final String USAGE = """
-            사용법: autotrade-collector <krx-daily|dart-financials> [옵션]
+            사용법: autotrade-collector <krx-daily|dart-financials|dart-disclosures> [옵션]
               --from yyyy-MM-dd   --to yyyy-MM-dd   --boards KOSPI,KOSDAQ,KONEX   --max-calls N   --interval-ms N
+              --types B,I(dart-disclosures 공시 유형)   --krx-snapshot krx-daily-...(dart-disclosures 이름 대조, 기본 최신)
               --config-dir 경로   --cache-dir 경로   --snapshot-dir 경로   --report-dir 경로   --no-snapshot
               --min-free-gb N(기본 20)   --keep-snapshots K(주면 최근 K개만 남김)   --experiments-dir experiments   --allow-during-session(실전 엔진을 끈 날만)
               --krx-base-url https://...  --dart-base-url https://...""";
@@ -311,6 +449,8 @@ public final class CollectorMain {
         boolean allowDuringSession;
         long minFreeGb = RunGuard.DEFAULT_MIN_FREE_GB;
         Integer keepSnapshots;
+        List<String> types = DEFAULT_DISCLOSURE_TYPES;
+        String krxSnapshot;
         String krxBase = KrxOpenApiClient.DEFAULT_BASE;
         String dartBase = OpenDartClient.BASE;
 
@@ -332,8 +472,8 @@ public final class CollectorMain {
         }
 
         static Options parse(String[] args) {
-            if (args.length == 0 || !Set.of("krx-daily", "dart-financials").contains(args[0])) {
-                throw new IllegalArgumentException("명령을 krx-daily 또는 dart-financials로 주세요");
+            if (args.length == 0 || !Set.of("krx-daily", "dart-financials", "dart-disclosures").contains(args[0])) {
+                throw new IllegalArgumentException("명령을 krx-daily, dart-financials, dart-disclosures 중 하나로 주세요");
             }
             Options o = new Options();
             o.command = args[0];
@@ -374,13 +514,34 @@ public final class CollectorMain {
                         case "--dart-base-url" -> o.dartBase = https(v);
                         case "--min-free-gb" -> o.minFreeGb = positive(Long.parseLong(v));
                         case "--keep-snapshots" -> o.keepSnapshots = (int) positive(Integer.parseInt(v));
+                        case "--types" -> {
+                            List<String> t = new ArrayList<>();
+                            for (String x : v.split(",")) {
+                                t.add(x.strip());
+                            }
+                            DartDisclosureCollector.checkTypes(t);
+                            o.types = List.copyOf(t);
+                        }
+                        case "--krx-snapshot" -> {
+                            if (!v.matches("krx-daily-\\d{4}-\\d{2}-\\d{2}-[0-9a-f]{8}")) {
+                                throw new IllegalArgumentException("KRX 일봉 스냅샷 ID 형식이 아닙니다: " + v);
+                            }
+                            o.krxSnapshot = v;
+                        }
                         default -> throw new IllegalArgumentException("모르는 옵션: " + e.getKey());
                     }
                 }
             } catch (RuntimeException e) {
                 throw new IllegalArgumentException("옵션 값이 틀렸습니다: " + e.getMessage(), e);
             }
-            int limit = o.command.equals("krx-daily") ? KRX_TERMS_DAILY_LIMIT : DART_DAILY_LIMIT;
+            if (!o.command.equals("dart-disclosures") && (kv.containsKey("--types") || kv.containsKey("--krx-snapshot"))) {
+                throw new IllegalArgumentException("--types·--krx-snapshot은 dart-disclosures에만 씁니다");
+            }
+            int limit = switch (o.command) {
+                case "krx-daily" -> KRX_TERMS_DAILY_LIMIT;
+                case "dart-disclosures" -> DART_DISCLOSURES_MAX; // 재무 기본 몫을 남긴다(D-122)
+                default -> DART_DAILY_LIMIT;
+            };
             if (o.maxCalls != null && (o.maxCalls < 1 || o.maxCalls > limit)) {
                 // 약관 한도를 넘기면 키가 정지될 수 있다(QA PR #39 R3)
                 throw new IllegalArgumentException("--max-calls는 1 이상 하루 한도 " + limit + " 이하여야 합니다");

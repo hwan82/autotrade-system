@@ -46,6 +46,18 @@ public final class OpenDartClient {
                 "page_no", Integer.toString(page), "page_count", "100"));
     }
 
+    /**
+     * 공시 유형 하나의 공시검색 한 쪽(ADR-012 3.4, D-122). 회사 코드 없이 날짜 구간으로, 정정 공시 포함({@code last_reprt_at=N}),
+     * 접수일 오름차순.
+     *
+     * @param type OpenDART 공시 유형 코드 한 글자(A~J)
+     */
+    public JsonNode disclosureList(String type, LocalDate bgn, LocalDate end, int page) throws IOException {
+        return call("list.json", Map.of("bgn_de", YMD.format(bgn), "end_de", YMD.format(end), "last_reprt_at", "N",
+                "pblntf_ty", type, "sort", "date", "sort_mth", "asc", "page_no", Integer.toString(page),
+                "page_count", "100"));
+    }
+
     /** 단일회사 주요계정(사업보고서). 응답 원문 그대로. */
     public JsonNode accounts(String corpCode, int businessYear) throws IOException {
         return call("fnlttSinglAcnt.json", Map.of("corp_code", corpCode, "bsns_year", Integer.toString(businessYear),

@@ -69,4 +69,45 @@ class CallBudgetTest {
         assertThatThrownBy(again::acquire).isInstanceOf(CallBudget.BudgetExhausted.class).hasMessageContaining("멈췄");
         new CallBudget(dir, "opendart", 100, at("2026-10-10T15:00:00Z")).acquire();
     }
+
+    @Test
+    void 공시_몫은_재무_몫과_따로_세고_키_합은_키_상한으로_막는다() {
+        Clock c = at("2026-10-10T01:00:00Z");
+        CallBudget disclosures = new CallBudget(dir, "opendart", "disclosures", 2, 5, c);
+        disclosures.acquire();
+        disclosures.acquire();
+        assertThatThrownBy(disclosures::acquire).isInstanceOf(CallBudget.BudgetExhausted.class)
+                .hasMessageContaining("disclosures").hasMessageContaining("2회");
+        // 공시가 먼저 2회를 써도 재무 몫 3회는 그대로 남는다
+        CallBudget financials = new CallBudget(dir, "opendart", CallBudget.MAIN, 3, 5, c);
+        financials.acquire();
+        financials.acquire();
+        financials.acquire();
+        assertThat(financials.usedTodayByLane()).isEqualTo(3);
+        assertThat(financials.usedToday()).isEqualTo(5);
+        assertThatThrownBy(financials::acquire).isInstanceOf(CallBudget.BudgetExhausted.class);
+        // 몫이 남아도 키 합 상한(5)에 닿으면 막는다
+        CallBudget more = new CallBudget(dir, "opendart", "disclosures", 10, 5, c);
+        assertThatThrownBy(more::acquire).isInstanceOf(CallBudget.BudgetExhausted.class).hasMessageContaining("합 상한 5회");
+    }
+
+    @Test
+    void 몫을_적기_전_기록의_호출은_main_몫으로_보고_한도_초과_멈춤은_모든_몫에_적용된다() throws Exception {
+        Clock c = at("2026-10-10T01:00:00Z");
+        java.nio.file.Files.createDirectories(dir.resolve("budget"));
+        java.nio.file.Files.writeString(dir.resolve("budget").resolve("opendart-2026-10-10.json"), "{\"calls\":4,\"stopped\":false}");
+        CallBudget financials = new CallBudget(dir, "opendart", CallBudget.MAIN, 5, 20, c);
+        assertThat(financials.usedTodayByLane()).isEqualTo(4);
+        CallBudget disclosures = new CallBudget(dir, "opendart", "disclosures", 5, 20, c);
+        assertThat(disclosures.usedTodayByLane()).isZero();
+        disclosures.acquire();
+        financials.acquire();
+        assertThat(financials.usedTodayByLane()).isEqualTo(5);
+        assertThat(disclosures.usedTodayByLane()).isEqualTo(1);
+        assertThat(financials.usedToday()).isEqualTo(6);
+        disclosures.stopForToday();
+        assertThatThrownBy(new CallBudget(dir, "opendart", CallBudget.MAIN, 100, 100, c)::acquire)
+                .isInstanceOf(CallBudget.BudgetExhausted.class).hasMessageContaining("멈췄");
+        assertThat(financials.usedTodayByLane()).isEqualTo(5); // 멈춤 기록 뒤에도 몫 기록은 남는다
+    }
 }
