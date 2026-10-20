@@ -54,7 +54,8 @@ parameters:
 | 키 | 필수 | 값 |
 |---|---|---|
 | `hypothesis` | O | 가설 1문장(STR-02) |
-| `refresh` | O | `PRE_OPEN_DAILY`(단타 전용), `POST_CLOSE_DAILY`, `POST_CLOSE_WEEKLY`(스윙·중기). 스타일과 맞지 않으면 검증 실패 |
+| `refresh` | O | 단타용 `PRE_OPEN_DAILY`·`INTRADAY_AT`, 스윙·중기용 `POST_CLOSE_DAILY`·`POST_CLOSE_WEEKLY`. 규칙은 "단타 ⇔ 단타용 갱신 주기 집합"(2026-10-20 개정, [D-127](../decisions/D-127-intraday-at-selection.md). 처음에는 "단타 ⇔ `PRE_OPEN_DAILY`"). 스타일과 맞지 않으면 검증 실패 |
+| `at` | `INTRADAY_AT`만 O | 장중 순위 시각 `HH:MM`(거래소 현지, KRX 09:01~15:20, 미국 09:31~16:00). 다른 갱신 주기에 주면 검증 실패(D-127) |
 | `max-symbols` | O | 1 이상 정수. 선정 결과 종목 수 상한 |
 | `filter.*` | | 하드 필터(STR-10) |
 | `gate.<2자리 순번>.*` | | 자격 조건(모두 AND, STR-15) |
@@ -126,7 +127,7 @@ parameters:
 |---|---|
 | `strategy_profile.style` | CHECK에 `POSITION` |
 | 함수 `combination_hash_v1(selection, profile)` | 2.2 유도식. `IMMUTABLE`이라 CHECK에서 쓴다 |
-| 새 표 `selection_profile` | PK `selection_hash`, `UNIQUE (selection_id, version)`, `refresh` 열, CHECK "단타 ⇔ `PRE_OPEN_DAILY`" |
+| 새 표 `selection_profile` | PK `selection_hash`, `UNIQUE (selection_id, version)`, `refresh` 열, CHECK "단타 ⇔ `PRE_OPEN_DAILY`"(V3에서 "단타 ⇔ `PRE_OPEN_DAILY`·`INTRADAY_AT`"과 "`INTRADAY_AT` ⇔ `at` 키"로 바꿈, D-127. V2 파일은 고치지 않음) |
 | 새 표 `combination` | PK `combination_hash`, `selection_hash`(`none` 또는 hex64), 생성 열 `selection_ref`(`none`이면 NULL)로 `selection_profile` 외래키, `profile_hash` → `strategy_profile`, CHECK `combination_hash = combination_hash_v1(...)` |
 | `experiment_run` | `selection_hash`, `combination_hash`, `run_seed_scheme` 추가(NOT NULL). `UNIQUE (experiment_id, profile_hash)` 삭제 → `UNIQUE (experiment_id, combination_hash)`. `(combination_hash, selection_hash, profile_hash)` → `combination` 외래키로 Run의 세 해시가 서로 맞는지 강제. 시드 방식 CHECK |
 | `virtual_trade_log` | `combination_hash` 추가(NOT NULL), `(run_id, combination_hash)` 외래키. V1의 `(run_id, profile_hash)` 외래키 유지. `selection_id`·`selection_hash`는 `combination → selection_profile`로 찾는다(중복 저장 안 함) |
