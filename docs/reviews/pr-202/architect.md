@@ -197,3 +197,40 @@ C4의 L7은 `signal.range-minutes` ±20%(24분·36분)인데 선정 시각 `at: 
 수정 필요(R2-1 F7 안 (라)가 대기 금액 효과를 남기므로 G1 해결안에서 빼거나 측정·문턱 조건을 달 것, R2-2 D-128 7번·decisions/README 행을 계획과 맞출 것). 그 밖의 지적은 모두 해결됨.
 
 판정: 수정 필요
+
+## 재검토 3 2026-10-20
+- 대상: PR #202 / 커밋 6391aec(`origin/claude/live02-preregistration-plan-1g6tsw`와 같음) / main 대비 diff `git diff origin/main...HEAD`(5파일, 문서만). 3d74ca7 뒤 바뀐 것은 `git diff 3d74ca7 6391aec`로 따로 읽음: D-128 7번, decisions/README D-128 행, 계획 G1·F7·9.2 표·11장, 검토 원문 2개. 이 파일의 변화는 내가 쓴 재검토 2 절을 덧붙인 것뿐임(삭제 줄 0). 코드·설정·스키마·보호 경로 변경 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --console=plain`(작업 폴더): 다시 Maven Central 429(kotlinx-coroutines-core-jvm 1.6.4 등)로 실패(환경 문제).
+  - B1은 6391aec CI로 판정: `gh api repos/hwan82/autotrade-system/commits/6391aec/check-runs` → Gradle build, DB schema, Lab screens, Secret scan and collector boundary 모두 `success`(run 39446482421).
+  - 계획·D-128·README에서 F7의 옛 표기(`(가)(나)`, 안 `(라)`) 남은 곳 검색: 없음. 선정 이름 (다)(라)는 F7과 무관한 원래 뜻으로만 남음.
+  - F7 새 인용 줄 확인: `ManagedStrategy.java:266`(`pendingEntryNotional.put`), `:139-142`(다음 이벤트에서 열린 주문 없으면 지움), `:312-313`(쓸 수 있는 현금에서 대기 금액 뺌). 맞음.
+
+### 이전 지적 처리
+
+| 항목 | 결과 | 근거 |
+|---|---|---|
+| R2-1 F7 안 (라)가 대기 금액을 남김 | 해결 | 계획 F7: F7-d(프로필 한도만 늘리기)를 "G1을 풀지 않음"으로 두고 코드 근거를 적음. G1: "F7-a나 F7-b로 해결해 머지한 뒤에만", F7-c·F7-d는 G1을 풀지 않음. 11장 F7 일정도 맞춤. F7-a(신호 전 거름)는 한도와 대기 금액이 둘 다 생기지 않고, F7-b(콜백)는 둘 다 되돌리므로 F7 목표를 채운다 `[추론]`(구체 설계는 그 PR의 ADR에서 검토) |
+| R2-2 결정 로그 불일치 | 해결 | D-128 7번과 README D-128 행이 F7-a·F7-b만 해결안, 보호 경로라 사용자 머지, F7-c·F7-d는 선행 조건을 풀지 않음으로 계획과 같아짐 |
+
+### 점검표 B
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(CI 근거) | 로컬은 Maven 429로 실패(환경). 6391aec CI Gradle build success(run 39446482421). 변경은 문서뿐 |
+| B2 | 해당 없음 | Java·Gradle·ArchUnit 변경 없음 |
+| B3 | 해당 없음(이 PR) | 계약 변경 없음. F1·F3·F4·F7-a·F7-b의 ADR 선행 조건이 계획에 있음 |
+| B4 | 해당 없음(이 PR) | 코드 변경 없음 |
+| B5 | 해당 없음 | 코드 변경 없음 |
+| B6 | 해당 없음 | 코드·테스트 변경 없음 |
+| B7 | 해당 없음(이 PR) | 실전 경로·보호 경로 변경 없음. 후속 F7-a·F7-b는 보호 경로(`autotrade-strategy/*`, 안에 따라 `autotrade-domain/*`)라 그 PR에서 risk-ops 검토·독립 QA·사용자 머지가 필요하고 계획·결정 로그에 적혀 있음 |
+| B8 | 통과 | diff에 비밀값 없음 |
+
+### 점검표 밖 발견
+- 경미(머지를 막지 않음): G1 괄호 설명이 "막힌 신호가 하루 진입 한도를 쓰지 않게"로 대기 금액을 빼고 적었다. F7 제목과 같게 "하루 진입 한도·대기 금액"으로 맞추면 좋다. 다음 문서 수정 때 같이.
+
+## 판정
+승인(경미 1건은 다음 수정 때 반영 권함)
+
+판정: 승인
