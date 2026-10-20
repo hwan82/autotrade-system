@@ -61,7 +61,7 @@
 - (라) `kr-intraday-news@1`: 소식 있는 종목. 가설: "전일 주요사항보고·거래소공시가 있었고 거래대금이 50억 원 이상인 종목은 다음 날 정보 반영 거래로 장중 방향성이 생겨, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)." (다)의 필터 + gate `disclosure-count`(w1, `types: B,I`) ≥ 1, `avg-turnover`(w1) ≥ 50억 원, score `volume-spike`(w20) `DESC`, `max-symbols: 20`.
 - 대조군(STR-17): 같은 선정 + 단타 무작위 진입(`random` 로직, 기존), 같은 매매지표 + 선정 없음(`boards` 전체). 조합 실험 절차는 [combination-experiments.md](../strategy/combination-experiments.md) 그대로(대조군 두 축, 본페로니).
 - **조합 수와 대조군 시드 수는 사전 등록에 고정**한다. 조합 수 m ≤ 4로 시작하고(3.7에서 두 갱신 주기를 함께 돌리면 그것도 m에 셈), 무작위 대조군 시드 수 N은 N+1 ≥ 20m을 지킨다(본페로니 1 − 0.05/m 분위를 대조군 분포에서 읽기 위한 최소 표본, strategy-researcher R1).
-- **선정 엣지 일봉 사전 검사**(실시간 모의 전에, strategy-researcher M2): 선정과 장중 매매지표를 묶은 조합은 과거 장중 데이터가 녹화(2026-10-12부터)뿐이라 과거 검증 경로가 사실상 없다. 그래서 선정 자체에 엣지가 있는지 먼저 일봉으로 본다. 규칙: 선정일 T **시가에 진입해 T 종가에 청산**(D-075 체결 규칙의 일봉 근사, 슬리피지 포함 비용 모델 `KR-DEFAULT-1c6a40d3efb8`), 같은 날 같은 수를 유니버스에서 무작위로 고른 대조군(시드 N개)과 비교, 워크포워드 3구간 이상(ADR-009 실행기, 2026-04-01 이후 표본 외 보존은 D-071과 같게). 통과 기준은 비용 차감 평균 수익이 대조군 분포의 1 − 0.05/m 분위를 넘고 구간 과반에서 같은 부호일 것 `[가정]`. 통과하지 못한 선정 프로필은 실시간 모의(LIVE02) 등록에 넣지 않는다. 이 검사는 장중 체결을 재현하지 않으므로 승격 근거가 아니라 거르는 단계다.
+- **선정 엣지 일봉 사전 검사**(실시간 모의 전에, strategy-researcher M2): 선정과 장중 매매지표를 묶은 조합은 과거 장중 데이터가 녹화(2026-10-12부터)뿐이라 과거 검증 경로가 사실상 없다. 그래서 선정 자체에 엣지가 있는지 먼저 일봉으로 본다. 규칙: 선정일 T **시가에 진입해 T 종가에 청산**(D-075 체결 규칙의 일봉 근사, 슬리피지 포함 비용 모델 `KR-DEFAULT-1c6a40d3efb8`), 같은 날 같은 수를 유니버스에서 무작위로 고른 대조군(시드 N개)과 비교, 워크포워드 3구간 이상, 2026-04-01 이후 표본 외 보존. 통과 기준은 비용 차감 평균 수익이 대조군 분포의 1 − 0.05/m 분위를 넘고 구간 과반에서 같은 부호일 것 `[가정]`. **확정 내용은 [D-125](../decisions/D-125-selection-edge-precheck.md)**: ADR-009 실행기 대신 새 명령 `runSelectionEdgeCheck`(일봉 경로에 장 마감 청산 칸이 없고 대조군 정의가 달라서), 대조군 모집단은 하드 필터 통과 집합, (다)는 변동폭 `RANGE`를 주 통계로 하고 방향 열위는 E3으로 거름, 표본 외 보존 2026-04-01의 출처는 D-071이 아니라 stage-4-plan 4장 등록 초안의 마지막 구간 끝(2026-03-31)이다. 통과하지 못한 선정 프로필은 실시간 모의(LIVE02) 등록에 넣지 않는다. 이 검사는 장중 체결을 재현하지 않으므로 승격 근거가 아니라 거르는 단계다.
 
 ### 3.4 공시 스냅샷(data-engineer, 수집 일괄 명령 확장)
 
@@ -171,7 +171,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 | 0 | 넓힌 watchlist(거래대금 상위 종목)로 녹화 시작. 그날부터의 녹화만 5번 시험에 쓴다. watchlist 크기는 risk-ops가 7단계 전 구독 상한을 정할 때까지 임시값 | 사용자 PC, data-engineer, risk-ops 확인 | 아님(실전 활성화 전) | 없음 |
 | 1 | KRX 게시 시각 확인(3.7) → `PRE_OPEN_DAILY_LAG1` 필요 여부 결정 | 사용자 PC 1회 실행, data-engineer | 아님 | 없음 |
 | 2 | 지표 `day-range`·`close-strength`·`volume-spike`, 프로필 (다), selection-catalog 갱신, 골든 테스트 | strategy-researcher·sim-engine | 아님 | 없음(1과 병렬) |
-| 2b | 선정 엣지 일봉 사전 검사(3.3): T 시가 진입·T 종가 청산, 비용 차감, 무작위 선정 대조군, 워크포워드 3구간 이상. 통과한 선정만 5번으로 | strategy-researcher | 아님 | 2(공시 조건은 3) |
+| 2b | 선정 엣지 일봉 사전 검사(3.3, D-125): T 시가 진입·T 종가 청산, 비용 차감, 무작위 선정 대조군, 워크포워드 3구간 이상. 통과한 선정만 5번으로. (다)는 EDGE01 등록, (라)·공시 대조는 공시 스냅샷 뒤 | strategy-researcher | 아님 | 2(공시 조건은 3) |
 | 3 | 공시 스냅샷 수집(`dartDisclosures`, 유형으로 좁혀 재무 수집 뒤, 하루 상한 공유)·`disclosure-count`·`gate.types`, 프로필 (라) | data-engineer → strategy-researcher | 아님 | 2 |
 | 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로) | architect·sim-engine | 아님 | 1 또는 7 |
 | 4 | 녹화 실험·실시간 모의 `selections`·`selection-input`, 그날 후보 ∩ `boards`, `NOT_SUBSCRIBED`·`BLACKLISTED`·`SELECTION_MISSING`, 고정 파일, 리플레이 확인. **D-124로 구현** | sim-engine(+ ui-dev 화면 표시) | 아님 | 2, (1의 결과) |

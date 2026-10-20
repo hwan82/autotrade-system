@@ -1,0 +1,23 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# (라) kr-intraday-news@1의 공시 대조 선정(PR #196 strategy-researcher R1, D-125): (라)에서 공시 조건(gate.01 disclosure-count)만 뺐다.
+# 선정 엣지 일봉 사전 검사(ADR-012 배치표 2b)에서 (라)의 성과가 공시 조건 때문인지, 나머지 조건(거래대금 50억 + 거래량 급증 순 20종목)
+# 때문인지 가르려고 둔다. 수치는 (라)와 같다([가정] 출발값).
+id: "kr-intraday-news-nodisc"
+version: 1
+market: "KRX"
+style: "INTRADAY"
+created-at: "2026-10-20T00:00:00Z"
+parameters:
+  hypothesis: "(라) 공시 대조: 전일 거래대금이 50억 원 이상이고 거래량 급증이 큰 종목은 공시 여부와 관계없이 다음 날 장중 방향성이 생겨, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)"
+  refresh: "PRE_OPEN_DAILY"
+  max-symbols: "20"
+  filter.kinds: "STOCK"
+  filter.min-price: "1000"
+  filter.min-bar-days: "21"
+  gate.01.metric: "avg-turnover"
+  gate.01.window: "1"
+  gate.01.op: "GE"
+  gate.01.value: "5000000000"
+  score.metric: "volume-spike"
+  score.window: "20"
+  score.order: "DESC"
