@@ -1,7 +1,7 @@
 # D-123 공시 스냅샷 수집(dart-disclosures)·지표 disclosure-count·프로필 (라)
 
 - 날짜: 2026-10-20
-- 상태: 확정 · **추천안 채택(자율)**(지침 8장). 6번 시점 규칙은 **D-121 ③ "접수일 ≤ 기준 데이터일"을 대체**한다(확정 결정을 바꾸므로 지침 8장 4번에 따라 사용자에게 확인을 물음, 답 전에는 머지하지 않음). 실전 주문 경로·RealTradingGuard·블랙리스트·리스크 한도·보호 경로(`autotrade-marketdata`·`autotrade-domain`·`autotrade-config`·아키텍처 시험)는 바꾸지 않는다.
+- 상태: 확정 · **추천안 채택(자율)**(지침 8장). 6번 시점 규칙은 **D-121 ③ "접수일 ≤ 기준 데이터일"을 대체**한다(확정 결정을 바꾸므로 지침 8장 4번에 따라 사용자에게 물었고, **사용자가 "T 전날까지"로 확인함**(2026-10-20)). 실전 주문 경로·RealTradingGuard·블랙리스트·리스크 한도·보호 경로(`autotrade-marketdata`·`autotrade-domain`·`autotrade-config`·아키텍처 시험)는 바꾸지 않는다.
 - 담당: data-engineer(수집), strategy-researcher(지표·프로필). 교차 검토: architect, strategy-researcher
 - 근거: [ADR-012](../adr/ADR-012-intraday-selection.md) 3.1·3.2·3.3·3.4, 배치표 3번, [D-121](D-121-intraday-selection.md) ②③, 수집 라이선스 D-050·D-055([결정 로그](README.md)), 카탈로그 [selection-catalog.md](../strategy/selection-catalog.md)
 
