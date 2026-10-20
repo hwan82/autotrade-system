@@ -27,3 +27,30 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-20
+- 대상: PR #190 / 브랜치 `claude/project-thread-yxpj4r` 커밋 da4269e / `git diff origin/main...HEAD` 전체(코드 7개 파일 + ADR-010 + 검토 원문 2개). 새 커밋 da4269e는 `VirtualExchange.java`(상수 공개), `LiveWeeklyCheck.java`, `LiveWeeklyCheckTest.java`를 바꿨다
+- 점검표: B
+- 직접 실행한 것: `git pull` 뒤 `./gradlew build --rerun-tasks` → BUILD SUCCESSFUL in 2m 47s, 138 actionable tasks: 138 executed. `LiveWeeklyCheckTest` 14건(새 시험 `openingPrintsFollowTheVirtualExchangeRuleIncludingMidSessionStart` 포함) failures 0 / errors 0 / skipped 0, 전체 모듈에서 skipped>0인 스위트 없음. 바뀐 경로는 보호 경로 목록(`scripts/ci/protected-paths.txt`)에 걸리지 않음
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` 전 작업 실행, BUILD SUCCESSFUL |
+| B2 | 통과 | 새 import는 `com.autotrade.domain.MarketRules`와 같은 sim 모듈의 `com.autotrade.sim.exchange.VirtualExchange`(LiveWeeklyCheck.java:3, 21). 순수 Java 경계 그대로. `AUCTION_PRINT_GRACE`를 package-private에서 public으로 연 것(VirtualExchange.java:98)은 sim 모듈 안의 다른 패키지(sim.live)가 읽기 위한 것이고 ArchUnit 통과 |
+| B3 | 통과 | 앞 검토와 같음. 새 `OpeningPrints`는 package-private(LiveWeeklyCheck.java:155). 공개된 상수는 불변 `Duration`이고 값 변경 없음. 설정 키·스키마·REST 변경 없음 |
+| B4 | 통과 | `OpeningPrints.isOpeningPrint`(LiveWeeklyCheck.java:164-190)를 `VirtualExchange.phase`(VirtualExchange.java:220-263)와 줄 단위로 대조: CLOSED는 시가 판정 대상 아님, 단일가 접수 구간 체결 이벤트는 "그날 첫 정규장 이벤트"에서 제외, 이미 열린 종목 제외, 첫 이벤트가 개장 뒤 60초 이상이면 열린 것으로(장중 시작), 접속 구간 첫 체결이 시가 단일가 체결, 공백이 먼저 오면 열린 것, 호가는 접수로 보고 열지 않음 — 모두 같다. 거래일 단위는 VE가 `Map<Symbol, LocalDate>`, 주간 점검은 `compareDay` 호출(하루)마다 새 인스턴스(LiveWeeklyCheck.java:389)라 같은 뜻. HashSet은 멤버십만 쓰고 순회 없음. `now()`·난수 없음. 가상 거래소 동작 변경은 접근 제한자뿐이라 골든 테스트 포함 전체 통과 |
+| B5 | 해당 없음 | 금액 계산 변경 없음 |
+| B6 | 통과 | 새 시험이 장전 시간외 체결(08:35) 무시, 개장 직후 첫 체결 = 시가 단일가, 두 번째 체결은 접속 매매, 장중 시작(10:00 첫 이벤트) 종목은 시가 단일가 없음을 고정. 앞 커밋의 시험(`midpointTradeTicksAreCountedPerSymbolFromTheJournal`, `midpointTicksOutsideContinuousTradingAreCountedApart`)은 그대로 통과. 지우거나 끈 시험 없음. 다만 "공백이 먼저 오면 열린 것"과 "개장 뒤 호가가 먼저 오면 접수로 보고 다음 체결을 시가로" 두 갈래는 시험이 없다 → 아래 R1 |
+| B7 | 해당 없음 | `VirtualExchange`는 가상 거래소(sim)이고 바뀐 것은 접근 제한자 하나. 실전 주문 경로·RealTradingGuard·블랙리스트·리스크 한도·장애 대응·보호 테스트 미변경 |
+| B8 | 통과 | diff에 비밀값 없음. 새 주석의 `005930 218750`은 종목 코드·가격이며 계좌·키 아님 |
+
+### 앞 검토 발견의 처리
+- N1(시가 단일가 판정 단순화): 해소. 위 B4 대조대로 가상 거래소와 같은 규칙이 됐고, 판정에 boards·plan 안의 모든 이벤트(호가·공백 포함)를 넣는다(LiveWeeklyCheck.java:399).
+- N2(`BOOK_V6_FIRST_DAY` 근거): 해소. 주석에 `[가정]`과 근거(사용자 PC stopReason), 근거가 없는 부분(재기동 시각·커밋), 다른 PC에서의 영향(경고 문구만)을 적었다.
+
+### 점검표 밖 발견
+- R1(권고, 차단 아님): `OpeningPrints`의 공백 갈래와 "호가 먼저" 갈래에 단위 시험을 더하면 가상 거래소 규칙과의 일치가 시험으로 고정된다.
+- R2(권고, 차단 아님): 같은 규칙이 `VirtualExchange.phase`와 `LiveWeeklyCheck.OpeningPrints` 두 곳에 있다. 한쪽만 바뀌면 다시 갈린다. 다음에 sim-engine이 시가 판정을 한 곳(예: `sim.exchange`의 작은 판정기)으로 빼고 둘 다 그것을 쓰게 하기를 권한다. 지금은 주석이 서로를 가리키고 값(유예 시간)을 공유하므로 막지 않는다.
+
+## 판정
+승인
