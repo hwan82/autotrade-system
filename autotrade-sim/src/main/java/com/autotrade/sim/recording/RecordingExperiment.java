@@ -14,7 +14,9 @@ import com.autotrade.risk.BlacklistEntry;
 import com.autotrade.risk.BlacklistSnapshot;
 import com.autotrade.risk.BlacklistType;
 import com.autotrade.risk.RiskChain;
+import com.autotrade.selection.calc.Metric;
 import com.autotrade.selection.calc.SelectionCalculator;
+import com.autotrade.selection.calc.SelectionCriteria;
 import com.autotrade.selection.profile.Combination;
 import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.selection.profile.SelectionRefresh;
@@ -269,7 +271,7 @@ public final class RecordingExperiment {
             String daily = sel.daily().orElseThrow();
             SnapshotHeap.requireFits(SnapshotHeap.dailyBarRows(snapshotsRoot, daily), Runtime.getRuntime().maxMemory(), daily);
             SnapshotInputs in = SnapshotInputs.load(plan.market(), sel.daily().orElseThrow(), sel.financials(),
-                    snapshotsRoot, calendar, gate, log, (first, last) -> { });
+                    sel.disclosures(), snapshotsRoot, calendar, gate, log, (first, last) -> { });
             Path dir;
             try {
                 dir = Files.createTempDirectory("autotrade-recording-selections-");
@@ -347,8 +349,15 @@ public final class RecordingExperiment {
             factory.validate(p);
             out.add(Combination.of(s, p));
         }
-        selections.requireInputs(loaded.values().stream().anyMatch(s -> s.refresh() == SelectionRefresh.PRE_OPEN_DAILY));
+        selections.requireInputs(loaded.values().stream().anyMatch(s -> s.refresh() == SelectionRefresh.PRE_OPEN_DAILY),
+                loaded.values().stream().anyMatch(RecordingExperiment::usesDisclosures));
         return out;
+    }
+
+    /** 장전 선정이 공시 지표 조건을 쓰는지(ADR-014 6장, {@code SelectionEdgeStudy}의 일치 검사와 같은 판단). */
+    static boolean usesDisclosures(SelectionProfile s) {
+        return s.refresh() == SelectionRefresh.PRE_OPEN_DAILY
+                && SelectionCriteria.parse(s).inputKinds().contains(Metric.Kind.DISCLOSURE);
     }
 
     /** 조합들의 장전 선정 프로필(선정 해시마다 하나, 해시순). 장중 순위 선정은 고정 파일을 쓰지 않으므로 뺀다(D-127). */
@@ -527,6 +536,8 @@ public final class RecordingExperiment {
         sb.append("selection-input:\n");
         sb.append("  daily: \"").append(sel.daily().orElse("")).append("\"\n");
         sb.append("  financials: \"").append(sel.financials().orElse("")).append("\"\n");
+        // 공시 입력이 없는 등록은 줄을 쓰지 않는다(결과 파일이 F9 전과 바이트로 같음, ADR-014 2장 ⑤)
+        sel.disclosures().ifPresent(d -> sb.append("  disclosures: \"").append(d).append("\"\n"));
         sb.append("selection-days:\n");
         for (SessionSelections.Applied a : applied) {
             for (SessionSelections.Item it : a.items()) {

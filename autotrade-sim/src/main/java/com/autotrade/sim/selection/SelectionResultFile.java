@@ -96,12 +96,16 @@ public final class SelectionResultFile {
         JsonNode fin = in.get("financials");
         boolean hasShares = shares != null && !shares.isNull();
         boolean hasFin = fin != null && !fin.isNull();
+        JsonNode dis = in.get("disclosures"); // 공시 조건이 있는 선정만(D-123). 없으면 키가 없다
+        boolean hasDis = dis != null && !dis.isNull();
         SelectionResult.Inputs inputs = new SelectionResult.Inputs(text(bars, "snapshot_id"), text(bars, "sha256"),
                 date(bars, "last_trading_date"),
                 hasShares ? text(shares, "snapshot_id") : null, hasShares ? date(shares, "as_of_date") : null,
                 hasFin ? text(fin, "snapshot_id") : null, hasFin ? nullableText(fin, "sha256") : null,
                 hasFin ? nullableText(fin, "last_collected_at") : null,
-                text(object(in, "calendar"), "sources_digest"));
+                text(object(in, "calendar"), "sources_digest"),
+                hasDis ? text(dis, "snapshot_id") : null, hasDis ? text(dis, "sha256") : null,
+                hasDis ? date(dis, "covered_through") : null);
         List<SelectionResult.Selected> selected = new ArrayList<>();
         for (JsonNode s : array(root, "selected")) {
             selected.add(new SelectionResult.Selected(text(s, "code"), intOf(s, "rank")));

@@ -55,6 +55,7 @@
      # 종료 코드 0 준비됨, 2 못 만든 선정 있음(출력에 사유), 4 장 시간 보호·정지 요청
      ```
 
+   - 공시 조건 선정(예 (라) `kr-intraday-news@1`)이 있는 등록은 `selection-input.disclosures: "latest"`도 적는다([ADR-014](../adr/ADR-014-live02-judgement-roles-precheck.md) 6장). 준비 작업은 마지막 수집 시각이 가장 늦은 공시 스냅샷(`snapshots/dart-disclosures/`)을 쓰므로, T 00:00 ~ 08:00 공시 수집(D-123)이 끝난 뒤 "선정 다시 준비"를 누른다. 공시 스냅샷이 T 전날까지를 담지 않았거나 없으면 그 조합은 `STALE_INPUT`(신규 진입 0건)이고, 새 공시 스냅샷이 생기면 다시 계산한다. 공시 조건 선정이 없는데 `disclosures`를 적거나, 있는데 빼면 세션을 열 때 거절된다.
    - 선정 결과와 적용 기록은 `live-sessions/<ID>/selections/<날짜>/`에 쌓인다. 리플레이 확인이 이 파일을 읽으니 지우지 않는다.
 
 7. **장중 순위 선정 계좌가 있는 등록(`refresh: INTRADAY_AT`, [D-127](../decisions/D-127-intraday-at-selection.md))만**: 준비 작업도 `selection-input`도 없다. 그날 `at`(예 09:30) 전에 받은 boards 체결로 실험실이 순위를 매긴다.

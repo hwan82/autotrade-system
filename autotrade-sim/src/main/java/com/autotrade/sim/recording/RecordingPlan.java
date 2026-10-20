@@ -44,6 +44,7 @@ import java.util.regex.Pattern;
  *   - "kr-intraday-hot@1 x kr-volume-surge@1"
  * selection-input:               # selections가 있으면 필수. 녹화 실험은 스냅샷 ID로 고정(latest 거부)
  *   daily: "krx-daily-2026-10-30-1a2b3c4d"
+ *   disclosures: "dart-disclosures-2026-10-30-1a2b3c4d"  # 공시 조건 장전 선정이 있을 때만(ADR-014 F9)
  * </pre>
  *
  * <p>선정 조합 계좌는 녹화일마다 그날 선정 결과 ∩ {@code boards}에만 신규 진입한다({@link RegisteredSelections},
