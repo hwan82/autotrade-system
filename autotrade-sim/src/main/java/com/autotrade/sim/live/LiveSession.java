@@ -22,7 +22,10 @@ import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.RunStepper;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.SelectionDay;
+import com.autotrade.sim.selection.SelectionDays;
 import com.autotrade.sim.selection.SelectionSchedule;
+import com.autotrade.sim.selection.SessionSelections;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
@@ -38,6 +41,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -58,6 +62,12 @@ import java.util.function.Consumer;
  * (RECORDER_RESTART)으로 남는다. 다음 날로 넘어가 이어 받으면 새 날 첫 줄 앞에 앞 날 마지막 수신 시각부터의 공백이 남는다.
  *
  * <p><b>받지 않는 이벤트</b>: 등록 파일 boards에 없는 종목, 운용 기간(거래일과 수신 날짜 모두) 밖. 기록에도 쓰지 않고 건수만 센다.
+ *
+ * <p><b>선정 조합 계좌</b>(D-122, ADR-012 3.5·3.6). 등록 파일에 {@code selections}가 있으면 거래일이 바뀌는 첫 이벤트를 기록에 쓰기
+ * <b>전에</b> 그날 적용 기록({@link SessionSelections#apply})을 쓴다. 계산하지 않고 준비 작업이 미리 놓은 결과 파일을 읽기만 한다.
+ * 계좌는 그 적용 기록에서 나온 판정({@link SelectionDays})으로 신규 진입을 거른다. 리플레이 확인도 같은 적용 기록을 읽으므로 같은
+ * 결과가 나온다. 적용 기록을 쓰지 못하면 그 이벤트를 기록하지 않고 세션을 멈춘다. 되살릴 때는 기록일마다 적용 기록과 결과 파일이
+ * 맞는지 먼저 보고, 맞지 않으면 세션을 열지 않는다(architect PR #191 N3).
  *
  * <p>계좌 하나가 예외로 실패하면 그 계좌만 멈추고 나머지는 계속한다(계좌 격리). 기록 쓰기가 실패하면 세션 전체가 멈춘다(그 뒤로는
  * 리플레이와 같은 결과를 보장할 수 없으므로). 세션 폴더당 한 프로세스만 연다({@value #LOCK_FILE} 파일 잠금).
@@ -86,6 +96,11 @@ public final class LiveSession implements AutoCloseable {
     private final List<RunStepper> runs = new ArrayList<>();
     private final RunReport[] failed;
     private final List<DataGap> gaps = new ArrayList<>();
+    /** 선정 조합 계좌의 고정 파일·적용 기록. 선정 계좌가 없으면 null(지금까지와 같은 경로). */
+    private final SessionSelections selections;
+    private final LiveSelectionDays selectionDays;
+    /** 적용 기록을 쓴(또는 읽은) 마지막 거래일. */
+    private LocalDate appliedDay;
     private boolean begun;
     private long position;
     private long restored;
@@ -109,9 +124,12 @@ public final class LiveSession implements AutoCloseable {
         if (spec.combinations().size() > SimulationExperimentRunner.MAX_COMBINATIONS) {
             throw new IllegalArgumentException("조합 수가 실험실 상한을 넘습니다(SIM-14): " + spec.combinations().size());
         }
+        this.selections = setup.hasSelections() ? setup.selectionFiles(sessionDir) : null;
+        this.selectionDays = selections == null ? null : new LiveSelectionDays(spec, selections);
+        SelectionDays days = selectionDays == null ? SelectionSchedule.empty() : selectionDays;
         for (int i = 0; i < spec.combinations().size(); i++) {
             runs.add(new RunStepper(spec, i, setup.rules(), setup.cost(), setup.execution(), setup.factory(),
-                    setup.risk(), true, SelectionSchedule.empty()));
+                    setup.risk(), true, days));
         }
         this.failed = new RunReport[runs.size()];
         this.journal = new JournalWriter(layout, setup.plan().market(), setup.rules().zone(), Map.of(
@@ -193,6 +211,12 @@ public final class LiveSession implements AutoCloseable {
         }
         long offset = 0;
         Path lastWithLines = null;
+        if (selections != null) {
+            // 적용 기록이 가리키는 결과 파일이 없거나 바뀌었으면 열지 않는다(리플레이 확인과 같은 기준, architect PR #191 N3)
+            for (SessionSelections.Applied a : LiveReplayCheck.verifiedSelections(setup, sessionDir, log)) {
+                appliedDay = a.date();
+            }
+        }
         for (Path day : days) {
             beforeEachDay.run();
             long dayOffset = offset;
@@ -265,6 +289,20 @@ public final class LiveSession implements AutoCloseable {
                     + offTick.get().toPlainString() + ". ETF·ETN 같은 주식 밖 종목은 아직 받지 않으니 boards에서 빼고 새 실험 ID로 "
                     + "등록하세요(기록에는 쓰지 않음)";
             return Accepted.STOPPED;
+        }
+        if (selections != null) {
+            LocalDate d = setup.rules().tradingDate(event.exchangeTime());
+            if (!d.equals(appliedDay)) {
+                // 그날 첫 이벤트를 기록에 쓰기 전에 적용 기록을 쓴다. 계산하지 않고 준비 작업이 놓은 파일만 읽는다(ADR-012 3.5)
+                try {
+                    selections.apply(d);
+                } catch (RuntimeException e) {
+                    stopReason = "선정 적용 기록을 쓰지 못해 세션을 멈췄습니다(" + e.getClass().getSimpleName()
+                            + "). 원인을 고친 뒤 다시 시작하면 기록으로 계좌를 되살립니다(이 이벤트는 기록하지 않음)";
+                    return Accepted.STOPPED;
+                }
+                appliedDay = d;
+            }
         }
         List<MarketEvent> written;
         try {
@@ -348,9 +386,21 @@ public final class LiveSession implements AutoCloseable {
             progress.add(runs.get(i).progress());
             failures.add(failed[i] == null ? "" : failed[i].summary().failureReason());
         }
+        SessionSelections.Applied today = selections == null || appliedDay == null ? null
+                : selections.appliedQuietly(appliedDay).orElse(null);
         return new Status(setup.plan().id().value(), setup.plan().from(), setup.plan().to(), position, restored,
                 skippedSymbol, skippedRange, gaps.size(), lastEventAt, journal.currentDate(), stopReason, closed,
-                progress, failures);
+                progress, failures, today);
+    }
+
+    /** 선정 조합 계좌가 있는 세션인지. */
+    public boolean hasSelections() {
+        return selections != null;
+    }
+
+    /** 그날 적용 기록(화면용). 선정 계좌가 없거나 적용 기록이 없으면 빈 값. */
+    public synchronized Optional<SessionSelections.Applied> appliedSelections(LocalDate date) {
+        return selections == null ? Optional.empty() : selections.appliedQuietly(date);
     }
 
     /**
@@ -396,10 +446,12 @@ public final class LiveSession implements AutoCloseable {
      * @param events 계좌에 준 이벤트 수(기록 줄 수, 되살린 것 포함)
      * @param restored 시작 때 기록으로 되살린 이벤트 수
      * @param failures 계좌마다 실패 이유(정상이면 빈 문자열)
+     * @param selections 선정 조합 계좌가 있으면 마지막으로 적용한 거래일의 적용 기록(D-122). 없으면 null
      */
     public record Status(String experimentId, LocalDate from, LocalDate to, long events, long restored,
             long skippedSymbol, long skippedRange, int dataGaps, Instant lastEventAt, LocalDate journalDate,
-            String stopReason, boolean closed, List<RunStepper.Progress> runs, List<String> failures) {
+            String stopReason, boolean closed, List<RunStepper.Progress> runs, List<String> failures,
+            SessionSelections.Applied selections) {
         public Status {
             runs = List.copyOf(runs);
             failures = List.copyOf(failures);
@@ -479,6 +531,28 @@ public final class LiveSession implements AutoCloseable {
     /** 계좌에 준 마지막 이벤트의 순번(기록 전체 위치). */
     long position() {
         return position;
+    }
+
+    /**
+     * 실시간 계좌가 묻는 선정 판정 표. 거래일마다 처음 물을 때 그날 적용 기록으로 판정을 만든다(리플레이 실행기와 같은
+     * {@link SelectionSchedule#compute} 하루치, 같은 공급자). 적용 기록이 없는 날은 {@code MISSING}이다(리플레이도 같음).
+     * 세션 처리 스레드에서만 쓴다.
+     */
+    private static final class LiveSelectionDays implements SelectionDays {
+        private final ExperimentSpec spec;
+        private final SessionSelections files;
+        private final Map<LocalDate, SelectionSchedule> byDay = new HashMap<>();
+
+        LiveSelectionDays(ExperimentSpec spec, SessionSelections files) {
+            this.spec = spec;
+            this.files = files;
+        }
+
+        @Override
+        public SelectionDay day(String selectionHash, LocalDate date) {
+            return byDay.computeIfAbsent(date, d -> SelectionSchedule.compute(spec.combinations(), List.of(d),
+                    files.source())).day(selectionHash, date);
+        }
     }
 
     private static void closeQuietly(FileChannel ch) {

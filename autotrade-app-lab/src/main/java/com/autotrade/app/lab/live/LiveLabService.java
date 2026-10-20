@@ -4,13 +4,16 @@ import com.autotrade.domain.market.DataGap;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.ConnectionState;
+import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.marketdata.feed.FeedClient;
 import com.autotrade.sim.live.LivePlan;
+import com.autotrade.sim.live.LiveSelectionPrep;
 import com.autotrade.sim.live.LiveSession;
 import com.autotrade.sim.recording.RecordingPlan;
 import com.autotrade.sim.run.CodeVersion;
 import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.SelectionResultFile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -48,12 +51,20 @@ import org.slf4j.LoggerFactory;
  *   <li>입력 기록으로 계좌를 되살리는 일은 요청 스레드가 아니라 가장 낮은 우선순위의 별도 스레드에서 기록일 하나씩 하고, 날마다 정지
  *       요청과 디스크를 본다(risk-ops PR #87 R2). 그동안 상태는 {@code restoring}이고 게이트웨이 연결은 아직 열지 않는다.</li>
  *   <li>세션은 한 번에 하나다. 실험실이 다시 뜨면 자동으로 다시 시작하지 않는다(다시 시작하면 입력 기록으로 계좌를 되살린다).</li>
+ *   <li><b>선정 준비</b>(D-122, ADR-012 3.5). 등록 파일에 {@code selections}가 있으면 세션이 연결된 뒤 가장 낮은 우선순위의 준비
+ *       스레드가 장 밖 창({@link LiveSelectionPrep#QUIET_FROM} ~ 다음 날 {@link LiveSelectionPrep#QUIET_TO})에서
+ *       {@value #PREPARE_INTERVAL_MINUTES}분마다, 또 화면의 "지금 준비"로 다음 거래일 선정 결과 고정 파일을 만든다. 정지 요청·디스크
+ *       관문을 스냅샷을 읽기 전과 선정 하나마다 본다(architect PR #191 N2). 일봉 스냅샷이 실험실 힙에 비해 크면 읽지 않고 준비 실행
+ *       명령({@code runLiveSelectionPrepare})을 쓰라고 남긴다. 이벤트 처리 스레드는 계산하지 않고 그날 첫 이벤트에서 고정 파일만
+ *       읽는다.</li>
  * </ul>
  */
 public class LiveLabService implements AutoCloseable {
 
     /** 감시가 만드는 정지 요청 파일(실험 실행 명령과 같은 위치, D-058·D-063). */
     public static final String STOP_REQUEST = "experiment-state/stop-request";
+    /** 설정 폴더 안 수집 스냅샷 폴더(세션 폴더 {@code live-sessions}와 같은 부모, ADR-008 2.4). */
+    static final String SNAPSHOTS_DIR = "snapshots";
     public static final int INBOX_CAPACITY = 100_000;
     /** 입력 기록 디스크 여유 기본 하한(수집기 {@code --min-free-gb} 기본값과 같음, ADR-008 2.7). */
     public static final long DEFAULT_MIN_FREE_GB = 20;
@@ -61,6 +72,13 @@ public class LiveLabService implements AutoCloseable {
     /** 등록 파일의 {@code input: live} 줄(따옴표 있든 없든). 형식 검사는 {@link LivePlan#parse}가 한다. */
     private static final Pattern LIVE_INPUT = Pattern.compile("input:\\s*[\"']?" + LivePlan.INPUT + "[\"']?\\s*(#.*)?");
     private static final Logger log = LoggerFactory.getLogger(LiveLabService.class);
+    /** 준비 스레드가 장 밖 창에서 다시 보는 간격(분). */
+    public static final int PREPARE_INTERVAL_MINUTES = 5;
+    /**
+     * 일봉 한 행을 읽는 데 드는 힙 추정(바이트) `[가정]`. 워크포워드가 전체 KRX 스냅샷에 8g를 쓰는 데서 넉넉히 잡았다. 행 수 × 이 값이
+     * 실험실 최대 힙의 절반을 넘으면 실험실에서 읽지 않는다(세션이 쓸 힙을 남긴다).
+     */
+    static final long HEAP_BYTES_PER_DAILY_ROW = 1024;
 
     /** 디스크 여유 바이트. 테스트는 고정값을 넣는다. */
     @FunctionalInterface
@@ -169,7 +187,8 @@ public class LiveLabService implements AutoCloseable {
         lastStopKind = StopKind.NONE;
         r.starter = Thread.ofPlatform().name("live-restore").daemon(true).priority(Thread.MIN_PRIORITY)
                 .start(() -> openAndConnect(r));
-        log.info("실시간 모의 세션 시작 요청: {} (계좌 {}개, 입력 기록 되살리는 중)", id, plan.profiles().size());
+        log.info("실시간 모의 세션 시작 요청: {} (계좌 {}개, 입력 기록 되살리는 중)", id,
+                plan.profiles().size() + plan.selections().entries().size());
         return status();
     }
 
@@ -210,6 +229,11 @@ public class LiveLabService implements AutoCloseable {
             r.pump = Thread.ofPlatform().name("live-pump").daemon(true).priority(Thread.MIN_PRIORITY).unstarted(r::pump);
             r.pump.start();
             r.client.start();
+            if (LiveSelectionPrep.hasSelections(r.plan)) {
+                r.prep = Thread.ofPlatform().name("live-selection-prep").daemon(true).priority(Thread.MIN_PRIORITY)
+                        .unstarted(r::prepareLoop);
+                r.prep.start();
+            }
             // 되살리기에 걸린 시간: 6단계 주간 점검이 재기동한 날 적는 값(절차서 stage-6-live-session.md). 앞 날 기록을 한 번 더
             // 읽는 비용(architect PR #94 R2)을 고칠지 이 값으로 판단한다
             log.info("실시간 모의 세션 연결: {} (되살린 이벤트 {}, 되살리기 {}초)", r.plan.id(), session.status().restored(),
@@ -303,19 +327,47 @@ public class LiveLabService implements AutoCloseable {
     public synchronized View status() {
         if (running == null) {
             return new View("", "", List.of(), false, Optional.empty(), ConnectionState.CLOSED, "", 0, 0, 0,
-                    lastStopReason, lastStopKind);
+                    lastStopReason, lastStopKind, Optional.empty());
         }
         Running r = running;
         String market = r.plan.market().name();
-        List<String> profiles = r.plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList();
+        List<String> profiles = accounts(r.plan);
         if (r.session == null) {
             return new View(r.plan.id().value(), market, profiles, true, Optional.empty(), ConnectionState.NEW, "", 0, 0,
-                    0, "", StopKind.NONE);
+                    0, "", StopKind.NONE, Optional.ofNullable(r.lastPrep));
         }
         String reason = r.session.status().stopReason();
         return new View(r.plan.id().value(), market, profiles, false, Optional.of(r.session.status()), r.client.state(),
                 r.client.lastError(), r.client.reconnectCount(), r.inbox.size(), r.inboxDropped.get(), reason,
-                reason.isEmpty() ? StopKind.NONE : StopKind.PROBLEM);
+                reason.isEmpty() ? StopKind.NONE : StopKind.PROBLEM, Optional.ofNullable(r.lastPrep));
+    }
+
+    /**
+     * 화면의 "지금 준비": 준비 스레드를 깨워 장 밖 창이 아니어도 다음 거래일 준비를 한 번 한다(이벤트 처리와 별도 스레드).
+     *
+     * @throws IllegalStateException 돌고 있는 세션이 없거나 되살리는 중이거나 선정 조합 계좌가 없을 때
+     */
+    public synchronized void prepareNow() {
+        if (running == null || running.session == null) {
+            throw new IllegalStateException("연결된 실시간 모의 세션이 없습니다");
+        }
+        if (running.prep == null) {
+            throw new IllegalStateException("이 세션에는 선정 조합 계좌(selections)가 없습니다");
+        }
+        running.prepRequested = true;
+        java.util.concurrent.locks.LockSupport.unpark(running.prep);
+    }
+
+    /** 계좌 순서대로 이름: profiles 계좌 뒤에 선정 조합 계좌({@code 선정@버전 x 전략@버전}, D-122). */
+    static List<String> accounts(LivePlan plan) {
+        List<String> out = new ArrayList<>(plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList());
+        plan.selections().entries().forEach(e -> out.add(e.text()));
+        return List.copyOf(out);
+    }
+
+    /** 일봉 행 수를 이 실험실 힙으로 읽어도 되는지(최대 힙의 절반 안). */
+    static boolean heapFits(long dailyRows, long maxHeapBytes) {
+        return dailyRows <= maxHeapBytes / 2 / HEAP_BYTES_PER_DAILY_ROW;
     }
 
     /**
@@ -340,10 +392,12 @@ public class LiveLabService implements AutoCloseable {
      * @param inboxDropped 받는 큐가 차서 버린 수(공백으로 남음)
      * @param stopReason 마지막 멈춘 이유(감시 정지 요청, 디스크 부족, 기록 실패, 시작 실패 등)
      * @param stopKind {@code stopReason}의 종류. 세션이 도는 중에는 세션이 스스로 멈췄을 때만 {@link StopKind#PROBLEM}
+     * @param prepare 선정 조합 계좌가 있으면 마지막 선정 준비 결과(D-122). 아직 준비하지 않았으면 비어 있다
      */
     public record View(String experimentId, String market, List<String> profiles, boolean restoring,
             Optional<LiveSession.Status> session, ConnectionState feedState, String feedError, long feedReconnects,
-            int inboxQueued, long inboxDropped, String stopReason, StopKind stopKind) {
+            int inboxQueued, long inboxDropped, String stopReason, StopKind stopKind,
+            Optional<LiveSelectionPrep.Report> prepare) {
         public View {
             profiles = List.copyOf(profiles);
         }
@@ -430,7 +484,7 @@ public class LiveLabService implements AutoCloseable {
                 LivePlan plan = LivePlan.parse(yaml, "experiments/" + id + "/experiment.yaml");
                 String error = plan.id().value().equals(id) ? null : "폴더 이름과 실험 ID가 다릅니다";
                 out.add(new Registration(id, plan.question(), plan.from() + " ~ " + plan.to(),
-                        plan.profiles().stream().map(RecordingPlan.ProfileRef::text).toList(), plan.boards().size(),
+                        accounts(plan), plan.boards().size(),
                         journal, finished, error));
             } catch (RuntimeException e) {
                 out.add(new Registration(id, null, null, List.of(), 0, journal, finished,
@@ -502,6 +556,10 @@ public class LiveLabService implements AutoCloseable {
         private LiveSession session;
         private FeedClient client;
         private Thread pump;
+        /** 선정 준비 스레드(선정 조합 계좌가 있을 때만). */
+        private Thread prep;
+        private volatile boolean prepRequested;
+        private volatile LiveSelectionPrep.Report lastPrep;
         private volatile boolean halted;
         private volatile boolean cancelled;
         /** 되살리기 정지 점검이 세션 열기를 멈춘 사유(되살리기 스레드만 쓰고 읽음). */
@@ -557,6 +615,42 @@ public class LiveLabService implements AutoCloseable {
             }
         }
 
+        /**
+         * 준비 스레드: 장 밖 창이거나 화면이 요청했을 때 다음 거래일 선정 결과를 준비한다. 정지 요청·디스크 부족이면 건너뛴다.
+         * 실패는 사유로만 남기고 세션은 멈추지 않는다(그날 결과가 없으면 선정 계좌만 {@code SELECTION_MISSING}).
+         */
+        void prepareLoop() {
+            ExchangeCalendar calendar = ExchangeCalendar.bundled(plan.market());
+            while (!halted) {
+                Instant now = clock.instant();
+                boolean asked = prepRequested;
+                prepRequested = false;
+                if (asked || LiveSelectionPrep.inQuietHours(calendar, now)) {
+                    prepareOnce(calendar, now);
+                }
+                java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MINUTES.toNanos(PREPARE_INTERVAL_MINUTES));
+            }
+        }
+
+        private void prepareOnce(ExchangeCalendar calendar, Instant now) {
+            try {
+                if (stopReason().isPresent()) {
+                    return;
+                }
+                java.time.LocalDate date = LiveSelectionPrep.targetDate(calendar, now);
+                if (date.isBefore(plan.from()) || date.isAfter(plan.to())) {
+                    return;
+                }
+                long maxHeap = Runtime.getRuntime().maxMemory();
+                lastPrep = LiveSelectionPrep.prepare(plan, repoRoot, sessionsRoot, sessionsRoot.getParent()
+                        .resolve(SNAPSHOTS_DIR), date, new SelectionResultFile.Producer(code.commit(), code.dirty(), now),
+                        LiveLabService.this::stopReason, rows -> heapFits(rows, maxHeap), m -> log.info("실시간 모의: {}", m));
+            } catch (RuntimeException e) {
+                // 정지 관문으로 멈춘 경우도 여기로 온다. 다음 차례에 다시 본다. 메시지에 경로가 있을 수 있어 로그에만
+                log.warn("선정 준비를 하지 못했습니다: {} ({}: {})", plan.id(), e.getClass().getSimpleName(), e.getMessage());
+            }
+        }
+
         private void stopFromPump(String reason) {
             Thread.ofPlatform().daemon(true).start(() -> {
                 synchronized (LiveLabService.this) {
@@ -571,6 +665,9 @@ public class LiveLabService implements AutoCloseable {
         void halt() {
             halted = true;
             cancelled = true;
+            if (prep != null) {
+                java.util.concurrent.locks.LockSupport.unpark(prep);
+            }
             if (client != null) {
                 client.close();
             }

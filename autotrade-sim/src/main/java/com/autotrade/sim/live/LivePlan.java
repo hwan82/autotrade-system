@@ -5,6 +5,7 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.sim.ExperimentId;
 import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.recording.RecordingPlan;
+import com.autotrade.sim.recording.RegisteredSelections;
 import com.autotrade.sim.run.RegistrationYaml;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -41,9 +42,14 @@ import java.util.regex.Pattern;
  *   - "005930 KOSPI"
  * blacklist:                     # 선택. 세션 시작 시점 제외 종목(RSK-12)
  *   - "000660"
+ * selections:                    # 선택(D-122). 선정 x 전략 조합 계좌. profiles 계좌 뒤에 번호를 매긴다
+ *   - "kr-intraday-hot@1 x kr-volume-surge@1"
+ * selection-input:               # selections가 있으면 필수
+ *   daily: "latest"              # 준비 시점에 기준 데이터일을 덮는 가장 최근 일봉 스냅샷(스냅샷 ID도 됨)
  * </pre>
  *
- * <p>선정 프로필은 받지 않는다(녹화 실험과 같음, 후속). 지금은 국내(KRX)만 받는다.
+ * <p>선정 조합 계좌는 거래일마다 준비 작업이 미리 만든 그날 선정 결과 ∩ {@code boards}에만 신규 진입한다(ADR-012 3.5,
+ * {@link com.autotrade.sim.selection.SessionSelections}). 지금은 국내(KRX)만 받는다.
  */
 public record LivePlan(
         ExperimentId id,
@@ -56,14 +62,17 @@ public record LivePlan(
         Optional<String> benchmark,
         List<RecordingPlan.ProfileRef> profiles,
         Map<String, KrxBoard> boards,
-        List<String> blacklist) {
+        List<String> blacklist,
+        RegisteredSelections selections) {
 
     /** 등록 파일의 {@code input} 값. */
     public static final String INPUT = "live";
 
     private static final Set<String> SCALARS = Set.of("id", "question", "input", "market", "from", "to", "seed",
             "seed-capital", "benchmark");
-    private static final Set<String> LISTS = Set.of("profiles", "boards", "blacklist");
+    private static final Set<String> LISTS = Set.of("profiles", "boards", "blacklist", RegisteredSelections.LIST_KEY);
+    private static final Map<String, Set<String>> MAPS =
+            Map.of(RegisteredSelections.INPUT_KEY, RegisteredSelections.INPUT_SUBKEYS);
     private static final Pattern REF = Pattern.compile("([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)");
     private static final Pattern CODE = Pattern.compile("[0-9A-Z]{6}");
     private static final Pattern BOARD = Pattern.compile("([0-9A-Z]{6}) ([A-Z]+)");
@@ -77,14 +86,15 @@ public record LivePlan(
         profiles = List.copyOf(profiles);
         boards = java.util.Collections.unmodifiableSortedMap(new TreeMap<>(boards));
         blacklist = List.copyOf(blacklist);
+        Objects.requireNonNull(selections, "selections");
         if (market != Market.KRX) {
             throw new IllegalArgumentException("실시간 모의는 지금 국내(KRX)만 지원합니다: " + market);
         }
         if (to.isBefore(from)) {
             throw new IllegalArgumentException("종료일이 시작일보다 앞섭니다: " + from + " ~ " + to);
         }
-        if (profiles.isEmpty()) {
-            throw new IllegalArgumentException("프로필이 하나 이상 필요합니다");
+        if (profiles.isEmpty() && selections.isEmpty()) {
+            throw new IllegalArgumentException("프로필(profiles)이나 선정 조합(selections)이 하나 이상 필요합니다");
         }
         if (boards.isEmpty()) {
             throw new IllegalArgumentException("boards에 받을 종목이 하나 이상 필요합니다");
@@ -99,7 +109,7 @@ public record LivePlan(
      * @throws IllegalArgumentException 형식이 틀렸거나 필수 키가 없을 때
      */
     public static LivePlan parse(String text, String source) {
-        RegistrationYaml raw = RegistrationYaml.parse(text, source, SCALARS, LISTS);
+        RegistrationYaml raw = RegistrationYaml.parse(text, source, SCALARS, LISTS, MAPS);
         try {
             return build(raw);
         } catch (IllegalArgumentException | DateTimeParseException e) {
@@ -149,7 +159,15 @@ public record LivePlan(
         return new LivePlan(new ExperimentId(y.required("id")), y.required("question"), market,
                 LocalDate.parse(y.required("from")), LocalDate.parse(y.required("to")), Long.parseLong(y.required("seed")),
                 Money.of(Long.parseLong(y.required("seed-capital")), market.currency()), benchmark, profiles, boards,
-                List.copyOf(black));
+                List.copyOf(black), RegisteredSelections.read(y, true));
+    }
+
+    /** 선정 조합 계좌가 없는 등록(D-122 전 모양). */
+    public LivePlan(ExperimentId id, String question, Market market, LocalDate from, LocalDate to, long seed,
+            Money seedCapital, Optional<String> benchmark, List<RecordingPlan.ProfileRef> profiles,
+            Map<String, KrxBoard> boards, List<String> blacklist) {
+        this(id, question, market, from, to, seed, seedCapital, benchmark, profiles, boards, blacklist,
+                RegisteredSelections.NONE);
     }
 
     private static String code(String v) {

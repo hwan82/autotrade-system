@@ -1,0 +1,117 @@
+package com.autotrade.sim.recording;
+
+import com.autotrade.sim.run.RegistrationYaml;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * 녹화 실험·실시간 모의 등록 파일의 선정 조합 계좌와 선정 입력(ADR-012 3.5, D-122). 두 등록 파일이 같은 키를 쓴다.
+ *
+ * <pre>
+ * selections:                       # 선정 x 전략 조합 계좌. profiles 계좌 뒤에 이 순서로 계좌 번호를 매긴다
+ *   - "kr-intraday-hot@1 x kr-volume-surge@1"
+ * selection-input:
+ *   daily: "latest"                 # 실시간만 latest. 녹화 실험은 스냅샷 ID
+ *   financials: "latest"            # 재무 조건이 있는 선정만. 없으면 생략
+ * </pre>
+ *
+ * <p>조합은 조합 실험 등록 파일({@code CombinationPlan})과 같은 {@code "선정 x 전략"} 한 줄 모양이다(좁은 YAML 모양을 지키려고
+ * ADR-012 3.5 예시의 겹친 목록 대신 이것을 쓴다). 공시 입력({@code disclosures})은 공시 스냅샷 수집(ADR-012 배치표 3번) 전이라
+ * 아직 받지 않는다.
+ *
+ * @param entries 선정 x 전략 조합(파일 순서). 비어 있으면 선정 계좌가 없다(지금까지와 같음)
+ * @param daily 일봉 스냅샷 ID 또는 {@value #LATEST}. 선정 계좌가 있으면 필수
+ * @param financials 재무 스냅샷 ID 또는 {@value #LATEST}
+ */
+public record RegisteredSelections(List<Entry> entries, Optional<String> daily, Optional<String> financials) {
+
+    /** 실시간 모의만 받는 "준비 시점에 가장 최근 스냅샷" 표시. */
+    public static final String LATEST = "latest";
+    public static final String LIST_KEY = "selections";
+    public static final String INPUT_KEY = "selection-input";
+    /** {@code selection-input} 하위 키. {@code disclosures}는 알아보고 "아직 안 받음"으로 거절하려고 넣어 둔다. */
+    public static final Set<String> INPUT_SUBKEYS = Set.of("daily", "financials", "disclosures");
+
+    private static final Pattern ENTRY = Pattern.compile(
+            "([a-z0-9][a-z0-9-]*)@([1-9][0-9]*) x ([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)");
+    private static final Pattern SNAPSHOT = Pattern.compile("[a-z0-9][a-z0-9-]{0,127}");
+
+    /** 선정이 없는 등록 파일. */
+    public static final RegisteredSelections NONE = new RegisteredSelections(List.of(), Optional.empty(), Optional.empty());
+
+    /** 조합 하나. */
+    public record Entry(RecordingPlan.ProfileRef selection, RecordingPlan.ProfileRef strategy) {
+
+        public Entry {
+            Objects.requireNonNull(selection, "selection");
+            Objects.requireNonNull(strategy, "strategy");
+        }
+
+        public String text() {
+            return selection.text() + " x " + strategy.text();
+        }
+    }
+
+    public RegisteredSelections {
+        entries = List.copyOf(entries);
+        Objects.requireNonNull(daily, "daily");
+        Objects.requireNonNull(financials, "financials");
+        if (!entries.isEmpty() && daily.isEmpty()) {
+            throw new IllegalArgumentException("selections가 있으면 selection-input.daily(일봉 스냅샷)가 필요합니다");
+        }
+        if (entries.isEmpty() && (daily.isPresent() || financials.isPresent())) {
+            throw new IllegalArgumentException("selection-input은 selections가 있을 때만 씁니다");
+        }
+    }
+
+    public boolean isEmpty() {
+        return entries.isEmpty();
+    }
+
+    /** 등록 파일에서 읽는다. @param allowLatest 실시간 모의면 true(녹화 실험은 스냅샷 ID를 고정해야 해서 false) */
+    public static RegisteredSelections read(RegistrationYaml y, boolean allowLatest) {
+        List<Entry> entries = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String text : y.list(LIST_KEY)) {
+            Matcher m = ENTRY.matcher(text);
+            if (!m.matches()) {
+                throw new IllegalArgumentException("선정 조합은 \"선정 id@버전 x 전략 id@버전\" 형식이어야 합니다: " + text);
+            }
+            if (!seen.add(text)) {
+                throw new IllegalArgumentException("같은 선정 조합이 두 번 있습니다: " + text);
+            }
+            entries.add(new Entry(new RecordingPlan.ProfileRef(m.group(1), Integer.parseInt(m.group(2))),
+                    new RecordingPlan.ProfileRef(m.group(3), Integer.parseInt(m.group(4)))));
+        }
+        Map<String, String> input = y.map(INPUT_KEY);
+        if (input.containsKey("disclosures")) {
+            throw new IllegalArgumentException("selection-input.disclosures는 아직 받지 않습니다(공시 스냅샷 수집 뒤, ADR-012 배치표 3번)");
+        }
+        return new RegisteredSelections(entries, snapshot(input.get("daily"), "daily", allowLatest),
+                snapshot(input.get("financials"), "financials", allowLatest));
+    }
+
+    private static Optional<String> snapshot(String v, String key, boolean allowLatest) {
+        if (v == null) {
+            return Optional.empty();
+        }
+        if (v.equals(LATEST)) {
+            if (!allowLatest) {
+                throw new IllegalArgumentException("녹화 실험은 selection-input." + key + "에 latest를 쓸 수 없습니다. 스냅샷 ID를 "
+                        + "적어 입력을 고정하세요(ADR-012 3.5)");
+            }
+            return Optional.of(v);
+        }
+        if (!SNAPSHOT.matcher(v).matches()) {
+            throw new IllegalArgumentException("selection-input." + key + "가 스냅샷 ID 형식이 아닙니다: " + v);
+        }
+        return Optional.of(v);
+    }
+}

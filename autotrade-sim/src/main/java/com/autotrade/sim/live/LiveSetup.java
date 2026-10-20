@@ -10,6 +10,7 @@ import com.autotrade.risk.BlacklistSnapshot;
 import com.autotrade.risk.BlacklistType;
 import com.autotrade.risk.RiskChain;
 import com.autotrade.selection.profile.Combination;
+import com.autotrade.selection.profile.SelectionProfile;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.cost.CostModel;
@@ -17,12 +18,14 @@ import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.recording.RecordingExperiment;
 import com.autotrade.sim.recording.RecordingPlan;
+import com.autotrade.sim.selection.SessionSelections;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 실시간 모의 세션과 그 리플레이 확인이 같이 쓰는 실험 조립(시장 규칙, 비용, 전략, 블랙리스트, 체결 설정). 녹화 실험(D-069)과
@@ -38,7 +41,9 @@ record LiveSetup(
         BlacklistSnapshot blacklist,
         RiskChain risk,
         ExecutionSettings execution,
-        Symbol benchmark) {
+        Symbol benchmark,
+        ExchangeCalendar calendar,
+        List<SelectionProfile> selectionProfiles) {
 
     /** 실시간 세션 계약 데이터 버전. 리플레이 확인은 입력 기록의 녹화 데이터셋 버전을 쓴다(보고서에는 나오지 않음). */
     static final String LIVE_DATA_VERSION_PREFIX = "LIVE-";
@@ -58,13 +63,27 @@ record LiveSetup(
             factory.validate(p);
             combinations.add(Combination.of(p));
         }
+        // 선정 조합 계좌는 profiles 계좌 뒤에 등록 파일 순서로 번호를 매긴다(D-122). 선정 없는 계좌의 번호·시드는 그대로다
+        List<Combination> selected = RecordingExperiment.selectionCombinations(repoRoot, plan.selections(), factory);
+        combinations.addAll(selected);
         List<BlacklistEntry> black = plan.blacklist().stream()
                 .map(c -> new BlacklistEntry(Symbol.krx(c), BlacklistType.MANUAL, "실험 등록 파일 " + plan.id())).toList();
         BlacklistSnapshot blacklist = BlacklistSnapshot.of(black);
         RiskChain risk = RiskChain.builder(blacklist).build();
         Symbol benchmark = plan.benchmark().map(Symbol::krx).orElse(null);
         return new LiveSetup(plan, rules, cost, factory, List.copyOf(combinations), blacklist, risk,
-                ExecutionSettings.defaults(), benchmark);
+                ExecutionSettings.defaults(), benchmark, calendar, RecordingExperiment.selectionProfiles(selected));
+    }
+
+    /** 선정 조합 계좌가 있는지. */
+    boolean hasSelections() {
+        return !selectionProfiles.isEmpty();
+    }
+
+    /** 세션 폴더의 선정 고정 파일·적용 기록(D-122). */
+    SessionSelections selectionFiles(Path sessionDir) {
+        return new SessionSelections(sessionDir, selectionProfiles, plan.boards().keySet(), Set.copyOf(plan.blacklist()),
+                calendar::previousTradingDay);
     }
 
     /** @param dataVersion 실시간 세션은 {@link #LIVE_DATA_VERSION_PREFIX} + 실험 ID, 리플레이 확인은 입력 기록 데이터셋 버전 */
@@ -104,6 +123,6 @@ record LiveSetup(
     /** 녹화 실험 보고서 형식({@link RecordingExperiment#results})을 그대로 쓰기 위한 같은 내용의 녹화 등록. */
     RecordingPlan asRecordingPlan() {
         return new RecordingPlan(plan.id(), plan.question(), plan.market(), plan.from(), plan.to(), plan.seed(),
-                plan.seedCapital(), plan.benchmark(), 1, plan.profiles(), plan.boards(), plan.blacklist());
+                plan.seedCapital(), plan.benchmark(), 1, plan.profiles(), plan.boards(), plan.blacklist(), plan.selections());
     }
 }

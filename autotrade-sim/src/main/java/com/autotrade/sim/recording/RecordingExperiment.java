@@ -14,7 +14,10 @@ import com.autotrade.risk.BlacklistEntry;
 import com.autotrade.risk.BlacklistSnapshot;
 import com.autotrade.risk.BlacklistType;
 import com.autotrade.risk.RiskChain;
+import com.autotrade.selection.calc.SelectionCalculator;
 import com.autotrade.selection.profile.Combination;
+import com.autotrade.selection.profile.SelectionProfile;
+import com.autotrade.selection.profile.SelectionRefresh;
 import com.autotrade.sim.ClockMode;
 import com.autotrade.sim.ExperimentSpec;
 import com.autotrade.sim.RunResult;
@@ -31,6 +34,14 @@ import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.combo.CombinationExperiment;
+import com.autotrade.sim.combo.CombinationPlan;
+import com.autotrade.sim.combo.SnapshotInputs;
+import com.autotrade.sim.selection.SelectionCandidates;
+import com.autotrade.sim.selection.SelectionPreparer;
+import com.autotrade.sim.selection.SelectionResultFile;
+import com.autotrade.sim.selection.SelectionSource;
+import com.autotrade.sim.selection.SessionSelections;
 import com.autotrade.strategy.StrategyProfile;
 import com.autotrade.strategy.catalog.CatalogStrategyFactory;
 import com.autotrade.strategy.profile.ProfileYaml;
@@ -50,8 +61,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 /**
  * 녹화 실험(D-069): 녹화 폴더의 실녹화일들을 {@link RecordedMarketDataSet}으로 읽어 장중 전략 프로필들을 실제
@@ -94,6 +107,14 @@ public final class RecordingExperiment {
      */
     public static Outcome run(RecordingPlan plan, Path repoRoot, Path recordingsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
+        return run(plan, repoRoot, recordingsRoot, null, code, verifyDeterminism, log, gate);
+    }
+
+    /**
+     * @param snapshotsRoot 수집 스냅샷 폴더({@code <설정 폴더>/snapshots}). 선정 조합 계좌가 있을 때만 쓴다(D-122)
+     */
+    public static Outcome run(RecordingPlan plan, Path repoRoot, Path recordingsRoot, Path snapshotsRoot,
+            CodeVersion code, boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
         ExchangeCalendar calendar = ExchangeCalendar.bundled(plan.market());
         gate.check(); // 힙을 크게 쓰는 녹화 읽기 전에 먼저 본다
         RecordingLayout layout = new RecordingLayout(recordingsRoot);
@@ -134,6 +155,9 @@ public final class RecordingExperiment {
             factory.validate(p);
             combinations.add(Combination.of(p));
         }
+        // 선정 조합 계좌는 profiles 계좌 뒤에 등록 파일 순서로(D-122). 선정 없는 계좌의 번호·시드는 그대로다
+        List<Combination> selected = selectionCombinations(repoRoot, plan.selections(), factory);
+        combinations.addAll(selected);
         List<BlacklistEntry> black = plan.blacklist().stream()
                 .map(c -> new BlacklistEntry(Symbol.krx(c), BlacklistType.MANUAL, "실험 등록 파일 " + plan.id())).toList();
         BlacklistSnapshot blacklist = BlacklistSnapshot.of(black);
@@ -143,33 +167,163 @@ public final class RecordingExperiment {
                 cost.id(), data.version(), ClockMode.REPLAY, combinations);
         ExecutionSettings execution = ExecutionSettings.defaults();
 
-        // 실제 병렬 수: 등록 파일 parallelism과 실행 명령 상한 중 작은 쪽(D-089). 결정론 기록에도 이 값을 쓴다
-        int parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
-        log.accept("프로필 " + combinations.size() + "개 실행(병렬 " + parallel + ")");
-        SimulationReport report = new SimulationExperimentRunner(data, rules, cost, factory, risk, execution, code,
-                parallel, benchmark, null, gate).runDetailed(spec);
-        String detail = ReportWriter.render(report);
+        // 선정 조합 계좌가 있으면 녹화일마다 고정 스냅샷으로 선정을 계산해 고정 파일·적용 기록을 만들고(실시간 모의와 같은
+        // 준비→적용 경로), 실행기는 그 적용 기록을 읽는다(ADR-012 3.5·3.6, D-122)
+        SelectionStage stage = selected.isEmpty() ? null
+                : SelectionStage.prepare(plan, selectionProfiles(selected), data, calendar, snapshotsRoot, code, log, gate);
+        SimulationReport report;
+        String detail;
         String determinism = "확인 안 함(--verify-determinism으로 확인)";
-        if (verifyDeterminism && parallel == 1) {
-            determinism = "확인 안 함(실제 병렬 수가 1이라 병렬 대 직렬 비교가 안 됨. -PmaxParallelRuns와 등록 파일 parallelism을 2 이상으로)";
-            log.accept("결정론 확인 생략: 실제 병렬 수가 1입니다");
-        } else if (verifyDeterminism) {
-            log.accept("결정론 확인: 병렬 1로 다시 실행");
-            gate.check();
-            String second = ReportWriter.render(new SimulationExperimentRunner(data, rules, cost, factory, risk,
-                    execution, code, 1, benchmark, null, gate).runDetailed(spec));
-            determinism = second.equals(detail)
-                    ? "같음(병렬 " + parallel + " vs 1, 상세 보고서 바이트 일치)" : "다름";
-            if (!second.equals(detail)) {
-                log.accept("결정론 확인 실패: 두 실행의 상세 보고서가 다릅니다");
+        int parallel;
+        try {
+            SelectionSource source = stage == null ? null : stage.files.source();
+            // 실제 병렬 수: 등록 파일 parallelism과 실행 명령 상한 중 작은 쪽(D-089). 결정론 기록에도 이 값을 쓴다
+            parallel = Math.min(plan.parallelism(), gate.maxParallelRuns());
+            log.accept("프로필 " + combinations.size() + "개 실행(병렬 " + parallel + ")");
+            report = new SimulationExperimentRunner(data, rules, cost, factory, risk, execution, code,
+                    parallel, benchmark, source, gate).runDetailed(spec);
+            detail = ReportWriter.render(report);
+            if (verifyDeterminism && parallel == 1) {
+                determinism = "확인 안 함(실제 병렬 수가 1이라 병렬 대 직렬 비교가 안 됨. -PmaxParallelRuns와 등록 파일 parallelism을 2 이상으로)";
+                log.accept("결정론 확인 생략: 실제 병렬 수가 1입니다");
+            } else if (verifyDeterminism) {
+                log.accept("결정론 확인: 병렬 1로 다시 실행");
+                gate.check();
+                String second = ReportWriter.render(new SimulationExperimentRunner(data, rules, cost, factory, risk,
+                        execution, code, 1, benchmark, source, gate).runDetailed(spec));
+                determinism = second.equals(detail)
+                        ? "같음(병렬 " + parallel + " vs 1, 상세 보고서 바이트 일치)" : "다름";
+                if (!second.equals(detail)) {
+                    log.accept("결정론 확인 실패: 두 실행의 상세 보고서가 다릅니다");
+                }
+            }
+        } finally {
+            if (stage != null) {
+                stage.close();
             }
         }
 
+        List<SessionSelections.Applied> applied = stage == null ? List.of() : stage.applied;
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("inputs.yaml", inputs(plan, data, symbols, cost, execution, blacklist, report, determinism, detail));
-        files.put("results.md", results(plan, data, cost, execution, blacklist, report, determinism));
+        files.put("inputs.yaml", inputs(plan, data, symbols, cost, execution, blacklist, report, determinism, detail,
+                applied));
+        files.put("results.md", results(plan, data, cost, execution, blacklist, report, determinism, applied));
         files.put("detail.txt", detail);
+        if (stage != null) {
+            files.putAll(stage.texts);
+        }
         return new Outcome(spec, report, data, files);
+    }
+
+    /**
+     * 녹화 실험의 선정 준비 폴더(임시). 녹화일마다 결과 파일과 적용 기록을 만들고, 실행이 끝나면 내용을 결과 폴더
+     * {@code selections/}에 쓸 파일로 옮긴 뒤 지운다.
+     */
+    private static final class SelectionStage implements AutoCloseable {
+        private final Path dir;
+        private final SessionSelections files;
+        private final List<SessionSelections.Applied> applied = new ArrayList<>();
+        private final Map<String, String> texts = new TreeMap<>();
+
+        private SelectionStage(Path dir, SessionSelections files) {
+            this.dir = dir;
+            this.files = files;
+        }
+
+        static SelectionStage prepare(RecordingPlan plan, List<SelectionProfile> profiles, RecordedMarketDataSet data,
+                ExchangeCalendar calendar, Path snapshotsRoot, CodeVersion code, Consumer<String> log, RunGate gate) {
+            if (snapshotsRoot == null) {
+                throw new IllegalArgumentException("선정 조합 계좌가 있는데 수집 스냅샷 폴더가 정해지지 않았습니다");
+            }
+            RegisteredSelections sel = plan.selections();
+            SnapshotInputs in = SnapshotInputs.load(plan.market(), sel.daily().orElseThrow(), sel.financials(),
+                    snapshotsRoot, calendar, gate, log, (first, last) -> { });
+            Path dir;
+            try {
+                dir = Files.createTempDirectory("autotrade-recording-selections-");
+            } catch (IOException e) {
+                throw new UncheckedIOException("선정 준비 임시 폴더를 만들 수 없습니다", e);
+            }
+            SelectionStage stage = new SelectionStage(dir, new SessionSelections(dir, profiles, plan.boards().keySet(),
+                    java.util.Set.copyOf(plan.blacklist()), calendar::previousTradingDay));
+            try {
+                SelectionCalculator calc = new SelectionCalculator(in.selectionData());
+                // 결과 파일이 실행마다 같게 만든 시각은 남기지 않는다(SIM-09)
+                SelectionResultFile.Producer producer = new SelectionResultFile.Producer(code.commit(), code.dirty(), null);
+                for (RecordedMarketDataSet.DayInfo d : data.days()) {
+                    java.time.LocalDate cutoff = calendar.previousTradingDay(d.date());
+                    for (SelectionPreparer.Outcome o : SelectionPreparer.prepare(stage.files, d.date(), calc, in.last(),
+                            cutoff, producer, gate::check)) {
+                        log.accept("선정 " + d.date() + " " + o.selection() + ": " + o.status()
+                                + (o.reason() == null ? "" : " " + o.reason() + " " + o.detail()));
+                    }
+                    stage.applied.add(stage.files.apply(d.date()));
+                }
+                stage.collect();
+            } catch (RuntimeException e) {
+                stage.close();
+                throw e;
+            }
+            return stage;
+        }
+
+        /** 임시 폴더의 결과 파일·적용 기록을 결과 폴더 상대 경로 {@code selections/<날짜>/<이름>}으로 모은다. */
+        private void collect() {
+            try (Stream<Path> walk = Files.walk(files.root())) {
+                for (Path f : walk.filter(Files::isRegularFile).sorted().toList()) {
+                    String name = f.getFileName().toString();
+                    if (name.startsWith(".tmp-")) {
+                        continue;
+                    }
+                    String rel = SessionSelections.DIR + "/" + files.root().relativize(f).toString().replace('\\', '/');
+                    texts.put(rel, Files.readString(f, StandardCharsets.UTF_8));
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException("선정 준비 파일을 읽을 수 없습니다", e);
+            }
+        }
+
+        @Override
+        public void close() {
+            try (Stream<Path> walk = Files.walk(dir)) {
+                for (Path f : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(f);
+                }
+            } catch (IOException ignored) {
+                // 임시 폴더 정리 실패는 결과에 영향이 없다
+            }
+        }
+    }
+
+    /**
+     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-122). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})만
+     * 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다(ADR-007 2.1).
+     */
+    public static List<Combination> selectionCombinations(Path repoRoot, RegisteredSelections selections,
+            CatalogStrategyFactory factory) {
+        Map<String, SelectionProfile> loaded = new LinkedHashMap<>();
+        List<Combination> out = new ArrayList<>();
+        for (RegisteredSelections.Entry e : selections.entries()) {
+            SelectionProfile s = loaded.computeIfAbsent(e.selection().text(), k -> CombinationExperiment.loadSelection(
+                    repoRoot, new CombinationPlan.Ref(e.selection().id(), e.selection().version())));
+            if (s.refresh() != SelectionRefresh.PRE_OPEN_DAILY) {
+                throw new IllegalArgumentException("녹화 실험·실시간 모의의 선정은 단타 장전 선정(PRE_OPEN_DAILY)만 받습니다: "
+                        + s.key() + " = " + s.refresh());
+            }
+            StrategyProfile p = loadStrategy(repoRoot, e.strategy());
+            factory.validate(p);
+            out.add(Combination.of(s, p));
+        }
+        return out;
+    }
+
+    /** 조합들의 선정 프로필(선정 해시마다 하나, 해시순). */
+    public static List<SelectionProfile> selectionProfiles(List<Combination> combinations) {
+        TreeMap<String, SelectionProfile> out = new TreeMap<>();
+        for (Combination c : combinations) {
+            c.selection().ifPresent(s -> out.putIfAbsent(s.selectionHash(), s));
+        }
+        return List.copyOf(out.values());
     }
 
     /**
@@ -213,6 +367,15 @@ public final class RecordingExperiment {
     /** 등록 파일을 읽어 실험을 돌리고 결과 파일을 등록 파일 옆에 쓴다. 멈추면 결과 파일을 하나도 쓰지 않는다. */
     public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path recordingsRoot, CodeVersion code,
             boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
+        return runAndWrite(experimentDir, repoRoot, recordingsRoot, null, code, verifyDeterminism, log, gate);
+    }
+
+    /**
+     * @param snapshotsRoot 수집 스냅샷 폴더. 선정 조합 계좌가 있으면 필요하다(D-122). 선정 고정 파일은 결과 폴더
+     *     {@code selections/}에 쓴다(저장소에는 커밋하지 않음: 종목 전체 평가가 들어 있어 크다. 내용 해시는 inputs.yaml에 남는다)
+     */
+    public static Outcome runAndWrite(Path experimentDir, Path repoRoot, Path recordingsRoot, Path snapshotsRoot,
+            CodeVersion code, boolean verifyDeterminism, Consumer<String> log, RunGate gate) {
         Path file = experimentDir.resolve("experiment.yaml");
         RecordingPlan plan;
         try {
@@ -223,10 +386,11 @@ public final class RecordingExperiment {
         if (!plan.id().value().equals(experimentDir.getFileName().toString())) {
             throw new IllegalArgumentException("폴더 이름과 실험 ID가 다릅니다: " + experimentDir.getFileName() + " ≠ " + plan.id());
         }
-        Outcome out = run(plan, repoRoot, recordingsRoot, code, verifyDeterminism, log, gate);
+        Outcome out = run(plan, repoRoot, recordingsRoot, snapshotsRoot, code, verifyDeterminism, log, gate);
         for (Map.Entry<String, String> f : out.files().entrySet()) {
             Path target = experimentDir.resolve(f.getKey());
             try {
+                Files.createDirectories(target.getParent());
                 Files.writeString(target, f.getValue(), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 throw new UncheckedIOException("결과를 쓸 수 없습니다: " + target, e);
@@ -239,6 +403,15 @@ public final class RecordingExperiment {
     public static String inputs(RecordingPlan plan, RecordingInput data, TreeSet<Symbol> symbols, CostModel cost,
             ExecutionSettings execution, BlacklistSnapshot blacklist, SimulationReport report, String determinism,
             String detail) {
+        return inputs(plan, data, symbols, cost, execution, blacklist, report, determinism, detail, List.of());
+    }
+
+    /**
+     * @param applied 선정 조합 계좌의 날짜별 적용 기록(날짜순). 비어 있으면 선정 칸을 쓰지 않는다(선정 없는 실험은 예전과 같은 파일)
+     */
+    public static String inputs(RecordingPlan plan, RecordingInput data, TreeSet<Symbol> symbols, CostModel cost,
+            ExecutionSettings execution, BlacklistSnapshot blacklist, SimulationReport report, String determinism,
+            String detail, List<SessionSelections.Applied> applied) {
         StringBuilder sb = new StringBuilder();
         sb.append("# 실험 입력(실행기가 씀, D-069). 녹화 파일은 저장소에 넣지 않는다(ADR-003 4장).\n");
         sb.append("experiment: ").append(plan.id()).append('\n');
@@ -275,11 +448,50 @@ public final class RecordingExperiment {
         sb.append("seed-capital: \"").append(plan.seedCapital()).append("\"\n");
         sb.append("determinism: \"").append(determinism).append("\"\n");
         sb.append("detail-sha256: ").append(sha256(detail)).append('\n');
+        if (!plan.selections().isEmpty()) {
+            selectionInputs(sb, plan.selections(), applied);
+        }
         return sb.toString();
+    }
+
+    /** inputs.yaml의 선정 칸(D-122): 등록 파일 선정 입력과 날짜·선정별 적용 기록. */
+    private static void selectionInputs(StringBuilder sb, RegisteredSelections sel, List<SessionSelections.Applied> applied) {
+        sb.append("selection-input:\n");
+        sb.append("  daily: \"").append(sel.daily().orElse("")).append("\"\n");
+        sb.append("  financials: \"").append(sel.financials().orElse("")).append("\"\n");
+        sb.append("selection-days:\n");
+        for (SessionSelections.Applied a : applied) {
+            for (SessionSelections.Item it : a.items()) {
+                sb.append("  - date: ").append(a.date()).append('\n');
+                sb.append("    selection: \"").append(it.selection()).append("\"\n");
+                sb.append("    status: ").append(it.status()).append('\n');
+                if (it.applied()) {
+                    SelectionCandidates c = it.candidates();
+                    sb.append("    content-hash: ").append(it.contentHash()).append('\n');
+                    sb.append("    candidates: \"").append(String.join(",", c.candidates())).append("\"\n");
+                    sb.append("    not-subscribed: \"").append(String.join(",",
+                            c.excludedCodes(SelectionCandidates.Exclusion.NOT_SUBSCRIBED))).append("\"\n");
+                    sb.append("    blacklisted: \"").append(String.join(",",
+                            c.excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED))).append("\"\n");
+                    sb.append("    coverage: \"").append(c.coverage()).append("\"\n");
+                } else {
+                    sb.append("    reason: ").append(it.reason()).append('\n');
+                    sb.append("    detail: \"").append(it.detail().replace("\\", "\\\\").replace("\"", "\\\""))
+                            .append("\"\n");
+                }
+            }
+        }
     }
 
     public static String results(RecordingPlan plan, RecordingInput data, CostModel cost, ExecutionSettings execution,
             BlacklistSnapshot blacklist, SimulationReport report, String determinism) {
+        return results(plan, data, cost, execution, blacklist, report, determinism, List.of());
+    }
+
+    /** @param applied {@link #inputs}와 같음. 비어 있지 않으면 계좌 표 뒤에 선정 표를 쓴다 */
+    public static String results(RecordingPlan plan, RecordingInput data, CostModel cost, ExecutionSettings execution,
+            BlacklistSnapshot blacklist, SimulationReport report, String determinism,
+            List<SessionSelections.Applied> applied) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(plan.id()).append(" 결과\n\n");
         sb.append("- 질문: ").append(plan.question()).append('\n');
@@ -300,7 +512,9 @@ public final class RecordingExperiment {
             RunReport r = report.runs().get(i);
             RunResult s = r.summary();
             RunMetrics m = s.metrics();
-            sb.append("| ").append(s.accountId()).append(" | ").append(r.profile().id()).append('@')
+            sb.append("| ").append(s.accountId()).append(" | ");
+            r.combination().selection().ifPresent(sel -> sb.append(sel.key()).append(" x "));
+            sb.append(r.profile().id()).append('@')
                     .append(r.profile().version()).append(" | ").append(r.equityCurve().size()).append(" | ");
             if (m == null) {
                 sb.append("- | - | - | - | - | - | - | ");
@@ -311,6 +525,9 @@ public final class RecordingExperiment {
             }
             sb.append(s.failureReason().isEmpty() ? s.status().name() : s.status() + " " + s.failureReason()).append(" |\n");
         }
+        if (!plan.selections().isEmpty()) {
+            selectionResults(sb, report, applied);
+        }
         if (!report.dataGaps().isEmpty()) {
             sb.append("\n## 시세 공백\n\n");
             sb.append("| seq | 종목 | 원인 | 시작 | 끝 |\n|---:|---|---|---|---|\n");
@@ -320,6 +537,44 @@ public final class RecordingExperiment {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * results.md 선정 표(D-122, ADR-012 3.5): 날짜·선정마다 상태, 그날 후보, 구독 밖({@code NOT_SUBSCRIBED})·블랙리스트
+     * ({@code BLACKLISTED})로 뺀 종목, 구독 커버리지, 그 선정을 쓰는 계좌들이 막힌 신규 진입 신호 수 합.
+     */
+    private static void selectionResults(StringBuilder sb, SimulationReport report, List<SessionSelections.Applied> applied) {
+        Map<String, Integer> blocked = new LinkedHashMap<>();
+        for (RunReport r : report.runs()) {
+            for (com.autotrade.sim.run.RunSelectionDay d : r.selectionDays()) {
+                blocked.merge(r.combination().selectionHashOrNone() + "|" + d.selection().date(), d.blockedEntries(),
+                        Integer::sum);
+            }
+        }
+        sb.append("\n## 선정(D-122)\n\n");
+        sb.append("> 그날 후보 = 선정 결과 ∩ boards − blacklist. 뺀 자리는 다음 순위로 메우지 않는다. 커버리지는 선정 종목 중 boards 안 "
+                + "비율이다. 성과를 시장 전체 선정의 성과로 읽지 않는다(ADR-012 6장 R2).\n\n");
+        sb.append("| 날짜 | 선정 | 상태 | 후보 | NOT_SUBSCRIBED | BLACKLISTED | 커버리지 | 막힌 신규 진입 |\n");
+        sb.append("|---|---|---|---|---|---|---:|---:|\n");
+        for (SessionSelections.Applied a : applied) {
+            for (SessionSelections.Item it : a.items()) {
+                sb.append("| ").append(a.date()).append(" | ").append(it.selection()).append(" | ");
+                if (it.applied()) {
+                    SelectionCandidates c = it.candidates();
+                    sb.append(it.status()).append(" | ").append(list(c.candidates())).append(" | ")
+                            .append(list(c.excludedCodes(SelectionCandidates.Exclusion.NOT_SUBSCRIBED))).append(" | ")
+                            .append(list(c.excludedCodes(SelectionCandidates.Exclusion.BLACKLISTED))).append(" | ")
+                            .append(c.coverage()).append(" | ");
+                } else {
+                    sb.append(it.status()).append(" ").append(it.reason()).append(" | - | - | - | - | ");
+                }
+                sb.append(blocked.getOrDefault(it.selectionHash() + "|" + a.date(), 0)).append(" |\n");
+            }
+        }
+    }
+
+    private static String list(List<String> codes) {
+        return codes.isEmpty() ? "-" : String.join(", ", codes);
     }
 
     public static StrategyProfile loadStrategy(Path root, RecordingPlan.ProfileRef ref) {

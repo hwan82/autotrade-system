@@ -12,6 +12,10 @@ import com.autotrade.sim.run.ReportWriter;
 import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.SelectionSource;
+import com.autotrade.sim.selection.SessionSelections;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
@@ -36,6 +40,10 @@ import java.util.function.Consumer;
  * <p>입력 기록을 날마다 디스크에서 다시 읽어 돌린다(D-115: 메모리는 기간 길이와 상관없고, 대신 기록을 세 번 푼다). 그래도 무거워서
  * 실험실이 아니라 실험 실행 명령
  * ({@code runLiveReplayCheck}, 장 시간 보호·정지 요청 확인 D-063)으로만 돌린다.
+ *
+ * <p>선정 조합 계좌가 있으면(D-122) 실시간 세션이 남긴 적용 기록과 결과 파일을 그대로 읽어 같은 판정으로 돌린다. 기록일마다 적용
+ * 기록이 가리키는 결과 파일이 있고 내용 해시가 맞아야 한다(맞지 않으면 확인하지 않고 멈춤, architect PR #191 N3). 선정을 다시
+ * 계산하지는 않는다(입력 스냅샷이 세션 뒤에 바뀔 수 있고, 계좌가 쓴 것은 고정 파일이다).
  */
 public final class LiveReplayCheck {
 
@@ -100,9 +108,11 @@ public final class LiveReplayCheck {
                     + d.segments());
         }
         gate.check();
+        List<SessionSelections.Applied> applied = verifiedSelections(setup, sessionDir, log);
         ExperimentSpec spec = setup.spec(ClockMode.REPLAY, data.version());
         SimulationReport replay = new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(),
-                setup.risk(), setup.execution(), code, 1, setup.benchmark(), null, gate).runDetailed(spec);
+                setup.risk(), setup.execution(), code, 1, setup.benchmark(), selectionSource(setup, sessionDir), gate)
+                .runDetailed(spec);
         String detail = ReportWriter.render(replay);
         int diff = firstDifference(withoutCodeLine(liveDetail), withoutCodeLine(detail));
         boolean same = diff < 0;
@@ -114,9 +124,9 @@ public final class LiveReplayCheck {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("inputs.yaml", "# 실시간 모의(D-076). 입력은 실험실 세션의 입력 기록(설정 폴더, 저장소 밖)\nclock-mode: REALTIME\n"
                 + RecordingExperiment.inputs(setup.asRecordingPlan(), data, symbols, setup.cost(), setup.execution(),
-                        setup.blacklist(), replay, determinism, detail));
+                        setup.blacklist(), replay, determinism, detail, applied));
         files.put("results.md", RecordingExperiment.results(setup.asRecordingPlan(), data, setup.cost(),
-                setup.execution(), setup.blacklist(), replay, determinism));
+                setup.execution(), setup.blacklist(), replay, determinism, applied));
         files.put("detail.txt", detail);
         return new Outcome(same, replay, files);
     }
@@ -135,6 +145,32 @@ public final class LiveReplayCheck {
             log.accept("작성: " + target);
         }
         return out;
+    }
+
+    /** 선정 계좌가 있으면 세션 폴더의 적용 기록을 읽는 공급자, 없으면 null(지금까지와 같은 실행기 입력). */
+    static SelectionSource selectionSource(LiveSetup setup, Path sessionDir) {
+        return setup.hasSelections() ? setup.selectionFiles(sessionDir).source() : null;
+    }
+
+    /**
+     * 운용 기간의 거래일마다 적용 기록과 결과 파일이 맞는지 보고 적용 기록을 날짜순으로 모은다. 적용 기록은 거래일 기준이라 입력 기록
+     * 폴더(수신 날짜)가 아니라 기간 전체를 본다. 적용 기록이 없는 날은 빠진다(그날 선정 계좌는 {@code SELECTION_MISSING}).
+     * 선정 계좌가 없으면 빈 목록.
+     *
+     * @throws IllegalStateException 적용 기록이 가리키는 결과 파일이 없거나 바뀌었을 때
+     */
+    static List<SessionSelections.Applied> verifiedSelections(LiveSetup setup, Path sessionDir, Consumer<String> log) {
+        if (!setup.hasSelections()) {
+            return List.of();
+        }
+        SessionSelections files = setup.selectionFiles(sessionDir);
+        List<SessionSelections.Applied> out = new ArrayList<>();
+        for (LocalDate d = setup.plan().from(); !d.isAfter(setup.plan().to()); d = d.plusDays(1)) {
+            files.verify(d);
+            files.readApplied(d).ifPresent(out::add);
+        }
+        log.accept("선정 적용 기록 " + out.size() + "일 확인(결과 파일·내용 해시·후보 일치)");
+        return List.copyOf(out);
     }
 
     static List<Path> journalDays(LiveSetup setup, Path sessionDir) {

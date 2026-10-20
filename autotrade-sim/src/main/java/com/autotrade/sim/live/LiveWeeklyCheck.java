@@ -30,6 +30,7 @@ import com.autotrade.sim.run.RunGate;
 import com.autotrade.sim.run.RunReport;
 import com.autotrade.sim.run.SimulationExperimentRunner;
 import com.autotrade.sim.run.SimulationReport;
+import com.autotrade.sim.selection.SelectionSource;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
@@ -716,10 +717,14 @@ public final class LiveWeeklyCheck {
         List<Path> dirs = days.stream().map(d -> journal.dayDir(setup.plan().market(), d)).toList();
         // 날마다 디스크에서 다시 읽는다(D-115). 목록으로 모으던 때(RecordedMarketDataSet)와 같은 이벤트·같은 버전이다
         StreamedRecordingDataSet live = StreamedRecordingDataSet.open(setup.plan().market(), dirs, gate::check, e -> { });
+        // 선정 조합 계좌는 두 리플레이 모두 세션이 남긴 같은 적용 기록을 읽는다(D-122). 맞지 않으면 대조하지 않고 멈춘다
+        Path sessionDir = journal.root().getParent();
+        LiveReplayCheck.verifiedSelections(setup, sessionDir, log);
+        SelectionSource selections = LiveReplayCheck.selectionSource(setup, sessionDir);
         log.accept("계좌 대조: 입력 기록 리플레이(이벤트 " + live.eventCount() + ")");
-        SimulationReport a = replay(setup, live, end, code, gate);
+        SimulationReport a = replay(setup, live, end, code, selections, gate);
         log.accept("계좌 대조: 같은 날 녹화 리플레이(이벤트 " + rec.eventCount() + ")");
-        SimulationReport b = replay(setup, rec, end, code, gate);
+        SimulationReport b = replay(setup, rec, end, code, selections, gate);
         int diff = LiveReplayCheck.firstDifference(LiveReplayCheck.withoutCodeLine(ReportWriter.render(a)),
                 LiveReplayCheck.withoutCodeLine(ReportWriter.render(b)));
         StringBuilder sb = new StringBuilder();
@@ -751,9 +756,9 @@ public final class LiveWeeklyCheck {
     }
 
     private static SimulationReport replay(LiveSetup setup, MarketEventStream data, LocalDate end, CodeVersion code,
-            RunGate gate) {
+            SelectionSource selections, RunGate gate) {
         return new SimulationExperimentRunner(data, setup.rules(), setup.cost(), setup.factory(), setup.risk(),
-                setup.execution(), code, 1, setup.benchmark(), null, gate)
+                setup.execution(), code, 1, setup.benchmark(), selections, gate)
                 .runDetailed(setup.spec(ClockMode.REPLAY, data.version(), end));
     }
 
