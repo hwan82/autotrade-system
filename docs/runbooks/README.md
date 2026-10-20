@@ -30,13 +30,14 @@
 |---|---|---|---|
 | `runCombinationExperiment` | 선정 × 매매지표 조합을 수집 스냅샷 위에서 비교 | `experiments/<ID>/experiment.yaml` | [조합 실험](../strategy/combination-experiments.md) 5장 |
 | `runWalkForwardStudy` | 일봉 워크포워드 판정(통과·탈락·보류) | `experiments/<ID>/study.yaml` | [4단계 워크포워드](stage-4-walkforward.md) |
+| `runSelectionEdgeCheck` | 선정 결과를 T 시가 매수·T 종가 매도로 재서 같은 날 무작위 선정 대조군과 비교(통과·탈락·판정 불가) | `experiments/<ID>/edge.yaml` | [선정 엣지 사전 검사](selection-edge-check.md) |
 | `runRecordingExperiment` | 장중 프로필을 실녹화 위에서 실행 | `experiments/<ID>/experiment.yaml`(`input: recording`) | [D-069](../decisions/D-069-session-phases-recording-experiment.md) |
 | `runLiveReplayCheck` | 실시간 모의 세션 결과를 리플레이와 대조 | 끝낸 세션의 `live-detail.txt` | [6단계 실시간 모의](stage-6-live-session.md) 4장 |
 | `runLiveJudgement` | 6단계 장중 승격 후보 기준 L1~L11 계산(±20% 변형·지연·대조군·녹화 대조), `judgement.md` | 끝낸 세션의 `live-detail.txt`, 같은 날 게이트웨이 녹화 | [D-116](../decisions/D-116-stage-6-recording-judgement.md) |
 | `runStrategyStudy` | 합성 시세 비교(4단계 첫 실험 재현용) | 없음 | `autotrade-app-experiment/build.gradle.kts` 주석 |
 | `runWatchlistCandidates` | 게이트웨이 감시 종목 후보(20거래일 평균 거래대금 상위 `STOCK` + 꼭 넣을 종목) 목록 파일을 씀. `watchlist.json`은 바꾸지 않음. 종료 코드는 실험 명령과 같음(2는 없음) | 수집 일봉 스냅샷 | [6단계 시작 점검표](stage-6-start-checklist.md) 4.1 |
 
-옵션: `-PallowDuringSession`(위 표의 `runStrategyStudy` 밖 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드 실험만).
+옵션: `-PallowDuringSession`(위 표의 `runStrategyStudy` 밖 명령 모두, **실전 엔진과 게이트웨이를 모두 끈 날에만**, 장 시간 보호만 풀림), `-Pheap=8g`(메모리, `runStrategyStudy` 제외), `-PverifyDeterminism`(전체를 한 번 더 돌려 결과가 같은지 확인, 시간 두 배 이상. 조합·녹화·워크포워드·선정 엣지 실험만).
 
 ## 2. 하루 흐름 (거래일 기준, 서울 시각)
 
