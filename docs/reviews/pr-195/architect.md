@@ -34,3 +34,36 @@
 
 ## 판정
 수정 필요(R1, R2)
+
+## 재검토 2026-10-20
+- 대상: PR #195 / 헤드 커밋 f1a960d / 병합 기준 main e9a7ee2 대비 diff 전체(커밋 3개: adc91bc, 검토 원문 bf420b0, 반영 f1a960d). 반영 커밋은 12파일 +141 −28
+- 점검표: B
+- 직접 실행한 것:
+  - `git diff origin/main...HEAD` 전체를 다시 읽고, 반영분은 `git diff bf420b0..f1a960d`로 따로 읽음. 보호 경로(`scripts/ci/protected-paths.txt`)에 드는 파일은 여전히 없다(`autotrade-sim`·`autotrade-app-experiment`·`autotrade-ui`·문서뿐).
+  - `./gradlew --init-script <scratchpad>/mirror.gradle clean build`(헤드 f1a960d, 기본 저장소는 1회째와 같은 Maven 429): **BUILD SUCCESSFUL in 3m 19s**(161 actionable tasks: 152 executed, 9 up-to-date). 시험 결과 XML 합계 1,691건, 실패 0, 오류 0, 건너뜀 0. 새 `WatchlistCommandTest` 3건, `WatchlistCandidatesMainTest` 4건 통과.
+  - **변이 확인**: `ExperimentJobStatus.COMMANDS`에서 `"watchlist"`만 잠시 빼고 `:autotrade-app-experiment:test --tests '*WatchlistCommandTest'` → "3 tests completed, 2 failed". 새 시험이 R1을 잡는다. 파일은 되돌렸다(`git status` 깨끗함).
+  - **실제 진입점 실행**: `AUTOTRADE_CONFIG_DIR=<scratchpad>/cfg2 ./gradlew ... :autotrade-app-experiment:runWatchlistCandidates -Psnapshot=krx-daily-none -Ptotal=100 -Pout=... -Pheap=512m`(09:25 UTC, 장 시간 밖). `[experiment] 진행 상태 파일: .../WATCHLIST-CANDIDATES.status`가 찍히고 본체(`[watchlist] 일봉 스냅샷 읽기: <cfg2>/snapshots/krx-daily/krx-daily-none`)까지 간다. R1은 해결됐다. 설정 폴더가 `ExperimentMain`이 정한 것과 같음도 이 줄로 확인(반영분이 `configDir`를 넘기게 바뀜, `ExperimentMain.java:177`). 다만 아래 R3.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `clean build` 성공, 1,691건 실패 0(미러 init script 사용, 사유는 1회째와 같음) |
+| B2 | 통과 | 반영분은 `WatchlistCandidatesMain`의 자체 설정 폴더 해석을 지우고 `ExperimentMain`의 `configDir`를 받는다(`WatchlistCandidatesMain.java:61-65,112-113`). 새 의존 없음. `ArchitectureTest`·`ModuleOwnershipTest` 통과 |
+| B3 | 통과 | 상태 파일 명령 값 추가(`ExperimentJobStatus.java:58-60`)가 D-122 결정 2번에 적혔고(`experiment-state/jobs/WATCHLIST-CANDIDATES.status`, 작업 화면 "감시 종목 후보"), 화면 라벨 `jobs.js:14` 추가. 실험실 쪽 읽기는 같은 `ExperimentJobStatus`를 쓰므로 따로 고칠 곳 없음(`autotrade-app-lab/.../ExperimentJobs.java`가 이 클래스를 씀) |
+| B4 | 통과 | 1회째와 같음. 반영분에 시계·난수 추가 없음. 새 시험은 `Clock.fixed` |
+| B5 | 통과 | 1회째와 같음 |
+| B6 | 통과 | `WatchlistCommandTest`: `장_밖에는_끝까지_돌아_목록_파일을_쓰고_작업_상태를_남긴다`(종료 0, 파일 `000030, 000010`, 상태 `command: watchlist`·`COMPLETED`), `장_시간과_정지_요청에는_시작하지_않고_파일을_쓰지_않는다`(장 시간 4, 정지 요청이면 `--allow-during-session`이어도 4, 파일 없음), `작업_ID는_고정이다`. 변이 확인으로 R1 회귀를 잡음을 확인. 단 R3의 실패 경로 시험은 없다(아래) |
+| B7 | 해당 없음 | 1회째와 같음. 실전 경로·보호 경로 변경 없음. D-122가 적은 risk-ops 교차 검토(게이트웨이 운영 설정 변경)는 계속 권고 |
+| B8 | 통과 | 반영분 로그에도 비밀값 없음 |
+
+### 1회째 항목 처리
+- R1 해결: 위 실제 진입점 실행과 `WatchlistCommandTest`.
+- R2 해결: 위 B6. 요청한 (a)(b)(c) 모두 있음.
+- M1 해결: `docs/strategy/selection-catalog.md:83`에 "(감시 후보, 매매용 아님)" 줄.
+- M2 해결: D-122·runbook·selections/README·프로필 주석이 `STOCK`(우선주·KONEX 포함)으로 바뀜. `v1.yaml`은 아직 main에 없는 새 파일이라 같은 PR 안의 수정은 "저장된 버전 파일은 고치지 않는다"에 걸리지 않는다. 바뀐 것은 주석과 `hypothesis` 문구뿐이고 계산 매개변수는 그대로다.
+
+### 새 발견
+- **R3(수정 필요)** 스냅샷을 읽지 못하면 종료 코드 계약이 깨진다. 위 실제 실행에서 `SnapshotInputs.load`가 던진 `java.io.UncheckedIOException: 스냅샷을 읽을 수 없습니다: ...`가 `WatchlistCandidatesMain.run`의 `catch (IllegalArgumentException | IllegalStateException | IOException e)`(`WatchlistCandidatesMain.java:129`)에 걸리지 않고 빠져나가 스택 추적이 찍히고, 상태 파일은 `state: FAILED`, `message: 종료 코드 -1`로 남았다. Javadoc(종료 코드 "1 입력 오류")과 runbook 4.1 1번("1이면 마지막 줄을 스레드에 올린다", 마지막 줄이 스택 프레임이나 Gradle 문구가 됨)과 다르고, 실험실 작업 화면에는 입력 오류가 아니라 실패로 보인다. 다른 명령은 `RuntimeException`을 잡아 1로 끝낸다(`CombinationMain.java:87-89`, `RecordingMain.java:84`). 같은 방식으로 `RuntimeException`(또는 최소 `UncheckedIOException`)을 잡아 `[watchlist] 실패: ...`와 1을 돌려주고, `WatchlistCommandTest`에 "없는 스냅샷 ID면 1, 목록 파일 없음, 상태 `INPUT_ERROR`" 시험을 더한다. 1회째 검토에서 이 경로를 놓쳤다(1회째 실행은 R1에서 먼저 멈춰 본체까지 가지 않았다).
+- m1(권고) D-122 "위험과 한계"의 "우선주는 거래대금이 작아 100위 안에 드는 일이 드물다 `[추론]`"은 근거가 약하다. 삼성전자우(005935) 같은 대형 우선주는 거래대금 상위권에 자주 든다 `[추론]`. 첫 후보 목록을 뽑은 뒤 우선주 수를 세어 적는 쪽이 낫다. 같은 절에 새 줄 뒤 빈 줄이 하나 더 있다(표시 문제만).
+
+## 판정
+수정 필요(R3)
