@@ -122,7 +122,29 @@ public final class SelectionPreparer {
 
     /** 사유 파일에 남기는 입력 스냅샷 키: 일봉 스냅샷 ID와 재무 스냅샷 ID(없으면 빈 칸). 스냅샷 ID는 내용 해시를 담아 바뀌지 않는다. */
     public static String inputsKey(String dailySnapshot, java.util.Optional<String> financialsSnapshot) {
-        return "daily=" + dailySnapshot + ";financials=" + financialsSnapshot.orElse("");
+        return inputsKey(dailySnapshot, financialsSnapshot, java.util.Optional.empty());
+    }
+
+    /**
+     * 공시 스냅샷까지 담은 입력 키(ADR-014 F9). 공시 입력이 없으면 공시 칸을 쓰지 않아 F9 전 사유 파일의 키와 같다(그래서 이미 남은
+     * 사유 파일을 "다른 입력"으로 보고 다시 읽지 않는다).
+     */
+    public static String inputsKey(String dailySnapshot, java.util.Optional<String> financialsSnapshot,
+            java.util.Optional<String> disclosuresSnapshot) {
+        return "daily=" + dailySnapshot + ";financials=" + financialsSnapshot.orElse("")
+                + disclosuresSnapshot.map(d -> ";disclosures=" + d).orElse("");
+    }
+
+    /**
+     * 계산 실패 사유. 선정 계산기는 공시 입력이 조건 구간을 다 담지 않으면 메시지를 {@code STALE_INPUT:}으로 시작하는 예외를 던진다
+     * ({@code SelectionCalculator.checkDisclosures}, ADR-012 3.2). 그날은 입력이 늦은 것이라 {@code STALE_INPUT}으로 남긴다
+     * (ADR-014 6장). 그 밖의 실패는 지금처럼 {@code PRODUCER_FAILED}다. 공시 조건이 없는 선정은 이 머리말을 내지 않으므로
+     * F9 전 결과는 바뀌지 않는다.
+     */
+    static SelectionInvalidReason failureReason(RuntimeException e) {
+        String m = e.getMessage();
+        return m != null && m.startsWith(SelectionInvalidReason.STALE_INPUT.name() + ":")
+                ? SelectionInvalidReason.STALE_INPUT : SelectionInvalidReason.PRODUCER_FAILED;
     }
 
     /** 입력 스냅샷 키 없이(녹화 실험: 한 번만 계산한다). */
@@ -165,8 +187,9 @@ public final class SelectionPreparer {
                 r = calculator.calculate(s, date);
             } catch (RuntimeException e) {
                 String detail = "선정 계산 실패(" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")";
-                files.writeProblem(date, s.selectionHash(), SelectionInvalidReason.PRODUCER_FAILED, detail, inputs);
-                out.add(new Outcome(s.key(), Status.PROBLEM, SelectionInvalidReason.PRODUCER_FAILED, detail));
+                SelectionInvalidReason reason = failureReason(e);
+                files.writeProblem(date, s.selectionHash(), reason, detail, inputs);
+                out.add(new Outcome(s.key(), Status.PROBLEM, reason, detail));
                 continue;
             }
             boolean wrote = files.writeResult(r, producer);

@@ -287,9 +287,13 @@ public final class LiveReplayCheck {
                 }
                 String bars = fixed.inputs().barsSnapshotId();
                 java.util.Optional<String> fin = java.util.Optional.ofNullable(fixed.inputs().financialsSnapshotId());
+                // 공시 조건 선정은 결과 파일에 적힌 공시 스냅샷으로 다시 계산한다(ADR-014 6장, D-124 결정론)
+                java.util.Optional<String> dis = java.util.Optional.ofNullable(fixed.inputs().disclosuresSnapshotId());
                 Path barsDir = snapshotsRoot.resolve(SnapshotHeap.KRX_DAILY).resolve(bars);
                 boolean present = Files.isDirectory(barsDir) && fin.map(f -> Files.isDirectory(snapshotsRoot
-                        .resolve(LiveSelectionPrep.DART_FINANCIALS).resolve(f))).orElse(true);
+                        .resolve(LiveSelectionPrep.DART_FINANCIALS).resolve(f))).orElse(true)
+                        && dis.map(d -> Files.isDirectory(snapshotsRoot.resolve(LiveSelectionPrep.DART_DISCLOSURES)
+                        .resolve(d))).orElse(true);
                 if (!present) {
                     skipped++;
                     notes.add("입력 스냅샷이 PC에 없음");
@@ -300,12 +304,12 @@ public final class LiveReplayCheck {
                     notes.add("힙이 모자람(-Pheap으로 늘림)");
                     continue;
                 }
-                String key = bars + "|" + fin.orElse("");
+                String key = bars + "|" + fin.orElse("") + "|" + dis.orElse("");
                 if (!key.equals(loadedKey)) {
                     calc = null; // 앞 스냅샷을 놓고 읽는다
                     gate.check();
                     com.autotrade.sim.combo.SnapshotInputs in = com.autotrade.sim.combo.SnapshotInputs.load(
-                            setup.plan().market(), bars, fin, snapshotsRoot, setup.calendar(), gate, log,
+                            setup.plan().market(), bars, fin, dis, snapshotsRoot, setup.calendar(), gate, log,
                             (first, last) -> { });
                     calc = new com.autotrade.selection.calc.SelectionCalculator(in.selectionData());
                     loadedKey = key;

@@ -141,8 +141,11 @@ class LiveIntradaySessionTest {
                 s = LiveSession.open(plan(true), REPO, sessions, clock, m -> { });
             }
             if (e.sequence() == firstAtOrAfter.get(D1)) {
-                assertThat(s.status().intraday()).singleElement()
-                        .satisfies(st -> assertThat(st.state()).isEqualTo("AWAITING"));
+                assertThat(s.status().intraday()).singleElement().satisfies(st -> {
+                    assertThat(st.state()).isEqualTo("AWAITING");
+                    assertThat(st.universe()).isZero();
+                    assertThat(st.sessionGap()).isZero();
+                });
             }
             assertThat(s.accept("KIWOOM-WS", e)).isEqualTo(LiveSession.Accepted.ACCEPTED);
             if (e.sequence() == firstAtOrAfter.get(D1)) {
@@ -151,6 +154,8 @@ class LiveIntradaySessionTest {
                     // 순번은 세션 기록 위치(재기동 공백 표시가 끼면 받은 이벤트 순번과 다르다)
                     rankedFrom.put(D1, st.activeFrom());
                     assertThat(st.at()).isEqualTo("09:30");
+                    assertThat(st.universe()).isEqualTo(2);
+                    assertThat(st.sessionGap()).isZero(); // 장 시작부터 받은 날
                 });
             }
         }
@@ -232,6 +237,9 @@ class LiveIntradaySessionTest {
             assertThat(st.state()).isEqualTo("RANKED");
             assertThat(st.selectedCount()).isZero();
             assertThat(st.candidates()).isEmpty();
+            // 화면이 "누락으로 뺀 종목 2/2"로 이유를 보인다
+            assertThat(st.universe()).isEqualTo(2);
+            assertThat(st.sessionGap()).isEqualTo(2);
         });
         s.close();
     }

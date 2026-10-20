@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 
 /**
  * 실험 생성 화면(UI-02, D-074)의 스냅샷 고르기용 목록. 수집기가 쓴 {@code <설정 폴더>/snapshots/krx-daily/<ID>/},
- * {@code dart-financials/<ID>/}(ADR-008 2.4)의 manifest만 읽는다(파일 해시는 실행 명령이 확인). 실행 명령의 스냅샷 폴더 기본값과
+ * {@code dart-financials/<ID>/}, {@code dart-disclosures/<ID>/}(ADR-008 2.4, D-123)의 manifest만 읽는다(파일 해시는 실행 명령이 확인). 실행 명령의 스냅샷 폴더 기본값과
  * 같은 곳이다({@code CombinationMain}).
  */
 public final class SnapshotList {
@@ -37,14 +37,14 @@ public final class SnapshotList {
      * 스냅샷 하나. manifest를 읽지 못하면 기간이 null이고 {@code problem}에 이유가 있다.
      *
      * @param firstDate manifest {@code coverage.firstDate}(예전 스냅샷은 null)
-     * @param lastDate 일봉은 {@code coverage.lastTradingDate}, 재무는 {@code coverage.lastCollectedAt}
+     * @param lastDate 일봉은 {@code coverage.lastTradingDate}, 재무·공시는 {@code coverage.lastCollectedAt}
      */
     public record Snapshot(String id, String firstDate, String lastDate, String problem) {
     }
 
-    /** @param kind {@code krx-daily} 또는 {@code dart-financials}. ID 내림차순(최근 수집이 앞) */
+    /** @param kind {@code krx-daily}, {@code dart-financials} 또는 {@code dart-disclosures}(D-123). ID 내림차순(최근 수집이 앞) */
     public List<Snapshot> list(String kind) {
-        if (!kind.equals("krx-daily") && !kind.equals("dart-financials")) {
+        if (!kind.equals("krx-daily") && !kind.equals("dart-financials") && !kind.equals("dart-disclosures")) {
             throw new IllegalArgumentException("모르는 스냅샷 종류입니다: " + kind);
         }
         Path dir = root.resolve(kind);

@@ -99,6 +99,46 @@ public final class SelectionFixtures {
         return snapshotsRoot;
     }
 
+    /** 저장소의 공시 예시 선정 (라) {@code kr-intraday-news@1}(disclosure-count B·I ≥ 1, PRE_OPEN_DAILY, D-123). */
+    public static SelectionProfile intradayNews(Path repoRoot) {
+        return CombinationExperiment.loadSelection(repoRoot, new CombinationPlan.Ref("kr-intraday-news", 1));
+    }
+
+    /**
+     * 공시 스냅샷 폴더 하나({@code <snapshotsRoot>/dart-disclosures/<id>}, 수집 명령 {@code dart-disclosures} 형식). 유형 B·I를
+     * {@code coverFrom} ~ {@code coverTo}로 받았고, {@code codes}의 종목마다 {@code receipt} 날짜에 주요사항보고(B) 한 건이 있다.
+     *
+     * @param collectedAt manifest {@code coverage.lastCollectedAt}(실시간 latest 고르기 기준)
+     * @return {@code snapshotsRoot}
+     */
+    public static Path disclosureSnapshot(Path snapshotsRoot, String id, LocalDate coverFrom, LocalDate coverTo,
+            LocalDate receipt, List<String> codes, String collectedAt) {
+        StringBuilder rows = new StringBuilder("market,code,code_source,corp_code,corp_cls,pblntf_ty,rcept_no,rcept_dt,report_nm\n");
+        int n = 0;
+        for (String code : codes) {
+            n++;
+            rows.append("KRX,").append(code).append(",DART,0000000").append(n).append(",Y,B,")
+                    .append(receipt.toString().replace("-", "")).append(String.format("%06d", n)).append(',').append(receipt)
+                    .append(",주요사항보고서(유상증자결정)\n");
+        }
+        String types = "pblntf_ty,from,to\nB," + coverFrom + "," + coverTo + "\nI," + coverFrom + "," + coverTo + "\n";
+        try {
+            Path dir = Files.createDirectories(snapshotsRoot.resolve("dart-disclosures").resolve(id));
+            Path r = write(dir, "disclosures.csv", rows.toString());
+            Path t = write(dir, "disclosure_types.csv", types);
+            write(dir, SnapshotManifest.FILE_NAME, """
+                    {"snapshotId":"%s","schemaVersion":1,"createdAt":"%s","scriptVersion":"0.1.0",
+                     "sources":[{"name":"테스트","url":"https://example.invalid","license":"테스트용","collectedAt":"%s"}],
+                     "files":[{"name":"disclosures.csv","sha256":"%s","rows":%d},{"name":"disclosure_types.csv","sha256":"%s","rows":2}],
+                     "coverage":{"firstDate":"%s","lastTradingDate":null,"sharesAsOf":null,"lastCollectedAt":"%s"}}
+                    """.formatted(id, collectedAt, collectedAt, Sha256.ofFile(r), codes.size(), Sha256.ofFile(t), coverFrom,
+                    collectedAt));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return snapshotsRoot;
+    }
+
     private static void row(StringBuilder sb, String code, LocalDate d, int close, long volume) {
         sb.append("KRX,").append(code).append(',').append(d).append(',').append(close).append(',').append(close)
                 .append(',').append(close).append(',').append(close).append(',').append(volume).append(",1\n");

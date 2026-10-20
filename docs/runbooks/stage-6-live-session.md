@@ -55,11 +55,12 @@
      # 종료 코드 0 준비됨, 2 못 만든 선정 있음(출력에 사유), 4 장 시간 보호·정지 요청
      ```
 
+   - 공시 조건 선정(예 (라) `kr-intraday-news@1`)이 있는 등록은 `selection-input.disclosures: "latest"`도 적는다([ADR-014](../adr/ADR-014-live02-judgement-roles-precheck.md) 6장). 준비 작업은 마지막 수집 시각이 가장 늦은 공시 스냅샷(`snapshots/dart-disclosures/`)을 쓰므로, T 00:00 ~ 08:00 공시 수집(D-123)이 끝난 뒤 "선정 다시 준비"를 누른다. 공시 스냅샷이 T 전날까지를 담지 않았거나 없으면 그 조합은 `STALE_INPUT`(신규 진입 0건)이고, 새 공시 스냅샷이 생기면 다시 계산한다. 공시 조건 선정이 없는데 `disclosures`를 적거나, 있는데 빼면 세션을 열 때 거절된다.
    - 선정 결과와 적용 기록은 `live-sessions/<ID>/selections/<날짜>/`에 쌓인다. 리플레이 확인이 이 파일을 읽으니 지우지 않는다.
 
 7. **장중 순위 선정 계좌가 있는 등록(`refresh: INTRADAY_AT`, [D-127](../decisions/D-127-intraday-at-selection.md))만**: 준비 작업도 `selection-input`도 없다. 그날 `at`(예 09:30) 전에 받은 boards 체결로 실험실이 순위를 매긴다.
    - 세션을 **정규장 시작(09:00) 전에** 열어 둔다. 그날 처음 받는 이벤트가 09:01(개장 + 60초) 뒤이거나(장중에 처음 열었음), 09:00 ~ `at` 사이에 다시 띄워 재기동 공백이 붙으면 boards 전 종목이 누락으로 보여 그날 그 계좌는 후보 0(신규 진입 0건)이다. `at` 뒤 재기동은 입력 기록으로 순위를 되살려 그대로 이어 간다.
-   - 상태 `GET /api/live/status`의 `session.intraday`가 `at` 전에는 `AWAITING`, 뒤에는 `RANKED`(후보·적용 시작 순번)인지 본다.
+   - 실험실 화면 `#/live`의 "선정 조합 · 장중 순위 선정" 표(또는 상태 `GET /api/live/status`의 `session.intraday`)가 `at` 전에는 `AWAITING`, 뒤에는 `RANKED`(후보·적용 시작 순번)인지 본다. "시세 누락" 칸이 `SESSION_GAP n/n`(모든 종목)이면 그날은 장 초반 시세를 못 받아 신규 진입이 없다.
    - 녹화 판정(`runLiveJudgement`)은 아직 이 계좌를 받지 않는다(D-127 후속).
 
 ## 3. 운용 중

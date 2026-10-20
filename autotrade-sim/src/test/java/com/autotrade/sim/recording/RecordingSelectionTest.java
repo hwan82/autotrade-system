@@ -167,6 +167,74 @@ class RecordingSelectionTest {
     }
 
     @Test
+    void disclosureSelectionReadsTheFixedDisclosureSnapshot() throws IOException {
+        // ADR-014 F9: 공시 조건 선정 (라)는 selection-input.disclosures의 스냅샷으로 계산한다. 일봉은 D2 기준 데이터일(D1)까지
+        // 담고 공시는 D1 전날까지만 담아, D2는 공시 구간 [D1, D1]을 못 덮어 STALE_INPUT이다(일봉이 아니라 공시 때문에)
+        Path recordings = tmp.resolve("recordings");
+        FixtureRecordings.record(recordings, Market.KRX, TestKrxRules.INSTANCE.zone(), EVENTS);
+        Path snapshots = SelectionFixtures.dailySnapshot(tmp.resolve("snapshots"), SNAPSHOT, D1, false);
+        // D1(03-03) 공시 구간은 기준 데이터일 c(02-27) ~ T 전날(03-02, 대체공휴일): 그 끝날까지만 담는다
+        LocalDate c1 = KRX.previousTradingDay(D1);
+        SelectionFixtures.disclosureSnapshot(snapshots, "dart-disclosures-sel-0001", LocalDate.of(2026, 1, 1),
+                D1.minusDays(1), c1,
+                List.of("005930"), "2026-03-03T23:00:00Z");
+        String news = """
+                selections:
+                  - "kr-intraday-news@1 x kr-random-control@1"
+                selection-input:
+                  daily: "%s"
+                  disclosures: "dart-disclosures-sel-0001"
+                """.formatted(SNAPSHOT);
+        Path dir = experiment("news", BASE + news);
+        RecordingExperiment.Outcome out = RecordingExperiment.runAndWrite(dir, Path.of(".."), recordings, snapshots,
+                new CodeVersion("test", false), false, m -> { }, RunGate.NONE);
+        RunReport sel = out.report().runs().get(2);
+        assertThat(sel.selectionDays()).extracting(RunSelectionDay::selection).satisfiesExactly(
+                d -> assertThat(d.symbols()).as("공시가 있는 005930만").containsExactly(Symbol.krx("005930")),
+                d -> assertThat(d.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT));
+        assertThat(out.files().get("inputs.yaml")).contains("  disclosures: \"dart-disclosures-sel-0001\"\n")
+                .contains("공시 스냅샷이 gate.01");
+        assertThat(out.files().entrySet()).filteredOn(f -> f.getKey().startsWith(SessionSelections.DIR + "/" + D1 + "/")
+                && f.getKey().endsWith(".json") && !f.getKey().contains("applied")).singleElement()
+                .satisfies(f -> assertThat(f.getValue()).contains("\"disclosures\":{").contains("dart-disclosures-sel-0001"));
+
+        // 공시 입력이 없는 등록은 inputs.yaml에 공시 줄이 없다(F9 전과 같은 모양)
+        RecordingExperiment.Outcome hot = RecordingExperiment.runAndWrite(experiment("hot", BASE + SELECTIONS),
+                Path.of(".."), recordings, snapshots, new CodeVersion("test", false), false, m -> { }, RunGate.NONE);
+        assertThat(hot.files().get("inputs.yaml")).doesNotContain("disclosures");
+    }
+
+    @Test
+    void disclosureInputMustMatchTheSelections() {
+        String news = "selections:\n  - \"kr-intraday-news@1 x kr-random-control@1\"\nselection-input:\n  daily: \""
+                + SNAPSHOT + "\"\n";
+        // 공시 조건이 있는데 공시 입력이 없음
+        assertThatThrownBy(() -> RecordingExperiment.selectionCombinations(Path.of(".."),
+                RecordingPlan.parse(BASE + news, "x").selections(), factory()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input.disclosures")
+                .hasMessageContaining("필요");
+        // 공시 조건이 없는데 공시 입력이 있음
+        String hotWith = SELECTIONS + "  disclosures: \"dart-disclosures-sel-0001\"\n";
+        assertThatThrownBy(() -> RecordingExperiment.selectionCombinations(Path.of(".."),
+                RecordingPlan.parse(BASE + hotWith, "x").selections(), factory()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input.disclosures가 있습니다");
+        // 녹화 실험은 공시도 latest를 받지 않는다
+        assertThatThrownBy(() -> RecordingPlan.parse(BASE + news + "  disclosures: \"latest\"\n", "x"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("selection-input.disclosures에 latest");
+        // 형식이 아닌 ID
+        assertThatThrownBy(() -> RecordingPlan.parse(BASE + news + "  disclosures: \"Bad_ID\"\n", "x"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("스냅샷 ID 형식");
+        // 맞으면 받는다
+        RecordingExperiment.selectionCombinations(Path.of(".."),
+                RecordingPlan.parse(BASE + news + "  disclosures: \"dart-disclosures-sel-0001\"\n", "x").selections(),
+                factory());
+    }
+
+    private static com.autotrade.strategy.catalog.CatalogStrategyFactory factory() {
+        return new com.autotrade.strategy.catalog.CatalogStrategyFactory(TestKrxRules.INSTANCE);
+    }
+
+    @Test
     void selectionPreparationChecksTheHeapBeforeReadingTheSnapshot() {
         // architect PR #197 R4: 녹화 데이터와 같은 힙에 일봉 전체를 올리기 전에 보고, 늘릴 힙을 알려 준다
         long gib = 1024L * 1024 * 1024;

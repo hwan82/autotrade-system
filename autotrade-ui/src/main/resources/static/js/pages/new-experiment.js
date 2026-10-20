@@ -27,8 +27,9 @@ async function snapshots(kind) {
 }
 
 export async function newExperimentPage() {
-  const [seedCapital, bars, financials] = await Promise.all([
-    settingValue('lab.default-seed-capital-krw'), snapshots('krx-daily'), snapshots('dart-financials')]);
+  const [seedCapital, bars, financials, disclosures] = await Promise.all([
+    settingValue('lab.default-seed-capital-krw'), snapshots('krx-daily'), snapshots('dart-financials'),
+    snapshots('dart-disclosures')]);
   const ymd = today();
 
   const field = (id, attrs = {}) => h('input', { id, autocomplete: 'off', ...attrs });
@@ -47,7 +48,7 @@ export async function newExperimentPage() {
   const blacklist = field('xblack', { placeholder: '쉼표로 구분한 종목 코드(선택)' });
 
   const snapshotPicker = (id, res, optional) => {
-    const sel = h('select', { id }, optional ? h('option', { value: '' }, '없음(재무 조건 선정이 없을 때)') : null,
+    const sel = h('select', { id }, optional ? h('option', { value: '' }, optional) : null,
       res.items.map(s => h('option', { value: s.id, disabled: !!s.problem },
         s.problem ? `${s.id} (${s.problem})` : `${s.id} (${s.firstDate || '?'} ~ ${s.lastDate || '?'})`)));
     if (!optional && res.items.length === 0) {
@@ -57,7 +58,9 @@ export async function newExperimentPage() {
     return sel;
   };
   const barsInput = snapshotPicker('xbars', bars, false);
-  const finInput = snapshotPicker('xfin', financials, true);
+  const finInput = snapshotPicker('xfin', financials, '없음(재무 조건 선정이 없을 때)');
+  // 공시 스냅샷(D-123): 공시 지표(disclosure-count)를 쓰는 선정이 있을 때만 고른다. 없는데 고르면 서버가 거절한다
+  const discInput = snapshotPicker('xdisc', disclosures, '없음(공시 조건 선정이 없을 때)');
   const coverage = h('p', { class: 'hint' });
   const checkCoverage = () => {
     const s = bars.items.find(x => x.id === barsInput.value);
@@ -134,7 +137,8 @@ export async function newExperimentPage() {
   const payload = () => ({
     id: idInput.value.trim(), question: question.value.trim(), market: market.value, style: style.value,
     from: from.value, to: to.value, seed: seed.value.trim(), seedCapital: capital.value.trim(),
-    barsSnapshot: barsInput.value.trim(), financialsSnapshot: finInput.value.trim(), benchmark: benchmark.value.trim(),
+    barsSnapshot: barsInput.value.trim(), financialsSnapshot: finInput.value.trim(),
+    disclosuresSnapshot: discInput.value.trim(), benchmark: benchmark.value.trim(),
     parallelism: parallelism.value.trim(), combinations: chosen(),
     blacklist: blacklist.value.split(',').map(x => x.trim()).filter(Boolean),
   });
@@ -183,6 +187,8 @@ export async function newExperimentPage() {
       h('label', { for: 'xbars' }, '일봉 스냅샷'), h('div', {}, barsInput,
         h('p', { class: 'hint' }, bars.items.length ? `수집기가 쓴 스냅샷(${bars.root})` : `이 PC에 일봉 스냅샷이 없습니다${bars.root ? `(${bars.root})` : ''}. ID를 직접 적거나 먼저 수집하세요.`)),
       h('label', { for: 'xfin' }, '재무 스냅샷'), h('div', {}, finInput, h('p', { class: 'hint' }, '재무 지표를 쓰는 선정 프로필이 있으면 필요합니다.')),
+      h('label', { for: 'xdisc' }, '공시 스냅샷'), h('div', {}, discInput, h('p', { class: 'hint' },
+        '공시 지표(disclosure-count)를 쓰는 선정 프로필이 있을 때만 고릅니다. 날짜는 마지막 수집 시각이고, 스냅샷 ID의 날짜까지 접수된 공시가 들어 있습니다.')),
       h('label', { for: 'xbench' }, '비교 종목'), benchmark,
       h('label', { for: 'xpar' }, '병렬 수'), parallelism,
       h('label', { for: 'xblack' }, '제외 종목'), blacklist),

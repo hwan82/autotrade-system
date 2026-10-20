@@ -162,4 +162,50 @@ class SessionSelectionsTest {
         assertThat(SelectionPreparer.current(files, D1)).singleElement()
                 .satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.ALREADY_APPLIED));
     }
+
+    @Test
+    void preparedShowsFilesOnDiskWithoutThrowing() throws Exception {
+        // 아무 파일도 없음
+        assertThat(files.prepared(D1)).singleElement().satisfies(p -> {
+            assertThat(p.selection()).isEqualTo(hot.key());
+            assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.NONE);
+        });
+        // 준비 작업 사유 파일(입력 스냅샷 키 포함): 실험실을 다시 띄워도 화면이 사유를 본다
+        files.writeProblem(D1, hot.selectionHash(), SelectionInvalidReason.PRODUCER_FAILED, "선정 계산 실패(x)",
+                "daily=krx-daily-a;financials=");
+        assertThat(files.prepared(D1)).singleElement().satisfies(p -> {
+            assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.PROBLEM);
+            assertThat(p.reason()).isEqualTo(SelectionInvalidReason.PRODUCER_FAILED);
+            assertThat(p.detail()).isEqualTo("선정 계산 실패(x)");
+            assertThat(p.inputs()).isEqualTo("daily=krx-daily-a;financials=");
+        });
+        // 읽을 수 없는 사유 파일도 예외 없이 PROBLEM
+        Path problem = files.dayDir(D2).resolve(hot.selectionHash() + ".problem.json");
+        Files.createDirectories(problem.getParent());
+        Files.writeString(problem, "{", StandardCharsets.UTF_8);
+        assertThat(files.prepared(D2)).singleElement().satisfies(p -> {
+            assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.PROBLEM);
+            assertThat(p.reason()).isNull();
+        });
+        // 결과 파일이 생기면 사유보다 결과(READY), 적용하면 APPLIED
+        files.writeResult(SelectionFixtures.result(hot, D1, List.of("005930")), PRODUCER);
+        assertThat(files.prepared(D1)).singleElement()
+                .satisfies(p -> assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.READY));
+        files.apply(D1);
+        assertThat(files.prepared(D1)).singleElement()
+                .satisfies(p -> assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.APPLIED));
+        // 적용 기록이 SELECTION_MISSING이면 그 사유
+        Files.delete(problem);
+        files.apply(D2);
+        assertThat(files.prepared(D2)).singleElement().satisfies(p -> {
+            assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.APPLIED_MISSING);
+            assertThat(p.reason()).isEqualTo(SelectionInvalidReason.MISSING);
+        });
+        // 깨진 적용 기록은 예외 없이 APPLIED_UNREADABLE
+        LocalDate d3 = LocalDate.of(2026, 10, 16);
+        Files.createDirectories(files.dayDir(d3));
+        Files.writeString(files.appliedFile(d3), "{", StandardCharsets.UTF_8);
+        assertThat(files.prepared(d3)).singleElement()
+                .satisfies(p -> assertThat(p.state()).isEqualTo(SessionSelections.Prepared.State.APPLIED_UNREADABLE));
+    }
 }
