@@ -33,7 +33,7 @@ public record CollectorSecrets(Secret krxAuthKey, Secret openDartKey, Secret kis
             "opendart", Set.of("crtfc-key"),
             "kis-news", Set.of("app-key", "app-secret"));
 
-    /** 파일이 없으면 둘 다 빈 값. 형식이 틀리면 예외(값은 메시지에 넣지 않는다). */
+    /** 파일이 없으면 모든 값이 빈 값. 형식이 틀리면 예외(값은 메시지에 넣지 않는다). */
     public static CollectorSecrets load(Path configDir) {
         Path file = configDir.resolve(FILE_NAME);
         if (!Files.exists(file)) {

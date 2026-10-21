@@ -77,7 +77,7 @@
 
 ## 6. 사용자 할 일(B를 고를 때)
 - 한투 포털 이용약관에서 시세·뉴스 정보의 개인 저장 제한 조항이 있는지 확인(있으면 알려 주기).
-- 한투 키가 실전 계좌용이면 조회 전용 앱키를 따로 발급받는 것을 권한다(D-054 risk-ops 조건). 키는 `secrets.json`의 `brokers.kis.app-key`·`app-secret` 자리에만 넣는다.
+- 한투 키가 실전 계좌용이면 조회 전용 앱키를 따로 발급받는 것을 권한다(D-054 risk-ops 조건). 키는 `collector-secrets.json`의 `kis-news` 칸(`app-key`·`app-secret`)에만 넣는다(D-136 3번, runbook collector.md 3.9). `secrets.json`의 `brokers.kis`에는 넣지 않는다(게이트웨이·실전 엔진 설정이 바뀐다).
 
 ## 7. 결정 뒤 추가 확인 (2026-10-21, D-136 구현 전)
 
