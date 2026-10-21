@@ -33,7 +33,7 @@ import java.util.TreeMap;
  *   <li>종목 상태 갱신 후 {@link #observe} 호출(지표 상태는 항상 갱신)</li>
  *   <li>보유 중이면 청산 조건 확인. 손절 → 익절 → 추적 손절 → 시간 → 최대 보유일 → 로직 청산 → 장 마감 순으로 첫 사유 하나로 전량 시장가 매도</li>
  *   <li>보유가 없으면 주 신호 확인 → 확인 신호를 만료 전까지 기다림 → 실행기가 받는 진입인지 확인
- *       ({@link StrategyContext#admitsEntry}) → 한도 확인 → 수량 계산 → 시장가 매수</li>
+ *       ({@link StrategyContext#admitsEntry}, 받지 않으면 일 손실 한도만 확인하고 끝) → 한도 확인 → 수량 계산 → 시장가 매수</li>
  * </ol>
  * 주문은 모두 시장가다. 신호(T) 다음 이벤트부터 체결되는 것은 실행기·가상 거래소가 보장한다.
  *
@@ -249,7 +249,11 @@ public abstract class ManagedStrategy implements Strategy {
         armedAt.remove(symbol);
         if (!ctx.admitsEntry(symbol)) {
             // 실행기가 받지 않는 신규 진입(선정 밖 종목 등, D-130): 신호는 쓴 것으로 하되 하루 진입 수·대기 진입 금액·깔때기는
-            // 건드리지 않는다. 예전에는 신호를 내고 실행기가 버려서 그날 진입 한도와 현금을 후보 밖 종목이 먼저 써 버렸다(F7)
+            // 건드리지 않는다. 예전에는 신호를 내고 실행기가 버려서 그날 진입 한도와 현금을 후보 밖 종목이 먼저 써 버렸다(F7).
+            // 일 손실 한도만은 이 신호가 온 시점에도 확인한다(D-135): D-130 이전처럼 확인 신호가 오면 받든 안 받든 그날 손실을 본다
+            if (!haltedToday) {
+                dailyLossReached(account);
+            }
             return List.of();
         }
         funnel.signal(today);
@@ -298,15 +302,23 @@ public abstract class ManagedStrategy implements Strategy {
         if (slots >= rules.maxPositions()) {
             return false;
         }
-        BigDecimal equity = equity(account);
-        if (dayStartEquity != null && dayStartEquity.signum() > 0) {
-            BigDecimal change = equity.subtract(dayStartEquity).divide(dayStartEquity, MathContext.DECIMAL64);
-            if (change.compareTo(rules.dailyLossLimit().negate()) <= 0) {
-                haltedToday = true;
-                return false;
-            }
+        return !dailyLossReached(account);
+    }
+
+    /**
+     * 당일 시작 평가금액 대비 손실이 일 손실 한도에 닿았는지 본다. 닿으면 그날 신규 진입 중단({@code haltedToday})을 켠다.
+     * 확인 신호가 온 순간에만 부른다: 한도 확인({@link #allowedByLimits}) 마지막 단계와, 실행기가 받지 않은 확인 신호(D-135).
+     */
+    private boolean dailyLossReached(AccountSnapshot account) {
+        if (dayStartEquity == null || dayStartEquity.signum() <= 0) {
+            return false;
         }
-        return true;
+        BigDecimal change = equity(account).subtract(dayStartEquity).divide(dayStartEquity, MathContext.DECIMAL64);
+        if (change.compareTo(rules.dailyLossLimit().negate()) <= 0) {
+            haltedToday = true;
+            return true;
+        }
+        return false;
     }
 
     /** 거래당 위험·종목당 상한·현금 여유 중 가장 작은 수량(STR-12). 수량 단위로 내림. */

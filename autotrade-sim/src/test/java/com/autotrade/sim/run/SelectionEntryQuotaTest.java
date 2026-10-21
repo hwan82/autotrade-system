@@ -27,6 +27,7 @@ import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.cost.KrxBoard;
 import com.autotrade.sim.exchange.ExecutionSettings;
 import com.autotrade.sim.selection.DailySelection;
+import com.autotrade.sim.selection.SelectionDay;
 import com.autotrade.sim.selection.IntradayUniverse;
 import com.autotrade.sim.selection.SelectionSource;
 import com.autotrade.sim.testing.TestKrxRules;
@@ -132,6 +133,63 @@ class SelectionEntryQuotaTest {
             assertThat(ReportWriter.render(current))
                     .isEqualTo(ReportWriter.render(runDetailed(none, new LegacyContextFactory())));
         }
+    }
+
+    @Test
+    void 전략이_진입_여부를_묻지_않아도_주문_전_거름이_후보_밖_매수를_막는다() {
+        // PR #205 risk-ops 2: admitsEntry는 거름을 앞당길 뿐 대신하지 않는다. 묻지 않는 문맥(기본값 true)으로 돌려도
+        // 후보 밖 삼성전자 매수 주문은 나가지 않고 실행기가 막은 수로 센다. 그 대신 한도는 고치기 전처럼 삼성전자가 쓴다(F7)
+        RunReport run = runDetailed(Combination.of(PICK, RANDOM_ONE_PER_DAY), new LegacyContextFactory()).runs().get(0);
+
+        assertThat(buys(run)).isEmpty();
+        assertThat(run.selectionDays()).singleElement()
+                .satisfies(d -> assertThat(d.blockedEntries()).as("주문 전 거름이 막은 삼성전자 신호 1건").isEqualTo(1));
+        assertThat(run.rejections()).isEmpty();
+    }
+
+    @Test
+    void 실시간_모의_순위_전_대기일_신호는_한도를_쓰지_않고_순위_이벤트_자신의_후보_신호는_들어간다() {
+        // PR #212 QA Q1(변이 N5)·Q2(변이 N6). 실시간 모의는 순위 전 그날을 대기일(NOT_YET)로 두고 이벤트마다 다시 묻는다
+        // (RunStepper.onEvent, D-127). 여기서는 실시간 세션의 날짜 표처럼 순위 이벤트 앞에서 판정을 바꿔 준다.
+        // N5(대기일이면 받음): 순위 전 삼성전자 신호가 하루 1건 한도를 써서 하이닉스 매수 0건.
+        // N6(전략에 순번 − 1을 넘김): 순위를 매긴 바로 그 이벤트의 하이닉스 신호가 막혀 매수 0건
+        List<MarketEvent> events = new ArrayList<>();
+        long[] seq = {0};
+        trade(events, seq, PICKED, "09:00:00", 180_100);
+        book(events, seq, OUTSIDE, "09:10:00", 70_000, 70_100);
+        trade(events, seq, OUTSIDE, "09:10:01", 70_100);
+        book(events, seq, PICKED, "09:20:00", 180_000, 180_100);
+        trade(events, seq, PICKED, "09:20:01", 180_100);
+        book(events, seq, PICKED, "09:30:30", 180_000, 180_100);
+        trade(events, seq, PICKED, "09:31:00", 180_100); // 순위 이벤트
+        book(events, seq, PICKED, "09:31:02", 180_000, 180_100);
+        long rankSeq = events.get(6).sequence();
+        SelectionProfile openAll = new SelectionProfile("open-all", 1, Market.KRX, TradingStyle.INTRADAY,
+                new TreeMap<>(Map.of("hypothesis", "테스트", "refresh", "INTRADAY_AT", "at", "09:30", "max-symbols", "200",
+                        "gate.01.metric", "session-turnover", "gate.01.op", "GT", "gate.01.value", "0")));
+        SelectionDay[] today = {SelectionDay.awaitingIntraday(DAY)};
+        RunStepper run = new RunStepper(spec(Combination.of(openAll, RANDOM_ONE_PER_DAY), events), 0,
+                TestKrxRules.INSTANCE, COST, ExecutionSettings.defaults(), new CatalogStrategyFactory(TestKrxRules.INSTANCE),
+                RiskChain.builder(BlacklistSnapshot.EMPTY).build(), true, (hash, date) -> today[0]);
+        run.begin(events.get(0).receivedAt(), List.of());
+        for (MarketEvent e : events) {
+            if (e.sequence() == rankSeq) {
+                today[0] = SelectionDay.intraday(DAY, "cd".repeat(32), new TreeSet<>(List.of(PICKED)), rankSeq);
+            }
+            run.onEvent(e, () -> { });
+        }
+        RunReport report = run.finish(BigDecimal.ZERO, false);
+
+        assertThat(buys(report)).as("순위 이벤트에서 낸 하이닉스 신호가 그날 1건 한도 안에서 체결")
+                .singleElement().satisfies(f -> {
+                    assertThat(f.fill().symbol()).isEqualTo(PICKED);
+                    assertThat(f.fill().signalEventSeq()).isEqualTo(rankSeq);
+                });
+        assertThat(report.selectionDays()).singleElement().satisfies(d -> {
+            assertThat(d.selection().activeFrom()).isEqualTo(rankSeq);
+            assertThat(d.blockedEntries()).as("순위 전 삼성전자·하이닉스 신호 각 1건").isEqualTo(2);
+        });
+        assertThat(report.rejections()).isEmpty();
     }
 
     /** admitsEntry를 넘기지 않는 문맥으로 카탈로그 전략을 감싼다(D-130 도입 전 실행기와 같은 문맥). */
