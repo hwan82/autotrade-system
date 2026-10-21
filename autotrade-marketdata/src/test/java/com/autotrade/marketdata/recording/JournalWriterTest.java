@@ -54,6 +54,10 @@ class JournalWriterTest {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+        // 되돌린 파일이 정상 종료와 구분되는지 확인한다. 없으면 crash를 정상 종료로 바꿔도 시험이 통과한다(PR #209 QA R3)
+        RecordedDayStream.Summary crashed = RecordedDayStream.read(dir, l -> { });
+        assertThat(crashed.meta()).hasValueSatisfying(m -> assertThat(m.complete()).isFalse());
+        assertThat(crashed.truncated()).isTrue();
     }
 
     private static TradeTick tick(Symbol s, long srcSeq, Instant t) {

@@ -56,3 +56,11 @@
 - architect-3 2·risk-ops-3 N3: `DayWriterRestartStreamTest` 큰 녹화 시험 주석 "명령 줄 길이 한도를 피하고"는 부정확(환경 변수도 같은 한도). 시스템 로캘이 한글을 못 담는 Windows에서는 `CLASSPATH`도 깨질 수 있음 `[추론]`.
 - risk-ops-3 N4·architect-3 4: Windows에서 같은 날 녹화 파일을 다른 핸들이 열고 있으면 재기동 `Files.move`가 거부돼 녹화가 멈출 수 있음(이전부터 있던 성질, 조용히 틀리지 않고 오류로 멈춤).
 - PR #209 Windows 재실행 결과는 받지 못했다. 다음 사용자 PC 실행 때 `./gradlew :autotrade-marketdata:test` 161개 통과를 확인한다.
+
+## 후속 반영(시험만, 운영 코드 무변경)
+
+- QA Q1: `DayWriterRestartStreamTest` "같은 날 재기동은 앞 재기동이 남긴 tmp를 비우고 다시 쓴다". 정상 종료 녹화 폴더에 같은 줄을 담은 `events.jsonl.gz.tmp`를 남기고 같은 날 재기동한 뒤, tmp가 없어지고 순번이 1부터 끊김 없이 이어지며 잘림·표시 없는 경계가 없는지 본다.
+- QA R2: `RecordingMetaSourcesOrderTest` "소스 맵은 고칠 수 없다". 만든 쪽 맵을 바꿔도 따라 바뀌지 않고, `put`·`remove`·`clear`가 `UnsupportedOperationException`(직접 만든 메타, `meta.json`에서 읽은 메타 둘 다).
+- QA R3: `JournalWriterTest`·`DayWriterRestartStreamTest`의 비정상 종료 흉내(`crash`·`crashedDay`) 끝에 "메타 `complete=false`, 이벤트 읽기 `truncated`" 단언. 정상 종료로 바꾸거나 메타·이벤트 중 하나만 되돌리면 시험이 실패한다.
+- architect-3 2·risk-ops-3 N3: 큰 녹화 시험 주석에서 "명령 줄 길이 한도를 피하고"를 지우고, 환경 변수도 같은 한도이며 한글을 못 담는 로캘에서는 깨질 수 있다 `[추론]`고 고쳤다.
+- 남은 것: risk-ops-3 N4·architect-3 4(다른 핸들이 그날 파일을 열고 있을 때 Windows 재기동 `Files.move` 거부)는 운영 성질이라 이번 범위 밖. 사용자 PC Windows에서 `./gradlew :autotrade-marketdata:test` 통과 확인은 이 PR 머지 전에 받는다.
