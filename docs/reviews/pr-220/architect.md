@@ -32,3 +32,33 @@
 
 ## 판정
 수정 필요(B1 확인 못 함: 이 컨테이너에서 `./gradlew build`가 Maven Central 429와 오프라인 캐시 부족으로 의존성 해석 단계에서 실패해 전체 빌드를 직접 확인하지 못했다. 바뀐 모듈 `:autotrade-strategy:test`는 직접 통과시켰고 변이 P2·P9가 새 시험으로 죽는 것도 확인했다. 같은 헤드 CI `Gradle build` success(run 39546028432)도 직접 확인했으므로, 사용자가 이 PR에 "CI 결과를 B1 근거로 인정"을 남기면 B1은 CI로 판단할 수 있다. 코드·시험 결함으로 인한 수정 요구는 없다. B7: 보호 경로(`autotrade-strategy/*`) 변경이므로 risk-ops 검토·독립 QA·사용자 머지 대상이며 이 판정만으로 Claude가 머지하지 않는다)
+
+## 재검토 2026-10-21
+- 대상: PR #220 / 커밋 23decb04317b1dcce00bbfec643106019585b72a / main(b4b39b6c) 대비 diff. 파일은 4개, +100이다.
+  - 앞 검토의 2개 파일은 daaa87a0과 같다.
+  - 새로 더해진 것은 `docs/reviews/pr-220/architect.md`와 `docs/reviews/pr-220/risk-ops.md`다. `git diff daaa87a0 23decb04 --stat`으로 보면 이 두 문서만 바뀌었고 운영·시험 코드는 바뀌지 않았다.
+  - 커밋된 architect.md는 검토자가 쓴 원문과 같다(작업 트리 대비 `git diff --quiet HEAD` 통과).
+- 점검표: B
+- 직접 실행한 것 (검토자 전용 worktree, 헤드 23decb04):
+  - `./gradlew build` → 실패. spring-boot-starter-test 3.5.16 pom이 Maven Central `429 Too Many Requests`를 받아 의존성 해석에서 멈췄다. 전체 빌드 결과는 이번에도 직접 얻지 못했다.
+  - `./gradlew :autotrade-strategy:test --offline` → BUILD SUCCESSFUL. 52건(CatalogStrategyTest 25건 포함), 실패 0, 건너뜀 0.
+  - 변이 P2·P9: 앞 검토(daaa87a0)에서 새 시험으로 죽는 것을 확인했다. 그 뒤 운영·시험 코드가 바뀌지 않아 결과가 그대로 유효하다.
+  - PR #220 issue comment를 직접 조회했다. id 6308494141, 작성자 `hwan82`(author_association OWNER), 2026-10-21T05:04:25Z, 본문 "CI 결과를 B1 근거로 인정".
+  - CI run 39547214458을 직접 조회했다. head_sha 23decb04317b1dcce00bbfec643106019585b72a, conclusion success. Gradle build, DB schema, Lab screens, Secret scan and collector boundary 4종 job 모두 success.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(CI 근거) | 사용자 hwan82의 PR #220 댓글 6308494141 "CI 결과를 B1 근거로 인정"에 따라, 같은 헤드 CI `Gradle build` success(run 39547214458, job 119047986551)로 판단했다. 직접 실행한 전체 빌드는 429로 실패했다. 바뀐 모듈 시험은 직접 통과했다. |
+| B2 | 통과 | 운영 코드·빌드 스크립트·의존성 변경이 없다. ArchUnit을 포함한 CI `Gradle build`가 success다. |
+| B3 | 해당 없음 | 계약 변경이 없다. 새로 더해진 것은 검토 원문 문서뿐이다. |
+| B4 | 통과 | 앞 검토와 같다(고정 시드 42L, CatalogStrategyTest.java:427-428). CI 골든 시험을 포함한 `Gradle build`가 success다. |
+| B5 | 통과 | 앞 검토와 같다. |
+| B6 | 통과 | 새 시험 2건이 직접 실행에서 통과했다. 변이 P2·P9를 죽이는 것도 앞 검토에서 확인했다. 시험 삭제·건너뜀은 없다. |
+| B7 | risk-ops 검토 필요 | `autotrade-strategy/*`가 보호 경로다(`scripts/ci/protected-paths.txt`:15). risk-ops 원문 `docs/reviews/pr-220/risk-ops.md`가 커밋되어 있으나, 그 판정은 이 검토에서 평가하지 않는다. 머지 전 독립 QA와 사용자 머지가 필요하다. |
+| B8 | 통과 | 새 문서 2개에도 비밀값이 없다. CI Secret scan이 success다. |
+
+## 점검표 밖 발견
+- 없음.
+
+## 판정
+승인(사용자 hwan82의 PR #220 댓글 6308494141 "CI 결과를 B1 근거로 인정"에 따라 B1을 같은 헤드 CI `Gradle build` success(23decb04, run 39547214458)로 판단함. 그 댓글이 사용자 본인 것이 아니면 이 승인은 무효. B7: 보호 경로 변경이므로 risk-ops 검토·독립 QA·사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다)
