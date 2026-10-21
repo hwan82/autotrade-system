@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 /**
  * 준비 작업의 계산 부분(ADR-012 3.5 "준비 작업", D-124): 거래일 T의 선정 결과를 계산해 고정 파일로 놓는다. 실시간 모의(실험실의
@@ -149,8 +150,9 @@ public final class SelectionPreparer {
 
     /** 입력 스냅샷 키 없이(녹화 실험: 한 번만 계산한다). */
     public static List<Outcome> prepare(SessionSelections files, LocalDate date, SelectionCalculator calculator,
-            LocalDate barsLastTradingDate, LocalDate cutoff, SelectionResultFile.Producer producer, Runnable checkpoint) {
-        return prepare(files, date, calculator, barsLastTradingDate, cutoff, producer, checkpoint, null);
+            LocalDate barsLastTradingDate, UnaryOperator<LocalDate> previousTradingDay, SelectionResultFile.Producer producer,
+            Runnable checkpoint) {
+        return prepare(files, date, calculator, barsLastTradingDate, previousTradingDay, producer, checkpoint, null);
     }
 
     /**
@@ -158,12 +160,13 @@ public final class SelectionPreparer {
      *     남기지 않음
      * @param calculator 입력 스냅샷으로 만든 계산기
      * @param barsLastTradingDate 일봉 스냅샷 마지막 거래일
-     * @param cutoff T의 직전 거래일(기준 데이터일 c)
+     * @param previousTradingDay 거래일 → 직전 거래일(거래소 캘린더). 선정마다 갱신 주기로 기준 데이터일 c를 정한다
+     *     ({@code PRE_OPEN_DAILY}는 T의 직전 거래일, {@code PRE_OPEN_DAILY_LAG1}은 그 하루 앞, D-137)
      * @param checkpoint 선정 하나를 계산하기 전마다 부른다(정지 요청·디스크 관문, architect PR #191 N2). 던진 예외는 그대로 올라간다
      */
     public static List<Outcome> prepare(SessionSelections files, LocalDate date, SelectionCalculator calculator,
-            LocalDate barsLastTradingDate, LocalDate cutoff, SelectionResultFile.Producer producer, Runnable checkpoint,
-            String inputs) {
+            LocalDate barsLastTradingDate, UnaryOperator<LocalDate> previousTradingDay, SelectionResultFile.Producer producer,
+            Runnable checkpoint, String inputs) {
         Objects.requireNonNull(checkpoint, "checkpoint");
         List<Outcome> out = new ArrayList<>();
         if (nothingToDoApplied(files, date)) {
@@ -176,6 +179,7 @@ public final class SelectionPreparer {
                 continue;
             }
             checkpoint.run();
+            LocalDate cutoff = s.refresh().cutoff(date, previousTradingDay);
             if (barsLastTradingDate.isBefore(cutoff)) {
                 String detail = "일봉 스냅샷 마지막 거래일 " + barsLastTradingDate + " < 기준 데이터일 " + cutoff;
                 files.writeProblem(date, s.selectionHash(), SelectionInvalidReason.STALE_INPUT, detail, inputs);

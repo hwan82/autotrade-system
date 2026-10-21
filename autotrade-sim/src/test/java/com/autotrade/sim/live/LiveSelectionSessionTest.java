@@ -196,6 +196,57 @@ class LiveSelectionSessionTest {
         }
     }
 
+    /**
+     * 하루 늦춘 장전 선정(D-137): 일봉이 T−1까지 오지 않아도 T−2를 덮는 스냅샷으로 계산하고, 그 결과는 T−1에 적용할 원래 판
+     * 결과와 같다. 같은 등록의 원래 판은 그날 STALE_INPUT이다. 스냅샷 마지막 거래일(10-13)의 급등은 10-14 LAG1 선정에 들어가지
+     * 않는다(기준 데이터일 10-12, 미래 정보 아님).
+     */
+    @Test
+    void lagOneSelectionUsesDayBeforeCutoffAndMatchesPreviousDayResult() throws Exception {
+        Path root = tmp.resolve("lag1");
+        String text = yaml(true).replace("  - \"kr-intraday-hot@1 x kr-random-control@1\"\n",
+                "  - \"kr-intraday-hot@1 x kr-random-control@1\"\n  - \"kr-intraday-hot-lag1@1 x kr-random-control@1\"\n");
+        assertThat(text).contains("kr-intraday-hot-lag1@1");
+        LivePlan plan = LivePlan.parse(text, "experiment.yaml");
+        Path sessions = root.resolve("live-sessions");
+        Path snapshots = SelectionFixtures.dailySnapshot(root.resolve("snapshots"), "krx-daily-live-0001", D1.minusDays(1),
+                false);
+        SelectionProfile lag = com.autotrade.sim.combo.CombinationExperiment.loadSelection(REPO,
+                new com.autotrade.sim.combo.CombinationPlan.Ref("kr-intraday-hot-lag1", 1));
+        SessionSelections files = LiveSetup.of(plan, REPO).selectionFiles(sessions.resolve(ID));
+
+        LiveSelectionPrep.Report d1 = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D1, PRODUCER,
+                RunGate.NONE, rows -> true, m -> { });
+        assertThat(d1.ready()).isTrue();
+        LiveSelectionPrep.Report d2 = LiveSelectionPrep.prepare(plan, REPO, sessions, snapshots, D2, PRODUCER,
+                RunGate.NONE, rows -> true, m -> { });
+        assertThat(d2.outcomes()).filteredOn(o -> o.selection().equals(hot.key())).singleElement()
+                .satisfies(o -> assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT));
+        assertThat(d2.outcomes()).filteredOn(o -> o.selection().equals(lag.key())).singleElement()
+                .satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.WRITTEN));
+
+        com.autotrade.selection.result.SelectionResult hotD1 = read(files, D1, hot);
+        com.autotrade.selection.result.SelectionResult lagD1 = read(files, D1, lag);
+        com.autotrade.selection.result.SelectionResult lagD2 = read(files, D2, lag);
+        assertThat(hotD1.selected()).extracting(com.autotrade.selection.result.SelectionResult.Selected::code)
+                .containsExactlyInAnyOrder("005930", "035720");
+        assertThat(lagD1.selected()).isEmpty();
+        assertThat(lagD2.selected()).isEqualTo(hotD1.selected());
+        assertThat(lagD2.evaluations()).isEqualTo(hotD1.evaluations());
+        assertThat(lagD2.applyFrom()).isEqualTo(D2);
+        assertThat(lagD2.applyTo()).isEqualTo(D2);
+
+        // 날짜 전환 지점의 판정도 선정마다 기준 데이터일을 본다: LAG1 결과(일봉 10-13까지)는 D2에 적용된다
+        assertThat(files.apply(D2).item(lag.selectionHash()).applied()).isTrue();
+        assertThat(files.apply(D2).item(hot.selectionHash()).reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
+    }
+
+    private static com.autotrade.selection.result.SelectionResult read(SessionSelections files, LocalDate date,
+            SelectionProfile p) throws Exception {
+        return SelectionResultFile.read(Files.readString(files.resultFile(date, p.selectionHash()), StandardCharsets.UTF_8))
+                .result();
+    }
+
     @Test
     void preparedFromLatestSnapshotAndReplayRecomputesIt() throws Exception {
         Path root = tmp.resolve("prep");

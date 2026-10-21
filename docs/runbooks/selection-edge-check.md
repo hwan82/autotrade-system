@@ -7,12 +7,13 @@
 | 단계 | 누가 | 무엇 |
 |---|---|---|
 | 1 | Claude | 등록 파일 `experiments/EXP-20261020-EDGE01/edge.yaml` 커밋(끝남, 결과를 본 뒤 고치지 않음) |
-| 2 | 사용자 | `git pull` 뒤 EDGE01 실행(2장) |
+| 1b | Claude | 하루 늦춘 판 (다) 등록 파일 `experiments/EXP-20261022-EDGE04/edge.yaml` 커밋(끝남, [D-137](../decisions/D-137-pre-open-daily-lag1.md)). LIVE02 후보 판정은 이 검사로 한다 |
+| 2 | 사용자 | `git pull` 뒤 EDGE01, 이어서 EDGE04 실행(2장) |
 | 3 | 사용자 → 스레드 | 결과 파일 다섯 개를 올린다(3장) |
 | 4 | Claude | 결과 커밋, 판정 정리 |
 | 5 | 사용자 | 공시 전체 수집과 품질 리포트 확인(4장). 끝나면 스냅샷 ID를 알려 준다 |
-| 6 | Claude | EDGE02 (라)·EDGE03 공시 대조 등록 파일을 결과 전에 커밋 |
-| 7 | 사용자 → 스레드 | EDGE02·EDGE03 실행과 결과 업로드(2·3장과 같음) |
+| 6 | Claude | EDGE02 (라)·EDGE03 공시 대조와 하루 늦춘 판 EDGE05·EDGE06 등록 파일을 결과 전에 커밋 |
+| 7 | 사용자 → 스레드 | EDGE02·03·05·06 실행과 결과 업로드(2·3장과 같음) |
 
 ## 1. 실행 시각(장 시간 보호)
 
@@ -31,7 +32,10 @@ chcp 65001
 cd C:\2.Code\myproject\autotrade-system
 git pull
 .\gradlew.bat :autotrade-app-experiment:runSelectionEdgeCheck -Pexperiment=EXP-20261020-EDGE01 -PverifyDeterminism
+.\gradlew.bat :autotrade-app-experiment:runSelectionEdgeCheck -Pexperiment=EXP-20261022-EDGE04 -PverifyDeterminism
 ```
+
+- EDGE04는 (다)의 하루 늦춘 판이다(D-137). 같은 스냅샷을 쓰고 걸리는 시간도 EDGE01과 비슷하다 `[추론]`. 둘째 줄은 첫째가 끝난 뒤 돈다. 보호 구간 전에 둘 다 끝나지 않을 것 같으면 EDGE04를 다른 날 돌려도 된다.
 
 - `chcp 65001`은 한글 출력이 깨지지 않게 한다.
 - 일봉 스냅샷 `krx-daily-2026-10-16-a6df4719`가 기본 위치(`<설정 폴더>\snapshots\`)에 있어야 한다. 다른 폴더에 두었으면 `-PsnapshotsDir=D:\폴더`를 붙인다.

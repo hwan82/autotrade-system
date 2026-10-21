@@ -48,6 +48,7 @@
 6. **선정 조합 계좌가 있는 등록(`selections`, D-124)만**: 순서는 전날 저녁 KRX 일봉 수집([수집기 runbook](collector.md)) → 세션 열림 → 준비 완료 확인이다.
    - 세션이 열려 있으면 실험실이 장 시간 밖(16:00~08:30)에 5분마다 다음 거래일 선정을 준비한다. 장 시작 전에 `GET /api/live/status`의 `prepare`가 그 거래일이고 `outcomes`가 모두 `WRITTEN`·`EXISTS`인지 본다(화면 `#/live` "선정 조합 계좌" 구역에도 보임). 장중에 세션을 열었으면 화면의 "지금 준비"(`POST /api/live/selections/prepare`)로 손으로 준비한다.
    - `PROBLEM`·`STALE_INPUT`이면 저녁 수집이 그날 일봉을 덮지 않은 것이다(ADR-012 3.7). 그날 그 조합 계좌는 신규 진입 0건으로 돈다.
+   - **KRX 일봉은 다음 날 장 전까지 게시되지 않는다**([D-137](../decisions/D-137-pre-open-daily-lag1.md), 2026-10-21 확인). 그래서 `refresh: PRE_OPEN_DAILY` 선정(예 `kr-intraday-hot@1`)은 실시간 모의에서 매일 `STALE_INPUT`이다. 실시간 등록에는 하루 늦춘 판(`refresh: PRE_OPEN_DAILY_LAG1`, 예 `kr-intraday-hot-lag1@1`)을 쓴다. 이 판은 T의 두 거래일 전 일봉까지만 필요해 전날 저녁 수집으로 준비된다.
    - `PRODUCER_FAILED`에 힙 안내가 나오면 실험실 밖에서 준비한다(장 시간 밖, 실험실은 켜 둔 채로 됨):
 
      ```powershell

@@ -46,7 +46,7 @@ record LiveSetup(
         Symbol benchmark,
         ExchangeCalendar calendar,
         List<SelectionProfile> selectionProfiles) {
-    // selectionProfiles: 장전 선정(PRE_OPEN_DAILY)만. 장중 순위 선정은 combinations에서 찾는다(D-127)
+    // selectionProfiles: 장전 선정(PRE_OPEN_DAILY·PRE_OPEN_DAILY_LAG1)만. 장중 순위 선정은 combinations에서 찾는다(D-127)
 
     /** 실시간 세션 계약 데이터 버전. 리플레이 확인은 입력 기록의 녹화 데이터셋 버전을 쓴다(보고서에는 나오지 않음). */
     static final String LIVE_DATA_VERSION_PREFIX = "LIVE-";

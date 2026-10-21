@@ -148,7 +148,11 @@ public final class LiveSelectionPrep {
             return new Report(id, date, "", "", "", out, Files.exists(files.appliedFile(date))
                     ? "이미 적용함(그날 적용 기록이 있음)" : "이미 준비됨(결과 파일이 모두 있음)");
         }
-        LocalDate cutoff = setup.calendar().previousTradingDay(date);
+        // 선정마다 기준 데이터일이 다를 수 있다(LAG1은 하루 앞, D-137). 가장 이른 것도 못 덮으면 아무 선정도 계산할 수 없다.
+        // 일부만 덮으면 계산을 이어 가고, 못 덮는 선정은 SelectionPreparer가 선정마다 STALE_INPUT으로 남긴다
+        LocalDate cutoff = files.selections().stream()
+                .map(s -> s.refresh().cutoff(date, setup.calendar()::previousTradingDay))
+                .min(LocalDate::compareTo).orElseThrow();
         RegisteredSelections sel = plan.selections();
         String daily = sel.daily().orElseThrow();
         if (daily.equals(RegisteredSelections.LATEST)) {
@@ -199,8 +203,8 @@ public final class LiveSelectionPrep {
         SnapshotInputs in = SnapshotInputs.load(plan.market(), daily, financials, disclosures, snapshotsRoot,
                 setup.calendar(), gate, log, (first, last) -> { });
         SelectionCalculator calc = new SelectionCalculator(in.selectionData());
-        List<SelectionPreparer.Outcome> out = SelectionPreparer.prepare(files, date, calc, in.last(), cutoff, producer,
-                gate::check, inputs);
+        List<SelectionPreparer.Outcome> out = SelectionPreparer.prepare(files, date, calc, in.last(),
+                setup.calendar()::previousTradingDay, producer, gate::check, inputs);
         Report r = new Report(id, date, daily, financials.orElse(""), disclosures.orElse(""), out, summary(out));
         log.accept("선정 준비 " + id + " " + date + ": " + r.note());
         return r;

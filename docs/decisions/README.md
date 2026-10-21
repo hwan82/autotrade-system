@@ -139,6 +139,7 @@
 | D-133 | 2026-10-20 | KRX 실제 거래대금 `ACC_TRDVAL` 수집(ADR-012 후속 F1, data-engineer, **추천안 채택(자율)**). `krx-daily` 스냅샷 선택 파일 `daily_turnover.csv`(원, 수정 안 함, 값 있는 행만), ID 해시는 일봉+거래대금 두 파일(같은 캐시도 새 ID), `--without-turnover`는 옛 형식·옛 ID 재현. 범위(저가×거래량~고가×거래량) 밖은 경고만. `autotrade-marketdata`·`DailyBar`·스키마 버전 무변경. 지표 `turnover`·프로필 v2는 다음 PR(strategy-researcher 상담) | [D-133](D-133-krx-actual-turnover.md) |
 | D-134 | 2026-10-21 | LIVE02 판정 기준과 시작 시점(Q-056 닫음, **사용자 결정**). 선정 조합 계좌 C1~C4는 D-114 L1~L11 수치·계산 그대로(L1 기준선 `kr-bh-baseline@3`, L10 같은 선정 무작위 진입·m = 판정 대상 수, 선정 효과는 참고 칸). 실험실 세션 하나 유지, LIVE02는 LIVE01 뒤 2026-12-21~2027-02-19 | [D-134](D-134-live02-criteria-and-start.md) |
 | D-135 | 2026-10-21 | 선정 계좌에서 받지 않은 확인 신호도 일 손실 한도를 확인(PR #205 risk-ops 1·QA R2, sim-engine, **사용자 결정**(안 1), 실전 관련 PR이라 사용자 머지). `ManagedStrategy.entry`가 `admitsEntry` false일 때 그날 멈추지 않았으면 일 손실만 확인해 `haltedToday`를 켬(진입 수·대기 금액·깔때기는 D-130대로 안 씀). 선정 없는 계좌 바이트 동일. 대안: 모든 계좌 이벤트마다 확인(LIVE01·기존 결과 바뀜), 프로필 새 키. `blocked-entries` 뜻(D-130부터 한도 확인 앞에서 셈) 명시, risk-ops 2(묻지 않는 문맥에도 주문 전 거름)·PR #212 QA Q1·Q2 시험 | [D-135](D-135-blocked-signal-daily-loss-check.md) |
+| D-137 | 2026-10-22 | 하루 늦춘 장전 선정 `PRE_OPEN_DAILY_LAG1`(ADR-012 3.7 (a)·배치표 1·3b, sim-engine, **추천안 채택(자율)**). KRX 일봉이 다음 날 07:34까지 게시되지 않음을 사용자 PC로 확인(10-21 18:31·21:01, 10-22 07:34). 기준 데이터일 T−2, 계산은 T의 직전 거래일에 적용할 원래 판과 같음, DB V4, 하루 늦춘 판 (다)(라)(라 공시 대조) `*-lag1@1`, LIVE02 C1~C3은 하루 늦춘 판, 사전 검사 EDGE04 등록(EDGE05·06은 공시 스냅샷 뒤) | [D-137](D-137-pre-open-daily-lag1.md) |
 
 ## 미확정
 | ID | 항목 | 담당 |

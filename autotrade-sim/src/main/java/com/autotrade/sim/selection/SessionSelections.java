@@ -56,7 +56,8 @@ import java.util.regex.Pattern;
  * <p><b>파일 쓰기</b>: 같은 폴더 임시 파일에 쓰고 디스크로 내린 뒤 원자적 이름 바꾸기로 놓는다(architect PR #191 N3). 결과 파일과
  * 적용 기록은 이미 있으면 덮어쓰지 않는다.
  *
- * <p>선정 해시마다 하나의 결과를 쓴다. 단타 선정({@code PRE_OPEN_DAILY})만 받으므로 결과의 적용 범위는 그날 하루다.
+ * <p>선정 해시마다 하나의 결과를 쓴다. 단타 장전 선정({@code PRE_OPEN_DAILY}·{@code PRE_OPEN_DAILY_LAG1})만 받으므로 결과의
+ * 적용 범위는 그날 하루다. 기준 데이터일은 선정마다 갱신 주기로 정한다(LAG1은 하루 더 앞, D-137).
  */
 public final class SessionSelections {
 
@@ -279,7 +280,7 @@ public final class SessionSelections {
         }
         LocalDate cutoff;
         try {
-            cutoff = previousTradingDay.apply(date);
+            cutoff = profile.refresh().cutoff(date, previousTradingDay); // LAG1은 T−2(D-137)
         } catch (RuntimeException ex) {
             return Item.missing(hash, key, SelectionInvalidReason.MALFORMED,
                     "기준 데이터일을 정할 수 없음(" + ex.getClass().getSimpleName() + ")");

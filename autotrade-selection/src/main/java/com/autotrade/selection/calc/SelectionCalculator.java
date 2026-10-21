@@ -28,8 +28,9 @@ import java.util.function.Function;
  *
  * <p>순서
  * <ol>
- *   <li>선정 기준일 T = {@code applyFrom}(거래일), 기준 데이터일 c = T의 직전 거래일. 일봉·상장주식수는 c까지, 재무는 T 전
- *       접수분만 읽는다(MD-10, {@link FinancialsAt}). 유니버스는 c에 상장돼 있던 종목(상장폐지 예정 포함, MD-07)</li>
+ *   <li>선정 기준일 T = {@code applyFrom}(거래일), 정보 시점 I = T({@code PRE_OPEN_DAILY_LAG1}은 T의 직전 거래일, D-137),
+ *       기준 데이터일 c = I의 직전 거래일. 일봉·상장주식수는 c까지, 재무·공시는 I 전 접수분만 읽는다(MD-10, {@link FinancialsAt}).
+ *       유니버스는 c에 상장돼 있던 종목(상장폐지 예정 포함, MD-07)</li>
  *   <li>하드 필터(STR-10): 상품 유형 → 최소 가격 → 최근 일봉 일수. 걸리면 그 종목은 자격 조건을 보지 않는다</li>
  *   <li>자격 조건(Gate, 모두 AND): 모든 조건을 계산해 값과 사유를 남긴다(사유는 조건 순번 순)</li>
  *   <li>통과 종목을 점수 순(없으면 종목 코드 순)으로 세워 {@code max-symbols}까지 선정, 나머지는 {@code RANK_CUTOFF}</li>
@@ -98,16 +99,19 @@ public final class SelectionCalculator {
             throw new IllegalArgumentException("주간 갱신 선정의 기준일은 그 주 첫 거래일이어야 합니다: " + applyFrom);
         }
         SelectionCriteria criteria = SelectionCriteria.parse(profile);
-        LocalDate cutoff = days.previous(applyFrom);
+        // 정보 시점: 하루 늦춘 장전 선정(LAG1)은 T의 직전 거래일에 적용할 PRE_OPEN_DAILY 결과와 같은 입력만 읽는다(D-137).
+        // 아래 계산은 모두 이 날짜를 기준으로 하고, 결과의 적용 범위만 T다
+        LocalDate asOf = profile.refresh().infoDate(applyFrom, days::previous);
+        LocalDate cutoff = days.previous(asOf);
         List<LocalDate> window = days.lastN(cutoff, criteria.lookbackDays());
         Set<Metric.Kind> kinds = criteria.inputKinds();
         checkInputs(kinds, cutoff);
-        checkDisclosures(criteria, applyFrom, window);
+        checkDisclosures(criteria, asOf, window);
 
         List<Scored> passed = new ArrayList<>();
         Map<String, SelectionResult.Evaluation> evaluations = new TreeMap<>();
         for (Symbol symbol : data.universe(cutoff)) {
-            Eval e = evaluate(symbol, criteria, applyFrom, cutoff, window);
+            Eval e = evaluate(symbol, criteria, asOf, cutoff, window);
             if (e.reasons.isEmpty()) {
                 passed.add(new Scored(symbol, e));
             } else {
@@ -144,7 +148,7 @@ public final class SelectionCalculator {
                 data.calendarDigest(),
                 kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().snapshotId() : null,
                 kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().sha256() : null,
-                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, applyFrom) : null);
+                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, asOf) : null);
         return new SelectionResult(SelectionResult.Selection.of(profile), applyFrom, applyToFor(profile, applyFrom),
                 inputs, selected, List.copyOf(evaluations.values()));
     }
@@ -258,7 +262,7 @@ public final class SelectionCalculator {
         }
     }
 
-    private Eval evaluate(Symbol symbol, SelectionCriteria c, LocalDate applyFrom, LocalDate cutoff,
+    private Eval evaluate(Symbol symbol, SelectionCriteria c, LocalDate asOf, LocalDate cutoff,
             List<LocalDate> window) {
         Eval e = new Eval();
         Map<LocalDate, DailyBar> bars = new HashMap<>();
@@ -283,7 +287,7 @@ public final class SelectionCalculator {
             e.reasons.add(FILTER_MIN_BAR_DAYS);
             return e;
         }
-        Context ctx = new Context(symbol, applyFrom, cutoff, window, bars);
+        Context ctx = new Context(symbol, asOf, cutoff, window, bars);
         for (Condition g : c.gates()) {
             Value v = g.metric() == Metric.DISCLOSURE_COUNT ? disclosureCount(ctx, g) : value(ctx, g.metric(), g.period());
             if (v.fallback) {

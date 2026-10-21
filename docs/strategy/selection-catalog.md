@@ -16,9 +16,9 @@
 4. **순위**: 통과 종목을 `score.*` 순(같으면 종목 코드 순), 점수가 없으면 종목 코드 순으로 세워 `max-symbols`까지 선정. 넘친 종목은 `RANK_CUTOFF`.
 5. **결과**: 선정 종목(순위), 전 종목 평가(통과·탈락 사유, 조건별 값, 정정 대체 규칙 표시), 입력 데이터 기준(일봉 스냅샷·수록 마지막 거래일, 상장주식수 기준일, 재무 스냅샷·수집 시각, 공시 조건이 있을 때만 공시 스냅샷 ID·SHA-256·`covered_through`(쓴 유형들 수집 구간 끝날 중 가장 이른 날)), 내용 해시(ADR-007 2.6 정규 JSON의 SHA-256).
 
-**적용 범위**: `POST_CLOSE_DAILY`·`PRE_OPEN_DAILY`는 T 하루. `POST_CLOSE_WEEKLY`는 T가 그 ISO 주(월~일)의 첫 거래일이어야 하고 그 주 마지막 거래일까지. 실험실은 주중에 시작해도 그 주 첫 거래일 결과를 쓴다.
+**적용 범위**: `POST_CLOSE_DAILY`·`PRE_OPEN_DAILY`·`PRE_OPEN_DAILY_LAG1`은 T 하루. `POST_CLOSE_WEEKLY`는 T가 그 ISO 주(월~일)의 첫 거래일이어야 하고 그 주 마지막 거래일까지. 실험실은 주중에 시작해도 그 주 첫 거래일 결과를 쓴다.
 
-**미래 정보 0건**: 일봉·상장주식수는 c까지만, 재무는 접수일이 T보다 앞선 공시만, 공시 건수도 접수일이 T보다 앞선 공시만 읽는다(T 당일 장전 공시는 쓰지 않음, ADR-012 3.1, D-123에서 "접수일 ≤ c"를 바꿈). T가 거래일이므로 "접수일 < T"는 "접수일 다음 거래일 ≤ T"와 같다(MD-10). 테스트: `SelectionCalculatorTest#기준일_당일_이후_일봉은_쓰지_않는다`, `#가_재무_4조건_골든_T1`(T1 당일 접수 공시 미사용).
+**미래 정보 0건**: 일봉·상장주식수는 c까지만, 재무는 접수일이 T보다 앞선 공시만, 공시 건수도 접수일이 T보다 앞선 공시만 읽는다(T 당일 장전 공시는 쓰지 않음, ADR-012 3.1, D-123에서 "접수일 ≤ c"를 바꿈). T가 거래일이므로 "접수일 < T"는 "접수일 다음 거래일 ≤ T"와 같다(MD-10). **하루 늦춘 장전 선정(`PRE_OPEN_DAILY_LAG1`, D-137)**은 위 규칙의 T를 T의 직전 거래일 T'로 바꿔 계산한다: 일봉·상장주식수는 T'의 직전 거래일까지, 재무·공시는 접수일 < T'만 읽고, 결과는 T 하루에 적용한다. 그래서 그 결과의 선정·평가·입력은 T'에 적용할 원래 판 결과와 같다(`DisclosureSelectionCalculatorTest#하루_늦춘_판은_전_거래일_원래_판_결과와_같은_입력으로_고른다`). 테스트: `SelectionCalculatorTest#기준일_당일_이후_일봉은_쓰지_않는다`, `#가_재무_4조건_골든_T1`(T1 당일 접수 공시 미사용).
 
 ## 2. 프로필 키
 
@@ -91,6 +91,7 @@
 | (다) 전일 관심 종목 | `selections/kr-intraday-hot/v1.yaml` | INTRADAY, 장전 매일(`PRE_OPEN_DAILY`) | 전일 거래대금(`avg-turnover` w1) ≥ 100억, 전일 거래량 급증(`volume-spike` w20) ≥ 2, 전일 등락률(`return` w1) 0.03 이상 0.25 이하, `STOCK`, c 종가 ≥ 1,000원, 21거래일 일봉 | 전일 거래대금 큰 순, 20종목 |
 | (라) 공시 촉매 | `selections/kr-intraday-news/v1.yaml` | INTRADAY, 장전 매일(`PRE_OPEN_DAILY`) | 전일 공시(`disclosure-count` w1, 유형 `B,I`) ≥ 1, 전일 거래대금(`avg-turnover` w1) ≥ 50억, `STOCK`, c 종가 ≥ 1,000원, 21거래일 일봉 | 전일 거래량 급증(`volume-spike` w20) 큰 순, 20종목 |
 | (라) 공시 대조(2b 전용) | `selections/kr-intraday-news-nodisc/v1.yaml` | INTRADAY, 장전 매일(`PRE_OPEN_DAILY`) | (라)에서 공시 조건만 뺌: 전일 거래대금(`avg-turnover` w1) ≥ 50억, `STOCK`, c 종가 ≥ 1,000원, 21거래일 일봉 | 전일 거래량 급증(`volume-spike` w20) 큰 순, 20종목. 공시 효과를 떼어 보는 대조(D-125) |
+| (다)(라)(라 공시 대조)의 하루 늦춘 판 | `selections/kr-intraday-hot-lag1/v1.yaml`, `kr-intraday-news-lag1/v1.yaml`, `kr-intraday-news-nodisc-lag1/v1.yaml` | INTRADAY, 장전 매일(하루 늦춘 일봉 `PRE_OPEN_DAILY_LAG1`) | 원래 판과 같음. 기준 데이터일만 T의 두 거래일 전(D-137). KRX 일봉이 장 전까지 게시되지 않아 실시간 모의에는 이 판을 쓴다 | 원래 판과 같음 |
 | (마) 장 초반 거래대금 상위 | `selections/kr-intraday-open-momentum/v1.yaml` | INTRADAY, 장중 순위(`INTRADAY_AT`, `at` 09:30) | 그날 09:30 전 장중 수익률(`session-return`) 0.01 이상 0.15 이하 | 그날 09:30 전 거래대금(`session-turnover`) 큰 순, 10종목. boards 안 순위(D-127) |
 | (마)의 대조 선정 | `selections/kr-intraday-open-all/v1.yaml` | INTRADAY, 장중 순위(`INTRADAY_AT`, `at` 09:30) | 그날 09:30 전 거래대금(`session-turnover`) > 0 | 순위 없음(종목 코드 순), 200종목(boards 전 종목). (마)와 같은 매매지표로 선정 효과만 비교(PR #200 strategy-researcher M1) |
 | (감시 후보, 매매용 아님) | `selections/kr-watchlist-turnover/v1.yaml` | INTRADAY, 장전 매일 | 20거래일 평균 거래대금(`avg-turnover` w20) ≥ 10억, `STOCK`, c 종가 ≥ 1,000원, 20거래일 일봉 | 20거래일 평균 거래대금 큰 순, 200종목. `runWatchlistCandidates`만 쓴다(D-122) |
