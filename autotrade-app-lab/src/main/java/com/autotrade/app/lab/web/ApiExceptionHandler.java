@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
@@ -48,6 +49,15 @@ public class ApiExceptionHandler {
             default -> status >= 500 ? "처리 중 오류가 났습니다. 실험실 로그를 확인하세요" : "요청 형식이 올바르지 않습니다";
         };
         return ResponseEntity.status(status).body(new ErrorView(code, message));
+    }
+
+    /**
+     * 화면이 진행 스트림(SSE)을 닫거나 새로 고친 뒤 서버가 쓰려다 난 오류. 받는 쪽이 이미 떠났으므로 보낼 응답이 없고
+     * 오류도 아니다. 예전에는 아래 {@link #unexpected}가 ERROR 로그를 남긴 뒤 SSE 응답에 JSON을 쓰려다 두 번째 경고를 냈다.
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    void clientGone(AsyncRequestNotUsableException e) {
+        log.debug("화면 연결이 먼저 닫혔습니다: {}", e.getClass().getSimpleName());
     }
 
     @ExceptionHandler(Exception.class)
