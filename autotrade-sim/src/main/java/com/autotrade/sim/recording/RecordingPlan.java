@@ -73,10 +73,13 @@ public record RecordingPlan(
     /** 등록 파일의 {@code input} 값. 조합 실험 등록 파일과 섞이지 않게 꼭 적는다. */
     public static final String INPUT = "recording";
 
-    private static final Set<String> SCALARS = Set.of("id", "question", "input", "market", "from", "to", "seed",
+    /** 등록 파일 스칼라 키. 녹화 사전 검사 등록(ADR-014 5.1)이 이 키를 모두 받고 제 키를 더한다. */
+    public static final Set<String> SCALARS = Set.of("id", "question", "input", "market", "from", "to", "seed",
             "seed-capital", "benchmark", "parallelism");
-    private static final Set<String> LISTS = Set.of("profiles", "boards", "blacklist", RegisteredSelections.LIST_KEY);
-    private static final Map<String, Set<String>> MAPS =
+    /** 등록 파일 목록 키. */
+    public static final Set<String> LISTS = Set.of("profiles", "boards", "blacklist", RegisteredSelections.LIST_KEY);
+    /** 등록 파일 묶음 키. */
+    public static final Map<String, Set<String>> MAPS =
             Map.of(RegisteredSelections.INPUT_KEY, RegisteredSelections.INPUT_SUBKEYS);
     private static final Pattern REF = Pattern.compile("([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)");
     private static final Pattern CODE = Pattern.compile("[0-9A-Z]{6}");
@@ -125,15 +128,20 @@ public record RecordingPlan(
     public static RecordingPlan parse(String text, String source) {
         RegistrationYaml raw = RegistrationYaml.parse(text, source, SCALARS, LISTS, MAPS);
         try {
-            return build(raw);
+            return build(raw, INPUT);
         } catch (IllegalArgumentException | DateTimeParseException e) {
             throw new IllegalArgumentException(source + ": " + e.getMessage(), e);
         }
     }
 
-    private static RecordingPlan build(RegistrationYaml y) {
-        if (!INPUT.equals(y.required("input"))) {
-            throw new IllegalArgumentException("input은 \"" + INPUT + "\"이어야 합니다: " + y.scalars().get("input"));
+    /**
+     * 읽은 등록 파일에서 녹화 실험 키를 꺼낸다. 녹화 사전 검사(ADR-014 5.1)는 같은 키를 {@code input: recording-precheck}로 쓴다.
+     *
+     * @param input 이 등록 파일이 가져야 할 {@code input} 값
+     */
+    public static RecordingPlan build(RegistrationYaml y, String input) {
+        if (!input.equals(y.required("input"))) {
+            throw new IllegalArgumentException("input은 \"" + input + "\"이어야 합니다: " + y.scalars().get("input"));
         }
         Market market = Market.valueOf(y.required("market"));
         List<ProfileRef> profiles = new ArrayList<>();

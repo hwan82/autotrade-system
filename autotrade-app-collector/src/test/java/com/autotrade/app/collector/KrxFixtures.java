@@ -27,7 +27,7 @@ final class KrxFixtures {
         }
     }
 
-    /** code,name,section,open,high,low,close,change,volume,shares */
+    /** code;name;section;open;high;low;close;change;volume;shares[;turnover]. 11번째 칸이 없으면 ACC_TRDVAL을 넣지 않는다. */
     static String body(LocalDate date, List<String> rows) {
         StringBuilder sb = new StringBuilder("{\"OutBlock_1\":[");
         for (int i = 0; i < rows.size(); i++) {
@@ -41,7 +41,11 @@ final class KrxFixtures {
                     .append("\",\"TDD_OPNPRC\":\"").append(f[3]).append("\",\"TDD_HGPRC\":\"").append(f[4])
                     .append("\",\"TDD_LWPRC\":\"").append(f[5]).append("\",\"TDD_CLSPRC\":\"").append(f[6])
                     .append("\",\"CMPPREVDD_PRC\":\"").append(f[7]).append("\",\"ACC_TRDVOL\":\"").append(f[8])
-                    .append("\",\"LIST_SHRS\":\"").append(f[9]).append("\"}");
+                    .append("\",\"LIST_SHRS\":\"").append(f[9]).append('"');
+            if (f.length > 10) {
+                sb.append(",\"ACC_TRDVAL\":\"").append(f[10]).append('"');
+            }
+            sb.append('}');
         }
         return sb.append("]}").toString();
     }

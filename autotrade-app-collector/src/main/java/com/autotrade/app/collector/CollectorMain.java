@@ -30,6 +30,7 @@ import java.util.TreeMap;
  *
  * <pre>
  * autotrade-collector krx-daily       [--from 2010-01-04] [--to yyyy-MM-dd] [--boards KOSPI,KOSDAQ,KONEX] [--max-calls 9000]
+ *                                     [--without-turnover]
  * autotrade-collector dart-financials [--from 2016-01-01] [--to yyyy-MM-dd] [--max-calls 10000]
  * autotrade-collector dart-disclosures [--from 2010-01-01] [--to yyyy-MM-dd] [--types B,I] [--max-calls 2000] [--krx-snapshot ID]
  * 공통: [--config-dir 경로] [--cache-dir 경로] [--snapshot-dir 경로] [--report-dir experiments/_data-quality]
@@ -148,19 +149,45 @@ public final class CollectorMain {
             SnapshotWriter.Sink bars = w.open(SnapshotManifest.DAILY_BARS, SnapshotDailyBarSource.BAR_HEADER);
             SnapshotWriter.Sink hist = w.open(SnapshotManifest.INSTRUMENT_HISTORY, SnapshotDailyBarSource.HISTORY_HEADER);
             SnapshotWriter.Sink shares = w.open(SnapshotManifest.LISTED_SHARES, SnapshotDailyBarSource.SHARES_HEADER);
-            stats = KrxDailySnapshotBuilder.build(source, bars::write, hist::write, shares::write);
+            SnapshotWriter.Sink turnover = o.withoutTurnover ? null
+                    : w.open(KrxDailySnapshotBuilder.TURNOVER_FILE, KrxDailySnapshotBuilder.TURNOVER_HEADER);
+            stats = KrxDailySnapshotBuilder.build(source, bars::write, hist::write, shares::write,
+                    turnover == null ? null : turnover::write);
             if (stats.lastTradingDate() == null) {
                 System.out.println("기간 안에 거래일이 없어 스냅샷을 만들지 않습니다");
                 return 0;
             }
             String created = clock.instant().toString();
             String last = stats.lastTradingDate().toString();
-            dir = w.commit("krx-daily", last, SnapshotManifest.DAILY_BARS, created, VERSION,
+            dir = w.commit("krx-daily", last, krxHashFiles(o.withoutTurnover), created, VERSION,
                     List.of(new SnapshotManifest.Source(KRX_SOURCE, "https://openapi.krx.co.kr", KRX_LICENSE, created)),
                     new SnapshotManifest.Coverage(stats.firstDate().toString(), last, last, created));
         }
         finishKrxSnapshot(o, root, dir, guard, stats, r.fetched(), budget.usedToday(), uncachedDates(r));
         return 0;
+    }
+
+    /**
+     * 일봉 스냅샷 ID의 해시 기준 파일(D-133). 거래대금 파일을 쓰면 일봉과 함께 해시해, 거래대금 값만 달라도 ID가 달라진다(같은 ID 폴더는
+     * 덮어쓰지 않으므로 일봉 해시만 쓰면 옛 스냅샷 폴더에 막혀 거래대금이 버려진다). {@code --without-turnover}는 일봉만 해시해 D-133
+     * 전 스냅샷과 같은 ID를 다시 만든다(실험이 고정한 옛 ID의 재현, 예: EDGE01 {@code krx-daily-2026-10-16-a6df4719}).
+     */
+    static List<String> krxHashFiles(boolean withoutTurnover) {
+        return withoutTurnover ? List.of(SnapshotManifest.DAILY_BARS)
+                : List.of(SnapshotManifest.DAILY_BARS, KrxDailySnapshotBuilder.TURNOVER_FILE);
+    }
+
+    /** 실제 거래대금 한 줄(D-133). 응답에 {@code ACC_TRDVAL}이 하나도 없으면 크게 알린다. */
+    static String turnoverLine(KrxDailySnapshotBuilder.TurnoverStats t) {
+        if (!t.written()) {
+            return "실제 거래대금(ACC_TRDVAL): --without-turnover로 거래대금 파일 없이 옛 형식으로 만들었습니다";
+        }
+        String base = "실제 거래대금(ACC_TRDVAL): " + t.rows() + "행, 값 없는 일봉 " + t.missing() + "행, 저가×거래량~고가×거래량 밖 "
+                + t.outsideRange() + "행(경고)";
+        if (t.rows() == 0 && t.missing() > 0) {
+            return base + ". KRX 응답에 ACC_TRDVAL이 없습니다. 품질 리포트와 runbook 3.8을 확인해 주세요";
+        }
+        return base;
     }
 
     /**
@@ -176,6 +203,7 @@ public final class CollectorMain {
         ExchangeCalendar cal = ExchangeCalendar.bundled(Market.KRX);
         CollectorReports.appendDailySummary(reportFile, stats, fetched, usedToday, cal, pending);
         System.out.println("품질 리포트: " + reportFile + " (오류 " + report.errorCount() + "건)");
+        System.out.println(turnoverLine(stats.turnover()));
         CollectorReports.DailyWarnings w = CollectorReports.warnings(stats, cal, pending);
         System.out.println("빈 평일 " + stats.emptyWeekdays().size() + "일(캘린더상 거래일 " + w.emptyTradingDays() + "), 시장 하나만 빈 날 "
                 + w.boardGaps() + "건, 같은 날 여러 종목 수정 이벤트 " + w.massAdjustmentDays() + "일"
@@ -429,6 +457,7 @@ public final class CollectorMain {
               --from yyyy-MM-dd   --to yyyy-MM-dd   --boards KOSPI,KOSDAQ,KONEX   --max-calls N   --interval-ms N
               --types B,I(dart-disclosures 공시 유형)   --krx-snapshot krx-daily-...(dart-disclosures 이름 대조, 기본 최신)
               --config-dir 경로   --cache-dir 경로   --snapshot-dir 경로   --report-dir 경로   --no-snapshot
+              --without-turnover(krx-daily: 실제 거래대금 파일 없이 옛 형식·옛 ID로)
               --min-free-gb N(기본 20)   --keep-snapshots K(주면 최근 K개만 남김)   --experiments-dir experiments   --allow-during-session(실전 엔진을 끈 날만)
               --krx-base-url https://...  --dart-base-url https://...""";
 
@@ -446,6 +475,7 @@ public final class CollectorMain {
         Path reportDir = Path.of("experiments", "_data-quality");
         Path experimentsDir = Path.of("experiments");
         boolean noSnapshot;
+        boolean withoutTurnover;
         boolean allowDuringSession;
         long minFreeGb = RunGuard.DEFAULT_MIN_FREE_GB;
         Integer keepSnapshots;
@@ -482,6 +512,11 @@ public final class CollectorMain {
                 String a = args[i];
                 if (a.equals("--no-snapshot")) {
                     o.noSnapshot = true;
+                } else if (a.equals("--without-turnover")) {
+                    if (!o.command.equals("krx-daily")) {
+                        throw new IllegalArgumentException("--without-turnover는 krx-daily에만 씁니다");
+                    }
+                    o.withoutTurnover = true;
                 } else if (a.equals("--allow-during-session")) {
                     o.allowDuringSession = true;
                 } else if (a.startsWith("--") && i + 1 < args.length) {

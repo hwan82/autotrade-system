@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Run 하나(조합 하나 = 모의 계좌 하나)를 이벤트 하나씩 진행한다. 리플레이 실행기({@link SimulationExperimentRunner})와
@@ -139,15 +140,29 @@ public final class RunStepper {
         state.lastSeq = e.sequence();
         Instant now = clock.instant();
         AccountSnapshot snapshot = account.snapshot(now);
-        List<TradeSignal> signals = strategy.onEvent(e, new Context(now, snapshot, exchange));
+        long seq = e.sequence();
+        List<TradeSignal> signals = strategy.onEvent(e, new Context(now, snapshot, exchange, symbol -> admits(symbol, seq)));
         for (TradeSignal s : signals) {
             if (state.selectionDay != null && !s.intent().isProtective() && !state.selectionDay.allowsEntry(s.symbol(), e.sequence())) {
-                // 선정 밖 신규 진입은 주문을 만들지 않는다(멱등 키도 쓰지 않음). 건수만 그날 기록에 남긴다
+                // 선정 밖 신규 진입은 주문을 만들지 않는다(멱등 키도 쓰지 않음). 건수만 그날 기록에 남긴다.
+                // admitsEntry를 묻는 전략(ManagedStrategy)은 여기 오기 전에 걸러져 이 줄에 오지 않는다(D-130). 묻지 않는 전략의 안전망
                 state.blockedToday++;
                 continue;
             }
             submit(s, d, e);
         }
+    }
+
+    /**
+     * 전략이 신규 진입 신호를 내기 전에 묻는 거름(D-130). {@link #onEvent}의 주문 전 거름과 같은 기준이고, 막으면 그날 막은 신규 진입 수를 센다.
+     * 선정 없는 조합은 언제나 true라 결과가 이 거름 도입 전과 같다.
+     */
+    private boolean admits(Symbol symbol, long sequence) {
+        if (state.selectionDay == null || state.selectionDay.allowsEntry(symbol, sequence)) {
+            return true;
+        }
+        state.blockedToday++;
+        return false;
     }
 
     /** 마지막 거래일을 마감하고 지표를 계산한다. */
@@ -318,10 +333,16 @@ public final class RunStepper {
         }
     }
 
-    private record Context(Instant now, AccountSnapshot account, VirtualExchange exchange) implements StrategyContext {
+    private record Context(Instant now, AccountSnapshot account, VirtualExchange exchange, Predicate<Symbol> entryGate)
+            implements StrategyContext {
         @Override
         public boolean hasOpenOrder(Symbol symbol) {
             return exchange.hasOpenOrder(symbol);
+        }
+
+        @Override
+        public boolean admitsEntry(Symbol symbol) {
+            return entryGate.test(symbol);
         }
     }
 

@@ -219,6 +219,42 @@ class LiveJudgementTest {
                 .doesNotContain(" | – |");
     }
 
+    /** LIVE01 모양 판정 결과 고정 파일(PR #208 architect m2). 비용 표 해시·데이터 버전 줄은 가린다(비용 표·녹화 형식 변경과 무관하게). */
+    private static final String LIVE01_GOLDEN = "/golden/live-judgement-live01.md";
+
+    /**
+     * LIVE01 모양 등록(새 키 없음)의 판정 결과는 PR #208 머지(f571a38) 때와 바이트로 같다(PR #208 architect m2, LIVE01 판정 보호).
+     * 비용·데이터 버전 줄만 가린다. 판정 계산을 바꿔 이 시험이 깨지면 고정 파일을 고치기 전에 LIVE01 판정에 주는 영향을 적는다.
+     * 갱신: {@code ./gradlew :autotrade-sim:test -Dgolden.update=true}.
+     */
+    @Test
+    void live01ShapedJudgementMatchesTheCommittedGolden() throws Exception {
+        operate(true);
+        String masked = maskVolatile(judge(parallel(2)).report());
+        if (Boolean.getBoolean("golden.update")) {
+            Path p = Path.of("src/test/resources" + LIVE01_GOLDEN);
+            Files.createDirectories(p.getParent());
+            Files.writeString(p, masked, StandardCharsets.UTF_8);
+        }
+        try (java.io.InputStream in = LiveJudgementTest.class.getResourceAsStream(LIVE01_GOLDEN)) {
+            assertThat(in).as(LIVE01_GOLDEN).isNotNull();
+            assertThat(masked).isEqualTo(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        }
+    }
+
+    private static String maskVolatile(String report) {
+        StringBuilder sb = new StringBuilder();
+        for (String line : report.split("\n", -1)) {
+            if (line.startsWith("- 비용: ")) {
+                line = "- 비용: <가림>";
+            } else if (line.startsWith("- 데이터 버전: ")) {
+                line = "- 데이터 버전: <가림>";
+            }
+            sb.append(line).append('\n');
+        }
+        return sb.substring(0, sb.length() - 1);
+    }
+
     @Test
     void stressLatencyColumnEqualsASeparateRunWithThatLatency() throws Exception {
         operate(true);

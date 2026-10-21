@@ -1,6 +1,7 @@
 package com.autotrade.strategy.catalog;
 
 import static com.autotrade.strategy.catalog.Tape.A;
+import static com.autotrade.strategy.catalog.Tape.B;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -131,6 +132,41 @@ class CatalogStrategyTest {
         assertThat(cooldown.trade("09:12:00", 10000, 100)).as("청산(09:12 관측) 직후").isEmpty();
         assertThat(cooldown.trade("09:41:59", 10000, 100)).as("30분 전").isEmpty();
         assertThat(cooldown.trade("09:42:00", 10000, 100)).as("30분 경과").hasSize(1);
+    }
+
+    @Test
+    void 실행기가_받지_않는_신규_진입은_신호를_내지_않고_하루_진입_수를_쓰지_않는다() {
+        // F7(D-130): 선정 밖 종목 B의 신호가 먼저 와도 하루 1건 한도는 후보 A에 남는다
+        Tape tape = new Tape(create(random(Map.of("limits.max-entries-per-day", "1")))).refuse(B);
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).isEmpty();
+        assertThat(tape.trade(B, "09:10:30", 10000, 100)).isEmpty();
+        assertThat(tape.admitAsks()).as("신호를 내려던 순간마다 한 번").isEqualTo(2);
+        assertThat(tape.trade("09:11:00", 10000, 100)).as("후보 A는 그대로 들어간다").hasSize(1);
+        assertThat(tape.admitAsks()).isEqualTo(3);
+        assertThat(tape.trade("09:12:00", 10000, 100)).as("A가 한도 1건을 썼다").isEmpty();
+        assertThat(tape.admitAsks()).as("신호가 켜져도 묻는 것은 한도 확인 전, 한 번").isEqualTo(4);
+    }
+
+    @Test
+    void 실행기가_받지_않는_신규_진입은_대기_진입_금액도_잡지_않는다() {
+        // F7(D-130): B 신호가 대기 진입 금액을 잡으면 A 수량이 현금 상한으로 줄었다
+        Map<String, String> p = Map.of("sizing.max-position-pct", "100", "sizing.risk-per-trade-pct", "5");
+        Tape alone = new Tape(create(random(p))).cash(1_000_000);
+        long expected = alone.trade("09:11:00", 10000, 100).get(0).quantity();
+
+        Tape tape = new Tape(create(random(p))).cash(1_000_000).refuse(B).openOrder(B, false);
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).isEmpty();
+        assertThat(tape.trade("09:11:00", 10000, 100)).extracting(TradeSignal::quantity).containsExactly(expected);
+        assertThat(expected).as("현금 상한이 걸리는 수량").isEqualTo(94);
+    }
+
+    @Test
+    void 청산은_실행기에_진입_여부를_묻지_않는다() {
+        Tape tape = new Tape(create(random(Map.of()))).refuse(A);
+        tape.trade("09:00:00", 10000, 100);
+        tape.hold(A, 100, 10000);
+        assertThat(tape.trade("09:11:00", 9800, 100)).extracting(TradeSignal::intent).containsExactly(OrderIntent.STOP_LOSS);
+        assertThat(tape.admitAsks()).isZero();
     }
 
     @Test

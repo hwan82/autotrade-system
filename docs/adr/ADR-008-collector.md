@@ -47,13 +47,14 @@
 - **거래정지·빈 가격**: 시가·고가·저가가 없거나 0이면 종가로 채운다. 거래량 0이면 거래정지일(품질 검사 ZERO_VOLUME 경고), 거래량이 있으면 원자료 이상으로 따로 센다. 종가가 없으면 그날 일봉을 쓰지 않는다.
 - **종목 이력**: (시장, 소속부 `SECT_TP_NM`, 종목명)이 바뀌면 새 구간(Q-012 형식). 수집 마지막 거래일까지 나오는 종목은 끝 날짜가 비고, 그 전에 사라진 종목은 마지막으로 나온 날이 끝 날짜다(상장폐지 포함). `kind`는 `STOCK`(일별매매정보는 주식 시장 서비스라서). 소속부는 `KOSPI`, `KOSDAQ/우량기업부` 형식.
 - **상장주식수**: 새 선택 파일 `listed_shares.csv`(`market,code,date,listed_shares`), 값이 바뀐 날(첫 날 포함)만. 날짜 D 값은 D 장 마감 시점 상장주식수. 읽기는 `SnapshotListedShares.asOf(symbol, date)`(직전 행 값). MD-07 "선정 기준일 시가총액 = 직전 거래일 종가 × 직전 거래일 상장주식수"는 읽는 쪽이 `previousTradingDay`로 부른다.
+- **실제 거래대금**(D-133): 새 선택 파일 `daily_turnover.csv`(`market,code,date,turnover`), 응답 `ACC_TRDVAL`(원) 그대로, 일봉을 쓴 행 중 값이 있는 행만. 칸이 없으면 일봉은 그대로 쓰고 수집 요약에 센다. 저가 × 거래량 ~ 고가 × 거래량 밖은 경고만. `--without-turnover`면 쓰지 않는다.
 - 같은 날 두 시장에 같은 코드가 나오면 어느 쪽이 맞는지 근거가 없어 멈춘다.
 
 ### 2.4 스냅샷 쓰기와 ID (ARC-06 계약 확장, 스키마 버전 1 유지)
 
 - 폴더: `<설정 폴더>/snapshots/krx-daily/<ID>/`, `<설정 폴더>/snapshots/dart-financials/<ID>/`. 저장소 밖이다(D-019, D-050 조건 3 "원자료 재배포 없음").
 - 쓰기: 임시 폴더에 CSV를 한 줄씩 쓰고(UTF-8, BOM 없음, `\n`), 파일별 SHA-256·행 수로 manifest를 만든 뒤 폴더째 `ATOMIC_MOVE`. 같은 ID 폴더가 있으면 덮어쓰지 않는다.
-- **ID**: `krx-daily-<마지막 거래일>-<daily_bars.csv SHA-256 앞 8자리>`, `dart-financials-<다 훑은 날>-<financial_filings.csv SHA-256 앞 8자리>`. 같은 캐시면 같은 ID(같은 날 다시 돌려도 새 폴더가 생기지 않는다, 테스트 있음).
+- **ID**: `krx-daily-<마지막 거래일>-<daily_bars.csv SHA-256 앞 8자리>`, `dart-financials-<다 훑은 날>-<financial_filings.csv SHA-256 앞 8자리>`. 같은 캐시면 같은 ID(같은 날 다시 돌려도 새 폴더가 생기지 않는다, 테스트 있음). D-133부터 일봉 스냅샷은 `daily_turnover.csv`도 해시해 `krx-daily-<마지막 거래일>-<"daily_bars.csv:<SHA>\ndaily_turnover.csv:<SHA>\n"의 SHA-256 앞 8자리>`이고, `--without-turnover`면 예전 규칙 그대로라 D-133 전 ID를 다시 만든다.
 - **manifest `coverage`**(새 선택 칸): `firstDate`, `lastTradingDate`, `sharesAsOf`, `lastCollectedAt`. ADR-007 2.6 `inputs`의 기준일(일봉 마지막 거래일, 상장주식수 기준일, 재무 마지막 수집 시각)은 이 칸을 옮긴다. 칸이 없는 예전 스냅샷은 `null`이다. Jackson이 모르는 칸을 무시하므로 스키마 버전을 올리지 않았다.
 - `manifest.sources[].license`에 D-050 약관 조건을 적는다. KRX: "KRX Open API 이용약관(2025-12-26 시행): 비상업 목적, 제3자 제공 금지, 출처 '한국거래소 통계정보'". OpenDART: "OpenDART 이용약관(2020-01-21 시행), 개인 실험용 로컬 저장".
 - 일봉 스냅샷은 기존 `SnapshotDailyBarSource`가 그대로 읽는다(헤더 불변). manifest·해시 확인은 `SnapshotFiles`로 묶어 일봉·상장주식수·재무 읽기가 같이 쓴다.

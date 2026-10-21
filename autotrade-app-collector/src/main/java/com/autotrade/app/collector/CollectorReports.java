@@ -77,9 +77,38 @@ final class CollectorReports {
                 + "| 전일 대비 칸이 없어 수정 판정 못 한 행 | " + s.missingChange() + " |\n"
                 + "| 20거래일 넘게 비었다가 다시 나온 코드(전일 종가 잇지 않음) | " + s.reappeared() + " |\n"
                 + "| 이번 실행 API 호출 | " + fetched + " (오늘 누적 " + usedToday + ") |\n"
+                + turnoverSection(s.turnover())
                 + gapSections(s, cal, pending)
                 + "\n출처 표시: 한국거래소 통계정보(KRX Open API 이용약관 제10조 ③, D-050 ①)\n";
         Files.writeString(report, text, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+    }
+
+    /**
+     * 실제 거래대금 칸(D-133). 값 범위 밖은 경고로만 센다: KRX 하루 거래대금에는 시간외 거래·대량매매가 들어갈 수 있어
+     * 정규장 고저 밖 가격으로 체결된 정상 거래도 있다 `[추론]`. 많으면 단위(천 원 등)나 필드 착오를 의심한다.
+     */
+    static String turnoverSection(KrxDailySnapshotBuilder.TurnoverStats t) {
+        StringBuilder sb = new StringBuilder("\n## 실제 거래대금(ACC_TRDVAL, D-133)\n\n");
+        if (!t.written()) {
+            return sb.append("거래대금 파일 없음(`--without-turnover`, 옛 형식). 선정 지표는 이 스냅샷에서 실제 거래대금을 쓸 수 없습니다.\n")
+                    .toString();
+        }
+        long total = t.rows() + t.missing();
+        sb.append("| 항목 | 값 |\n|---|---|\n")
+                .append("| 거래대금 행(`").append(KrxDailySnapshotBuilder.TURNOVER_FILE).append("`) | ").append(t.rows()).append(" |\n")
+                .append("| 일봉은 있는데 응답에 ACC_TRDVAL이 없거나 빈 행(파일에 넣지 않음) | ").append(t.missing()).append(" |\n")
+                .append("| 저가×거래량 ~ 고가×거래량(원가격) 밖 행(경고) | ").append(t.outsideRange())
+                .append(t.rows() == 0 ? "" : String.format(java.util.Locale.ROOT, " (%.3f%%)", 100.0 * t.outsideRange() / t.rows()))
+                .append(" |\n");
+        if (!t.outsideSamples().isEmpty()) {
+            sb.append("| 범위 밖 앞 ").append(t.outsideSamples().size()).append("건 | ").append(String.join(", ", t.outsideSamples()))
+                    .append(" |\n");
+        }
+        if (t.rows() == 0 && total > 0) {
+            sb.append("\n**KRX 응답에 ACC_TRDVAL이 없습니다.** 필드 이름이 다르거나 제공하지 않는 것으로 보입니다(runbook 3.8).\n");
+        }
+        sb.append("\n범위 밖 행에는 시간외 거래·대량매매가 든 정상 거래가 있을 수 있습니다 `[추론]`. 비율이 크면 단위·필드 착오를 의심합니다.\n");
+        return sb.toString();
     }
 
     static Path writeFinancial(Path dir, SnapshotManifest m, DartSnapshotBuilder.Stats s, DartFinancialCollector.Result r,
