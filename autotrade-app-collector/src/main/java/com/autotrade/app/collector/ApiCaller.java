@@ -68,6 +68,26 @@ public final class ApiCaller {
         throw last;
     }
 
+    /**
+     * JSON 본문 POST 한 번(한국투자 접근토큰 발급, D-136). 재시도하지 않는다: 토큰 발급은 1분에 1번만 받아 주므로 바로 다시 부르면
+     * 발급 제한 오류만 받는다. 상한 확인·간격·장 시간 확인은 GET과 같다. 응답 본문은 메시지에 넣지 않는다(토큰이 실릴 수 있음).
+     */
+    public String post(URI uri, Map<String, String> headers, String jsonBody) throws IOException {
+        pause(0);
+        beforeCall.run();
+        budget.acquire();
+        HttpGetter.Response r;
+        try {
+            r = http.post(uri, headers, jsonBody);
+        } catch (IOException e) {
+            throw new IOException("요청 실패(" + e.getClass().getSimpleName() + "): " + redaction.clean(uri.toString()));
+        }
+        if (r.status() != 200) {
+            throw new IOException("HTTP " + r.status() + ": " + redaction.clean(uri.toString()));
+        }
+        return r.body();
+    }
+
     private void pause(int attempt) throws IOException {
         long wait = first ? 0 : minIntervalMillis;
         first = false;

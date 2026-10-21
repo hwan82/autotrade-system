@@ -16,7 +16,15 @@ public final class Redaction {
     private final List<String> values;
 
     public Redaction(List<Secret> secrets) {
-        this.values = secrets.stream().filter(Secret::isPresent).map(Secret::reveal).toList();
+        this.values = new java.util.concurrent.CopyOnWriteArrayList<>(
+                secrets.stream().filter(Secret::isPresent).map(Secret::reveal).toList());
+    }
+
+    /** 실행 중에 생긴 비밀값(한국투자 접근토큰, D-136)도 가린다. */
+    public void add(Secret secret) {
+        if (secret.isPresent() && !values.contains(secret.reveal())) {
+            values.add(secret.reveal());
+        }
     }
 
     public String clean(String text) {

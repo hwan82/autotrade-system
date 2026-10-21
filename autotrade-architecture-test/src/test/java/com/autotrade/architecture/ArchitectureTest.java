@@ -231,6 +231,7 @@ class ArchitectureTest {
     /**
      * 수집 일괄 명령은 4개 프로세스의 설정 로더({@code runtime-config.json}·{@code secrets.json})를 쓰지 않고 수집기 전용 키
      * 파일만 읽는다(D-050 ⑤, D-051, ADR-008 2.2). 증권사 플러그인·주문 포트도 모른다(D-019 경계를 언어와 관계없이 유지).
+     * 한국투자 뉴스 제목 조회(D-136)는 수집기 안의 전용 호출기가 두 주소만 부르며, 이 규칙은 그대로 증권사 모듈 의존을 막는다.
      */
     static final ArchRule COLLECTOR_READS_ONLY_ITS_SECRETS = noClasses()
             .that().resideInAPackage("com.autotrade.app.collector..")
@@ -241,7 +242,8 @@ class ArchitectureTest {
             .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.RuntimeConfig")
             .orShould().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.config.ProcessStartup")
             .orShould().dependOnClassesThat().resideInAnyPackage("com.autotrade.broker..", "com.autotrade.domain.order..")
-            .because("수집기는 증권사 키·계좌·주문을 다루지 않는다(D-019 3장, D-051)");
+            .because("수집기는 증권사 계좌·주문과 증권사 플러그인을 다루지 않는다. 증권사 키는 뉴스 제목 조회 전용 앱키 하나만"
+                    + " collector-secrets.json에서 읽는다(D-019 3장, D-051, D-136)");
 
     /**
      * 실험 실행 명령(D-063)은 정지 확인({@link RunGate}) 없는 실행 입구를 부르지 않는다. 게이트 없는 오버로드는 순수 모듈 안

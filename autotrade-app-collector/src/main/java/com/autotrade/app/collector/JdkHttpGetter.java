@@ -19,7 +19,16 @@ final class JdkHttpGetter implements HttpGetter {
 
     @Override
     public Response get(URI uri, Map<String, String> headers) throws IOException {
-        HttpRequest.Builder b = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60)).GET();
+        return send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60)).GET(), headers);
+    }
+
+    @Override
+    public Response post(URI uri, Map<String, String> headers, String jsonBody) throws IOException {
+        return send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(60))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8)), headers);
+    }
+
+    private Response send(HttpRequest.Builder b, Map<String, String> headers) throws IOException {
         headers.forEach(b::header);
         try {
             HttpResponse<String> r = client.send(b.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

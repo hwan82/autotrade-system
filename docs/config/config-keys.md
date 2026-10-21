@@ -93,6 +93,8 @@ memory.used=85:95:3
 |---|---|---|---|
 | `krx.auth-key` 🔒 | 문자열 | 빈 값 | KRX Open API 인증키(`AUTH_KEY` 헤더). 비면 `krx-daily`가 오류로 끝난다 |
 | `opendart.crtfc-key` 🔒 | 문자열 | 빈 값 | OpenDART 인증키(쿼리 `crtfc_key`, 로그·오류 메시지에서 가림). 비면 `dart-financials`·`dart-disclosures`가 오류로 끝난다 |
+| `kis-news.app-key` 🔒 | 문자열 | 빈 값 | 한국투자 앱키, 뉴스 제목 조회(`kis-news`) 전용(D-136). 헤더로만 보내고 로그·오류에서 가림. 실전 계좌용 앱키와 다른 키 권장. 비면 `kis-news`가 오류로 끝난다 |
+| `kis-news.app-secret` 🔒 | 문자열 | 빈 값 | 위 앱키의 앱시크릿 |
 
 ## 예시 (자리표시자)
 `runtime-config.json`
@@ -118,5 +120,6 @@ memory.used=85:95:3
 ```
 `collector-secrets.json`
 ```json
-{ "krx": { "auth-key": "<KRX_OPEN_API_AUTH_KEY>" }, "opendart": { "crtfc-key": "<OPENDART_CRTFC_KEY>" } }
+{ "krx": { "auth-key": "<KRX_OPEN_API_AUTH_KEY>" }, "opendart": { "crtfc-key": "<OPENDART_CRTFC_KEY>" },
+  "kis-news": { "app-key": "<KIS_APP_KEY>", "app-secret": "<KIS_APP_SECRET>" } }
 ```

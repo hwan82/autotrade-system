@@ -214,6 +214,72 @@ final class CollectorReports {
         return out;
     }
 
+    /**
+     * 뉴스 스냅샷 품질 리포트(D-136). 집계만 담는다: 제목·일련번호는 넣지 않는다(이 폴더는 저장소에 커밋될 수 있다). 첫 실행 확인
+     * 항목(runbook collector.md 3.9): 훑은 구간이 실행 시각까지 닿는지, 종목코드 붙은 비율, 자료원·뉴스 구분 표(공시 제목을 뉴스
+     * 건수에서 뺄 코드를 정하는 근거).
+     */
+    static Path writeNews(Path dir, SnapshotManifest m, KisNewsSnapshotBuilder.Stats s, KisNewsCollector.Result r,
+            int tokens, int usedToday) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# 뉴스 데이터 품질 리포트: ").append(m.snapshotId()).append("\n\n");
+        sb.append("- 스냅샷 생성: ").append(m.createdAt()).append(", 수집 일괄 명령 ").append(m.scriptVersion()).append('\n');
+        sb.append("- 규칙: docs/decisions/D-136-kis-news-snapshot.md, docs/adr/ADR-012-intraday-selection.md 4.2절\n");
+        if (r.stopped() != null) {
+            sb.append("- **이번 실행은 다 받기 전에 멈췄습니다**: ").append(r.stopped()).append(". 훑은 구간까지만 담았습니다\n");
+        }
+        sb.append("\n## 출처\n\n| 이름 | 라이선스 | 수집 시각 | URL |\n|---|---|---|---|\n");
+        for (SnapshotManifest.Source src : m.sources()) {
+            sb.append("| ").append(src.name()).append(" | ").append(src.license()).append(" | ").append(src.collectedAt())
+                    .append(" | ").append(src.url()).append(" |\n");
+        }
+        sb.append("\n## 훑은 구간(한국 시각, 양 끝 포함)\n\n| 시작 | 끝 |\n|---|---|\n");
+        for (KisNewsCollector.Interval i : r.coverage()) {
+            sb.append("| ").append(i.from()).append(" | ").append(i.to()).append(" |\n");
+        }
+        if (r.floor() != null) {
+            sb.append("\n한국투자가 ").append(r.floor()).append(" 앞의 제목을 주지 않아 백필은 거기서 멈춥니다.\n");
+        }
+        sb.append("\n구간이 여러 개면 사이 빈틈은 다음 실행이 메웁니다. 지표는 기준 기간을 덮는 구간이 없으면 계산하지 않습니다.\n");
+        sb.append("\n## 제목 수\n\n| 항목 | 값 |\n|---|---|\n");
+        long all = s.rows() + s.untagged();
+        row(sb, "훑은 구간 안 제목", all);
+        row(sb, "종목코드 붙은 제목(스냅샷에 담음)", s.rows() + " (" + pct(s.rows(), all) + ")");
+        row(sb, "종목코드 없는 제목(담지 않음)", s.untagged());
+        row(sb, "훑은 구간 밖이라 담지 않은 캐시 행", s.outside());
+        sb.append("\n## 날짜별(최근 30일)\n\n| 날짜 | 제목 | 종목코드 붙음 |\n|---|---|---|\n");
+        List<Map.Entry<LocalDate, KisNewsSnapshotBuilder.DayStats>> days = new ArrayList<>(s.byDay().entrySet());
+        for (Map.Entry<LocalDate, KisNewsSnapshotBuilder.DayStats> e : days.subList(Math.max(0, days.size() - 30), days.size())) {
+            sb.append("| ").append(e.getKey()).append(" | ").append(e.getValue().headlines()).append(" | ")
+                    .append(e.getValue().tagged()).append(" |\n");
+        }
+        sb.append("\n## 자료원·뉴스 구분(훑은 구간 안 전체)\n\n| 제공 업체 코드 | 자료원 | 뉴스 구분 | 제목 |\n|---|---|---|---|\n");
+        s.byProvider().forEach((k, v) -> {
+            String[] p = k.split("\\|", -1);
+            sb.append("| `").append(p[0]).append("` | ").append(p[1]).append(" | `").append(p[2]).append("` | ").append(v)
+                    .append(" |\n");
+        });
+        sb.append("\n공시 제목은 공시 스냅샷(`disclosure-count`, D-123)으로 따로 세므로, 뉴스 건수 지표는 이 표에서 공시로 보이는 코드를 뺀다"
+                + "(지표 PR에서 코드를 고정, D-136 6번).\n");
+        sb.append("\n## 이번 실행\n\n| 걸음 | 시작 커서 | 닿은 시각 | 끝까지 | 쪽 | 새 제목 | 같은 초로 가득 찬 쪽 | 멈춘 까닭 |\n"
+                + "|---|---|---|---|---|---|---|---|\n");
+        for (KisNewsCollector.Walk w : r.walks()) {
+            sb.append("| ").append(w.kind()).append(" | ").append(w.top()).append(" | ").append(w.reached() == null ? "-" : w.reached())
+                    .append(" | ").append(w.complete() ? "예" : "**아니오**").append(" | ").append(w.pages()).append(" | ")
+                    .append(w.fresh()).append(" | ").append(w.crowdedSeconds()).append(" | ").append(w.reason() == null ? (w.complete() ? "-" : "호출 상한") : w.reason())
+                    .append(" |\n");
+        }
+        sb.append("\n'같은 초로 가득 찬 쪽'이 0이 아니면 그 초의 제목 일부를 못 받았을 수 있습니다(커서가 초 단위라서). 자주 나오면 "
+                + "data-engineer에 알립니다.\n");
+        sb.append("\n| 항목 | 값 |\n|---|---|\n");
+        row(sb, "접근토큰 발급(발급마다 알림톡)", tokens);
+        row(sb, "오늘 뉴스 몫 호출(토큰 발급 포함)", usedToday);
+        Files.createDirectories(dir);
+        Path out = dir.resolve(m.snapshotId() + ".md");
+        Files.writeString(out, sb.toString(), StandardCharsets.UTF_8);
+        return out;
+    }
+
     private static String pct(long a, long b) {
         return b == 0 ? "-" : String.format(java.util.Locale.ROOT, "%.1f%%", 100.0 * a / b);
     }

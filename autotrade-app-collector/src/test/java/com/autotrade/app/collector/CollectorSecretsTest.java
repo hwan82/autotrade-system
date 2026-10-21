@@ -43,6 +43,23 @@ class CollectorSecretsTest {
     }
 
     @Test
+    void 한국투자_뉴스_조회_키를_읽고_계좌번호_칸은_거부한다() throws IOException {
+        Files.writeString(dir.resolve("collector-secrets.json"),
+                "{\"kis-news\":{\"app-key\":\"KISKEYEEEEEEEEEE\",\"app-secret\":\"KISSECRETFFFFFFFF\"}}");
+        CollectorSecrets s = CollectorSecrets.load(dir);
+        assertThat(s.kisNewsAppKey().reveal()).isEqualTo("KISKEYEEEEEEEEEE");
+        assertThat(s.kisNewsAppSecret().reveal()).isEqualTo("KISSECRETFFFFFFFF");
+        assertThat(s.krxAuthKey().isPresent()).isFalse();
+        assertThat(s.toString()).doesNotContain("KISKEY").doesNotContain("KISSECRET");
+        Files.writeString(dir.resolve("collector-secrets.json"),
+                "{\"kis-news\":{\"app-key\":\"K\",\"app-secret\":\"S\",\"account-no\":\"ACCOUNT-VALUE\"}}");
+        assertThatThrownBy(() -> CollectorSecrets.load(dir))
+                .hasMessageContaining("kis-news.account-no").hasMessageNotContaining("ACCOUNT-VALUE");
+        Files.writeString(dir.resolve("collector-secrets.json"), "{\"kis\":{\"app-key\":\"K\"}}");
+        assertThatThrownBy(() -> CollectorSecrets.load(dir)).hasMessageContaining("kis");
+    }
+
+    @Test
     void 깨진_JSON은_값_없이_거부한다() throws IOException {
         Files.writeString(dir.resolve("collector-secrets.json"), "{\"krx\":{\"auth-key\":\"SECRET-PART");
         assertThatThrownBy(() -> CollectorSecrets.load(dir)).hasMessageNotContaining("SECRET-PART");
