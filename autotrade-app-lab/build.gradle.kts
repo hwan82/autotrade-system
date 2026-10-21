@@ -44,6 +44,8 @@ val labGitDirty = providers.exec {
 tasks.named<JavaExec>("bootRun") {
     workingDir = rootProject.projectDir
     maxHeapSize = (findProperty("labHeap") as String?) ?: "4g"
+    // Windows 콘솔에서 실험실 로그 한글이 깨지지 않게 한다(게이트웨이·실험 명령과 같은 방식, 2026-10-21 사용자 PC 창 2 로그 깨짐)
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
     jvmArgumentProviders.add(CommandLineArgumentProvider {
         listOf("-Dautotrade.code-commit=${labGitCommit.get()}", "-Dautotrade.code-dirty=${labGitDirty.get()}")
     })
