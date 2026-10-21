@@ -50,3 +50,9 @@
 ## 후속
 
 - 변경 제안(strategy-researcher): LIVE02 계획(`docs/strategy/live02-preregistration-plan.md`) 8장 F7 행에 "D-130으로 해결, D-130 전 선정 계좌 결과의 blocked-entries와 비교 불가(D-135 `blocked-entries` 뜻)"를 적는다(PR #205 architect N2).
+
+## 후속 반영(PR #218 QA Q1·Q2)
+
+- Q1(변이 P2): `CatalogStrategyTest`에 보유 수 상한(1)에 막힌 동안 손실 중 후보 밖 신호가 오면 그날 멈추는 시험을 더했다. 받지 않은 분기가 `allowedByLimits` 전체(D-130 전 범위)를 부르면 보유 수 확인에서 먼저 끝나 멈추지 않으므로 이 시험이 실패해야 한다.
+- Q2(변이 P9): 일 손실이 한도와 정확히 같으면(−2.0%) 멈추고 조금 모자라면(−1.9999%) 진입하는 경계 시험을 더했다. `<=`를 `<`로 바꾸면 실패해야 한다.
+- 운영 코드는 바꾸지 않았다.
