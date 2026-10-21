@@ -263,14 +263,14 @@ class DayWriterRestartStreamTest {
     @Test
     void 큰_녹화도_작은_힙에서_재기동한다() throws Exception {
         Path dir = crashedDay(HEAVY_LINES);
-        Path argFile = root.resolve("probe.args");
-        // Windows 명령 줄 길이 한도를 피하려고 클래스패스는 인자 파일로 넘긴다
-        Files.writeString(argFile, "-cp \"" + System.getProperty("java.class.path").replace("\\", "\\\\") + "\"");
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
         // 출력은 파일로 받는다: 자식이 멈춰도 시간 제한이 듣게(PR #187 risk-ops N1)
         Path log = root.resolve("probe.log");
-        Process p = new ProcessBuilder(java.toString(), SMALL_HEAP, "@" + argFile, Probe.class.getName(), dir.toString())
-                .redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        // 클래스패스는 환경 변수 CLASSPATH로 넘긴다. 명령 줄 길이 한도를 피하고, 인자 파일(@)은 Windows에서 시스템 인코딩으로
+        // 읽혀 한글 사용자 폴더(Gradle 캐시) 경로가 깨진다(사용자 PC에서 NoClassDefFoundError로 확인, PR #209)
+        ProcessBuilder pb = new ProcessBuilder(java.toString(), SMALL_HEAP, Probe.class.getName(), dir.toString());
+        pb.environment().put("CLASSPATH", System.getProperty("java.class.path"));
+        Process p = pb.redirectErrorStream(true).redirectOutput(log.toFile()).start();
         boolean exited = p.waitFor(5, TimeUnit.MINUTES);
         if (!exited) {
             p.destroyForcibly().waitFor();

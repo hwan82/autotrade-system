@@ -8,7 +8,10 @@ import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.MarketEvent;
 import com.autotrade.domain.market.Symbol;
 import com.autotrade.domain.market.TradeTick;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -32,6 +35,25 @@ class JournalWriterTest {
     private JournalWriter writer() {
         return new JournalWriter(new RecordingLayout(root), Market.KRX, SEOUL, Map.of("KIWOOM-WS", "KRX_REALTIME"),
                 "본인 연구용, 외부 공유 금지");
+    }
+
+    /**
+     * flush까지 한 뒤 닫지 못하고 죽은 기록기를 만든다. flush 직후 그날 파일을 떠 두고, 닫은 뒤 그 사본으로 되돌린다.
+     * 닫지 않은 채 두면 같은 JVM에 열린 핸들이 남아 Windows에서 재기동의 파일 바꾸기가 거부된다(실제 비정상 종료는 프로세스가
+     * 죽어 핸들이 없다). RecordingReplayTest#crash와 같은 방식
+     */
+    private void crash(JournalWriter w) {
+        w.flush();
+        Path dir = new RecordingLayout(root).dayDir(Market.KRX, w.currentDate());
+        try {
+            byte[] events = Files.readAllBytes(dir.resolve(RecordingLayout.EVENTS_FILE));
+            byte[] meta = Files.readAllBytes(dir.resolve(RecordingLayout.META_FILE));
+            w.close();
+            Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), events);
+            Files.write(dir.resolve(RecordingLayout.META_FILE), meta);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static TradeTick tick(Symbol s, long srcSeq, Instant t) {
@@ -61,7 +83,7 @@ class JournalWriterTest {
         JournalWriter first = writer();
         first.append("KIWOOM-WS", tick(SAMSUNG, 1, OPEN), OPEN);
         first.append("KIWOOM-WS", tick(HYNIX, 2, OPEN.plusSeconds(1)), OPEN.plusSeconds(1));
-        first.flush(); // 비정상 종료: close 없이 버린다
+        crash(first); // 비정상 종료: close 없이 버린 것과 같은 파일
 
         Instant resumed = OPEN.plusSeconds(60);
         JournalWriter second = writer();
@@ -85,7 +107,7 @@ class JournalWriterTest {
         first.append("KIWOOM-WS", tick(SAMSUNG, 1, OPEN), OPEN);
         Instant lastAlive = OPEN.plusSeconds(1);
         first.append("KIWOOM-WS", tick(HYNIX, 2, lastAlive), lastAlive);
-        first.flush(); // 비정상 종료
+        crash(first); // 비정상 종료
 
         Instant nextDay = OPEN.plusSeconds(24 * 3600);
         JournalWriter second = writer();
@@ -115,7 +137,7 @@ class JournalWriterTest {
     void resumingOnTheSameDayKeepsTheSameDayRestartGapsOnly() {
         JournalWriter first = writer();
         first.append("KIWOOM-WS", tick(SAMSUNG, 1, OPEN), OPEN);
-        first.flush();
+        crash(first);
 
         Instant resumed = OPEN.plusSeconds(60);
         JournalWriter second = writer();
