@@ -45,3 +45,43 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-21
+- 대상: PR #218 / 커밋 da64e0afb960d3484509096adf89432bc82251e6 (앞 검토 b53a3c4 뒤 38bdb46·da64e0a 추가) / main 대비 diff 전체(`git diff origin/main...HEAD`)와 b53a3c4 대비 증분(`git diff b53a3c4 da64e0a`, 7개 파일)
+- 점검표: A
+- 증분 내용(코드로 확인):
+  - Java·빌드·SQL 변경은 `SelectionEntryQuotaTest.java` import 한 줄 위치(`SelectionDay`를 이름순으로)뿐이다(`git diff b53a3c4 da64e0a --stat -- '*.java' '*.kts' '*.sql'` = 1개 파일 1+/1−). 운영 코드 `ManagedStrategy.java`·`RunStepper.java`·`RunSelectionDay.java`는 b53a3c4와 바이트 같다. 그래서 앞 검토의 직접 실행 결과(b53a3c4 전체 빌드 1,881건 통과, 변이 M1~M4 모두 잡힘)는 운영 코드와 시험 단언에 그대로 적용된다 `[추론]`(import 순서는 컴파일 결과에 영향 없음).
+  - `D-135` 문서: 상태를 "사용자 결정(안 1, 스레드 결정 카드 2026-10-21T03:54:38Z)"로 바꿈. 대안표 안 1 판단 칸과 "위험과 한계" 첫 항목에 "받지 않은 신호의 일 손실 확인은 하루 진입 수·재진입 금지·보유 수 확인과 상관없이 해서 D-130 전보다 일찍 멈출 수 있다(더 엄격한 쪽)"를 적음 → 앞 검토 N1 반영, 코드(`ManagedStrategy.java:250-258`, `:288-305`)와 일치. 후속에서 "사용자 결정 뒤 상태 고침" 줄 지움.
+  - 결정 로그 표 D-135 행·ADR-013 링크 표현을 "사용자 결정"으로 바꿈. 내용 변경 없음.
+  - `docs/qa/pending.md`에 PR #218 줄 추가(앞 검토 N4 반영).
+  - `docs/reviews/pr-218/risk-ops.md`: 커밋된 내용이 내가 쓴 원문과 같다(작업 트리 대비 diff 0줄 확인 뒤 이 절을 덧붙임). `architect.md` 추가.
+- 사용자 결정 확인: 스레드 결정 카드는 직접 볼 수 없었다. 대신 PR #218 issue comment 6307770592(작성자 hwan82, OWNER, 2026-10-21T04:05:39Z) 본문 "CI 결과를 B1 근거로 인정, D-135 결정 확인"을 `mcp__github__issue_read`로 읽어 확인했다.
+- 직접 실행한 것:
+  - 별도 git worktree(da64e0a 분리 체크아웃, 끝나고 지움)에서 `./gradlew --offline --no-daemon build` → 실패(`jackson-annotations-2.21.jar` "No cached version available for offline mode"). `--offline --configure-on-demand :autotrade-strategy:test :autotrade-sim:test :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test` → 실패(`junit-platform-launcher:1.12.2` 해석 불가). 원인은 의존성 캐시이며 코드와 무관. 지시에 따라 Maven 미러 우회는 이번에 쓰지 않았다. 따라서 **da64e0a에서 Gradle 시험은 직접 돌리지 못했다.**
+  - 대신 근거: (1) 위 증분 대조로 운영 코드·시험 단언이 앞 검토 때 직접 실행한 b53a3c4와 같음, (2) 같은 head da64e0a의 CI run 39541171961 4개 job 모두 success(Gradle build job 119029173680 "Build and test" = `./gradlew build --no-daemon` 단계 success, head_sha da64e0a 일치, `mcp__github__actions_list list_workflow_jobs`로 확인), (3) 사용자가 위 PR 댓글로 CI 결과를 근거로 인정.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 해당 없음 | 증분에 RealTradingGuard·설정·Guard 시험 변경 없음. CI Gradle build success(`:autotrade-risk:test` 포함) |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음. CI Gradle build success(architecture-test 포함) |
+| A3 | 해당 없음 | 증권사 주문 연동 변경 없음. 운영 코드 증분 0줄 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 로직 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 생성 변경 없음. 받지 않은 신호는 주문을 만들지 않음(앞 검토와 같음) |
+| A6 | 통과 | 앞 검토 근거 그대로(운영 코드 무변경). 블랙리스트 거절 시험·주문 전 거름 시험(M4로 확인)이 da64e0a에도 단언 그대로 있음(`SelectionEntryQuotaTest` 증분은 import 한 줄) |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 바뀐 전략 코드는 실전 엔진·감시 운영 코드에서 참조되지 않음(앞 검토 grep, 증분 코드 0줄) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절·전략 청산 경로 변경 없음 |
+| A10 | 통과 | 증분 추가 줄에 키·토큰·계좌번호 없음(문서 문장·결정 카드 시각·PR 번호뿐). CI Secret scan success |
+| A11 | 통과 | 보호 테스트·고정 값 변경 없음. 시험 증분은 import 순서뿐이라 단언 약화 없음. 새 동작 시험과 그 변이 검출(M1~M4)은 앞 검토에서 직접 확인했고, 같은 시험이 da64e0a CI에서 통과(Gradle build success) |
+| A12 | 통과 | 장애 대응표·장애 테스트 전제 영향 없음(운영 코드 증분 0줄) |
+| A13 | 해당 없음 | 시장 분기 추가 없음 |
+| A14 | 통과 | D-135 상태가 사용자 결정(안 1)으로 바뀌었고 PR 댓글 6307770592로 사용자 확인. 결정 본문·위험과 한계(N1 반영)·결정 로그 행·ADR-013 링크가 코드와 일치 |
+
+## 점검표 밖 발견(재검토)
+- R-N1(참고, 비차단): `docs/qa/pending.md`의 PR #218 줄(38bdb46에서 추가)이 "D-135 확인 방식은 사용자 결정 대기"라고 적혀 있다. da64e0a에서 사용자 결정으로 바뀌었으므로 QA 요청 문구와 어긋난다. QA가 대기 목록을 처리하기 전에 "사용자 결정(안 1)"으로 맞추길 권한다.
+- 앞 검토 N2(실전 일일 손실 보호는 7단계 계좌 단위 한도로 따로)와 N3(7단계에서 실전 문맥 주문 전 거름 시험)은 그대로 남는다. N1·N4는 반영됨을 확인.
+- 확인 못 한 것: da64e0a 로컬 Gradle 직접 실행(의존성 캐시, 미러 우회 미사용). 점검표 항목 판정은 운영 코드 증분 0줄 대조, 앞 검토의 b53a3c4 직접 실행·변이 결과, 같은 head CI success(사용자가 근거로 인정)로 했고 확인 못 함 항목은 없다.
+- 실전 주문 경로, RealTradingGuard, 블랙리스트 규칙, 실전 리스크 한도(`RiskChain`), 장애 대응 규칙 변경 없음. 보호 경로 변경이라 머지는 독립 QA 뒤 사용자가 한다.
+
+### 판정
+승인

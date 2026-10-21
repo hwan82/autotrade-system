@@ -29,3 +29,32 @@
 
 ## 판정
 수정 필요(B1·B6 확인 못 함: 이 컨테이너에서 `./gradlew build`가 Maven Central 429로 의존성 해석 단계에서 실패해 테스트를 한 건도 직접 돌리지 못했다. 같은 헤드 CI `Gradle build` success는 직접 확인했으므로, 사용자가 이 PR에 "CI 결과를 B1 근거로 인정"을 남기면 B1·B2·B4·B6은 CI로 판단할 수 있다. / 점검표 밖 1: D-135의 "D-130 전과 같아진다" 문구가 코드와 다르므로 문구 또는 코드를 맞춘다. 그 밖에 코드 결함으로 인한 수정 요구는 없다)
+
+## 재검토 2026-10-21
+- 대상: PR #218 / 커밋 `da64e0afb960d3484509096adf89432bc82251e6`(원격 브랜치 head와 일치) / main(`3e25539`) 대비 diff. 1차(b53a3c4) 뒤 커밋 `38bdb46`·`da64e0a`. 바뀐 것(`git diff b53a3c4 da64e0a`): `SelectionEntryQuotaTest.java` import 순서, D-135 상태·대안 표 안 1 칸·위험과 한계 첫 항목·후속, ADR-013 결과 절 "(제안)"→"(사용자 결정)", 결정 로그 색인 D-135 행, `docs/qa/pending.md` 한 줄, `docs/reviews/pr-218/architect.md`·`risk-ops.md` 원문. 운영 코드(`ManagedStrategy.java`, `RunSelectionDay.java`)는 1차와 같다. 커밋된 1차 원문은 이 검토자가 쓴 파일과 바이트 단위로 같다(md5 일치).
+- 점검표: B
+- 직접 실행·확인한 것:
+  - 별도 git worktree(헤드 da64e0a)에서 `./gradlew build --no-daemon` → **BUILD FAILED in 1m 7s, 의존성 해석 단계**(`junit-platform-launcher:1.12.2`, `junit-jupiter-engine:5.12.2` 등 `repo.maven.apache.org` 429). 테스트는 이번에도 직접 돌리지 못했다. worktree는 끝난 뒤 지웠다.
+  - **사용자 댓글(GitHub API `get_comments`)**: id 6307770592, 작성자 `hwan82`(author_association OWNER), 2026-10-21T04:05:39Z, 수정 없음, 본문 "CI 결과를 B1 근거로 인정, D-135 결정 확인", PR #218의 유일한 댓글.
+  - **한계(기록)**: PR #124 4차와 같다. 에이전트도 같은 저장소 소유자 계정으로 GitHub에 쓸 수 있는 환경이면, API 응답만으로는 사용자가 직접 쓴 댓글과 에이전트가 쓴 댓글을 구별할 수 없다. 이 검토는 저장소 소유자 계정의 PR 댓글을 사용자 결정으로 본다. 사용자가 이 댓글을 직접 쓰지 않았다면 아래 B1·B2·B4·B6 판단과 승인은 무효다.
+  - CI(직접 조회): 워크플로 `CI` run 39541171961(event `pull_request`, `head_sha` da64e0a 일치, conclusion success). check run `Gradle build`(119029173680), `DB schema (PostgreSQL 16)`(119029173706), `Lab screens (Playwright)`(119029173787), `Secret scan and collector boundary`(119029173492) 모두 success. 잡 로그 본문은 보지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(사용자 결정에 따라 CI로) | 사용자 댓글 6307770592 "CI 결과를 B1 근거로 인정"에 따라 같은 헤드 CI `Gradle build` success(run 39541171961, job 119029173680)를 근거로 씀. 직접 실행은 Maven Central 429로 의존성 해석 실패(코드 무관 `[추론]`) |
+| B2 | 통과 | 코드 읽기 통과(1차와 같음, 이후 코드 변경은 import 순서뿐). ArchUnit·`ModuleOwnershipTest`·`RealPathReflectionTest`는 CI `Gradle build`의 `autotrade-architecture-test`로 통과(B1과 같은 근거) |
+| B3 | 통과 | 1차와 같음. ADR-013 결과 절과 결정 로그 색인이 D-135 상태(사용자 결정)와 맞는다(`docs/adr/ADR-013-strategy-entry-admission.md:46`, `docs/decisions/README.md:141`) |
+| B4 | 통과 | 1차 코드 읽기(시계·난수 없음, 선정 없는 계좌는 새 분기를 타지 않음)에 더해, 골든·`선정_없는_계좌의_보고서는_admitsEntry_도입_전_문맥과_바이트_단위로_같다`는 CI로 통과(B1과 같은 근거) |
+| B5 | 통과 | 1차와 같음 |
+| B6 | 통과 | 새 시험 4건(1차 목록)은 CI로 통과(B1과 같은 근거). 첫 시험이 고치기 전 코드에서 실패한다는 것은 손 계산 `[추론]`이며 직접 변이 실행은 하지 못했다. 지우거나 끈 시험 없음(`38bdb46`·`da64e0a`의 시험 파일 변경은 import 한 줄 이동뿐) |
+| B7 | risk-ops 검토 필요 | 1차와 같음. 보호 경로 `autotrade-strategy/*` 운영 코드 변경. risk-ops 검토(A), 독립 QA, 사용자 머지 |
+| B8 | 통과 | 1차와 같음. 새 커밋에도 키·계좌번호·토큰 없음, CI `Secret scan and collector boundary` success |
+
+## 점검표 밖 발견(재검토)
+1. 1차 점검표 밖 1(D-135 "D-130 전과 같아진다" 문구): **해소**. 대안 표 안 1 칸이 "확인 시점은 D-130 전처럼, 단 범위는 다르다"로 바뀌었다. 위험과 한계 첫 항목은 받지 않은 신호가 하루 진입 수·재진입 금지·보유 수 확인과 상관없이 일 손실을 보므로 D-130 전보다 일찍 멈출 수 있다는 점, 받은 신호와의 비대칭, 범위를 맞추지 않은 이유를 적었다. 코드(`ManagedStrategy.java:250-257`, `:288-305`)와 맞는다. 코드를 바꾸지 않고 문서를 맞추는 쪽(1차 선택지 a)을 골랐다.
+2. 1차 권고 2(import 순서): 해소(`SelectionEntryQuotaTest.java:30-31`이 `IntradayUniverse`, `SelectionDay` 순).
+3. 권고(새로 발견): `docs/qa/pending.md`의 PR #218 줄이 아직 "D-135 확인 방식은 사용자 결정 대기"라고 적혀 있어 `da64e0a`의 D-135 상태(사용자 결정)와 다르다. QA가 읽는 요청 줄이라 다음 커밋 때 맞추면 좋다. 판정을 막지 않는다.
+4. 기록: D-135 상태의 근거인 "스레드 결정 카드 2026-10-21T03:54:38Z"는 이 검토자가 볼 수 없다. 같은 뜻의 기록은 사용자 댓글 6307770592 "D-135 결정 확인"뿐이다(위 한계와 같다).
+
+## 판정
+승인(사용자 hwan82의 PR #218 댓글 6307770592 "CI 결과를 B1 근거로 인정"에 따라 B1·B2·B4·B6을 같은 헤드 CI `Gradle build` success(da64e0a, run 39541171961)로 판단함. 그 댓글이 사용자 본인 것이 아니면 이 승인은 무효. B7: 보호 경로 변경이므로 risk-ops 검토·독립 QA·사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다)
