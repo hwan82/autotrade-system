@@ -61,3 +61,54 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-21
+- 대상: PR #209 / 브랜치 `claude/project-thread-astsat` / 헤드 커밋 970dbc1 / 병합 기준 main(549f89e, 현재 main 끝과 같음) 대비 diff 전체(17파일 +569 −15). 앞 판정(71a6178, 보고서 221934c) 뒤 새 커밋: 4a3e4e4·0d7637d(main 병합), f18cb6b(시험 2파일), 183735d·899ecec(검토 원문 `risk-ops-3.md`·`architect-3.md`), 970dbc1(`docs/qa/pending.md` 재검토 줄). `git merge-tree --write-tree origin/main HEAD` 충돌 없음(앞 R1 해소).
+- 점검표: A 전체 + B1, B6. 보호 경로 `autotrade-marketdata/*`라 실전 관련 PR로 본다. 보호 테스트는 diff에 없다.
+- 직접 실행한 것:
+  - 운영 코드 변경 확인: `git diff 71a6178 HEAD -- autotrade-marketdata/src/main` 0줄. 71a6178 대비 `autotrade-marketdata` 변경은 시험 `DayWriterRestartStreamTest.java`(+5 −5)·`JournalWriterTest.java`(+25 −3)뿐. main 병합으로 들어온 collector·sim·strategy 등은 main 대비 diff에 남지 않음(`git diff --stat origin/main HEAD` 17파일 모두 이 PR 파일). 병합 충돌 해결은 `docs/decisions/README.md`(D-130·D-132·D-133 행 모두 남음)·`docs/qa/pending.md`(#205·#209·#212 줄 모두 남음) 두 곳.
+  - `./gradlew build --rerun-tasks`(헤드 970dbc1): 1회째 **BUILD SUCCESSFUL in 4m 57s, 138 actionable tasks: 138 executed**(미러 init 스크립트 쓰지 않음). 시험 결과 XML 합계 **1,877건, 실패 0, 오류 0, 건너뜀 0**. `DayWriterRestartStreamTest` 7건, `JournalWriterTest` 6건, `RecordingMetaSourcesOrderTest` 3건 통과.
+  - 운영 코드가 바뀌지 않았고 main 병합분이 `marketdata.recording`을 건드리지 않아, 앞 판정의 운영 코드 변이 P1~P13과 실패 경로 임시 시험은 다시 돌리지 않았다(앞 결과 그대로 유효).
+  - **새 시험 변경 변이**(시험 파일 한 곳씩 바꾸고 해당 클래스만 실행, 매번 원본으로 되돌림, 마지막 `git status` 깨끗):
+
+| 변이 | 내용 | 결과 |
+|---|---|---|
+| T1 | 큰 녹화 시험에서 `pb.environment().put("CLASSPATH", …)` 뺌 | 잡힘(`큰_녹화도_작은_힙에서_재기동한다`, 자식이 클래스를 못 찾음). 자식 JVM은 이 환경 변수로만 클래스를 찾는다 |
+| T2 | `crash()`가 닫은 뒤 사본으로 되돌리지 않음(= 정상 종료) | **생존**(R3) |
+| T3 | `crash()`가 이벤트만 되돌리고 메타는 정상 종료 판 | 잡힘(3건, `녹화 파일 SHA-256이 메타와 다릅니다`) |
+| T4 | `crash()`가 메타만 되돌리고 이벤트는 닫힌 gzip | **생존**(R3) |
+| T5 | `crash()` 끝에 "되돌린 메타 `complete=false`이고 이벤트 읽기가 `truncated`"를 확인하는 단언을 임시로 넣음 | 세 시험 모두 통과: `crash()`가 만드는 파일은 실제 비정상 종료와 같은 상태(정상 종료 표시 없음, 닫히지 않은 gzip 멤버) |
+| T6 | main 판 `JournalWriterTest`(`first.flush()`만)에서 `flush()`를 `close()`로 | 생존: 고치기 전 판도 정상·비정상 종료를 가르지 못했다 |
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | diff에 Guard·설정 로딩·엔진 파일 없음. 빌드에서 `RealTradingGuardTest`·`GuardedOrderGatewayTest` 포함 1,877건 통과 |
+| A2 | 통과 | 주문 출구·Guard 팩토리·`autotrade-architecture-test` 변경 0줄. 새 커밋은 시험만(`ArchitectureTest`·`ModuleOwnershipTest` 통과) |
+| A3 | 해당 없음 | 주문·증권사 라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 타임아웃·조회 경로 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음. 녹화 순번·이벤트 파일 무변경 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 필터 변경 없음 |
+| A7 | 해당 없음 | 계좌별 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 통과 | 운영 코드 무변경(위). 녹화 코드는 실전 엔진·감시에 실리지 않음(앞 판정과 같음) |
+| A9 | 해당 없음 | 보호 시세 경로·서버 측 손절 코드 무변경 |
+| A10 | 통과 | f18cb6b·970dbc1 추가 줄에 `appkey|secret|token|password|계좌번호|account` 0줄. 새 시험은 사용자 폴더 경로를 적지 않고 `java.class.path`를 그대로 넘김 |
+| A11 | 통과 | 보호 시험 삭제·`@Disabled`·약화 없음, 고정 값 변경 없음. 새 커밋에서 지운 단언 0. 큰 녹화 시험의 힙 제한·5분 시간 제한·출력 파일·강제 종료와 단언이 그대로이고, 바뀐 클래스패스 전달이 실제로 쓰임을 T1로 확인. `JournalWriterTest`의 `crash()`는 실제 비정상 종료와 같은 파일 상태를 만든다(T5). 세 시험이 정상·비정상 종료를 가르지 못하는 점(T2·T4)은 main 판도 같아(T6) 약화가 아니다 |
+| A12 | 통과 | 대응표 #9(게이트웨이·실험실 크래시 뒤 `RECORDER_RESTART` 공백) 동작 코드 무변경. 새 커밋은 그 시험을 Windows에서 돌 수 있게 하려는 준비 변경 |
+| A13 | 해당 없음 | 시장 분기 추가 없음 |
+| A14 | 통과 | 운영 동작 변경이 없어 새 결정 불필요. 병합 뒤 결정 로그 표 D-130·D-132·D-133·D-134 행과 D-132 본문·기획서 v14.58·D-119 후속 줄이 코드와 일치. `pending.md` 재검토 줄 내용이 diff와 일치 |
+| B1 | 통과 | 위 `./gradlew build --rerun-tasks` 1회째 성공, 1,877건 실패 0 |
+| B6 | 통과 | 새 커밋은 시험 준비 방식 변경이며 단언을 지우거나 건너뛰지 않음(XML 건너뜀 0). 남은 시험 공백은 앞 Q1·R2와 아래 R3(비차단) |
+
+## 점검표 밖 발견(재검토)
+시나리오(잘못된 주문·중복·보호 공백으로 이어질 수 있는가):
+- S5 사용자 Windows PC에서 같은 날 재기동: 운영 경로는 앞 기록기를 닫지 않고 같은 JVM에서 같은 날 `DayWriter`를 다시 여는 일이 없다(`JournalWriter`·`MarketEventRecorder`는 날짜가 바뀔 때만 앞 날을 닫고 새로 연다, risk-ops-3 원문 주장을 `JournalWriter.java:69-74`로 확인). 그래서 고치기 전 `JournalWriterTest`의 Windows 실패(열린 핸들 위로 `Files.move`)는 시험이 만든 상황이고, 실제 크래시는 프로세스가 죽어 핸들이 없다 `[추론]`. 주문 경로와 무관. 결함 없음.
+- S6 다른 프로세스(실험실 리플레이·백신)가 그날 `events.jsonl.gz`를 열고 있을 때 Windows 재기동: `Files.move(…, REPLACE_EXISTING, ATOMIC_MOVE)`(`DayWriter.java:117`)가 실패할 수 있고, 그때 원본·보관본은 남고 녹화만 멈춘다 `[추론]`(risk-ops-3 N4와 같은 판단). 이 PR 전부터 같은 성질이고 이 PR이 바꾸지 않았다. 녹화 손실 쪽 위험이며 주문 경로와 무관.
+- S7 Windows에서 `CLASSPATH` 환경 변수로 넘긴 한글 경로: 환경 변수 하나의 한도(32,767자)는 명령 줄 한도와 같아, 커밋 주석의 "명령 줄 길이 한도를 피한다"는 정확하지 않다. 이 모듈 시험 클래스패스는 짧아(risk-ops-3 원문 Linux 2,344자) 실제 문제는 아니다 `[추론]`. 시험 준비 문제일 뿐 운영 영향 없음.
+
+권고·정보:
+- **확인 못 함(판정 밖, 이번 재검토의 핵심)**: f18cb6b가 Windows에서 실제로 시험 실패를 고치는지는 아무도 확인하지 않았다. 이 검토도 Linux에서만 돌렸다. risk-ops-3 N2 주장대로 사용자 보고의 `DayWriter.<init>(DayWriter.java:106)`은 main(549f89e) 판의 `Files.move` 줄 번호이고, PR 헤드에서는 같은 줄이 `:117`이다(두 판을 직접 대조해 확인). 즉 보고된 Windows 실패는 main 코드에서 난 것으로 보이며 `[추론]`, 이 PR 브랜치의 Windows 결과는 아직 없다. 머지 전에 사용자 PC에서 이 브랜치(970dbc1)를 받아 `./gradlew :autotrade-marketdata:test`를 한 번 돌리기를 권한다. 점검표 항목(B1은 검토자 직접 빌드)과는 별개라 판정을 막지 않는다.
+- **R3(정보, 비차단, main부터 같음)**: `JournalWriterTest`의 세 "비정상 종료" 시험은 `crash()`를 정상 종료로 바꿔도 통과한다(T2·T4 생존, main 판 T6도 생존). 이름만큼 고정하지 못한다. `crash()` 뒤 메타 `complete=false`를 단언하는 한 줄이면 고정된다(T5로 지금 판이 그 상태임을 확인).
+- 앞 판정의 Q1(남은 tmp를 비우고 쓰는지 시험 없음, P12)·R2(sources 불변성 시험 없음, P4)는 그대로다. 앞 R1(main과 문서 충돌)은 해소됐다.
+
+## 판정
+승인
