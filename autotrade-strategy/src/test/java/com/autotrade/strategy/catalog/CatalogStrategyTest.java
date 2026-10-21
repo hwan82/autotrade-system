@@ -198,6 +198,19 @@ class CatalogStrategyTest {
     }
 
     @Test
+    void 재진입_금지_시간_안에도_받지_않는_확인_신호로_일_손실_한도를_확인한다() {
+        // PR #220 QA Q1(변이 P2b): D-135는 받지 않은 신호에서 재진입 금지 확인 없이 일 손실만 본다.
+        // 후보 밖 B를 09:10에 막 판 직후(재진입 금지 30분 안) 손실 중 B 신호가 오면 그날 멈추고, 회복 뒤 A도 진입하지 않는다
+        Tape tape = new Tape(create(random(Map.of("limits.reentry-cooldown-minutes", "30")))).refuse(B);
+        tape.hold(B, 100, 10000).cash(9_000_000);
+        tape.trade(B, "09:00:00", 10000, 100); // 당일 시작 평가금액 10,000,000, B 보유 관측
+        tape.hold(B, 0, 0).cash(9_790_000); // B 청산, 평가금액 9,790,000(−2.1%)
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).as("B 청산 관측(재진입 금지 시작)과 같은 순간의 확인 신호").isEmpty();
+        tape.cash(10_000_000);
+        assertThat(tape.trade("09:11:00", 10000, 100)).as("재진입 금지 안에서 본 손실로 그날 멈춤").isEmpty();
+    }
+
+    @Test
     void 일_손실이_한도와_정확히_같으면_멈추고_조금_모자라면_진입한다() {
         // PR #218 QA Q2(변이 P9): 한도 경계 −2.0%는 멈춘다(손실이 한도 "이상"이면 중단, TradingRules)
         Tape exact = new Tape(create(random(Map.of())));
