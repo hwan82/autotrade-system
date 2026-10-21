@@ -161,6 +161,18 @@ class CatalogStrategyTest {
     }
 
     @Test
+    void 실행기가_받지_않는_신규_진입은_진입_깔때기에_세지_않는다() {
+        // PR #205 QA Q2: 막힌 신호는 깔때기의 신호·진입 어디에도 들어가지 않는다(ADR-013 5장)
+        ManagedStrategy strategy = (ManagedStrategy) create(random(Map.of()));
+        Tape tape = new Tape(strategy).refuse(B);
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).isEmpty();
+        assertThat(tape.trade("09:11:00", 10000, 100)).hasSize(1);
+        LocalDate day = LocalDate.of(2026, 3, 2);
+        assertThat(strategy.entryFunnel().totals(day, day))
+                .extracting(EntryFunnel.Totals::signals, EntryFunnel.Totals::entries).containsExactly(1L, 1L);
+    }
+
+    @Test
     void 청산은_실행기에_진입_여부를_묻지_않는다() {
         Tape tape = new Tape(create(random(Map.of()))).refuse(A);
         tape.trade("09:00:00", 10000, 100);
