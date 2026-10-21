@@ -231,7 +231,7 @@ function selectionsSection(view, s, act) {
     intraday.length ? intradaySelections(intraday, s) : null);
 }
 
-/** 장전 선정(PRE_OPEN_DAILY, D-124): 그날 적용 기록과 다음 거래일 준비. */
+/** 장전 선정(PRE_OPEN_DAILY·PRE_OPEN_DAILY_LAG1, D-124·D-137): 그날 적용 기록과 다음 거래일 준비. */
 function dailySelections(view, s, act) {
   const applied = s.selections;
   const prep = view.prepare;
