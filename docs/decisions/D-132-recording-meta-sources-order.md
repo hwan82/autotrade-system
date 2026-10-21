@@ -46,3 +46,13 @@
 - Q2: 다시 쓰기 중 쓰기 실패 문구 `녹화 재기동 다시 쓰기 실패: <폴더>`를 고정(`…#다시_쓰기_중_쓰기가_실패하면_폴더를_밝힌_문구로_멈추고_원본을_그대로_둔다`). 쓰기 실패를 만들려고 `DayWriter`에 tmp 여는 방법을 받는 패키지 전용 생성자를 더했다(운영 생성자는 `Files::newOutputStream`을 넘김, 동작 무변경). 변이 P13이 잡힌다.
 - architect 비차단: 시험 주석 "1000·5000부터"를 실제 값(첫 줄 KIS-WS 5000, 둘째 줄 KIWOOM-WS 1001)으로, "마지막 수신(event(1))"을 실제 이벤트로 고침.
 - PR #209 architect 1: 다시 쓰기 중 쓰기 실패 때 위 스트림 닫기가 다시 던지면서 tmp 파일 핸들이 열린 채 남았다(이전부터 있던 동작). 파일 스트림을 따로 try-with-resources 자원으로 잡아 항상 닫는다. Q2 시험이 핸들이 닫혔는지 확인한다(Windows에서 tmp 삭제 실패 방지).
+
+## 후속(다음 marketdata PR)
+
+- PR #209 머지(2026-10-21, 6b3cfb5, 독립 QA 승인·재검토 승인 `docs/reviews/pr-209/qa.md`).
+- QA Q1: 같은 날 재기동이 남아 있던 tmp를 비우고 다시 쓰는지 고정하는 시험(변이 P12: 운영 tmp 여는 방법을 `CREATE, APPEND`로 바꾸면 그날 녹화가 순번 끊김으로 읽히지 않는데 시험이 못 잡음).
+- QA R2: `RecordingMeta.sources()`가 고칠 수 없는 맵인지 시험(변이 P4).
+- QA R3·risk-ops-3 N1·architect-3 3: `JournalWriterTest` 비정상 종료 시험에 `meta.json` `complete=false` 단언을 넣어 정상 종료와 구분.
+- architect-3 2·risk-ops-3 N3: `DayWriterRestartStreamTest` 큰 녹화 시험 주석 "명령 줄 길이 한도를 피하고"는 부정확(환경 변수도 같은 한도). 시스템 로캘이 한글을 못 담는 Windows에서는 `CLASSPATH`도 깨질 수 있음 `[추론]`.
+- risk-ops-3 N4·architect-3 4: Windows에서 같은 날 녹화 파일을 다른 핸들이 열고 있으면 재기동 `Files.move`가 거부돼 녹화가 멈출 수 있음(이전부터 있던 성질, 조용히 틀리지 않고 오류로 멈춤).
+- PR #209 Windows 재실행 결과는 받지 못했다. 다음 사용자 PC 실행 때 `./gradlew :autotrade-marketdata:test` 161개 통과를 확인한다.
