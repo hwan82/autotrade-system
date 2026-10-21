@@ -35,3 +35,40 @@
 
 ## 판정
 수정 필요(A8·A12·A14: 발견 1 — 실전 계좌 한국투자 앱키를 수집기가 쓰지 못하게 하는 코드 검사, 또는 사용자 확인을 받은 D-054 R1 예외 결정과 7단계 관문 항목; 발견 2 — `KisNewsClient` 등 수집기 한국투자 호출 파일을 보호 경로·CODEOWNERS에 추가)
+
+## 재검토 2026-10-21
+- 대상: PR #222 / 커밋 `f9a53cff` / `git diff origin/main...HEAD` 전체(앞 검토 `4ea3b026` 뒤 커밋 `a1af5404`·`603f927e`·`d1de06be`·`f9a53cff`). `4ea3b026..HEAD`에서 Java·Gradle 변경 없음(`git diff --stat 4ea3b026..HEAD -- '*.java' '*.kts' '*.gradle'` 빈 결과). 바뀐 것은 `.github/CODEOWNERS`, `scripts/ci/protected-paths.txt`, `docs/qa/checklists.md`(D8), `docs/decisions/D-136-kis-news-snapshot.md`·`README.md`, `docs/qa/pending.md`, architect 원문
+- 점검표: A
+- 직접 실행한 것:
+  - `f9a53cff`를 별도 worktree에 꺼내 `./gradlew build`: **EXIT 0**. 시험 결과 XML 합계 1,910건, 실패·오류·건너뜀 0(`autotrade-app-collector` 130, `autotrade-architecture-test` 46, `autotrade-risk` 55, `autotrade-app-engine` 68, `autotrade-app-gateway` 55, `autotrade-broker-kis` 30).
+  - 변이 1건(같은 worktree, 끝나고 되돌린 뒤 worktree 삭제): `KisNewsClient.NEWS_PATH`를 `…/news-title-x`로 바꾸면 `KisNewsClientTest` 7건 중 1건 실패 → 두 주소 고정 시험이 주소 변경을 잡는다.
+  - `scripts/ci/test-mark-protected-changes.sh`: "표시 스크립트 자체 시험 통과". `mark-protected-changes.sh main`(origin/main 대비): 보호 대상 8개 표시, 새로 넣은 `KisNewsClient.java`·`HttpGetter.java`·`JdkHttpGetter.java`·`ApiCaller.java` 모두 포함.
+  - `protected-paths.txt`와 `CODEOWNERS` 목록 대조: 차이는 기존 `autotrade-broker-*` 표기 방식 하나뿐, 새 4줄은 양쪽에 같다.
+  - PR 머리 `f9a53cff`의 CI(REST 조회): Gradle build, Secret scan and collector boundary, DB schema, Lab screens 모두 success.
+  - 사용자 결정 확인: 메인 Claude 설명 대신 이 스레드의 결정 카드 기록을 직접 읽음. 질문 "수집기 뉴스 키의 실전 키 차단 검사를 언제 넣을까요?"(카드 맥락에 D-054 R1을 미루는 일이라 사용자 확인이 필요하다고 적힘), 2026-10-21T13:47:27Z에 사용자 계정이 0번 "7단계 연결 때 넣기"를 고름(활동 기록 `chosen_by` 사용자 ID). D-136 커밋 `f9a53cff`는 그 뒤.
+  - "지금 한국투자 실전 주문 경로가 없다" 주장 확인: `autotrade-broker-kis` 운영 클래스는 `KisApprovalClient`·`KisDailyChart`·`KisErrorCode`·`KisPlugin`·`KisRestClient`·`KisStreamProtocol`·`KisSymbolMaster`·`KisTokenClient`로 주문 클래스 없음, `autotrade-app-engine/src/main`에 `kis` 문자열 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 앞 검토와 같음. `autotrade-risk`·`autotrade-app-engine`·`autotrade-domain`·`autotrade-config` 변경 없음, `autotrade-risk` 55·`autotrade-app-engine` 68건 통과(`f9a53cff` worktree) |
+| A2 | 통과 | `KisNewsClient` 상수 두 주소(KisNewsClient.java 34~36행)와 `page(date,time)` 하나뿐. 두 주소 시험이 변이(`NEWS_PATH` 변경)를 잡음. 발견 2 반영: 수집기 한국투자 호출 파일 4개가 `scripts/ci/protected-paths.txt`·`.github/CODEOWNERS`에 들어가 표시 스크립트가 실전 관련 PR로 표시함(위 실행). 남은 틈은 점검표 밖 R1 |
+| A3 | 해당 없음 | 주문 경로 변경 없음 |
+| A4 | 해당 없음 | 주문 재전송 로직 변경 없음 |
+| A5 | 해당 없음 | 주문 생성 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 종목 경로 변경 없음, `autotrade-selection` 무변경 |
+| A7 | 통과 | 계좌별 직렬 큐·토큰 버킷 코드 변경 없음. 수집기 호출 간격 350ms, 100ms 미만 거부(앞 검토 근거 그대로, 시험 통과) |
+| A8 | 통과 | 코드 차단은 여전히 없으나, 이는 사용자 결정(위 결정 카드, 0번)으로 D-054 R1의 수집기 예외로 기록됨(D-136 "D-054 R1 수집기 예외" 절, 결정 색인 D-136 행 "사용자 결정(2026-10-21)"). 지금 한국투자 실전 주문 경로·실전 엔진 연결이 없어 나눠 쓰는 실전 한도가 없음(위 확인). 7단계 쪽 장치: ① 한국투자 실전 계좌 연결 PR의 승인 조건에 코드 검사+시험(D-136 예외 절 1번), ② 실전 활성화 점검표 D8(`docs/qa/checklists.md` 60행). 수집기는 장 시간 보호 구간 밖에서만 호출(`RunGuard.checkSession`, 매 GET·POST 전) |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 코드 변경 없음. 장 시간 거절 시험 통과 |
+| A10 | 통과 | 앞 검토 근거 그대로(코드 무변경), 수집기 시험 130건 통과, CI gitleaks success. 새 문서 변경에 키·계좌 값 없음 |
+| A11 | 통과 | 보호 테스트 `ArchitectureTest`는 javadoc·`because` 문구만 바뀜(앞 검토), 이번 커밋들에서 보호 테스트 변경 없음. 보호 경로 목록은 늘기만 함(삭제 없음), 표시 스크립트 자체 시험 통과 |
+| A12 | 통과 | 장애표 #17의 전제(실전 키는 실전 엔진 전용)를 수집기에 대해 지키는 장치가 7단계 관문(점검표 D8)과 한국투자 실전 연결 PR 승인 조건으로 들어감. 지금은 한국투자 실전 경로가 없어 #17이 일어날 실전 조회가 없음 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 통과 | D-054 R1 예외가 "추천안 채택(자율)"이 아니라 사용자 결정으로 기록됨(D-136 예외 절, 결정 색인), 결정 카드 기록으로 직접 확인. 되돌릴 조건(앱키 하나뿐이고 그 계좌를 7단계 후보로 쓰면 수집 전에 코드 검사 먼저)도 적힘 |
+
+## 재검토 점검표 밖 발견
+- 앞 발견 1: 해결((나)안, 사용자 결정·D8·연결 PR 승인 조건). 앞 발견 2: 최소 요구(4개 파일 보호 경로·CODEOWNERS) 해결.
+- R1 (참고, 판정 영향 없음) 보호 경로의 남은 틈: `ApiCaller.post(URI, …)`는 주소를 인자로 받고, 한국투자 앱키는 `CollectorSecrets.kisNewsAppKey()`(보호 경로 밖)로 수집기 패키지 어디서나 꺼낼 수 있다. 그래서 보호 파일을 고치지 않는 새 파일이 다른 한국투자 주소로 POST를 보내도 경로 표시에 걸리지 않는다. 다만 주문에는 계좌번호가 필요하고 `CollectorSecrets`가 `account-no` 칸을 거부한다. 권고: 다음 수집기 PR에서 `CollectorSecrets.java`(계좌 칸 거부가 사실상 안전 장치)를 보호 경로·CODEOWNERS에 더하고, 가능하면 앞 검토에서 선택으로 적은 상수 검사(수집기 패키지의 `koreainvestment`·`/uapi/`·`/oauth2/` 문자열은 `KisNewsClient`에만)를 `autotrade-architecture-test`에 둔다.
+- R2 (참고) D-054 R1 예외와 연결 PR 승인 조건이 D-136에만 있다. 한국투자 실전 연결 PR 검토자는 D-054를 먼저 볼 것이므로, D-054 쪽에서 D-136 예외 절로 가는 연결(후속 메모 등, 결정 수정 규칙 안에서)이 있으면 놓칠 위험이 줄어든다. 7단계 활성화는 D8이 막으므로 판정 영향은 없다.
+
+## 재검토 판정
+승인
