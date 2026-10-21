@@ -186,6 +186,32 @@ class CatalogStrategyTest {
     }
 
     @Test
+    void 보유_수_상한에_막힌_동안에도_받지_않는_확인_신호로_일_손실_한도를_확인한다() {
+        // PR #218 QA Q1(변이 P2): D-135는 받지 않은 신호에서 진입 수·재진입·보유 수 확인 없이 일 손실만 본다.
+        // 보유 수 상한(1)에 막힌 동안 손실 중 후보 밖 B 신호가 오면 그날 멈추고, A를 판 뒤 회복해도 진입하지 않는다
+        Tape tape = new Tape(create(random(Map.of("sizing.max-positions", "1")))).refuse(B);
+        tape.trade("09:00:00", 10000, 100); // 당일 시작 평가금액 10,000,000
+        tape.hold(A, 100, 10000).cash(8_790_000); // 평가금액 9,790,000(−2.1%), 보유 수 1 = 상한
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).isEmpty();
+        tape.hold(A, 0, 0).cash(10_000_000);
+        assertThat(tape.trade("09:11:00", 10000, 100)).as("보유 수 상한 때 본 손실로 그날 멈춤").isEmpty();
+    }
+
+    @Test
+    void 일_손실이_한도와_정확히_같으면_멈추고_조금_모자라면_진입한다() {
+        // PR #218 QA Q2(변이 P9): 한도 경계 −2.0%는 멈춘다(손실이 한도 "이상"이면 중단, TradingRules)
+        Tape exact = new Tape(create(random(Map.of())));
+        exact.trade("09:00:00", 10000, 100);
+        exact.cash(9_800_000); // 정확히 −2.0%
+        assertThat(exact.trade("09:10:00", 10000, 100)).isEmpty();
+
+        Tape under = new Tape(create(random(Map.of())));
+        under.trade("09:00:00", 10000, 100);
+        under.cash(9_800_010); // −1.9999%
+        assertThat(under.trade("09:10:00", 10000, 100)).hasSize(1);
+    }
+
+    @Test
     void 손실이_없으면_받지_않는_확인_신호는_뒤_후보_진입을_막지_않는다() {
         Tape tape = new Tape(create(random(Map.of()))).refuse(B);
         tape.trade("09:00:00", 10000, 100);
