@@ -173,6 +173,28 @@ class CatalogStrategyTest {
     }
 
     @Test
+    void 실행기가_받지_않는_확인_신호에서도_일_손실_한도를_확인한다() {
+        // D-135(PR #205 risk-ops 1·QA R2): 손실 중에는 후보 밖 B 신호만 왔고, 회복 뒤 후보 A 신호가 와도 그날은 멈춘 채다
+        Tape tape = new Tape(create(random(Map.of()))).refuse(B);
+        tape.trade("09:00:00", 10000, 100); // 당일 시작 평가금액 10,000,000
+        tape.cash(9_790_000); // −2.1%
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).isEmpty();
+        tape.cash(10_000_000);
+        assertThat(tape.trade("09:11:00", 10000, 100)).as("후보 밖 신호 때 닿은 손실로 그날 멈춤").isEmpty();
+        tape.day(LocalDate.of(2026, 3, 3));
+        assertThat(tape.trade("09:10:00", 10000, 100)).as("다음 거래일에는 다시 진입").hasSize(1);
+    }
+
+    @Test
+    void 손실이_없으면_받지_않는_확인_신호는_뒤_후보_진입을_막지_않는다() {
+        Tape tape = new Tape(create(random(Map.of()))).refuse(B);
+        tape.trade("09:00:00", 10000, 100);
+        tape.cash(9_850_000); // −1.5%, 한도(2%) 안
+        assertThat(tape.trade(B, "09:10:00", 10000, 100)).isEmpty();
+        assertThat(tape.trade("09:11:00", 10000, 100)).hasSize(1);
+    }
+
+    @Test
     void 청산은_실행기에_진입_여부를_묻지_않는다() {
         Tape tape = new Tape(create(random(Map.of()))).refuse(A);
         tape.trade("09:00:00", 10000, 100);
