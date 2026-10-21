@@ -264,7 +264,7 @@ public final class SelectionEdgeStudy {
     static Day day(EdgePlan plan, SelectionProfile profile, SelectionCalculator calc, SnapshotInputs in,
             KrxMarketRules rules, CostModel cost, LocalDate t) {
         SelectionResult r = calc.calculate(profile, t);
-        LocalDate c = in.days().days().previous(t);
+        LocalDate c = profile.refresh().cutoff(t, in.days().days()::previous); // LAG1은 T−2(D-137)
         List<String> hard = new ArrayList<>();
         int gatePassed = r.selected().size();
         Map<String, Integer> soleNoData = new TreeMap<>();

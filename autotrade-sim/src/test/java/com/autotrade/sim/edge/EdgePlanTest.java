@@ -3,7 +3,11 @@ package com.autotrade.sim.edge;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class EdgePlanTest {
@@ -88,5 +92,25 @@ class EdgePlanTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> EdgePlan.parse(OK.replace("EXP-20261020-EDGE01", "edge01"), "t"))
                 .hasMessageContaining("실험 ID");
+    }
+
+    /**
+     * 하루 늦춘 판 EDGE04는 EDGE01과 같은 키로 사전 등록한다(LIVE02 계획 3.3, D-137): 주석과 id·question·selection 말고는 줄이 같다.
+     * 두 등록 파일 모두 형식 검사를 통과한다.
+     */
+    @Test
+    void lagOneRegistrationDiffersFromEdge01OnlyInIdQuestionAndSelection() throws Exception {
+        Path dir = Path.of("..", "experiments");
+        String edge01 = Files.readString(dir.resolve("EXP-20261020-EDGE01/edge.yaml"), StandardCharsets.UTF_8);
+        String edge04 = Files.readString(dir.resolve("EXP-20261022-EDGE04/edge.yaml"), StandardCharsets.UTF_8);
+        EdgePlan.parse(edge01, "EDGE01");
+        EdgePlan.parse(edge04, "EDGE04");
+        assertThat(keyLines(edge04)).isEqualTo(keyLines(edge01));
+        assertThat(edge04).contains("selection: \"kr-intraday-hot-lag1@1\"").contains("id: \"EXP-20261022-EDGE04\"");
+    }
+
+    private static List<String> keyLines(String text) {
+        return text.lines().filter(l -> !l.startsWith("#"))
+                .filter(l -> !l.startsWith("id:") && !l.startsWith("question:") && !l.startsWith("selection:")).toList();
     }
 }

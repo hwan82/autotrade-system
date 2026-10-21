@@ -1,0 +1,36 @@
+# 선정 프로필(ADR-007 2.1, 카탈로그 docs/strategy/selection-catalog.md). 저장된 버전 파일은 고치지 않는다.
+# kr-intraday-hot@1의 하루 늦춘 판(D-137, ADR-012 3.7 (a)). 조건·수치는 kr-intraday-hot@1과 같고 refresh만 PRE_OPEN_DAILY_LAG1이다.
+# KRX 일봉이 다음 날 장 시작 전까지 게시되지 않아(2026-10-21 사용자 PC 확인) 실시간 모의에서 T 장 전에 T−1 일봉을 받을 수 없다.
+# 이 판은 T−1에 적용할 원래 판 결과와 같은 입력(일봉 T−2까지, 공시·재무 T−1 전날까지)으로 고르고 T 하루 적용한다.
+# 실시간에는 이 판을 쓰고, 원래 판과 일봉으로 비교한다. LIVE02에 넣으려면 이 판으로 새 일봉 사전 검사를 통과해야 한다(live02 계획 3.3).
+id: "kr-intraday-hot-lag1"
+version: 1
+market: "KRX"
+style: "INTRADAY"
+created-at: "2026-10-22T00:00:00Z"
+parameters:
+  hypothesis: "(다) 하루 늦춘 판: 전전 거래일 거래대금이 크고 거래량이 평소의 2배 넘게 터지며 3% 이상 오른 종목은 이틀 뒤(거래일) 장중 변동성과 유동성이 커서, 같은 단타 매매지표의 비용 차감 성과가 무작위로 고른 같은 수 종목보다 높다(기대 방향 +)"
+  refresh: "PRE_OPEN_DAILY_LAG1"
+  max-symbols: "20"
+  filter.kinds: "STOCK"
+  filter.min-price: "1000"
+  filter.min-bar-days: "21"
+  gate.01.metric: "avg-turnover"
+  gate.01.window: "1"
+  gate.01.op: "GE"
+  gate.01.value: "10000000000"
+  gate.02.metric: "volume-spike"
+  gate.02.window: "20"
+  gate.02.op: "GE"
+  gate.02.value: "2"
+  gate.03.metric: "return"
+  gate.03.window: "1"
+  gate.03.op: "GE"
+  gate.03.value: "0.03"
+  gate.04.metric: "return"
+  gate.04.window: "1"
+  gate.04.op: "LE"
+  gate.04.value: "0.25"
+  score.metric: "avg-turnover"
+  score.window: "1"
+  score.order: "DESC"

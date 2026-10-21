@@ -81,8 +81,8 @@ public record RegisteredSelections(List<Entry> entries, Optional<String> daily, 
     }
 
     /**
-     * 읽은 선정 프로필로 입력을 확인한다. 장전 선정({@code PRE_OPEN_DAILY})이 있으면 {@code selection-input.daily}가 필요하고,
-     * 장중 순위 선정({@code INTRADAY_AT})만 있으면 {@code selection-input}을 쓰지 않는다(입력 기록만 씀, D-127).
+     * 읽은 선정 프로필로 입력을 확인한다. 장전 선정({@code PRE_OPEN_DAILY}·{@code PRE_OPEN_DAILY_LAG1})이 있으면
+     * {@code selection-input.daily}가 필요하고, 장중 순위 선정({@code INTRADAY_AT})만 있으면 {@code selection-input}을 쓰지 않는다(입력 기록만 씀, D-127).
      *
      * <p>공시 입력은 장전 선정 가운데 공시 지표({@code Metric.Kind.DISCLOSURE}) 조건이 있는 것이 하나라도 있으면 필요하고, 하나도
      * 없으면 쓰면 안 된다(ADR-014 6장. 일봉 사전 검사 {@code SelectionEdgeStudy}의 일치 검사와 같은 판단). 쓰지 않는 입력을 적어
@@ -93,7 +93,8 @@ public record RegisteredSelections(List<Entry> entries, Optional<String> daily, 
      */
     public void requireInputs(boolean dailySelections, boolean disclosureSelections) {
         if (dailySelections && daily.isEmpty()) {
-            throw new IllegalArgumentException("장전 선정(PRE_OPEN_DAILY)이 있으면 selection-input.daily(일봉 스냅샷)가 필요합니다");
+            throw new IllegalArgumentException(
+                    "장전 선정(PRE_OPEN_DAILY·PRE_OPEN_DAILY_LAG1)이 있으면 selection-input.daily(일봉 스냅샷)가 필요합니다");
         }
         if (!dailySelections && (daily.isPresent() || financials.isPresent() || disclosures.isPresent())) {
             throw new IllegalArgumentException("장중 순위 선정(INTRADAY_AT)만 있는 등록은 selection-input을 쓰지 않습니다(입력 기록만 씀)");

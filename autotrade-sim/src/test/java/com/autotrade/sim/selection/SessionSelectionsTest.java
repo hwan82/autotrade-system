@@ -142,20 +142,20 @@ class SessionSelectionsTest {
     void preparerWritesOnlyMissingResultsAndStopsAtCheckpoint() {
         SelectionPreparer.Outcome[] seen = new SelectionPreparer.Outcome[1];
         List<SelectionPreparer.Outcome> stale = SelectionPreparer.prepare(files, D1, null, D1.minusDays(2),
-                D1.minusDays(1), PRODUCER, () -> { });
+                d -> d.minusDays(1), PRODUCER, () -> { });
         assertThat(stale).singleElement().satisfies(o -> {
             assertThat(o.status()).isEqualTo(SelectionPreparer.Status.PROBLEM);
             assertThat(o.reason()).isEqualTo(SelectionInvalidReason.STALE_INPUT);
             seen[0] = o;
         });
-        assertThatThrownBy(() -> SelectionPreparer.prepare(files, D1, null, D1.minusDays(1), D1.minusDays(1), PRODUCER,
+        assertThatThrownBy(() -> SelectionPreparer.prepare(files, D1, null, D1.minusDays(1), d -> d.minusDays(1), PRODUCER,
                 () -> {
                     throw new com.autotrade.sim.run.ExperimentStoppedException("정지 요청");
                 })).isInstanceOf(com.autotrade.sim.run.ExperimentStoppedException.class);
 
         files.writeResult(SelectionFixtures.result(hot, D1, List.of("005930")), PRODUCER);
         assertThat(SelectionPreparer.nothingToDo(files, D1)).isTrue();
-        assertThat(SelectionPreparer.prepare(files, D1, null, D1.minusDays(1), D1.minusDays(1), PRODUCER, () -> {
+        assertThat(SelectionPreparer.prepare(files, D1, null, D1.minusDays(1), d -> d.minusDays(1), PRODUCER, () -> {
             throw new AssertionError("결과 파일이 있으면 관문을 묻기 전에 건너뛴다");
         })).singleElement().satisfies(o -> assertThat(o.status()).isEqualTo(SelectionPreparer.Status.EXISTS));
         files.apply(D1);
