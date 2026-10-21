@@ -1,7 +1,7 @@
 # D-135 선정 계좌에서 받지 않은 확인 신호도 일 손실 한도를 확인한다(PR #205 risk-ops 1·QA R2)
 
 - 날짜: 2026-10-21
-- 상태: 제안 · 사용자 결정 대기(리스크 한도 평가 방식이라 지침 8장 2번). 결정 전에는 추천안(아래 1번)으로 구현했다. 보호 경로 `autotrade-strategy`를 바꾸므로 **실전 관련 PR**: architect·risk-ops 검토, 독립 QA, 사용자 머지(지침 10·11장). 실전 주문 경로, RealTradingGuard, 블랙리스트 규칙, 실전 리스크 한도(`RiskChain`), 게이트웨이는 바꾸지 않는다.
+- 상태: **사용자 결정**(안 1 "후보 밖 신호도 확인", 스레드 결정 카드 2026-10-21T03:54:38Z). 리스크 한도 평가 방식이라 지침 8장 2번으로 사용자에게 물었다. 보호 경로 `autotrade-strategy`를 바꾸므로 **실전 관련 PR**: architect·risk-ops 검토, 독립 QA, 사용자 머지(지침 10·11장). 실전 주문 경로, RealTradingGuard, 블랙리스트 규칙, 실전 리스크 한도(`RiskChain`), 게이트웨이는 바꾸지 않는다.
 - 담당: sim-engine. 교차 검토: architect, risk-ops
 - 근거: [D-130](D-130-strategy-entry-admission.md), [ADR-013](../adr/ADR-013-strategy-entry-admission.md) 5장, `docs/reviews/pr-205/risk-ops.md` 점검표 밖 1·2·3, `docs/reviews/pr-205/qa.md` R2, `docs/reviews/pr-212/qa.md` Q1·Q2. 번호: main 최신 D-134, 열린 원격 브랜치 전부에 D-135 없음(2026-10-21 확인).
 
@@ -17,7 +17,7 @@
 | 2 | 모든 계좌에서 이벤트마다 확인(risk-ops 제안 원문) | 결과가 바뀜(하루 중 한 번이라도 닿으면 멈춤) | 더 일찍 멈추지만 사전 등록된 LIVE01(D-113·D-114)과 4단계 실험 결과의 전략 동작이 같은 프로필 버전인데 달라진다 |
 | 3 | 프로필 새 키로 확인 방식을 고름(기본은 지금 방식) | 바이트 같음 | 새 키·검증·문서가 늘고, 쓰려면 새 프로필 버전이라 새 조합(8주부터) |
 
-안 1로 구현했다. 사용자가 안 2·3을 고르면 이 결정을 고쳐 다시 올린다.
+사용자가 안 1을 골랐다(2026-10-21).
 
 ## 결정(안 1)
 
@@ -49,5 +49,4 @@
 
 ## 후속
 
-- 사용자 결정(안 1·2·3) 뒤 이 문서 상태를 고친다.
 - 변경 제안(strategy-researcher): LIVE02 계획(`docs/strategy/live02-preregistration-plan.md`) 8장 F7 행에 "D-130으로 해결, D-130 전 선정 계좌 결과의 blocked-entries와 비교 불가(D-135 `blocked-entries` 뜻)"를 적는다(PR #205 architect N2).
