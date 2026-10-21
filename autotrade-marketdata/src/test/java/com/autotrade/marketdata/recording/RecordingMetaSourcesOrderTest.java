@@ -85,6 +85,24 @@ class RecordingMetaSourcesOrderTest {
     }
 
     @Test
+    void 소스_맵은_고칠_수_없다() throws IOException {
+        // 만든 쪽 맵을 나중에 바꿔도 메타가 따라 바뀌지 않고, 받은 쪽도 바꿀 수 없다(PR #209 QA R2, 변이 P4)
+        Map<String, String> in = shuffledSources();
+        RecordingMeta m = new RecordingMeta(RecordingCodec.FORMAT_VERSION, "KRX", DAY.toString(), "Asia/Seoul", in, "",
+                List.of(), 0, 0, 0, 0, false, "");
+        in.put("ZZ-WS", "KRX_REALTIME");
+        assertThat(m.sources()).doesNotContainKey("ZZ-WS");
+        assertThatThrownBy(() -> m.sources().put("ZZ-WS", "KRX_REALTIME"))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> m.sources().remove("A-WS")).isInstanceOf(UnsupportedOperationException.class);
+        // meta.json에서 읽은 메타도 같다
+        Path file = root.resolve(RecordingLayout.META_FILE);
+        new ObjectMapper().writeValue(file.toFile(), m);
+        RecordingMeta read = new ObjectMapper().readValue(file.toFile(), RecordingMeta.class);
+        assertThatThrownBy(() -> read.sources().clear()).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void 소스_이름이나_범위가_비면_예전처럼_거절한다() {
         Map<String, String> nullValue = new HashMap<>();
         nullValue.put("KIWOOM-WS", null);

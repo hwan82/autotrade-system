@@ -89,6 +89,10 @@ class DayWriterRestartStreamTest {
         w.close();
         Files.write(dir.resolve(RecordingLayout.EVENTS_FILE), events);
         Files.write(dir.resolve(RecordingLayout.META_FILE), meta);
+        // 되돌린 파일이 정상 종료와 구분되는지 확인한다(PR #209 QA R3와 같은 단언)
+        RecordedDayStream.Summary crashed = RecordedDayStream.read(dir, l -> { });
+        assertThat(crashed.meta()).hasValueSatisfying(m -> assertThat(m.complete()).isFalse());
+        assertThat(crashed.truncated()).isTrue();
         return dir;
     }
 
@@ -179,6 +183,35 @@ class DayWriterRestartStreamTest {
     }
 
     @Test
+    void 같은_날_재기동은_앞_재기동이_남긴_tmp를_비우고_다시_쓴다() throws IOException {
+        // 앞 재기동이 tmp를 다 쓰고 바꾸기 전에 멈춘 상황(D-119 "tmp 잔존"). 남은 tmp 뒤에 이어 쓰면 바꾼 뒤 그날 녹화가
+        // 순번 끊김으로 읽히지 않는다(PR #209 QA Q1, 변이 P12: 운영 여는 방법을 CREATE, APPEND로)
+        DayWriter first = open(OPEN);
+        for (long i = 0; i < 5; i++) {
+            first.write("KIWOOM-WS", event(i));
+        }
+        first.close(OPEN.plusSeconds(30));
+        Path events = dayDir().resolve(RecordingLayout.EVENTS_FILE);
+        Path tmp = dayDir().resolve(RecordingLayout.EVENTS_FILE + ".tmp");
+        Files.copy(events, tmp); // 앞 재기동이 남긴 tmp: 같은 줄을 담은 닫힌 gzip
+
+        DayWriter second = open(OPEN.plusSeconds(60));
+        assertThat(second.lastSeq()).isEqualTo(5);
+        assertThat(tmp).doesNotExist();
+        Instant resumed = OPEN.plusSeconds(65);
+        second.write("KIWOOM-WS", new TradeTick(Symbol.krx("005930"), 99, resumed, resumed, BigDecimal.valueOf(70_000), 1));
+        second.close(resumed.plusSeconds(1));
+
+        List<RecordingCodec.Line> lines = new ArrayList<>();
+        RecordedDayStream.Summary after = RecordedDayStream.read(dayDir(), lines::add);
+        assertThat(after.truncated()).isFalse();
+        assertThat(after.unmarkedRestarts()).isEmpty();
+        // 앞 5줄 + 재기동 공백 5종목 + 새 1줄, 순번은 1부터 끊김 없이
+        assertThat(lines).extracting(RecordingCodec.Line::seq)
+                .containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L);
+    }
+
+    @Test
     void 다시_쓰기_중_쓰기가_실패하면_폴더를_밝힌_문구로_멈추고_원본을_그대로_둔다() throws IOException {
         // 다시 쓰기 실패 문구(PR #187 architect 2)를 고정한다(PR #192 QA Q2, 변이 P13). 읽기 실패 시험은 위에 있다
         Path dir = crashedDay(2_000);
@@ -266,8 +299,9 @@ class DayWriterRestartStreamTest {
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
         // 출력은 파일로 받는다: 자식이 멈춰도 시간 제한이 듣게(PR #187 risk-ops N1)
         Path log = root.resolve("probe.log");
-        // 클래스패스는 환경 변수 CLASSPATH로 넘긴다. 명령 줄 길이 한도를 피하고, 인자 파일(@)은 Windows에서 시스템 인코딩으로
-        // 읽혀 한글 사용자 폴더(Gradle 캐시) 경로가 깨진다(사용자 PC에서 NoClassDefFoundError로 확인, PR #209)
+        // 클래스패스는 환경 변수 CLASSPATH로 넘긴다. 인자 파일(@)은 Windows에서 시스템 인코딩으로 읽혀 한글 사용자 폴더(Gradle
+        // 캐시) 경로가 깨진다(사용자 PC에서 NoClassDefFoundError로 확인, PR #209). 환경 변수도 길이 한도는 명령 줄과 같고(약 3만 2천
+        // 자), 시스템 로캘이 한글을 못 담는 Windows에서는 이것도 깨질 수 있다 [추론]. 이 모듈 클래스패스는 짧아 한도는 문제가 아니다
         ProcessBuilder pb = new ProcessBuilder(java.toString(), SMALL_HEAP, Probe.class.getName(), dir.toString());
         pb.environment().put("CLASSPATH", System.getProperty("java.class.path"));
         Process p = pb.redirectErrorStream(true).redirectOutput(log.toFile()).start();
