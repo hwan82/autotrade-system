@@ -33,3 +33,34 @@
 
 ## 판정
 수정 필요(점검표 밖 1: `docs/research/q-055-news-source.md` 6장 키 위치 안내를 `collector-secrets.json`의 `kis-news`로 바로잡기)
+
+## 재검토 2026-10-21
+- 대상: PR #222 / 커밋 a1af54045be5075fe30b096256a424c50be0d60b / main(62d81a7) 대비 diff (`git diff origin/main...HEAD`: 30개 파일, +1,774, −24). 앞 검토(65878307) 뒤 새 커밋은 4ea3b026(architect 발견 1·2 반영), a1af5404(risk-ops 발견 1·2 반영), 검토 원문 2건. main과 병합 충돌 없음(`git merge-tree --write-tree` 성공, main 쪽 새 커밋 #223은 문서 2개)
+  - 앞 검토 뒤 바뀐 것: `docs/research/q-055-news-source.md` 6장 키 위치, `CollectorSecrets.load` javadoc, D-136 "위험 1" 문구와 새 절 "D-054 R1 수집기 예외"(사용자 확인 대기), `docs/qa/checklists.md` D8, `scripts/ci/protected-paths.txt`·`.github/CODEOWNERS`에 수집기 파일 4개(`KisNewsClient`·`HttpGetter`·`JdkHttpGetter`·`ApiCaller`). 운영 코드 동작 변경 없음(javadoc 한 줄뿐)
+- 점검표: B
+- 직접 실행한 것(공유 작업 트리와 겹치지 않게 `git worktree add --detach`로 a1af5404를 따로 꺼내 실행):
+  - `./gradlew build --no-daemon` → 종료 0. 새 worktree라 빌드 폴더가 비어 모든 test 작업이 새로 실행됨(로그에 UP-TO-DATE·FROM-CACHE 0건). 결과 XML 합계 1,910건, 실패 0, 오류 0, 건너뜀 0
+  - 변이 M1 재실행: `KisNewsClient.java:188` `redaction.add(token)` 주석 처리 → `:autotrade-app-collector:test --tests 'com.autotrade.app.collector.Kis*'` 22건 중 1건 실패(**죽음**). `git checkout`으로 원복, `git status` 깨끗함 확인
+  - `bash scripts/ci/test-mark-protected-changes.sh` → "표시 스크립트 자체 시험 통과", 종료 0
+  - `bash scripts/ci/mark-protected-changes.sh main` → 보호 대상 8개 표시: `.github/CODEOWNERS`, 수집기 4개 파일, `ArchitectureTest.java`, `docs/qa/checklists.md`, `scripts/ci/protected-paths.txt`. 변이 M4: `protected-paths.txt`에서 `KisNewsClient.java` 줄을 지우면 표시 목록에서 그 파일이 빠짐(0건) → 새 줄이 실제로 경고를 만든다. 원복 확인
+  - CI(헤드 a1af5404, `gh api .../check-runs`): Gradle build, Secret scan and collector boundary, DB schema, Lab screens 모두 success
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 worktree `./gradlew build` 직접 실행 성공, 1,910건 새로 실행·전부 통과 |
+| B2 | 통과 | 앞 검토 뒤 빌드 스크립트·의존성·ArchUnit 규칙 변경 없음. `ArchitectureTest` 변경은 여전히 javadoc·`because` 문구뿐(조건식 무변경). `verifyProcessIsolation`·`verifyPureDependencies`·ArchUnit 전체 빌드에서 통과 |
+| B3 | 통과 | 앞 검토 발견 1 해소: q-055 6장(80행)이 `collector-secrets.json`의 `kis-news` 칸을 안내하고 `secrets.json` `brokers.kis`에 넣지 말라고 적음 → D-136 3번·ADR-008 2.2·config-keys 80~81행·runbook 3.9·`CollectorSecrets.ALLOWED`(31~34행)와 일치. 새 계약 변경 없음(D8은 관문 점검 항목, 보호 경로 목록은 CI 입력이며 코드 계약 아님). 단 점검표 밖 1(결정 로그 색인) |
+| B4 | 통과 | 시뮬레이션 코드 무변경. 수집기 주입 `Clock` 사용과 스냅샷 ID 결정성 시험(`같은_캐시와_구간이면_같은_ID다`)은 앞 검토와 같고 이번 빌드에서 통과 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 시험 삭제·`@Disabled`·건너뜀 없음(건너뜀 0). 앞 검토 뒤 운영 동작 변경이 없어 새 시험 필요 없음. 보호 경로 추가는 표시 스크립트 자체 시험 통과와 M4로 확인. M1 다시 죽음 |
+| B7 | 해당 없음(단, 보호 경로) | 실전 주문 경로·RealTradingGuard·GuardedOrderGateway·블랙리스트·리스크 한도 코드 변경 없음. 그러나 보호 테스트 파일·보호 경로 목록·CODEOWNERS·점검표 D를 바꾸고, D-054 R1을 수집기에 한해 미루는 결정(사용자 확인 대기)을 담으므로 실전 관련 PR이다. risk-ops 원문 판정이 "수정 필요"로 남아 있어 **risk-ops 재검토 필요**, 머지는 D-136 "D-054 R1 수집기 예외" 사용자 확인과 독립 QA 뒤 사용자가 한다 |
+| B8 | 통과 | 앞 검토 뒤 diff에 키·계좌번호·토큰 없음(직접 확인: 추가분은 문서 문구·경로 목록·javadoc). 토큰 가림은 M1으로 다시 확인. gitleaks는 로컬 미실행, CI "Secret scan and collector boundary" success로 확인 |
+
+## 점검표 밖 발견
+1. (권고, 판정 영향 없음) `docs/decisions/README.md` 142행 D-136 색인 줄은 여전히 "나머지는 **추천안 채택(자율)**"이라고만 적고, D-136 본문 새 절의 "D-054 R1 수집기 예외 — **사용자 확인 대기**"가 보이지 않는다. 지침 8장은 사용자가 결정 로그에서 한눈에 검토하게 하라고 하므로, 색인 줄에 "D-054 R1 수집기 예외는 사용자 확인 대기"를 한 마디 더하는 편이 낫다. 사용자 확인 결과가 나오면 그때 같이 고쳐도 된다.
+2. (권고, 판정 영향 없음) `docs/qa/pending.md` 73행의 PR #222 요청 설명은 처음 커밋 기준이다. 이제 보호 경로·CODEOWNERS·점검표 D8 변경과 D-054 R1 예외(사용자 확인 대기)도 QA 범위이므로 설명에 더하면 QA가 범위를 좁게 잡지 않는다(QA는 diff 전체를 보므로 필수는 아님).
+3. 앞 검토 점검표 밖 2(`CollectorSecrets.load` javadoc)는 "모든 값이 빈 값"으로 고쳐짐(CollectorSecrets.java:36). 3·4(비200 응답 본문 코드 미확인, 겹침 구간 200건 초과 시 '끝까지 아니오' 보고)는 참고 사항 그대로이며 코드 변경 없음.
+4. 보호 경로 추가 범위 확인: 수집기에서 한국투자 주소 상수는 `KisNewsClient`에만 있고(34~36행), 생성은 `CollectorMain.kisNews`(363행)가 `o.kisBase`와 `collector-secrets.json` 값으로만 한다. POST는 `HttpGetter.post`(13행 설명: 토큰 발급 전용)→`JdkHttpGetter`→`ApiCaller.post` 경로뿐이라, 새로 보호한 4개 파일이 한국투자 호출과 POST 경로를 덮는다. `CollectorMain`은 보호 밖이지만 주소·TR을 바꿀 수 없다(공개 메서드 `page(date,time)`만). ArchUnit 상수 검사(risk-ops 발견 2의 선택안)는 넣지 않았고, 경로 표시로 충분한지는 risk-ops 판단 몫이다.
+
+## 판정
+승인
