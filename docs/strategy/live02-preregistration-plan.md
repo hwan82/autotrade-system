@@ -1,6 +1,6 @@
 # LIVE02(선정 조합 8주 실시간 모의) 사전 등록 계획
 
-- 상태: **초안**. 등록 파일(`experiments/EXP-<시작일>-LIVE02/experiment.yaml`)과 녹화 사전 검사 등록 파일은 아직 만들지 않는다. 이 문서는 결과를 보기 전에 판정 방법을 고정하려는 것이다. 결정: [D-128](../decisions/D-128-live02-preregistration-plan.md)(추천안 채택(자율)), 사용자 확인 항목은 [Q-056](../decisions/README.md)(9장).
+- 상태: **초안**. 등록 파일(`experiments/EXP-<시작일>-LIVE02/experiment.yaml`)과 녹화 사전 검사 등록 파일은 아직 만들지 않는다. 이 문서는 결과를 보기 전에 판정 방법을 고정하려는 것이다. 결정: [D-128](../decisions/D-128-live02-preregistration-plan.md)(추천안 채택(자율)), 사용자 확인 항목 Q-056(9장)은 [D-134](../decisions/D-134-live02-criteria-and-start.md)(사용자 결정)로 닫혔다.
 - 담당: strategy-researcher(조합·판정 기준), pm-lead(사용자 확인 판단). 교차 검토: strategy-researcher(실험·통계), architect(8장 코드 후속의 계약).
 - 날짜: 2026-10-20
 - 근거: [ADR-012](../adr/ADR-012-intraday-selection.md) 3.3·3.5·5.2·배치표 5번, [D-121](../decisions/D-121-intraday-selection.md) 6번, [D-122](../decisions/D-122-wide-watchlist-100.md)(100종목 watchlist), [D-124](../decisions/D-124-selection-accounts-live-recording.md), [D-125](../decisions/D-125-selection-edge-precheck.md) 4장(사전 검사 결과를 LIVE02에 쓰는 규칙), [D-126](../decisions/D-126-live-judgement-selection-accounts.md)(선정 계좌 녹화 판정), [D-127](../decisions/D-127-intraday-at-selection.md)(장중 순위 선정 (마)), [D-114](../decisions/D-114-intraday-live-promotion-criteria.md)(L1~L11, 사용자 결정), [6단계 계획](stage-6-plan.md) 4.2, 검토 원문 [PR #199 strategy-researcher](../reviews/pr-199/strategy-researcher.md) R1~R4, [PR #200 strategy-researcher](../reviews/pr-200/strategy-researcher.md) m1~m3.
@@ -222,6 +222,7 @@ D-114 L1~L11의 수치와 계산을 바꾸지 않고 선정 조합 판정 대상
 | F5 | `strategies/kr-bh-baseline/v3.yaml`(slots 100) | strategy-researcher | 5.1. LIVE02 등록 PR에서 |
 | F7 | **막힌 신호가 하루 진입 한도·대기 금액을 쓰지 않게**(3.1). 안: F7-a 전략 문맥(`StrategyContext`, `autotrade-strategy` 모듈)에 그날 신규 진입 허용 종목을 알려 전략이 신호를 내기 전에 거름 F7-b 막힌 신호를 전략에 알리는 콜백으로 한도·대기 금액을 되돌림 F7-c 받아들이고 문서화: **G1을 풀지 않음**(위 G1) F7-d 선정 계좌용 전략 프로필 새 버전에서 `limits.max-entries-per-day`를 크게 둠(`strategies/`만 바뀌어 보호 경로 아님): **G1을 풀지 않음**. 막힌 신호는 주문이 없어도 대기 진입 금액을 잡고(`ManagedStrategy.java` 266행) 그 금액이 그 종목 다음 이벤트까지 남아(139~142행) 쓸 수 있는 현금에서 빠지므로(312~313행), 한도만 늘려도 09:30 직후 후보 밖 신호가 몰리면 후보 종목 진입 수량이 줄거나 0이 된다(architect PR #202 재검토 2 R2-1). F7-a·F7-b는 `autotrade-strategy`(안에 따라 `autotrade-domain`도, 실전 엔진과 같은 코드)를 바꾼다. `[사실]` 두 모듈은 보호 경로다(`scripts/ci/protected-paths.txt` 13·15행). 그래서 F7-a·F7-b는 ADR, architect·risk-ops 검토, 독립 QA, **사용자 머지**를 거치는 실전 관련 PR이다(지침 10·11장). F7-c는 코드 변경이 없지만 L10·P2·P3이 의도와 다른 것을 재게 된다 | sim-engine(architect·risk-ops) | `[사실]` `ManagedStrategy.java` 264~266행이 신호 때 한도를 쓰고 `RunStepper.java` 142~148행이 그 뒤에 버린다. 선정 계좌 전체에 해당 |
 | F6 | `LiveJudgeCriteria` 클래스 설명의 "L5 미달은 탈락" 문장 고침 | sim-engine | `[사실]` 같은 파일 코드는 L5 미달을 판정 불가로 낸다(45~46행 설명, 129~131행 코드). 설명만 틀림(결과 영향 없음) |
+| F8 | 실험실 실시간 세션 동시 운용(9.1 ② 선택지 2, 10장) | sim-engine·risk-ops | 채택 안 함(D-134, 세션 하나 유지) |
 
 ## 9. 사용자 확인 항목(pm-lead 판단, Q-056)
 
