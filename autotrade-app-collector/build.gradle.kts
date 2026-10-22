@@ -32,4 +32,6 @@ dependencies {
 tasks.named<JavaExec>("run") {
     maxHeapSize = "2g"
     workingDir = rootProject.projectDir // 품질 리포트 기본 경로(experiments/_data-quality)는 저장소 루트 기준
+    // Windows PowerShell(chcp 65001)에서 콘솔 한글이 깨지지 않게 표준 출력을 UTF-8로(실험실 bootRun과 같음)
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
 }
