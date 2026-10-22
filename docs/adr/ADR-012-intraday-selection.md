@@ -138,6 +138,8 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 
 ### 4.2 뉴스 스냅샷 설계(1.5차, Q-055 뒤)
 
+> **D-136(2026-10-21)으로 출처와 질의 규칙이 바뀜**: 출처는 네이버 검색이 아니라 한국투자 종합 시황/공시(제목) 조회이고, 종목명 검색 대신 시장 전체 제목 목록을 받아 한국투자가 붙인 종목코드로 센다(`kis-news-title-iscd@1`, 동명이인 오탐 없음). 링크는 응답에 없다. 수집 단계 이름은 `kis-news`, 스냅샷 coverage는 `news_coverage.csv`(훑은 구간). 아래 문단은 설계 당시 기록이다.
+
 - 수집: 수집 명령의 `news` 단계. 장 시간 보호 밖(장 마감 뒤 저녁, 장 전 08:00 전)에 종목명으로 검색해 그날 기사 건수와 기사 메타(제목, 언론사, 게시 시각, 링크)만 남긴다. 본문은 받지 않는다.
 - 동명이인 종목명(예: 지주사 약칭, 일반 명사와 같은 이름)은 오탐이 크다. 1차는 종목명 + "주가" 또는 종목코드 질의 같은 규칙을 버전으로 두고 `news.query-rule`을 선정 프로필이 아닌 스냅샷 manifest에 기록한다(같은 스냅샷 = 같은 규칙).
 - 지표: `news-count`(c 또는 T 08:00 전까지 w거래일 기사 수), `news-surge`(c 하루 기사 수 ÷ 앞 w거래일 평균). 스냅샷 coverage가 기준 구간을 덮지 않으면 계산 실패(`STALE_INPUT`)라 수집 시작 뒤 w거래일이 지나야 쓸 수 있다.
@@ -178,7 +180,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 | 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로). **`INTRADAY_AT` 부분은 D-127로 구현**(V3). **`LAG1`은 D-137로 구현**(V4) | architect·sim-engine | 아님 | 1 또는 7 |
 | 4 | 녹화 실험·실시간 모의 `selections`·`selection-input`, 그날 후보 ∩ `boards`, `NOT_SUBSCRIBED`·`BLACKLISTED`·`SELECTION_MISSING`, 고정 파일, 리플레이 확인. **D-124로 구현** | sim-engine(+ ui-dev 화면 표시) | 아님 | 2, (1의 결과) |
 | 5 | 0번 녹화(넓힌 watchlist)로 녹화 실험(스냅샷 ID 고정)을 돌려 2b를 통과한 선정 × 단타 전략 조합 시험 → 새 실시간 실험 `EXP-<등록일>-LIVE02` 사전 등록(조합 수 m ≤ 4, 대조군 시드 N+1 ≥ 20m, D-114 L5 왕복 30건을 8주에 채울 수 있는지 먼저 계산). 2026-10-12~ 기존 녹화(대형주 3~10종목)는 시장 전체 선정과 거의 겹치지 않아 기능 확인용으로만 쓴다 | strategy-researcher | 아님 | 0, 2b, 4 |
-| 6 | 뉴스 스냅샷(4.2), `news-count`·`news-surge` | data-engineer | 아님 | Q-055 |
+| 6 | 뉴스 스냅샷(4.2), `news-count`·`news-surge`. **수집은 D-136으로 구현**(`kis-news`, 출처 한국투자 종합 시황/공시(제목), Q-055 닫음), 지표는 다음 PR | data-engineer | 수집은 실전 관련 PR로 다룸(증권사 키를 수집기에 둠, 보호 테스트 설명 문구, D-136) | Q-055 |
 | 7 | 장중 순위 2차-a(5.2). **D-127로 구현**(거래대금·수익률·변동폭), 녹화 판정 D-129(거래량 급증·갭은 후속) | sim-engine·strategy-researcher | 아님 | 4 |
 | 8 | 2차-b(5.3) | data-engineer·risk-ops | **예**(게이트웨이) | Q-054, 7 |
 

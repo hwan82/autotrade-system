@@ -33,6 +33,7 @@ import java.util.TreeMap;
  *                                     [--without-turnover]
  * autotrade-collector dart-financials [--from 2016-01-01] [--to yyyy-MM-dd] [--max-calls 10000]
  * autotrade-collector dart-disclosures [--from 2010-01-01] [--to yyyy-MM-dd] [--types B,I] [--max-calls 2000] [--krx-snapshot ID]
+ * autotrade-collector kis-news        [--from yyyy-MM-dd(백필)] [--max-calls 400] [--interval-ms 350]
  * 공통: [--config-dir 경로] [--cache-dir 경로] [--snapshot-dir 경로] [--report-dir experiments/_data-quality]
  *       [--interval-ms 200] [--no-snapshot] [--min-free-gb 20] [--keep-snapshots K] [--experiments-dir experiments] [--allow-during-session]
  * </pre>
@@ -67,6 +68,15 @@ public final class CollectorMain {
     static final String DART_SOURCE = "OpenDART 공시검색·단일회사 주요계정(사업보고서)";
     static final String DART_LICENSE = "OpenDART 이용약관(2020-01-21 시행), 개인 실험용 로컬 저장 (D-050)";
     static final String DART_DISCLOSURE_SOURCE = "OpenDART 공시검색(공시 유형별 목록, 정정 포함)";
+    /** 뉴스 제목 몫 기본 상한 `[가정]`(D-136): 2차 자료 실측 장 하루 약 8,000건 = 약 206쪽의 두 배 남짓. */
+    static final int KIS_NEWS_DEFAULT = 400;
+    /** 뉴스 제목 하루 상한의 최대 `[가정]`(D-136). 한국투자는 하루 호출 상한을 공시하지 않고 초당 20건만 공시한다. */
+    static final int KIS_NEWS_MAX = 2_000;
+    /** 뉴스 호출 기본 간격(초당 약 3건). 실전 앱키와 같은 키여도 초당 한도 20건의 일부만 쓴다(D-136). */
+    static final long KIS_NEWS_INTERVAL_MS = 350;
+    static final String KIS_NEWS_SOURCE = "한국투자 국내주식 종합 시황/공시(제목) FHKST01011800, 질의 규칙 "
+            + KisNewsSnapshotBuilder.QUERY_RULE;
+    static final String KIS_NEWS_LICENSE = "한국투자 KIS Developers 이용약관, 개인 실험용 로컬 저장·재배포 없음 [가정] (D-136, Q-055)";
 
     private CollectorMain() {}
 
@@ -101,12 +111,14 @@ public final class CollectorMain {
             System.err.println(e.getMessage());
             return 1;
         }
-        Redaction redaction = new Redaction(List.of(secrets.krxAuthKey(), secrets.openDartKey()));
+        Redaction redaction = new Redaction(List.of(secrets.krxAuthKey(), secrets.openDartKey(), secrets.kisNewsAppKey(),
+                secrets.kisNewsAppSecret()));
         try {
             return switch (o.command) {
                 case "krx-daily" -> krxDaily(o, secrets, clock, http, sleeper, guard);
                 case "dart-financials" -> dartFinancials(o, secrets, clock, http, sleeper, guard);
                 case "dart-disclosures" -> dartDisclosures(o, secrets, clock, http, sleeper, guard);
+                case "kis-news" -> kisNews(o, secrets, clock, http, sleeper, guard, redaction);
                 default -> throw new IllegalStateException("모르는 명령");
             };
         } catch (RunGuard.Refused e) {
@@ -339,6 +351,64 @@ public final class CollectorMain {
         return r.stopped() == null ? 0 : 3;
     }
 
+    /**
+     * 한국투자 뉴스 제목 수집과 뉴스 스냅샷(D-136, ADR-012 4.2). 지금부터 마지막으로 훑은 시각까지, 이어서 빈틈과 {@code --from}
+     * 백필을 받는다. 호출 상한에 닿아도 그때까지 훑은 구간으로 스냅샷을 만들고 종료 코드 3으로 끝난다.
+     * 장 시간 보호 구간(서울 08:00~16:00, 미국 장) 밖에서만 돈다. 아침 실행은 07:00~08:00 사이(runbook collector.md 3.9).
+     */
+    static int kisNews(Options o, CollectorSecrets secrets, Clock clock, HttpGetter http, ApiCaller.Sleeper sleeper,
+            RunGuard guard, Redaction redaction) throws IOException {
+        CallBudget budget = new CallBudget(o.budgetDir(), "kis-news", o.maxCalls(KIS_NEWS_DEFAULT), clock);
+        long interval = o.intervalGiven ? o.intervalMs : KIS_NEWS_INTERVAL_MS;
+        KisNewsClient client = new KisNewsClient(new ApiCaller(http, budget, redaction, sleeper, interval, guard::checkSession),
+                o.kisBase, secrets.kisNewsAppKey(), secrets.kisNewsAppSecret(), redaction);
+        KisNewsCollector collector = new KisNewsCollector(client, o.cacheDir, clock);
+        KisNewsCollector.Result r = collector.collect(o.from);
+        System.out.println("한국투자 뉴스 제목: 쪽 " + r.pages() + ", 새 제목 " + r.fresh() + ", 접근토큰 발급 " + client.tokensIssued()
+                + "번, 오늘 누적 호출 " + budget.usedToday());
+        for (KisNewsCollector.Walk w : r.walks()) {
+            if (!w.complete()) {
+                System.out.println(w.kind() + " 걸음이 끝까지 가지 못했습니다: " + (w.reason() == null ? "호출 상한" : w.reason())
+                        + ". 다음 실행이 빈틈을 메웁니다");
+            }
+        }
+        if (r.stopped() != null) {
+            System.out.println(r.stopped() + ". 받은 것까지로 스냅샷을 만들고 다음 실행이 이어 받습니다");
+        }
+        if (o.noSnapshot || r.coverage().isEmpty()) {
+            if (r.coverage().isEmpty()) {
+                System.out.println("훑은 구간이 없어 스냅샷을 만들지 않습니다");
+            }
+            return r.stopped() == null ? 0 : 3;
+        }
+        guard.checkSession();
+        guard.checkDisk(List.of(o.snapshotDir));
+        String created = clock.instant().toString();
+        Path root = o.snapshotDir.resolve("kis-news");
+        Path dir;
+        KisNewsSnapshotBuilder.Stats stats;
+        try (SnapshotWriter w = new SnapshotWriter(root, "kis-news")) {
+            SnapshotWriter.Sink rows = w.open(KisNewsSnapshotBuilder.FILE, KisNewsSnapshotBuilder.HEADER);
+            SnapshotWriter.Sink cov = w.open(KisNewsSnapshotBuilder.COVERAGE, KisNewsSnapshotBuilder.COVERAGE_HEADER);
+            for (List<String> row : KisNewsSnapshotBuilder.coverageRows(r.coverage())) {
+                cov.write(row);
+            }
+            stats = KisNewsSnapshotBuilder.build(o.cacheDir, r.coverage(), rows::write);
+            KisNewsCollector.Interval first = r.coverage().getFirst();
+            KisNewsCollector.Interval last = r.coverage().getLast();
+            dir = w.commit("kis-news", last.to().toLocalDate().toString(),
+                    List.of(KisNewsSnapshotBuilder.FILE, KisNewsSnapshotBuilder.COVERAGE), created, VERSION,
+                    List.of(new SnapshotManifest.Source(KIS_NEWS_SOURCE, KisNewsClient.DEFAULT_BASE, KIS_NEWS_LICENSE, created)),
+                    new SnapshotManifest.Coverage(first.from().toLocalDate().toString(), null, null, created));
+        }
+        Path reportFile = CollectorReports.writeNews(o.reportDir, SnapshotFiles.readManifest(dir), stats, r,
+                client.tokensIssued(), budget.usedToday());
+        System.out.println("스냅샷: " + dir + "\n품질 리포트: " + reportFile + " (종목코드 붙은 제목 " + stats.rows() + "건, 안 붙은 제목 "
+                + stats.untagged() + "건)");
+        prune(o, root, "kis-news", dir);
+        return r.stopped() == null ? 0 : 3;
+    }
+
     /** 이름 대조에 쓸 KRX 일봉 스냅샷: {@code --krx-snapshot}, 없으면 가장 늦은 날짜의 것(같은 날짜면 manifest 생성 시각이 늦은 것). */
     static Optional<Path> krxSnapshotForNames(Options o) throws IOException {
         Path root = o.snapshotDir.resolve("krx-daily");
@@ -453,13 +523,14 @@ public final class CollectorMain {
     }
 
     static final String USAGE = """
-            사용법: autotrade-collector <krx-daily|dart-financials|dart-disclosures> [옵션]
+            사용법: autotrade-collector <krx-daily|dart-financials|dart-disclosures|kis-news> [옵션]
               --from yyyy-MM-dd   --to yyyy-MM-dd   --boards KOSPI,KOSDAQ,KONEX   --max-calls N   --interval-ms N
               --types B,I(dart-disclosures 공시 유형)   --krx-snapshot krx-daily-...(dart-disclosures 이름 대조, 기본 최신)
               --config-dir 경로   --cache-dir 경로   --snapshot-dir 경로   --report-dir 경로   --no-snapshot
               --without-turnover(krx-daily: 실제 거래대금 파일 없이 옛 형식·옛 ID로)
               --min-free-gb N(기본 20)   --keep-snapshots K(주면 최근 K개만 남김)   --experiments-dir experiments   --allow-during-session(실전 엔진을 끈 날만)
-              --krx-base-url https://...  --dart-base-url https://...""";
+              --from(kis-news: 그 날 00:00까지 거슬러 받는 백필)
+              --krx-base-url https://...  --dart-base-url https://...  --kis-base-url https://...""";
 
     /** 명령줄 옵션. 설정 파일을 쓰지 않는다(ADR-008 2.2). */
     static final class Options {
@@ -469,6 +540,7 @@ public final class CollectorMain {
         Set<KrxBoard> boards = EnumSet.allOf(KrxBoard.class);
         Integer maxCalls;
         long intervalMs = 200;
+        boolean intervalGiven;
         Path configDir;
         Path cacheDir;
         Path snapshotDir;
@@ -483,6 +555,7 @@ public final class CollectorMain {
         String krxSnapshot;
         String krxBase = KrxOpenApiClient.DEFAULT_BASE;
         String dartBase = OpenDartClient.BASE;
+        String kisBase = KisNewsClient.DEFAULT_BASE;
 
         int maxCalls(int defaultCap) {
             return maxCalls == null ? defaultCap : maxCalls;
@@ -502,8 +575,8 @@ public final class CollectorMain {
         }
 
         static Options parse(String[] args) {
-            if (args.length == 0 || !Set.of("krx-daily", "dart-financials", "dart-disclosures").contains(args[0])) {
-                throw new IllegalArgumentException("명령을 krx-daily, dart-financials, dart-disclosures 중 하나로 주세요");
+            if (args.length == 0 || !Set.of("krx-daily", "dart-financials", "dart-disclosures", "kis-news").contains(args[0])) {
+                throw new IllegalArgumentException("명령을 krx-daily, dart-financials, dart-disclosures, kis-news 중 하나로 주세요");
             }
             Options o = new Options();
             o.command = args[0];
@@ -539,7 +612,10 @@ public final class CollectorMain {
                             o.boards = b;
                         }
                         case "--max-calls" -> o.maxCalls = Integer.parseInt(v);
-                        case "--interval-ms" -> o.intervalMs = Long.parseLong(v);
+                        case "--interval-ms" -> {
+                            o.intervalMs = Long.parseLong(v);
+                            o.intervalGiven = true;
+                        }
                         case "--config-dir" -> o.configDir = Path.of(v);
                         case "--cache-dir" -> o.cacheDir = Path.of(v);
                         case "--snapshot-dir" -> o.snapshotDir = Path.of(v);
@@ -547,6 +623,7 @@ public final class CollectorMain {
                         case "--experiments-dir" -> o.experimentsDir = Path.of(v);
                         case "--krx-base-url" -> o.krxBase = https(v);
                         case "--dart-base-url" -> o.dartBase = https(v);
+                        case "--kis-base-url" -> o.kisBase = https(v);
                         case "--min-free-gb" -> o.minFreeGb = positive(Long.parseLong(v));
                         case "--keep-snapshots" -> o.keepSnapshots = (int) positive(Integer.parseInt(v));
                         case "--types" -> {
@@ -572,8 +649,15 @@ public final class CollectorMain {
             if (!o.command.equals("dart-disclosures") && (kv.containsKey("--types") || kv.containsKey("--krx-snapshot"))) {
                 throw new IllegalArgumentException("--types·--krx-snapshot은 dart-disclosures에만 씁니다");
             }
+            if (o.command.equals("kis-news") && kv.containsKey("--to")) {
+                throw new IllegalArgumentException("kis-news는 --to를 받지 않습니다(늘 지금부터 거슬러 받음)");
+            }
+            if (o.command.equals("kis-news") && o.intervalGiven && o.intervalMs < 100) {
+                throw new IllegalArgumentException("kis-news --interval-ms는 100 이상이어야 합니다(한국투자 초당 20건 한도의 절반 이하)");
+            }
             int limit = switch (o.command) {
                 case "krx-daily" -> KRX_TERMS_DAILY_LIMIT;
+                case "kis-news" -> KIS_NEWS_MAX;
                 case "dart-disclosures" -> DART_DISCLOSURES_MAX; // 재무 기본 몫을 남긴다(D-123)
                 default -> DART_DAILY_LIMIT;
             };
