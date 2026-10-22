@@ -111,17 +111,78 @@ class KisNewsClientTest {
     @Test
     void 행_해석_시각_여섯_자리_종목코드_중복과_빈_값_필수_칸() throws Exception {
         var json = new ObjectMapper().readTree("""
-                {"cntt_usiq_srno":"9","data_dt":"20261021","data_tm":"9301","hts_pbnt_titl_cntt":" 제목 ",
+                {"cntt_usiq_srno":"9","data_dt":"20261021","data_tm":"093010","hts_pbnt_titl_cntt":" 제목 ",
                  "news_ofer_entp_code":"2","dorg":"통신","news_lrdv_code":"01",
                  "iscd1":"005930","iscd2":"","iscd3":"005930","iscd4":"000660","iscd7":"035420"}""");
         KisNewsClient.Headline h = KisNewsClient.headline(json);
-        assertThat(h.time()).isEqualTo("930100");
+        assertThat(h.time()).isEqualTo("093010");
         assertThat(h.codes()).containsExactly("005930", "000660", "035420");
         assertThat(h.title()).isEqualTo("제목");
         assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"2026102\","
                 + "\"data_tm\":\"0930\",\"hts_pbnt_titl_cntt\":\"t\"}"))).isNull();
         assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261021\","
                 + "\"data_tm\":\"0930\",\"hts_pbnt_titl_cntt\":\"\"}"))).isNull();
+    }
+
+    @Test
+    void 여섯_자리가_아니거나_없는_시각_날짜는_채우지_않고_거르고_센다() throws Exception {
+        // 5자리 "93010"을 채우면 "930100"(93시)이 되어 실행이 매번 같은 곳에서 멈춘다(PR #222 QA Q2)
+        for (String bad : List.of("93010", "9301", "930", "250000", "096100", "093060", "0930100", "09301a")) {
+            assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261021\","
+                    + "\"data_tm\":\"" + bad + "\",\"hts_pbnt_titl_cntt\":\"t\"}"))).as(bad).isNull();
+        }
+        assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261332\","
+                + "\"data_tm\":\"093010\",\"hts_pbnt_titl_cntt\":\"t\"}"))).isNull();
+        assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261021\","
+                + "\"data_tm\":\"000000\",\"hts_pbnt_titl_cntt\":\"t\"}"))).isNotNull();
+
+        String body = "{\"rt_cd\":\"0\",\"output\":[{\"cntt_usiq_srno\":\"1\",\"data_dt\":\"20261021\",\"data_tm\":\"93010\","
+                + "\"hts_pbnt_titl_cntt\":\"t\"},{\"cntt_usiq_srno\":\"2\",\"data_dt\":\"20261021\",\"data_tm\":\"093010\","
+                + "\"hts_pbnt_titl_cntt\":\"t\"}]}";
+        KisNewsClient c = client(new FakeHttp((u, n) -> FakeHttp.ok(body)), redaction());
+        assertThat(c.page("20261021", "")).extracting(KisNewsClient.Headline::serial).containsExactly("2");
+        assertThat(c.badRows()).isEqualTo(1);
+    }
+
+    @Test
+    void 초당_한도_초과가_HTTP_500으로_와도_다시_부르지_않고_결과_코드로_멈춘다() {
+        // PR #222 QA Q1: 상태보다 본문 결과 코드를 먼저 본다(D-054 4번 자동 재시도 안 함)
+        FakeHttp http = new FakeHttp((u, n) -> new HttpGetter.Response(500,
+                "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00201\",\"msg1\":\"초당 거래건수를 초과하였습니다.\"}"));
+        assertThatThrownBy(() -> client(http, redaction()).page("20261021", ""))
+                .isInstanceOf(KisNewsClient.KisRejected.class).hasMessageContaining("EGW00201").hasMessageContaining("--interval-ms");
+        assertThat(http.calls).hasSize(1);
+    }
+
+    @Test
+    void 토큰_만료가_HTTP_500으로_와도_한_번만_다시_받는다() throws Exception {
+        String expired = "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00123\",\"msg1\":\"기간이 만료된 token 입니다.\"}";
+        FakeHttp http = new FakeHttp((u, n) -> n == 1 ? new HttpGetter.Response(500, expired)
+                : FakeHttp.ok(KisNewsFixtures.body(List.of(row("20261021", "065900", "S1", "005930")))));
+        KisNewsClient c = client(http, redaction());
+        assertThat(c.page("20261021", "")).hasSize(1);
+        assertThat(c.tokensIssued()).isEqualTo(2);
+        assertThat(http.calls).hasSize(2);
+    }
+
+    @Test
+    void 결과_코드_없는_5xx는_전처럼_두_번_다시_부르고_성공_코드인데_200이_아니면_믿지_않는다() {
+        FakeHttp plain = new FakeHttp((u, n) -> new HttpGetter.Response(503, "<html>busy</html>"));
+        assertThatThrownBy(() -> client(plain, redaction()).page("20261021", "")).hasMessageContaining("HTTP 503");
+        assertThat(plain.calls).hasSize(1 + ApiCaller.RETRIES);
+        FakeHttp odd = new FakeHttp((u, n) -> new HttpGetter.Response(500, KisNewsFixtures.body(List.of())));
+        assertThatThrownBy(() -> client(odd, redaction()).page("20261021", ""))
+                .isInstanceOf(KisNewsClient.KisRejected.class).hasMessageContaining("HTTP 500");
+        assertThat(odd.calls).hasSize(1);
+    }
+
+    @Test
+    void 토큰_응답에_access_token이_없으면_본문을_메시지에_싣지_않는다() {
+        FakeHttp http = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        http.postAnswer = n -> new HttpGetter.Response(200, "{\"error_description\":\"MARKERBODYTEXT\"}");
+        assertThatThrownBy(() -> client(http, redaction()).page("20261021", ""))
+                .hasMessageContaining("access_token").hasMessageNotContaining("MARKERBODYTEXT");
+        assertThat(http.calls).isEmpty();
     }
 
     @Test

@@ -57,4 +57,40 @@ class ApiCallerTest {
         assertThatThrownBy(() -> caller(down, 100).get(URL, Map.of()))
                 .isInstanceOf(IOException.class).hasMessageNotContaining("TESTKEY");
     }
+
+    @Test
+    void 토큰_발급_POST도_보내기_전에_장_시간을_확인한다() {
+        // PR #222 QA Q3(M1): 장 시간 보호 구간에 들어섰으면 POST를 보내지 않는다
+        FakeHttp http = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        CallBudget budget = new CallBudget(dir, "t", 10, Clock.fixed(Instant.parse("2026-10-10T01:00:00Z"), ZoneOffset.UTC));
+        ApiCaller c = new ApiCaller(http, budget, new Redaction(List.of()), ms -> {}, 0, () -> {
+            throw new IllegalStateException("장 시간 보호 구간");
+        });
+        assertThatThrownBy(() -> c.post(URI.create("https://kis.test/oauth2/tokenP"), Map.of(), "{}"))
+                .hasMessageContaining("장 시간");
+        assertThat(http.posts).isEmpty();
+        assertThatThrownBy(() -> c.get(URL, Map.of())).hasMessageContaining("장 시간");
+        assertThat(http.calls).isEmpty();
+    }
+
+    @Test
+    void 증권사가_결과_코드로_답한_5xx는_다시_부르지_않고_그대로_돌려준다() throws IOException {
+        FakeHttp http = new FakeHttp((u, n) -> new HttpGetter.Response(500, "ANSWERED"));
+        HttpGetter.Response r = caller(http, 10).getAnswered(URL, Map.of(), x -> x.body().equals("ANSWERED"));
+        assertThat(r.status()).isEqualTo(500);
+        assertThat(http.calls).hasSize(1);
+        FakeHttp other = new FakeHttp((u, n) -> new HttpGetter.Response(500, "busy"));
+        assertThatThrownBy(() -> caller(other, 10).getAnswered(URL, Map.of(), x -> x.body().equals("ANSWERED")))
+                .hasMessageContaining("HTTP 500");
+        assertThat(other.calls).hasSize(1 + ApiCaller.RETRIES);
+    }
+
+    @Test
+    void 수집기가_읽은_키는_모두_가린다() {
+        // PR #222 QA Q3(M10): 한국투자 앱키·시크릿도 가림 목록에 있다
+        CollectorSecrets s = new CollectorSecrets(Secret.of("KRXKEYAAAAAAAAAA"), Secret.of("DARTKEYBBBBBBBB"),
+                Secret.of("KISKEYCCCCCCCCCC"), Secret.of("KISSECRETDDDDDDDD"));
+        assertThat(CollectorMain.redaction(s).clean("a KRXKEYAAAAAAAAAA b DARTKEYBBBBBBBB c KISKEYCCCCCCCCCC d KISSECRETDDDDDDDD"))
+                .isEqualTo("a **** b **** c **** d ****");
+    }
 }

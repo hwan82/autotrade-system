@@ -22,13 +22,14 @@ final class KisNewsFixtures {
         return new Row(date, time, serial, codes);
     }
 
-    /** 커서가 없는 날(빈 시각)은 그날 끝까지, 행이 없으면 빈 쪽. {@code floor} 앞 행은 주지 않는다(한국투자 보관 한도 흉내). */
+    /** 커서가 없는 날(빈 시각·000000)은 그날 끝까지, 행이 없으면 빈 쪽. {@code floor} 앞 행은 주지 않는다(한국투자 보관 한도 흉내). */
     static BiFunction<URI, Integer, HttpGetter.Response> server(List<Row> rows, int pageSize) {
         return (u, n) -> {
             assertThat(u.getPath()).isEqualTo(KisNewsClient.NEWS_PATH);
             String date = param(u, "FID_INPUT_DATE_1");
             String time = param(u, "FID_INPUT_HOUR_1");
-            String cursor = date + (time.isEmpty() ? "999999" : time);
+            // 시각 000000은 "시각 없음"(= 그날 끝까지)으로 읽힌다 `[가정]` 2차 자료(D-136)
+            String cursor = date + (time.isEmpty() || time.equals("000000") ? "999999" : time);
             List<Row> hit = new ArrayList<>();
             for (Row r : rows) {
                 if ((r.date() + r.time()).compareTo(cursor) <= 0) {

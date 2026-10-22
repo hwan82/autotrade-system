@@ -60,10 +60,12 @@ final class KisNewsCollector {
 
     /**
      * 걸음 하나의 결과. {@code complete}가 거짓이면 {@code reason}에 까닭. {@code crowdedSeconds}는 한 쪽이 모두 같은 초의 행이라
-     * 그 초의 나머지 행을 받았는지 알 수 없이 1초 건너뛴 횟수(품질 리포트에 적는다, 0이 정상).
+     * 그 초의 나머지 행을 받았는지 알 수 없이 1초 건너뛴 횟수. {@code midnightCuts}는 쪽 끝이 00:00:00 행이었는데 커서 000000을
+     * 보낼 수 없어(시각 없음 = 지금으로 읽힘 `[가정]`) 그 초의 나머지 행을 확인하지 못하고 전날로 넘어간 횟수(PR #222 QA Q4). 둘 다
+     * 품질 리포트에 적고 0이 정상이다.
      */
     record Walk(String kind, LocalDateTime top, LocalDateTime reached, boolean complete, String reason, int pages,
-            int fresh, int crowdedSeconds, String stopped) {}
+            int fresh, int crowdedSeconds, int midnightCuts, String stopped) {}
 
     /** 실행 결과. {@code stopped}는 호출 상한으로 멈췄을 때의 메시지(아니면 null). */
     record Result(List<Walk> walks, List<Interval> coverage, LocalDateTime floor, String stopped) {
@@ -155,14 +157,18 @@ final class KisNewsCollector {
      */
     private Walk walk(String kind, LocalDateTime start, LocalDateTime top, LocalDateTime stopAt, Coverage cov)
             throws IOException {
-        String date = start == null ? YMD.format(top) : YMD.format(start);
-        String time = start == null ? "" : HMS.format(start);
+        // 시작 커서가 00:00:00이면 000000을 보낼 수 없다(시각 없음 = 지금으로 읽힘 `[가정]`): 그 시각 행은 이미 훑은 구간 안이므로
+        // 1초 앞(전날 23:59:59)부터 받는다
+        LocalDateTime cursor = start != null && start.toLocalTime().equals(LocalTime.MIDNIGHT) ? start.minusSeconds(1) : start;
+        String date = cursor == null ? YMD.format(top) : YMD.format(cursor);
+        String time = cursor == null ? "" : HMS.format(cursor);
         LocalDateTime oldest = null;
         int pages = 0;
         int fresh = 0;
         int emptyRun = 0;
         int emptyDays = 0;
         int crowded = 0;
+        int midnightCuts = 0;
         boolean complete = false;
         String reason = null;
         String stopped = null;
@@ -201,8 +207,8 @@ final class KisNewsCollector {
                 }
                 fresh += added;
                 oldest = oldest == null || pageOldest.isBefore(oldest) ? pageOldest : oldest;
-                if (!pageOldest.isAfter(stopAt)) {
-                    complete = true;
+                if (pageOldest.isBefore(stopAt)) {
+                    complete = true; // 멈출 시각보다 옛 행까지 왔다: 멈출 시각과 같은 초의 행도 이 쪽까지 다 나왔다
                     break;
                 }
                 LocalDateTime next;
@@ -210,10 +216,6 @@ final class KisNewsCollector {
                     if (++emptyRun >= MAX_EMPTY_PAGES) {
                         reason = "새 제목 없는 쪽이 " + MAX_EMPTY_PAGES + "번 이어짐(커서가 움직이지 않음)";
                         break;
-                    }
-                    LocalDateTime first = at(page.getFirst());
-                    if (page.size() > 1 && page.stream().allMatch(h -> at(h).equals(first))) {
-                        crowded++;
                     }
                     next = pageOldest.minusSeconds(1);
                 } else {
@@ -225,8 +227,19 @@ final class KisNewsCollector {
                 if (!next.isBefore(current)) {
                     next = current.minusSeconds(1);
                 }
+                LocalDateTime first = at(page.getFirst());
+                if (page.size() > 1 && next.isBefore(first) && page.stream().allMatch(h -> at(h).equals(first))) {
+                    crowded++; // 한 쪽이 모두 같은 초인데 커서가 그 초를 넘어간다: 그 초의 나머지는 받았는지 알 수 없다
+                }
                 if (next.toLocalTime().equals(LocalTime.MIDNIGHT)) {
                     next = next.minusSeconds(1); // 시각 000000은 "시각 없음"(= 그날 지금)으로 읽힌다 `[가정]` 2차 자료
+                    if (pageOldest.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+                        midnightCuts++; // 00:00:00 행이 이 쪽 뒤에 더 있어도 받을 커서가 없다: 셈해서 알린다
+                    }
+                }
+                if (next.isBefore(stopAt)) {
+                    complete = true; // 멈출 시각과 같은 초의 행을 다 받았다(다음 커서가 그보다 옛 시각)
+                    break;
                 }
                 date = YMD.format(next);
                 time = HMS.format(next);
@@ -241,7 +254,7 @@ final class KisNewsCollector {
                 add(cov, new Interval(oldest.plusSeconds(1), top));
             }
         }
-        return new Walk(kind, top, complete ? stopAt : oldest, complete, reason, pages, fresh, crowded, stopped);
+        return new Walk(kind, top, complete ? stopAt : oldest, complete, reason, pages, fresh, crowded, midnightCuts, stopped);
     }
 
     static LocalDateTime at(KisNewsClient.Headline h) {

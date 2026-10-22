@@ -7,6 +7,10 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,6 +73,7 @@ public final class KisNewsClient {
     private final Redaction redaction;
     private Secret token = Secret.empty();
     private int tokensIssued;
+    private int badRows;
 
     public KisNewsClient(ApiCaller caller, String base, Secret appKey, Secret appSecret, Redaction redaction) {
         if (!appKey.isPresent() || !appSecret.isPresent()) {
@@ -123,9 +128,16 @@ public final class KisNewsClient {
             Headline h = headline(row);
             if (h != null) {
                 out.add(h);
+            } else {
+                badRows++;
             }
         }
         return out;
+    }
+
+    /** 이번 실행에서 필수 칸이 빠졌거나 날짜·시각을 읽을 수 없어 거른 행 수(품질 리포트에 남긴다, PR #222 QA Q2). */
+    public int badRows() {
+        return badRows;
     }
 
     /** 이번 실행에서 받은 접근토큰 수(발급마다 사용자에게 알림톡이 간다). */
@@ -133,16 +145,25 @@ public final class KisNewsClient {
         return tokensIssued;
     }
 
-    /** 필수 칸(일련번호, 8자리 날짜, 숫자 시각, 제목)이 빠진 행은 null(세지 않음). */
+    /**
+     * 필수 칸(일련번호, 날짜 {@code YYYYMMDD}, 시각 {@code HHMMSS}, 제목)이 빠졌거나 날짜·시각이 실제로 있는 값이 아니면 null(거름).
+     * 자릿수가 모자란 시각은 채우지 않는다: 앞 0이 빠진 것인지 뒤가 잘린 것인지 알 수 없고, 잘못 채우면 없는 시각이 되어 실행이 매번
+     * 같은 곳에서 멈춘다(PR #222 QA Q2). 거른 행 수는 {@link #badRows()}로 리포트에 남는다.
+     */
     static Headline headline(JsonNode row) {
         String serial = row.path("cntt_usiq_srno").asText("").strip();
         String date = row.path("data_dt").asText("").strip();
-        String rawTime = row.path("data_tm").asText("").strip();
+        String time = row.path("data_tm").asText("").strip();
         String title = row.path("hts_pbnt_titl_cntt").asText("").strip();
-        if (serial.isEmpty() || !date.matches("\\d{8}") || !rawTime.matches("\\d{1,6}") || title.isEmpty()) {
+        if (serial.isEmpty() || !date.matches("\\d{8}") || !time.matches("\\d{6}") || title.isEmpty()) {
             return null;
         }
-        String time = (rawTime + "000000").substring(0, 6);
+        try {
+            LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE);
+            LocalTime.parse(time, DateTimeFormatter.ofPattern("HHmmss"));
+        } catch (DateTimeParseException e) {
+            return null;
+        }
         List<String> codes = new ArrayList<>();
         for (int i = 1; i <= MAX_TAGS; i++) {
             String c = row.path("iscd" + i).asText("").strip();
@@ -162,7 +183,22 @@ public final class KisNewsClient {
         headers.put("appsecret", appSecret.reveal());
         headers.put("tr_id", TR_ID);
         headers.put("custtype", "P");
-        return read(caller.get(uri, headers));
+        HttpGetter.Response r = caller.getAnswered(uri, headers, KisNewsClient::answered);
+        JsonNode body = read(r.body());
+        if (r.status() != 200 && "0".equals(body.path("rt_cd").asText(""))) {
+            throw new KisRejected("(HTTP " + r.status() + ")"); // 성공 코드인데 상태가 200이 아니면 믿지 않는다
+        }
+        return body;
+    }
+
+    /** 본문에 결과 코드({@code rt_cd})가 있는 응답이면 한국투자가 답한 것으로 보고 재시도하지 않는다. 읽을 수 없으면 거짓. */
+    static boolean answered(HttpGetter.Response r) {
+        try {
+            JsonNode n = JSON.readTree(r.body() == null ? "" : r.body());
+            return n != null && n.isObject() && !n.path("rt_cd").asText("").isBlank();
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
     }
 
     private Secret token() throws IOException {

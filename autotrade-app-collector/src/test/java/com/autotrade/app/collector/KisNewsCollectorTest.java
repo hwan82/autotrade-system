@@ -128,8 +128,11 @@ class KisNewsCollectorTest {
         assertThat(backfill.kind()).isEqualTo("백필");
         assertThat(backfill.complete()).isFalse();
         assertThat(backfill.reason()).contains("빈 쪽");
-        // 00:00:00 커서는 전날 23:59:59로(1번), 빈 쪽이면 전날로 넘어가기를 6번, 7번째 빈 쪽에서 끝으로 본다
-        assertThat(http.calls.stream().filter(u -> "235959".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")))).hasSize(7);
+        // 백필 시작(10-21 00:00:00)은 000000을 보낼 수 없어 10-20 23:59:59부터(1번), 10-20 00:00:00 행에서 전날 23:59:59로(1번),
+        // 빈 쪽이면 전날로 넘어가기를 6번 더 하고 7번째 빈 쪽에서 끝으로 본다
+        assertThat(http.calls.stream().filter(u -> "235959".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")))).hasSize(8);
+        assertThat(http.calls).noneMatch(u -> "000000".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
+        assertThat(backfill.midnightCuts()).isEqualTo(1); // 10-20 00:00:00 행으로 쪽이 끝나 그 초의 나머지는 확인 못 함
 
         FakeHttp again = new FakeHttp(KisNewsFixtures.server(rows(), 10));
         KisNewsCollector.Result r2 = collector(again, seoul("2026-10-21T07:30:00"), 200).collect(LocalDate.of(2026, 10, 1));
@@ -184,5 +187,93 @@ class KisNewsCollectorTest {
     void 실행_시각은_서울_기준이다() {
         assertThat(LocalDateTime.ofInstant(Instant.now(seoul("2026-10-21T07:00:00")), CallBudget.SEOUL))
                 .isEqualTo(LocalDateTime.parse("2026-10-21T07:00:00"));
+    }
+
+    @Test
+    void 실행_시각보다_뒤로_찍힌_행은_쌓지_않는다() throws IOException {
+        // PR #222 QA Q3(M5): 시계가 어긋나 지금보다 뒤 시각 행이 오면 그 구간은 아직 훑지 않은 것이라 쌓지 않는다
+        List<KisNewsFixtures.Row> rows = new ArrayList<>(rows());
+        rows.add(row("20261021", "073000", "FUTURE", "005930"));
+        KisNewsCollector.Result r = collector(new FakeHttp(KisNewsFixtures.server(rows, 4)), seoul("2026-10-21T07:00:00"), 100)
+                .collect(null);
+        assertThat(r.coverage().getLast().to()).isEqualTo(LocalDateTime.parse("2026-10-21T07:00:00"));
+        assertThat(KisNewsCollector.readDay(cache.resolve("kis-news"), LocalDate.of(2026, 10, 21)))
+                .extracting(KisNewsClient.Headline::serial).doesNotContain("FUTURE");
+    }
+
+    @Test
+    void 늦게_실린_기사는_마지막_구간_끝_10분_안이면_다음_실행이_받는다() throws IOException {
+        // PR #222 QA Q3(M6): 앞 실행(07:00) 뒤에 06:55·06:58 기사가 실렸다. 첫 쪽이 06:58에서 끝나도 06:50까지 더 거슬러 받는다
+        List<KisNewsFixtures.Row> rows = new ArrayList<>(rows());
+        collector(new FakeHttp(KisNewsFixtures.server(rows, 4)), seoul("2026-10-21T07:00:00"), 100).collect(null);
+        rows.add(row("20261021", "170000", "D1", "005930"));
+        rows.add(row("20261021", "160000", "D2", "005930"));
+        rows.add(row("20261021", "150000", "D3", "005930"));
+        rows.add(row("20261021", "065800", "LATE2", "005930"));
+        rows.add(row("20261021", "065500", "LATE", "005930"));
+        collector(new FakeHttp(KisNewsFixtures.server(rows, 4)), seoul("2026-10-21T18:00:00"), 100).collect(null);
+        assertThat(KisNewsCollector.readDay(cache.resolve("kis-news"), LocalDate.of(2026, 10, 21)))
+                .extracting(KisNewsClient.Headline::serial).contains("LATE", "LATE2", "D1");
+    }
+
+    @Test
+    void 자정_행이_한_쪽보다_많으면_확인_못_한_것을_세어_알린다() throws IOException {
+        // PR #222 QA Q4: 00:00:00 행 10건, 한 쪽 4건. 커서 000000은 보낼 수 없어 나머지를 받을 길이 없다 → 조용히 넘기지 않고 센다
+        List<KisNewsFixtures.Row> rows = new ArrayList<>();
+        rows.add(row("20261021", "010000", "ONE", "005930"));
+        for (int i = 0; i < 10; i++) {
+            rows.add(row("20261021", "000000", "M" + i, "005930"));
+        }
+        rows.add(row("20261020", "230000", "Y", "005930"));
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(rows, 4));
+        KisNewsCollector.Result r = collector(http, seoul("2026-10-21T07:00:00"), 100).collect(null);
+        KisNewsCollector.Walk w = r.walks().getFirst();
+        assertThat(w.midnightCuts()).isEqualTo(1);
+        assertThat(w.complete()).isTrue();
+        assertThat(http.calls).noneMatch(u -> "000000".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
+    }
+
+    @Test
+    void 멈출_시각과_같은_초에서_쪽이_끝나면_그_초를_한_번_더_받는다() throws IOException {
+        // PR #222 QA Q4: 쪽의 가장 옛 행이 멈출 시각과 같은 초면 그 초의 나머지가 다음 쪽에 있을 수 있어 끝으로 보지 않는다
+        List<KisNewsFixtures.Row> rows = new ArrayList<>(rows());
+        collector(new FakeHttp(KisNewsFixtures.server(rows, 4)), seoul("2026-10-21T07:00:00"), 100).collect(null);
+        // 다음 실행의 멈출 시각 = 07:00 − 10분 = 06:50:00. 그 초에 행 3건(앞 실행 뒤에 실림), 첫 쪽은 그중 1건에서 끝난다
+        for (int i = 0; i < 3; i++) {
+            rows.add(row("20261021", "065000", "S" + i, "005930"));
+        }
+        rows.add(row("20261021", "080000", "N1", "005930"));
+        rows.add(row("20261021", "075000", "N2", "005930"));
+        rows.add(row("20261021", "074000", "N3", "005930"));
+        KisNewsCollector.Result r = collector(new FakeHttp(KisNewsFixtures.server(rows, 4)), seoul("2026-10-21T08:00:00"), 100)
+                .collect(null);
+        assertThat(r.walks().getFirst().complete()).isTrue();
+        assertThat(r.walks().getFirst().crowdedSeconds()).isZero();
+        assertThat(KisNewsCollector.readDay(cache.resolve("kis-news"), LocalDate.of(2026, 10, 21)))
+                .extracting(KisNewsClient.Headline::serial).contains("S0", "S1", "S2");
+    }
+
+    @Test
+    void 새_행이_있어도_한_쪽이_모두_같은_초면_세어_알린다() throws IOException {
+        // 한 초에 6건, 한 쪽 4건: 둘째 쪽도 모두 같은 초라 커서가 그 초를 넘어가면 나머지는 못 받는다(D-136 위험 4)
+        List<KisNewsFixtures.Row> rows = new ArrayList<>();
+        rows.add(row("20261021", "064000", "TOP", "005930"));
+        for (int i = 0; i < 6; i++) {
+            rows.add(row("20261021", "063000", "S" + i, "005930"));
+        }
+        rows.add(row("20261020", "230000", "Y", "005930"));
+        KisNewsCollector.Result r = collector(new FakeHttp(KisNewsFixtures.server(rows, 4)), seoul("2026-10-21T07:00:00"), 100)
+                .collect(null);
+        assertThat(r.walks().getFirst().crowdedSeconds()).isEqualTo(1);
+    }
+
+    @Test
+    void 스냅샷은_구간_양_끝_시각의_행을_담는다() throws IOException {
+        // PR #222 QA Q3(M9): 구간은 양 끝 포함. 끝 시각 06:30·시작 시각 00:30 행이 들어간다
+        collector(new FakeHttp(KisNewsFixtures.server(rows(), 4)), seoul("2026-10-21T07:00:00"), 100).collect(null);
+        List<List<String>> out = new ArrayList<>();
+        KisNewsSnapshotBuilder.build(cache, List.of(new KisNewsCollector.Interval(LocalDateTime.parse("2026-10-21T00:30:00"),
+                LocalDateTime.parse("2026-10-21T06:30:00"))), out::add);
+        assertThat(out).extracting(row -> row.get(1)).contains("C30", "C390").doesNotContain("A23", "B23");
     }
 }

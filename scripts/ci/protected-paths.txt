@@ -15,11 +15,13 @@ autotrade-marketdata/*
 autotrade-strategy/*
 autotrade-notification-jar/*
 autotrade-monitor-agent-jar/*
-# 수집기 안 증권사 키·POST 호출(한국투자 뉴스 제목, D-136, PR #222 risk-ops 발견 2)
+# 수집기 안 증권사 키·POST 호출(한국투자 뉴스 제목, D-136, PR #222 risk-ops 발견 2, QA R3 키 읽기·넘기기)
 autotrade-app-collector/src/main/java/com/autotrade/app/collector/KisNewsClient.java
 autotrade-app-collector/src/main/java/com/autotrade/app/collector/HttpGetter.java
 autotrade-app-collector/src/main/java/com/autotrade/app/collector/JdkHttpGetter.java
 autotrade-app-collector/src/main/java/com/autotrade/app/collector/ApiCaller.java
+autotrade-app-collector/src/main/java/com/autotrade/app/collector/CollectorSecrets.java
+autotrade-app-collector/src/main/java/com/autotrade/app/collector/CollectorMain.java
 # 규칙 문서(보호 테스트 정의와 리플렉션 금지 결정)
 docs/team/project-instructions.md
 docs/qa/README.md

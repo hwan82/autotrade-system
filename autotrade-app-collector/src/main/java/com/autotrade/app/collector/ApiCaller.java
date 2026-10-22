@@ -3,6 +3,7 @@ package com.autotrade.app.collector;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * 소스 하나의 호출 규칙: 매 호출 전 하루 상한 확인({@link CallBudget}), 호출 간 최소 간격, 일시 오류(연결 실패, 5xx, 429)
@@ -43,6 +44,16 @@ public final class ApiCaller {
 
     /** 200 응답 본문. 그 밖의 상태는 {@link IOException}(메시지는 키를 가린 URL과 상태 코드만). */
     public String get(URI uri, Map<String, String> headers) throws IOException {
+        return getAnswered(uri, headers, r -> false).body();
+    }
+
+    /**
+     * {@link #get}과 같되, 200이 아니어도 {@code answered}가 참인 응답(증권사가 본문 결과 코드로 답한 응답)은 재시도하지 않고 그대로
+     * 돌려준다. 한국투자는 초당 한도 초과·토큰 만료를 HTTP 500 등으로 보낼 수 있어 상태보다 결과 코드를 먼저 본다(D-054 4번,
+     * PR #222 QA Q1). {@code answered}는 예외를 던지지 않아야 한다.
+     */
+    public HttpGetter.Response getAnswered(URI uri, Map<String, String> headers, Predicate<HttpGetter.Response> answered)
+            throws IOException {
         IOException last = null;
         for (int attempt = 0; attempt <= RETRIES; attempt++) {
             pause(attempt);
@@ -56,8 +67,8 @@ public final class ApiCaller {
                 last = new IOException("요청 실패(" + e.getClass().getSimpleName() + "): " + redaction.clean(uri.toString()));
                 continue;
             }
-            if (r.status() == 200) {
-                return r.body();
+            if (r.status() == 200 || answered.test(r)) {
+                return r;
             }
             IOException err = new IOException("HTTP " + r.status() + ": " + redaction.clean(uri.toString()));
             if (r.status() != 429 && r.status() < 500) {
