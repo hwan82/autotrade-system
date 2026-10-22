@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.ResolverStyle;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -50,7 +51,8 @@ final class KisNewsCollector {
     /** 빈 쪽을 받아 전날로 넘어가기를 이만큼 이어서 하면 더 옛 제목이 없는 것으로 본다(연휴 길이보다 길게) `[가정]`. */
     static final int MAX_EMPTY_DAYS = 7;
     static final DateTimeFormatter YMD = DateTimeFormatter.BASIC_ISO_DATE;
-    static final DateTimeFormatter HMS = DateTimeFormatter.ofPattern("HHmmss");
+    /** 엄격 해석: "240000"을 다음 날 00:00으로 읽지 않고 거절한다(PR #225 architect). */
+    static final DateTimeFormatter HMS = DateTimeFormatter.ofPattern("HHmmss").withResolverStyle(ResolverStyle.STRICT);
     /** 파일에 쓰는 시각 형식(초까지 늘 씀, 한국 시각). */
     static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss");
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);

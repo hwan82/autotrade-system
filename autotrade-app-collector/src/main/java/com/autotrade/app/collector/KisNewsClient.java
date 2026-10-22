@@ -159,8 +159,8 @@ public final class KisNewsClient {
             return null;
         }
         try {
-            LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE);
-            LocalTime.parse(time, DateTimeFormatter.ofPattern("HHmmss"));
+            LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE); // 엄격 해석(BASIC_ISO_DATE는 STRICT)
+            LocalTime.parse(time, KisNewsCollector.HMS); // 엄격 해석: "240000"도 거른다
         } catch (DateTimeParseException e) {
             return null;
         }

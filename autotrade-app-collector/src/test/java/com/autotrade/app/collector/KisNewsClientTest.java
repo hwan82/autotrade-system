@@ -127,14 +127,16 @@ class KisNewsClientTest {
     @Test
     void 여섯_자리가_아니거나_없는_시각_날짜는_채우지_않고_거르고_센다() throws Exception {
         // 5자리 "93010"을 채우면 "930100"(93시)이 되어 실행이 매번 같은 곳에서 멈춘다(PR #222 QA Q2)
-        for (String bad : List.of("93010", "9301", "930", "250000", "096100", "093060", "0930100", "09301a")) {
+        for (String bad : List.of("93010", "9301", "930", "240000", "250000", "096100", "093060", "0930100", "09301a")) {
             assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261021\","
                     + "\"data_tm\":\"" + bad + "\",\"hts_pbnt_titl_cntt\":\"t\"}"))).as(bad).isNull();
         }
         assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261332\","
                 + "\"data_tm\":\"093010\",\"hts_pbnt_titl_cntt\":\"t\"}"))).isNull();
-        assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261021\","
-                + "\"data_tm\":\"000000\",\"hts_pbnt_titl_cntt\":\"t\"}"))).isNotNull();
+        for (String good : List.of("000000", "235959")) {
+            assertThat(KisNewsClient.headline(new ObjectMapper().readTree("{\"cntt_usiq_srno\":\"9\",\"data_dt\":\"20261021\","
+                    + "\"data_tm\":\"" + good + "\",\"hts_pbnt_titl_cntt\":\"t\"}"))).as(good).isNotNull();
+        }
 
         String body = "{\"rt_cd\":\"0\",\"output\":[{\"cntt_usiq_srno\":\"1\",\"data_dt\":\"20261021\",\"data_tm\":\"93010\","
                 + "\"hts_pbnt_titl_cntt\":\"t\"},{\"cntt_usiq_srno\":\"2\",\"data_dt\":\"20261021\",\"data_tm\":\"093010\","
@@ -170,6 +172,9 @@ class KisNewsClientTest {
         FakeHttp plain = new FakeHttp((u, n) -> new HttpGetter.Response(503, "<html>busy</html>"));
         assertThatThrownBy(() -> client(plain, redaction()).page("20261021", "")).hasMessageContaining("HTTP 503");
         assertThat(plain.calls).hasSize(1 + ApiCaller.RETRIES);
+        FakeHttp noCode = new FakeHttp((u, n) -> new HttpGetter.Response(500, "{\"error\":\"busy\"}"));
+        assertThatThrownBy(() -> client(noCode, redaction()).page("20261021", "")).hasMessageContaining("HTTP 500");
+        assertThat(noCode.calls).hasSize(1 + ApiCaller.RETRIES); // JSON이어도 결과 코드(rt_cd)가 없으면 한국투자가 답한 것이 아니다
         FakeHttp odd = new FakeHttp((u, n) -> new HttpGetter.Response(500, KisNewsFixtures.body(List.of())));
         assertThatThrownBy(() -> client(odd, redaction()).page("20261021", ""))
                 .isInstanceOf(KisNewsClient.KisRejected.class).hasMessageContaining("HTTP 500");
