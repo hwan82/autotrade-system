@@ -41,3 +41,36 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-22
+- 대상: PR #225 / 커밋 `c7bca9b7`(위 검토 `5b7fa65a` 뒤 architect 수정 필요 반영 커밋, push 전 rebase 때 받음) / `git diff 5b7fa65a c7bca9b7` 전체와 `origin/main...HEAD`
+- 점검표: A
+- 바뀐 것: `KisNewsCollector.HMS`를 `ResolverStyle.STRICT`로(“240000”을 다음 날 00:00으로 읽지 않음), `KisNewsClient.headline`이 그 형식으로 시각 검사, 시험 3곳(240000 거름·235959 통과, rt_cd 없는 JSON 500은 두 번 다시 부름, 리포트 새 칸), D-136·README·runbook 문구, architect 원문. 보호 테스트·보호 경로·CI 스크립트·`ApiCaller` 변경 없음.
+- 직접 실행한 것:
+  - `c7bca9b7`을 새 worktree에 꺼내 `./gradlew build --no-daemon`: **EXIT 0**, 시험 1,928건 실패·오류·건너뜀 0(`autotrade-app-collector` 144, `autotrade-architecture-test` 46, `autotrade-risk` 55, `autotrade-app-engine` 68).
+  - 변이: `.withResolverStyle(ResolverStyle.STRICT)` 삭제 → `KisNewsClientTest#여섯_자리가_아니거나_없는_시각_날짜는_채우지_않고_거르고_센다` 실패(되돌린 뒤 worktree 삭제).
+  - `HMS`는 패턴 `HHmmss`(연도 칸 없음)라 STRICT에서 `uuuu`/`yyyy` 문제 없음. 수집기 안 다른 사용처(`walk` 커서 해석, `at`, 날짜 파일)는 이미 6자리로 검사된 값이나 자기가 만든 값만 읽음 `[추론]`(KisNewsCollector.java `walk`·`at`).
+  - CI: `c7bca9b7`의 Gradle build·Lab screens는 cancelled(뒤 push로 대체된 것으로 보임), Secret scan·DB schema success. 이 검토 커밋 뒤 실행 결과는 PR에서 확인할 것.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 실전 모듈 변경 없음, `autotrade-risk` 55·`autotrade-app-engine` 68건 통과 |
+| A2 | 통과 | 수집기 주소·호출 경로 변경 없음, 보호 경로 목록 그대로, `ArchitectureTest` 통과 |
+| A3 | 해당 없음 | 주문 경로 변경 없음 |
+| A4 | 해당 없음 | 주문 재전송 변경 없음. 결과 코드 없는 5xx 재시도 규칙 시험 보강(재시도 횟수는 그대로) |
+| A5 | 해당 없음 | 주문 생성 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 통과 | 직렬 큐·토큰 버킷·수집기 간격 변경 없음 |
+| A8 | 통과 | 프로세스 경계·장 시간 확인 변경 없음 |
+| A9 | 통과 | 보호 시세 경로·서버 측 손절 변경 없음 |
+| A10 | 통과 | 새 시험 값에 키 없음, 메시지 형식 변경 없음 |
+| A11 | 통과 | 보호 테스트 변경 없음, 기존 시험은 늘기만 함, STRICT 변이를 시험이 잡음 |
+| A12 | 통과 | 장애 대응 동작 변경 없음 |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 통과 | D-136 후속 2번 문구가 "240000도 거름"을 포함해 코드와 일치 |
+
+## 재검토 점검표 밖 발견
+- 위 R1~R3 그대로(판정 영향 없음).
+
+## 재검토 판정
+승인
