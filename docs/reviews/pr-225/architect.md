@@ -50,3 +50,40 @@
 
 ## 판정
 수정 필요(점검표 밖 1: `KisNewsClient.headline` 시각 검사를 STRICT로 바꿔 "240000"을 거르고 시험에 더하기)
+
+## 재검토 2026-10-22
+- 대상: PR #225 / 커밋 811699e12b7247080e80d3b2de2f42eaff984491 / main 대비 diff (`git diff origin/main...HEAD`: 21개 파일, +457, −40). 위 검토(5b7fa65a) 뒤 바뀐 것은 `git diff 5b7fa65a HEAD`로 따로 봄: 운영 코드 `KisNewsCollector.HMS`를 `ResolverStyle.STRICT`로, `KisNewsClient.headline`이 그 `HMS`로 시각 검사(KisNewsClient.java:162~163, KisNewsCollector.java:55). 시험 `KisNewsClientTest`(거를 값에 "240000", 통과 값 "000000"·"235959", `rt_cd` 없는 JSON 500은 두 번 다시 부름), `KisNewsCommandTest`(리포트 새 열·새 줄 단언). 문서 D-136 후속 2번, 결정 로그 README D-136 행 구분 기호, runbook collector.md 3장 6번 "5xx·429". 검토 원문 `pr-225/risk-ops.md`(승인·재검토 승인)
+- 점검표: B
+- 직접 실행한 것(공유 작업 트리와 겹치지 않게 `git worktree add --detach`로 811699e1을 꺼냄, 끝나고 `git checkout`으로 원복 뒤 `git worktree remove`):
+  - `./gradlew build --no-daemon` → **종료 0**(새 worktree). 결과 XML 합계 1,928건, 실패 0, 오류 0, 건너뜀 0. `KisNewsClientTest` 12, `KisNewsCollectorTest` 15, `KisNewsCommandTest` 6, `ApiCallerTest` 6 통과
+  - 변이 시험(`:autotrade-app-collector:test --tests 'com.autotrade.app.collector.*'`, 하나씩 넣고 원복):
+
+| 변이 | 내용 | 결과 |
+|---|---|---|
+| R-M1 | `HMS`에서 `.withResolverStyle(ResolverStyle.STRICT)` 제거 | 죽음 |
+| R-M2 | `KisNewsClient.answered`의 `rt_cd` 비지 않음 조건 제거(앞 검토 MK) | 죽음 |
+| R-M3 | 품질 리포트 "날짜·시각을 읽을 수 없어 거른 행" 줄 제거(앞 검토 ML) | 죽음 |
+| R-M4 | 같은 줄 값 `badRows` → 상수 `0` | **생존** |
+| R-M5 | `headline`만 옛 SMART 형식기 `ofPattern("HHmmss")`로 되돌림 | 죽음 |
+| R-M6 | 리포트 "자정 확인 못 함" 칸 값 `w.midnightCuts()` → `0` | **생존** |
+
+  - `bash scripts/ci/check-collector-keys.sh` → 종료 0. `bash scripts/ci/mark-protected-changes.sh main` → 보호 대상 5개 표시(앞 검토와 같음, 이번 고침 커밋은 보호 대상 중 `KisNewsClient.java`만 다시 바꿈)
+  - CI(헤드 811699e1, `gh api .../check-runs`): Gradle build, Secret scan and collector boundary, DB schema, Lab screens 모두 success
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 worktree `./gradlew build` 직접 실행, 종료 0, 1,928건 전부 통과 |
+| B2 | 통과 | 이번 고침은 `java.time.format.ResolverStyle` import 하나뿐(KisNewsCollector.java:20). 빌드 스크립트·ArchUnit 무변경, 전체 빌드의 ArchUnit·순수 모듈 검사 통과 |
+| B3 | 통과 | 계약 무변경. `HMS`는 수집기 패키지 안 상수. D-136 후속 2번 문구("엄격 해석, 240000도 거름")가 코드와 일치. STRICT `HHmmss`는 연도 칸이 없어 `uuuu/yyyy` 문제 없음. `HMS`의 다른 사용처(KisNewsCollector.java:166·228·247·263)는 자기가 `HMS.format`으로 만든 커서나 이미 `headline`을 통과한 6자리 값만 읽으므로 STRICT로 새로 실패할 입력 없음 `[추론]`(코드 읽기) |
+| B4 | 통과 | 시뮬레이션 코드 무변경, 수집기는 주입 `Clock`만 씀, 골든 시험 포함 빌드 통과 |
+| B5 | 해당 없음 | 금액 계산 없음 |
+| B6 | 통과 | 앞 판정 항목(240000)은 `여섯_자리가_아니거나_없는_시각_날짜는_채우지_않고_거르고_센다`가 고정(R-M1·R-M5 죽음). 앞 권고 2·3(MK·ML)도 고정(R-M2·R-M3 죽음). 기존 시험은 늘기만 하고 삭제·`@Disabled`·건너뜀 없음. 생존 R-M4·R-M6은 점검표 밖 1(권고) |
+| B7 | 해당 없음(단, 보호 경로) | 실전 주문 경로·RealTradingGuard·블랙리스트·리스크 한도 변경 없음. 보호 경로 `KisNewsClient` 등을 바꾸는 실전 관련 PR이므로 **risk-ops 검토 필요**: `pr-225/risk-ops.md` 재검토(c7bca9b7) 판정 "승인" 확인. 머지는 독립 QA 뒤 사용자 |
+| B8 | 통과 | 새 시험 값에 키·토큰 없음(`{"error":"busy"}` 등), 메시지 형식 변경 없음. CI 비밀값 스캔 success |
+
+## 재검토 점검표 밖 발견
+1. (권고, 판정 영향 없음) 변이 R-M4·R-M6 생존: 품질 리포트의 "거른 행" 값과 "자정 확인 못 함" 칸 값이 실제 셈(`badRows`, `w.midnightCuts()`)과 연결됐는지는 시험이 보지 않는다(`KisNewsCommandTest`는 둘 다 0인 경우만 봄). 셈 자체는 `KisNewsClientTest`·`KisNewsCollectorTest`가 고정하므로 남는 위험은 리포트 배선 실수뿐이다. 다음 수집기 PR에서 0이 아닌 값이 리포트에 찍히는 단언 하나를 권한다. 콘솔 줄(CollectorMain.java:373~375)도 같다.
+2. 앞 점검표 밖 1(수정 필요, 240000) 해결 확인: STRICT 형식기로 "240000" 거절·"000000"·"235959" 통과를 시험이 단언하고, 변이로 되돌리면 죽는다. 앞 4(README 구분 기호 ". ")·5(runbook "5xx·429") 반영 확인. 앞 6의 자정 손실 셈 설명은 그대로 유효.
+
+## 재검토 판정
+승인
