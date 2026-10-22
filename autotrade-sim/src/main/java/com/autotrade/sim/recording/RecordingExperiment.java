@@ -309,9 +309,8 @@ public final class RecordingExperiment {
                 // 결과 파일이 실행마다 같게 만든 시각은 남기지 않는다(SIM-09)
                 SelectionResultFile.Producer producer = new SelectionResultFile.Producer(code.commit(), code.dirty(), null);
                 for (RecordedMarketDataSet.DayInfo d : data.days()) {
-                    LocalDate cutoff = calendar.previousTradingDay(d.date());
                     for (SelectionPreparer.Outcome o : SelectionPreparer.prepare(stage.files, d.date(), calc, in.last(),
-                            cutoff, producer, gate::check)) {
+                            calendar::previousTradingDay, producer, gate::check)) {
                         log.accept("선정 " + d.date() + " " + o.selection() + ": " + o.status()
                                 + (o.reason() == null ? "" : " " + o.reason() + " " + o.detail()));
                     }
@@ -369,9 +368,9 @@ public final class RecordingExperiment {
     }
 
     /**
-     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-124). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY})과
-     * 장중 순위 선정({@code INTRADAY_AT}, D-127)만 받는다: 고정 파일이 하루 적용 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다
-     * (ADR-007 2.1). 장전 선정이 있으면 {@code selection-input.daily}가 있어야 한다.
+     * 등록 파일의 선정 조합을 계좌 조합으로 만든다(녹화 실험·실시간 모의, D-124). 선정은 단타 장전 선정({@code PRE_OPEN_DAILY},
+     * 하루 늦춘 {@code PRE_OPEN_DAILY_LAG1} D-137)과 장중 순위 선정({@code INTRADAY_AT}, D-127)만 받는다: 고정 파일이 하루 적용
+     * 범위를 전제로 하고, 장중 전략과 스타일이 맞아야 한다(ADR-007 2.1). 장전 선정이 있으면 {@code selection-input.daily}가 있어야 한다.
      */
     public static List<Combination> selectionCombinations(Path repoRoot, RegisteredSelections selections,
             CatalogStrategyFactory factory) {
@@ -380,22 +379,22 @@ public final class RecordingExperiment {
         for (RegisteredSelections.Entry e : selections.entries()) {
             SelectionProfile s = loaded.computeIfAbsent(e.selection().text(), k -> CombinationExperiment.loadSelection(
                     repoRoot, new CombinationPlan.Ref(e.selection().id(), e.selection().version())));
-            if (s.refresh() != SelectionRefresh.PRE_OPEN_DAILY && s.refresh() != SelectionRefresh.INTRADAY_AT) {
-                throw new IllegalArgumentException("녹화 실험·실시간 모의의 선정은 단타 장전 선정(PRE_OPEN_DAILY)과 장중 순위 선정"
-                        + "(INTRADAY_AT)만 받습니다: " + s.key() + " = " + s.refresh());
+            if (!s.refresh().preOpen() && s.refresh() != SelectionRefresh.INTRADAY_AT) {
+                throw new IllegalArgumentException("녹화 실험·실시간 모의의 선정은 단타 장전 선정(PRE_OPEN_DAILY·PRE_OPEN_DAILY_LAG1)과"
+                        + " 장중 순위 선정(INTRADAY_AT)만 받습니다: " + s.key() + " = " + s.refresh());
             }
             StrategyProfile p = loadStrategy(repoRoot, e.strategy());
             factory.validate(p);
             out.add(Combination.of(s, p));
         }
-        selections.requireInputs(loaded.values().stream().anyMatch(s -> s.refresh() == SelectionRefresh.PRE_OPEN_DAILY),
+        selections.requireInputs(loaded.values().stream().anyMatch(s -> s.refresh().preOpen()),
                 loaded.values().stream().anyMatch(RecordingExperiment::usesDisclosures));
         return out;
     }
 
     /** 장전 선정이 공시 지표 조건을 쓰는지(ADR-014 6장, {@code SelectionEdgeStudy}의 일치 검사와 같은 판단). */
     static boolean usesDisclosures(SelectionProfile s) {
-        return s.refresh() == SelectionRefresh.PRE_OPEN_DAILY
+        return s.refresh().preOpen()
                 && SelectionCriteria.parse(s).inputKinds().contains(Metric.Kind.DISCLOSURE);
     }
 

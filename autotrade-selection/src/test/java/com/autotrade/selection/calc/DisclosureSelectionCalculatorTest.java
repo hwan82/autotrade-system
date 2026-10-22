@@ -78,6 +78,36 @@ class DisclosureSelectionCalculatorTest {
         assertThat(r.canonicalJson()).contains("\"disclosures\":{\"covered_through\":\"2026-03-15\"");
     }
 
+    /**
+     * 하루 늦춘 판(D-137): T의 다음 거래일 T+1(03-17)에 적용할 {@code kr-intraday-news-lag1} 결과는 T에 적용할 원래 판 결과와
+     * 선정·평가·입력이 같고 적용일만 다르다. T 당일(03-16) 접수 공시(800050)는 T+1 선정에도 들어가지 않는다(정보 시점 T).
+     */
+    @Test
+    void 하루_늦춘_판은_전_거래일_원래_판_결과와_같은_입력으로_고른다() {
+        SelectionProfile lag = repoProfile("kr-intraday-news-lag1");
+        assertThat(lag.refresh()).isEqualTo(SelectionRefresh.PRE_OPEN_DAILY_LAG1);
+        TreeMap<String, String> same = new TreeMap<>(lag.parameters());
+        same.remove("hypothesis");
+        TreeMap<String, String> orig = new TreeMap<>(repoProfile("kr-intraday-news").parameters());
+        orig.remove("hypothesis");
+        orig.put("refresh", "PRE_OPEN_DAILY_LAG1");
+        assertThat(same).as("갱신 주기 말고는 원래 판과 같다").isEqualTo(orig);
+
+        LocalDate next = T.plusDays(1);
+        SelectionResult base = new SelectionCalculator(newsFixture()).calculate(repoProfile("kr-intraday-news"), T);
+        SelectionResult r = new SelectionCalculator(newsFixture()).calculate(lag, next);
+        assertThat(r.applyFrom()).isEqualTo(next);
+        assertThat(r.applyTo()).isEqualTo(next);
+        assertThat(r.selected()).isEqualTo(base.selected());
+        assertThat(r.evaluations()).isEqualTo(base.evaluations());
+        assertThat(r.inputs()).isEqualTo(base.inputs());
+        assertThat(eval(r, "800050").values()).containsEntry("gate.01", "0");
+
+        // 같은 입력으로 원래 판은 T+1을 계산하지 못한다: 공시 구간이 03-16(T+1 전날)까지 가야 하는데 입력은 03-15까지다
+        assertThatThrownBy(() -> new SelectionCalculator(newsFixture()).calculate(repoProfile("kr-intraday-news"), next))
+                .isInstanceOf(IllegalStateException.class).hasMessageStartingWith("STALE_INPUT");
+    }
+
     @Test
     void T_당일과_T_뒤_접수_공시는_결과를_바꾸지_않는다() {
         FixtureData d = newsFixture();

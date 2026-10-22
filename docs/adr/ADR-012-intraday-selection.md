@@ -117,6 +117,7 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 - 당일 게시가 맞으면: c 장 마감 뒤 저녁 수집(runbook 18:30 이후) → T 장 전 선정. 설계 그대로 된다.
 - 다음 날 08:00 게시가 맞으면: T 08:00에는 수집기 장 시간 보호가 시작돼 c 일봉을 장 전에 받을 수 없다. 이때 1차는 **선정이 매일 `SELECTION_MISSING`**이 되어 쓸모가 없다. 대안은 (a) 기준 데이터일을 c−1로 하루 늦추는 새 갱신 주기(`PRE_OPEN_DAILY_LAG1`, 선정 프로필 키로 명시, 미래 정보 아님) (b) 게이트웨이 녹화로 c의 `boards` 종목 일봉을 만들어 쓰는 입력(유니버스가 `boards`로 줄어듦) 둘이다. 추천은 (a)다. 시장 전체 유니버스를 지키고 계산 경로가 같기 때문이다. 다만 하루 늦은 정보라 단타 효과가 줄 수 있어 (다)(라)를 두 갱신 주기로 함께 돌려 비교한다.
 - 확인 방법: 구현 PR 전에 사용자 PC에서 장 마감 날 18:30 이후 수집을 한 번 돌려 스냅샷 `coverage.lastTradingDate`가 그날인지 본다(runbook 3.7 확인과 같이). 결과로 (a) 필요 여부를 정하고 결정 로그에 적는다.
+- **확인 결과(2026-10-22, [D-137](../decisions/D-137-pre-open-daily-lag1.md))**: `[사실, 사용자 PC 콘솔]` `krx-daily --from 2026-10-14 --no-snapshot`을 10-21 18:31, 21:01, 10-22 07:34(KST)에 돌렸고 세 번 모두 2026-10-21 KOSPI·KOSDAQ·KONEX가 게시 전이었다. `[추론]` KRX Open API는 T 일봉을 T+1 07:34까지 게시하지 않는다. 08:00 뒤 정확한 게시 시각은 모른다(수집기는 08:00부터 장 시간 보호로 멈춤). 그래서 (a) `PRE_OPEN_DAILY_LAG1`을 더했다. 원래 판 (다)(라)는 실시간 모의에서 매일 `STALE_INPUT`이 되므로 실시간에는 하루 늦춘 판(`*-lag1@1`)을 쓰고, 두 판은 일봉 사전 검사로 비교한다. `CollectorMain.KRX_SAME_DAY_FROM`(18:00)의 당일 게시 가정은 수집기가 고칠 일이라 이 결정 밖이다(D-137 후속).
 
 ## 4. 뉴스·소식·입소문 신호
 
@@ -172,11 +173,11 @@ boards: [...]                            # 받을 종목 = 게이트웨이 watch
 | 번호 | 내용 | 담당 | 실전 관련 | 선행 |
 |---|---|---|---|---|
 | 0 | 넓힌 watchlist(거래대금 상위 종목)로 녹화 시작. 그날부터의 녹화만 5번 시험에 쓴다. watchlist 크기는 risk-ops가 7단계 전 구독 상한을 정할 때까지 임시값 | 사용자 PC, data-engineer, risk-ops 확인 | 아님(실전 활성화 전) | 없음 |
-| 1 | KRX 게시 시각 확인(3.7) → `PRE_OPEN_DAILY_LAG1` 필요 여부 결정 | 사용자 PC 1회 실행, data-engineer | 아님 | 없음 |
+| 1 | KRX 게시 시각 확인(3.7) → `PRE_OPEN_DAILY_LAG1` 필요 여부 결정. **끝남(2026-10-22): 다음 날 장 전까지 게시 안 됨 → 필요, [D-137](../decisions/D-137-pre-open-daily-lag1.md)** | 사용자 PC 1회 실행, data-engineer | 아님 | 없음 |
 | 2 | 지표 `day-range`·`close-strength`·`volume-spike`, 프로필 (다), selection-catalog 갱신, 골든 테스트 | strategy-researcher·sim-engine | 아님 | 없음(1과 병렬) |
 | 2b | 선정 엣지 일봉 사전 검사(3.3, D-125): T 시가 진입·T 종가 청산, 비용 차감, 무작위 선정 대조군, 워크포워드 3구간 이상. 통과한 선정만 5번으로. (다)는 EDGE01 등록, (라)·공시 대조는 공시 스냅샷 뒤 | strategy-researcher | 아님 | 2(공시 조건은 3) |
 | 3 | 공시 스냅샷 수집(`dartDisclosures`, 유형으로 좁혀 재무 수집 뒤, 하루 상한 공유)·`disclosure-count`·`gate.types`, 프로필 (라) | data-engineer → strategy-researcher | 아님 | 2 |
-| 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로). **`INTRADAY_AT` 부분은 D-127로 구현**(V3). `LAG1`은 1번 결과 뒤 | architect·sim-engine | 아님 | 1 또는 7 |
+| 3b | 1번 결과가 다음 날 게시면 `PRE_OPEN_DAILY_LAG1`, 2차-a 착수 때 `INTRADAY_AT`: **ADR-007 2.1 개정**("단타 ⇔ `PRE_OPEN_DAILY`" 규칙을 "단타 ⇔ 단타용 갱신 주기 집합"으로), `SelectionRefresh` 값 추가, DB 새 마이그레이션(V2 `selection_profile` CHECK 교체, `V2__selection_combination.sql`의 CHECK는 고치지 않고 새 V 파일로). **`INTRADAY_AT` 부분은 D-127로 구현**(V3). **`LAG1`은 D-137로 구현**(V4) | architect·sim-engine | 아님 | 1 또는 7 |
 | 4 | 녹화 실험·실시간 모의 `selections`·`selection-input`, 그날 후보 ∩ `boards`, `NOT_SUBSCRIBED`·`BLACKLISTED`·`SELECTION_MISSING`, 고정 파일, 리플레이 확인. **D-124로 구현** | sim-engine(+ ui-dev 화면 표시) | 아님 | 2, (1의 결과) |
 | 5 | 0번 녹화(넓힌 watchlist)로 녹화 실험(스냅샷 ID 고정)을 돌려 2b를 통과한 선정 × 단타 전략 조합 시험 → 새 실시간 실험 `EXP-<등록일>-LIVE02` 사전 등록(조합 수 m ≤ 4, 대조군 시드 N+1 ≥ 20m, D-114 L5 왕복 30건을 8주에 채울 수 있는지 먼저 계산). 2026-10-12~ 기존 녹화(대형주 3~10종목)는 시장 전체 선정과 거의 겹치지 않아 기능 확인용으로만 쓴다 | strategy-researcher | 아님 | 0, 2b, 4 |
 | 6 | 뉴스 스냅샷(4.2), `news-count`·`news-surge`. **수집은 D-136으로 구현**(`kis-news`, 출처 한국투자 종합 시황/공시(제목), Q-055 닫음), 지표는 다음 PR | data-engineer | 수집은 실전 관련 PR로 다룸(증권사 키를 수집기에 둠, 보호 테스트 설명 문구, D-136) | Q-055 |

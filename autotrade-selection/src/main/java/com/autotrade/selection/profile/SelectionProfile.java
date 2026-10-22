@@ -72,7 +72,7 @@ public record SelectionProfile(
         SelectionRefresh refresh = parseRefresh(parameters.get(REFRESH), id);
         if (!refresh.allows(style)) {
             throw new IllegalArgumentException("갱신 주기 " + refresh + "는 " + style + " 선정에 쓸 수 없습니다"
-                    + "(단타는 PRE_OPEN_DAILY·INTRADAY_AT만, 스윙·중기는 장 마감 뒤 갱신만): " + id);
+                    + "(단타는 PRE_OPEN_DAILY·PRE_OPEN_DAILY_LAG1·INTRADAY_AT만, 스윙·중기는 장 마감 뒤 갱신만): " + id);
         }
         parseMaxSymbols(parameters.get(MAX_SYMBOLS), id);
         parseAt(parameters.get(AT), refresh, market, id);

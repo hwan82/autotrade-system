@@ -108,6 +108,42 @@ class SelectionProfileTest {
     }
 
     @Test
+    void 하루_늦춘_장전_선정은_단타만이고_기준_데이터일이_하루_앞이다() {
+        TreeMap<String, String> p = new TreeMap<>(Map.of("hypothesis", "h", "max-symbols", "5", "refresh", "PRE_OPEN_DAILY_LAG1"));
+        SelectionProfile s = new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, p);
+        assertThat(s.refresh()).isEqualTo(SelectionRefresh.PRE_OPEN_DAILY_LAG1);
+        assertThat(s.refresh().intraday()).isTrue();
+        assertThat(s.refresh().preOpen()).isTrue();
+        assertThat(s.at()).isEmpty();
+        assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.SWING, p))
+                .hasMessageContaining("PRE_OPEN_DAILY_LAG1");
+        TreeMap<String, String> withAt = new TreeMap<>(p);
+        withAt.put("at", "09:30");
+        assertThatThrownBy(() -> new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, withAt))
+                .hasMessageContaining("INTRADAY_AT");
+        // 원래 판과 갱신 주기만 달라도 해시가 다르다(같은 결과 파일 자리를 나눠 쓰지 않음)
+        TreeMap<String, String> daily = new TreeMap<>(p);
+        daily.put("refresh", "PRE_OPEN_DAILY");
+        assertThat(new SelectionProfile("s", 1, Market.KRX, TradingStyle.INTRADAY, daily).selectionHash())
+                .isNotEqualTo(s.selectionHash());
+
+        // 2026-10-19(월): 직전 거래일 10-16(금), 그 앞 10-15(목). 주말을 거래소 캘린더로 건넌다
+        ExchangeCalendar krx = ExchangeCalendar.bundled(Market.KRX);
+        LocalDate mon = LocalDate.of(2026, 10, 19);
+        assertThat(SelectionRefresh.PRE_OPEN_DAILY.infoDate(mon, krx::previousTradingDay)).isEqualTo(mon);
+        assertThat(SelectionRefresh.PRE_OPEN_DAILY.cutoff(mon, krx::previousTradingDay)).isEqualTo(LocalDate.of(2026, 10, 16));
+        assertThat(SelectionRefresh.PRE_OPEN_DAILY_LAG1.infoDate(mon, krx::previousTradingDay))
+                .isEqualTo(LocalDate.of(2026, 10, 16));
+        assertThat(SelectionRefresh.PRE_OPEN_DAILY_LAG1.cutoff(mon, krx::previousTradingDay))
+                .isEqualTo(LocalDate.of(2026, 10, 15));
+        assertThat(SelectionRefresh.POST_CLOSE_DAILY.cutoff(mon, krx::previousTradingDay)).isEqualTo(LocalDate.of(2026, 10, 16));
+        assertThat(SelectionRefresh.POST_CLOSE_DAILY.preOpen()).isFalse();
+        assertThat(SelectionRefresh.INTRADAY_AT.preOpen()).isFalse();
+        assertThatThrownBy(() -> SelectionRefresh.INTRADAY_AT.cutoff(mon, krx::previousTradingDay))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void at_범위_표는_시장마다_있고_거래소_캘린더_정규장과_맞는다() {
         // architect PR #200 R2: 시장 분기는 AT_RANGES 한 곳. 시작은 정규장 시작 + 1분, 끝은 정규장 끝보다 앞(순위 뒤 진입할 구간)
         assertThat(SelectionProfile.AT_RANGES).containsOnlyKeys(Market.values());

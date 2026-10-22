@@ -145,5 +145,23 @@ BEGIN
     EXCEPTION WHEN check_violation THEN
         RAISE NOTICE 'ok: at on pre-open rejected';
     END;
+    -- V4 하루 늦춘 장전 선정(D-137): 단타만, at 없음
+    INSERT INTO selection_profile VALUES (repeat('3', 64), 'kr-intraday-hot-lag1', 1, 'KRX', 'INTRADAY', 'PRE_OPEN_DAILY_LAG1',
+                                          '{"max-symbols":"10"}', now());
+    RAISE NOTICE 'ok: pre-open lag1 selection accepted';
+    BEGIN
+        INSERT INTO selection_profile VALUES (repeat('2', 64), 'kr-swing-lag1', 1, 'KRX', 'SWING', 'PRE_OPEN_DAILY_LAG1',
+                                              '{}', now());
+        RAISE EXCEPTION 'swing selection with pre-open lag1 refresh was accepted';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'ok: swing pre-open lag1 rejected';
+    END;
+    BEGIN
+        INSERT INTO selection_profile VALUES (repeat('1', 64), 'kr-lag1-at', 1, 'KRX', 'INTRADAY', 'PRE_OPEN_DAILY_LAG1',
+                                              '{"at":"09:30"}', now());
+        RAISE EXCEPTION 'pre-open lag1 selection with at was accepted';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'ok: at on pre-open lag1 rejected';
+    END;
 END $$;
 ROLLBACK;

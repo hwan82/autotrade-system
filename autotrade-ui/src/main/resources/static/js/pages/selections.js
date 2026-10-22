@@ -290,7 +290,7 @@ function conditionEditor(base, style, cat, onSave, saveLabel) {
   const root = h('div', { class: 'cond-editor' },
     h('div', { class: 'form-grid' },
       h('label', { for: 'shyp' }, '가설'), hypothesis,
-      h('label', { for: 'srefresh' }, '갱신 주기'), h('div', {}, refresh, h('p', { class: 'hint' }, '단타는 매일 장전, 스윙·중기는 장 마감 뒤 갱신만 쓸 수 있습니다.')),
+      h('label', { for: 'srefresh' }, '갱신 주기'), h('div', {}, refresh, h('p', { class: 'hint' }, '단타는 매일 장전·매일 장전(하루 늦춘 일봉)·장중 순위 시각, 스윙·중기는 장 마감 뒤 갱신만 쓸 수 있습니다.')),
       h('label', { for: 'smax' }, '최대 종목 수'), maxSymbols),
     h('h3', {}, '하드 필터'),
     h('div', { class: 'form-grid' },

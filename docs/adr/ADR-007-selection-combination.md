@@ -54,7 +54,7 @@ parameters:
 | 키 | 필수 | 값 |
 |---|---|---|
 | `hypothesis` | O | 가설 1문장(STR-02) |
-| `refresh` | O | 단타용 `PRE_OPEN_DAILY`·`INTRADAY_AT`, 스윙·중기용 `POST_CLOSE_DAILY`·`POST_CLOSE_WEEKLY`. 규칙은 "단타 ⇔ 단타용 갱신 주기 집합"(2026-10-20 개정, [D-127](../decisions/D-127-intraday-at-selection.md). 처음에는 "단타 ⇔ `PRE_OPEN_DAILY`"). 스타일과 맞지 않으면 검증 실패 |
+| `refresh` | O | 단타용 `PRE_OPEN_DAILY`·`PRE_OPEN_DAILY_LAG1`·`INTRADAY_AT`, 스윙·중기용 `POST_CLOSE_DAILY`·`POST_CLOSE_WEEKLY`. 규칙은 "단타 ⇔ 단타용 갱신 주기 집합"(2026-10-20 개정, [D-127](../decisions/D-127-intraday-at-selection.md). 처음에는 "단타 ⇔ `PRE_OPEN_DAILY`". `PRE_OPEN_DAILY_LAG1`은 2026-10-22 [D-137](../decisions/D-137-pre-open-daily-lag1.md)). 스타일과 맞지 않으면 검증 실패 |
 | `at` | `INTRADAY_AT`만 O | 장중 순위 시각 `HH:MM`(거래소 현지, KRX 09:01~14:30, 미국 09:31~15:00). 다른 갱신 주기에 주면 검증 실패(D-127) |
 | `max-symbols` | O | 1 이상 정수. 선정 결과 종목 수 상한 |
 | `filter.*` | | 하드 필터(STR-10) |
@@ -127,7 +127,7 @@ parameters:
 |---|---|
 | `strategy_profile.style` | CHECK에 `POSITION` |
 | 함수 `combination_hash_v1(selection, profile)` | 2.2 유도식. `IMMUTABLE`이라 CHECK에서 쓴다 |
-| 새 표 `selection_profile` | PK `selection_hash`, `UNIQUE (selection_id, version)`, `refresh` 열, CHECK "단타 ⇔ `PRE_OPEN_DAILY`"(V3에서 "단타 ⇔ `PRE_OPEN_DAILY`·`INTRADAY_AT`"과 "`INTRADAY_AT` ⇔ `at` 키"로 바꿈, D-127. V2 파일은 고치지 않음) |
+| 새 표 `selection_profile` | PK `selection_hash`, `UNIQUE (selection_id, version)`, `refresh` 열, CHECK "단타 ⇔ `PRE_OPEN_DAILY`"(V3에서 "단타 ⇔ `PRE_OPEN_DAILY`·`INTRADAY_AT`"과 "`INTRADAY_AT` ⇔ `at` 키"로 바꿈, D-127. V4에서 단타 집합에 `PRE_OPEN_DAILY_LAG1`을 더함, D-137. V2·V3 파일은 고치지 않음) |
 | 새 표 `combination` | PK `combination_hash`, `selection_hash`(`none` 또는 hex64), 생성 열 `selection_ref`(`none`이면 NULL)로 `selection_profile` 외래키, `profile_hash` → `strategy_profile`, CHECK `combination_hash = combination_hash_v1(...)` |
 | `experiment_run` | `selection_hash`, `combination_hash`, `run_seed_scheme` 추가(NOT NULL). `UNIQUE (experiment_id, profile_hash)` 삭제 → `UNIQUE (experiment_id, combination_hash)`. `(combination_hash, selection_hash, profile_hash)` → `combination` 외래키로 Run의 세 해시가 서로 맞는지 강제. 시드 방식 CHECK |
 | `virtual_trade_log` | `combination_hash` 추가(NOT NULL), `(run_id, combination_hash)` 외래키. V1의 `(run_id, profile_hash)` 외래키 유지. `selection_id`·`selection_hash`는 `combination → selection_profile`로 찾는다(중복 저장 안 함) |
@@ -167,12 +167,13 @@ parameters:
 ```
 
 - **`inputs.disclosures`**(D-123): 공시 조건(`disclosure-count`)이 있는 선정만 쓴다. 공시 조건이 없으면 키를 **아예 쓰지 않는다**(`null`도 쓰지 않음). 그래서 D-123 전 결과의 내용 해시는 그대로다. `sha256`은 공시 스냅샷의 `disclosures.csv` 파일 SHA-256(manifest의 그 파일 항목과 같음)이고, `covered_through`는 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날이다. 7단계 `SelectionValidity`의 `STALE_INPUT`에 공시 입력을 넣을지는 실전 판정 변경이라 risk-ops 검토로 정한다(지금 판정 함수는 이 필드를 보지 않는다. 생산 쪽 계산기는 공시 스냅샷이 구간 [w거래일 첫날, `apply_from` 전날]을 못 덮으면 결과를 만들지 않는다).
-- **선정 기준일 = `apply_from`**(그 결과를 처음 적용하는 거래일, STR-15). 계산은 `apply_from`의 직전 거래일까지의 데이터만 쓴다(MD-10).
+- **선정 기준일 = `apply_from`**(그 결과를 처음 적용하는 거래일, STR-15). 계산은 `apply_from`의 직전 거래일까지의 데이터만 쓴다(MD-10). `PRE_OPEN_DAILY_LAG1`은 하루 더 앞, 즉 `apply_from`의 두 거래일 전까지다(D-137).
 - **적용 거래일 범위**(거래소 현지 날짜, 양끝 포함, `ExchangeCalendar` 기준):
 
   | `refresh` | 생산 시점 | `apply_from` | `apply_to` |
   |---|---|---|---|
   | `PRE_OPEN_DAILY` | 기본: D의 직전 거래일 장 마감 뒤. 선택: D 장전, 장전 계산 마감(RSK-11) 전(2.7 실행 시점) | D | D |
+  | `PRE_OPEN_DAILY_LAG1` | `PRE_OPEN_DAILY`와 같음. 계산은 D의 직전 거래일 D'를 기준일로 둔 것처럼 한다(일봉 D'의 직전 거래일까지, 재무·공시 D' 전날까지, D-137) | D | D |
   | `POST_CLOSE_DAILY` | 거래일 D 장 마감 뒤(일봉 수집 뒤) | D의 다음 거래일 | `apply_from` |
   | `POST_CLOSE_WEEKLY` | 그 주(거래소 현지 ISO 주) 마지막 거래일 장 마감 뒤 | 다음 거래일 | `apply_from`이 속한 ISO 주의 마지막 거래일 |
 
