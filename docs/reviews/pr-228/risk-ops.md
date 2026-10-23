@@ -56,7 +56,7 @@
     - M7 자정 판단을 앞 판(`next.equals(current의 날 00:00:00)`)으로 되돌림 → `쪽이_커서보다_앞선_날의_00시_행에서_끝나도_…` 실패(000000 전송)
     - M8 셈을 항상 함 → `백필이_보관_한도에_닿으면_…`, `KisNewsCommandTest.거른_행과_자정_확인_못_함이_…` 실패
     - M9 `midnightCuts++` 삭제 → 시험 5개 실패
-  - 끝남 확인(코드 읽기, KisNewsCollector.java 225~247행): `next`는 225~227행에서 `current`보다 엄격히 앞서고, 자정 갈래(236~241행)는 `oneSecond`를 `current.isAfter(oneSecond)`일 때만 고르며 아니면 `dayStart - 1초`로 더 앞선다. 커서가 매 쪽 엄격히 줄어 같은 커서를 되풀이하지 않는다. `000000`은 어느 날이든 보내지 않는다(237행 조건이 시각만 봄).
+  - 끝남 확인(코드 읽기, KisNewsCollector.java 216~247행): `next`는 229~231행에서 `current`보다 엄격히 앞서고, 자정 갈래(236~241행)는 `oneSecond`를 `current.isAfter(oneSecond)`일 때만 고르며 아니면 `dayStart - 1초`로 더 앞선다. 커서가 매 쪽 엄격히 줄어 같은 커서를 되풀이하지 않는다. `000000`은 어느 날이든 보내지 않는다(236행 조건이 시각만 봄).
   - CI(REST 조회, 커밋 `9aa81081`): Gradle build, Secret scan and collector boundary, DB schema, Lab screens 모두 success.
 
 | # | 결과 | 근거 |
