@@ -1,0 +1,56 @@
+# 실시간 모의(D-076). 입력은 실험실 세션의 입력 기록(설정 폴더, 저장소 밖)
+clock-mode: REALTIME
+# 실험 입력(실행기가 씀, D-069). 녹화 파일은 저장소에 넣지 않는다(ADR-003 4장).
+experiment: EXP-20261020-LIVE00
+code: "0a66d55983434dcb6c17cb0d1a30ca8ea8db9d25"
+data-set: "REC-KRX-2026-10-20..2026-10-23-e28d111d9e5f309b"
+adapter: REC-ADAPTER-V1
+market: KRX
+events: 3980303
+symbols: "000660,005380,005930,028300,035420,035720,068270,105560,247540,373220"
+recording-days:
+  - date: 2026-10-20
+    file-sha256: f3ed17ef515681fed68aacfa52f77b5a197dbcedc83ea0d5b947247ba0d26793
+    recorded-events: 781560
+    complete: false
+    truncated: true
+    segments: 4
+    unmarked-restarts: ""
+    inserted-gaps: 0
+  - date: 2026-10-21
+    file-sha256: c8027b40341f0c17bee649c3a6b69f340b9641ea86ea01a36345c90999ac2400
+    recorded-events: 1081975
+    complete: false
+    truncated: true
+    segments: 1
+    unmarked-restarts: ""
+    inserted-gaps: 0
+  - date: 2026-10-22
+    file-sha256: c58816477ec9856d2a11effe342353c3bd7a5df6b74bd1f78aa3ef0bac8c7986
+    recorded-events: 969860
+    complete: false
+    truncated: true
+    segments: 1
+    unmarked-restarts: ""
+    inserted-gaps: 0
+  - date: 2026-10-23
+    file-sha256: 0335da99721bb8daf858fe087c30cb6f403d8cdc4e6c9098c8790777520f1ad8
+    recorded-events: 1146908
+    complete: true
+    truncated: false
+    segments: 1
+    unmarked-restarts: ""
+    inserted-gaps: 0
+data-gaps: 130
+cost-model: KR-DEFAULT-1c6a40d3efb8
+cost-table-hash: 9464ccf33cb9633f663a33e4520d6921328ad2a9551cfc7418174cb160ded5ad
+execution-model: "BOOK-V6;latency=PT0.5S"
+boards: "000660 KOSPI,005380 KOSPI,005930 KOSPI,028300 KOSDAQ,035420 KOSPI,035720 KOSPI,068270 KOSPI,105560 KOSPI,247540 KOSDAQ,373220 KOSPI"
+blacklist:
+  fingerprint: c45c33bc98b673d059797c57962bbf0acfb41e6ba74d76390874873ee326e202
+  size: 1
+benchmark: 005930
+seed: 20261020
+seed-capital: "10000000 KRW"
+determinism: "같음(실시간 세션 대 입력 기록 리플레이, 상세 보고서 바이트 일치, code 줄 제외. 실시간 code 0a66d55983434dcb6c17cb0d1a30ca8ea8db9d25)"
+detail-sha256: 0a847f83254c7023cb75f35853b86324f054bba60c9e0fb8674a4c643b11b36f
