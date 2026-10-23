@@ -40,3 +40,38 @@
 
 ## 판정
 수정 필요(1: `KisNewsCollector.java:236` `dayStart`를 `next`의 날짜로 잡고, 커서와 다른 날짜의 00:00:00에서 `000000`을 보내지 않고 자정 확인 못 함을 세는 시험 추가)
+
+## 재검토 2026-10-23
+- 대상: PR #228 / 커밋 9aa81081efeb874bea012c3f965bbf4f339dd4eb / `git diff origin/main...HEAD` 전체(12개 파일, +203 −11). 앞 검토 뒤 바뀐 것은 9aa81081(`KisNewsCollector.java`, `CollectorReports.java`, `KisNewsCollectorTest.java` 시험 2개, D-136 문구, `check-collector-keys.sh`)
+- 점검표: B
+- 직접 실행한 것(모두 PR 머리 커밋을 따로 꺼낸 `git worktree`에서):
+  - `./gradlew build --offline --no-daemon` → BUILD SUCCESSFUL in 5m 36s, 138 tasks
+  - `bash scripts/ci/check-collector-keys.sh` → exit 0. 바뀐 `grep -inEI`에 표본: `"appKey": "<26자>"`, `"AppSecret": '<26자, -·_ 포함>'` 잡힘, `"appkey": "<앱키>"`·짧은 값 안 잡힘. 따옴표 없는 YAML `appkey: <값>`은 여전히 안 잡힘(아래 2)
+  - 변이 시험 5종(`:autotrade-app-collector:test`, 148개, 변이마다 원본으로 되돌림, 되돌린 뒤 전체 통과):
+    - Ma 자정 판단을 앞 판(`next.equals(current의 날 00:00:00)`)으로: `쪽이_커서보다_앞선_날의_00시_행에서_끝나도_000000을_보내지_않고_센다` 실패 → 잡힘
+    - Mb `current.isAfter(oneSecond)` 되풀이 방지 제거: `자정_1초_행이_한_쪽보다_많으면_000001을_되풀이하지_않고_자정을_센다` 실패 → 잡힘
+    - Mc `midnightCuts++` 제거: 위 두 시험과 `자정_행이_한_쪽보다_많으면…`, `백필이_보관_한도에_닿으면…`, `KisNewsCommandTest.거른_행과_자정_확인_못_함이…` 5개 실패 → 잡힘
+    - Md 자정 셈 조건을 앞 판(커서 날 기준)으로: `쪽이_커서보다_앞선_날의_00시_행에서…` 실패 → 잡힘
+    - Me `000001` 갈래를 늘 끔: `새_행_없는_쪽이_00시_00분_01초에서_끝나면_000001로…` 실패 → 잡힘
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 `./gradlew build --offline` BUILD SUCCESSFUL(머리 커밋 9aa81081, 별도 worktree) |
+| B2 | 통과 | 바뀐 운영 코드는 `autotrade-app-collector` 안(`KisNewsCollector.java`, `KisNewsClient.java`, `CollectorReports.java` 문구)뿐, import·모듈 의존 변화 없음. ArchUnit은 빌드에서 통과 |
+| B3 | 통과 | 인터페이스·스키마·설정 키·REST 변경 없음(`Walk` 레코드 모양 그대로). 동작 변경은 D-136 후속 고침 2 1·3번(docs/decisions/D-136-kis-news-snapshot.md:66,68)에 반영 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음. 수집기 시험은 고정 시계 사용 |
+| B5 | 해당 없음 | 금액 다루는 코드 없음 |
+| B6 | 통과 | 앞 검토 발견 1을 막는 시험(`쪽이_커서보다_앞선_날의_00시_행에서_끝나도_000000을_보내지_않고_센다`: 호출에 `000000` 없음, 둘째 호출 `20261019 235959`, `midnightCuts`=1)이 더해졌고 Ma·Md를 잡는다. risk-ops R1 시험도 Mb를 잡는다. 지운·건너뛴 시험 없음 |
+| B7 | 통과(risk-ops 검토 필요) | 보호 경로 `KisNewsClient.java`(scripts/ci/protected-paths.txt:19) 수정이 PR에 포함. 실전 관련 PR이므로 risk-ops 재검토·사용자 머지·독립 QA(docs/qa/pending.md) 대상 |
+| B8 | 통과 | diff에 키·토큰·계좌번호 없음(시험 값은 자리표시·짧은 값). CI 키 검사 exit 0 |
+
+## 재검토 점검표 밖 발견
+
+1. **앞 검토 발견 1 해결 확인.** `KisNewsCollector.java:236`이 이제 `next.toLocalTime().equals(LocalTime.MIDNIGHT)`로 날짜와 상관없이 00:00:00 커서를 막고 `dayStart = next`(그 날 00:00:00)로 잡는다. 앞선 날 00:00:00에서 끝나는 쪽은 `pageOldest.isAfter(dayStart)`가 거짓이라 전날 23:59:59로 넘어가고, 셈 조건(`next.toLocalDate().isBefore(pageOldest.toLocalDate())`, :243)으로 1을 센다. 앞 검토 탐침과 같은 모양의 시험이 고정한다.
+   - 새 셈 조건 검토 `[추론]`(코드 읽기): `next`는 늘 `current`보다 엄격히 앞이고 정상 응답에서 `pageOldest` 이하이므로, 셈은 "커서가 이 쪽 가장 옛 행의 날을 떠날 때"에만 난다. 쪽이 그 날 행까지 닿았다면 `pageOldest`가 그 날이라 셈이 나지 않으니 의도(전날 행까지 닿지 않았는데 날을 넘김)와 맞다. 빈 쪽 갈래(:181-196)의 날 넘김은 세지 않는데, 커서 앞에 행이 없다는 뜻이라 손실 표시가 필요 없다(앞 판과 같음).
+   - 끝남: `000001` 갈래는 `current.isAfter(oneSecond)`일 때만, 다른 갈래는 `dayStart−1s`라 커서는 늘 엄격히 줄어든다. 커서 시각이 `000000`이 되는 경로가 없다(시작 `""`, 날 넘김 `235959`, 자정 갈래가 늘 00:00:00을 피함).
+2. (권고, 막지 않음, 앞 검토 2 일부 반영) CI 키 검사가 대소문자를 가리지 않게 됐다. 따옴표 없는 YAML `appkey: <값>`은 여전히 안 잡히나 gitleaks가 따로 있고 설정 파일이 JSON(`secrets.json`)이라 막지 않는다.
+3. (참고) 앞 검토 3(넉넉한 셈 설명)은 품질 리포트 문구(`CollectorReports.java:273`)에 반영됐다.
+
+## 재검토 판정
+승인
