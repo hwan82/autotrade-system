@@ -91,6 +91,8 @@ class KisNewsCommandTest {
         Path report = reports.resolve(m.snapshotId() + ".md");
         String text = Files.readString(report);
         assertThat(text).contains("훑은 구간").contains("| 2026-10-21 | 3 | 2 |").doesNotContain("합성 제목").doesNotContain("N1");
+        assertThat(text).contains("| 같은 초로 가득 찬 쪽 | 자정 확인 못 함 | 멈춘 까닭 |")
+                .contains("| 날짜·시각을 읽을 수 없어 거른 행(0이 정상) | 0 |");
         assertThat(Csv.read(KisNewsCollector.dayFile(config.resolve("collector-cache").resolve("kis-news"),
                 java.time.LocalDate.of(2026, 10, 21)), KisNewsCollector.DAY_HEADER)).hasSize(3);
     }

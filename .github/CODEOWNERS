@@ -16,6 +16,8 @@
 /autotrade-app-collector/src/main/java/com/autotrade/app/collector/HttpGetter.java @hwan82
 /autotrade-app-collector/src/main/java/com/autotrade/app/collector/JdkHttpGetter.java @hwan82
 /autotrade-app-collector/src/main/java/com/autotrade/app/collector/ApiCaller.java @hwan82
+/autotrade-app-collector/src/main/java/com/autotrade/app/collector/CollectorSecrets.java @hwan82
+/autotrade-app-collector/src/main/java/com/autotrade/app/collector/CollectorMain.java @hwan82
 /docs/team/project-instructions.md @hwan82
 /docs/qa/README.md @hwan82
 /docs/qa/checklists.md @hwan82

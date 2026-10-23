@@ -220,7 +220,7 @@ final class CollectorReports {
      * 건수에서 뺄 코드를 정하는 근거).
      */
     static Path writeNews(Path dir, SnapshotManifest m, KisNewsSnapshotBuilder.Stats s, KisNewsCollector.Result r,
-            int tokens, int usedToday) throws IOException {
+            int tokens, int badRows, int usedToday) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("# 뉴스 데이터 품질 리포트: ").append(m.snapshotId()).append("\n\n");
         sb.append("- 스냅샷 생성: ").append(m.createdAt()).append(", 수집 일괄 명령 ").append(m.scriptVersion()).append('\n');
@@ -261,18 +261,20 @@ final class CollectorReports {
         });
         sb.append("\n공시 제목은 공시 스냅샷(`disclosure-count`, D-123)으로 따로 세므로, 뉴스 건수 지표는 이 표에서 공시로 보이는 코드를 뺀다"
                 + "(지표 PR에서 코드를 고정, D-136 6번).\n");
-        sb.append("\n## 이번 실행\n\n| 걸음 | 시작 커서 | 닿은 시각 | 끝까지 | 쪽 | 새 제목 | 같은 초로 가득 찬 쪽 | 멈춘 까닭 |\n"
-                + "|---|---|---|---|---|---|---|---|\n");
+        sb.append("\n## 이번 실행\n\n| 걸음 | 시작 커서 | 닿은 시각 | 끝까지 | 쪽 | 새 제목 | 같은 초로 가득 찬 쪽 | 자정 확인 못 함 | 멈춘 까닭 |\n"
+                + "|---|---|---|---|---|---|---|---|---|\n");
         for (KisNewsCollector.Walk w : r.walks()) {
             sb.append("| ").append(w.kind()).append(" | ").append(w.top()).append(" | ").append(w.reached() == null ? "-" : w.reached())
                     .append(" | ").append(w.complete() ? "예" : "**아니오**").append(" | ").append(w.pages()).append(" | ")
-                    .append(w.fresh()).append(" | ").append(w.crowdedSeconds()).append(" | ").append(w.reason() == null ? (w.complete() ? "-" : "호출 상한") : w.reason())
+                    .append(w.fresh()).append(" | ").append(w.crowdedSeconds()).append(" | ").append(w.midnightCuts()).append(" | ").append(w.reason() == null ? (w.complete() ? "-" : "호출 상한") : w.reason())
                     .append(" |\n");
         }
-        sb.append("\n'같은 초로 가득 찬 쪽'이 0이 아니면 그 초의 제목 일부를 못 받았을 수 있습니다(커서가 초 단위라서). 자주 나오면 "
-                + "data-engineer에 알립니다.\n");
+        sb.append("\n'같은 초로 가득 찬 쪽'이 0이 아니면 그 초의 제목 일부를 못 받았을 수 있습니다(커서가 초 단위라서). "
+                + "'자정 확인 못 함'이 0이 아니면 00:00:00 제목이 한 쪽보다 많았을 때 나머지를 못 받았을 수 있습니다(커서 000000을 보낼 수 없음). "
+                + "자주 나오면 data-engineer에 알립니다.\n");
         sb.append("\n| 항목 | 값 |\n|---|---|\n");
         row(sb, "접근토큰 발급(발급마다 알림톡)", tokens);
+        row(sb, "날짜·시각을 읽을 수 없어 거른 행(0이 정상)", badRows);
         row(sb, "오늘 뉴스 몫 호출(토큰 발급 포함)", usedToday);
         Files.createDirectories(dir);
         Path out = dir.resolve(m.snapshotId() + ".md");

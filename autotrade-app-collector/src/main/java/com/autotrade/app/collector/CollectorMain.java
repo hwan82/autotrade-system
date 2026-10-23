@@ -111,8 +111,7 @@ public final class CollectorMain {
             System.err.println(e.getMessage());
             return 1;
         }
-        Redaction redaction = new Redaction(List.of(secrets.krxAuthKey(), secrets.openDartKey(), secrets.kisNewsAppKey(),
-                secrets.kisNewsAppSecret()));
+        Redaction redaction = redaction(secrets);
         try {
             return switch (o.command) {
                 case "krx-daily" -> krxDaily(o, secrets, clock, http, sleeper, guard);
@@ -351,6 +350,12 @@ public final class CollectorMain {
         return r.stopped() == null ? 0 : 3;
     }
 
+    /** 이 실행에서 오류 메시지·로그에서 가릴 키 전부(읽은 키를 하나도 빼지 않는다, PR #222 QA Q3). */
+    static Redaction redaction(CollectorSecrets secrets) {
+        return new Redaction(List.of(secrets.krxAuthKey(), secrets.openDartKey(), secrets.kisNewsAppKey(),
+                secrets.kisNewsAppSecret()));
+    }
+
     /**
      * 한국투자 뉴스 제목 수집과 뉴스 스냅샷(D-136, ADR-012 4.2). 지금부터 마지막으로 훑은 시각까지, 이어서 빈틈과 {@code --from}
      * 백필을 받는다. 호출 상한에 닿아도 그때까지 훑은 구간으로 스냅샷을 만들고 종료 코드 3으로 끝난다.
@@ -366,6 +371,9 @@ public final class CollectorMain {
         KisNewsCollector.Result r = collector.collect(o.from);
         System.out.println("한국투자 뉴스 제목: 쪽 " + r.pages() + ", 새 제목 " + r.fresh() + ", 접근토큰 발급 " + client.tokensIssued()
                 + "번, 오늘 누적 호출 " + budget.usedToday());
+        if (client.badRows() > 0) {
+            System.out.println("날짜·시각을 읽을 수 없어 거른 행 " + client.badRows() + "건(품질 리포트 참고, data-engineer에 알림)");
+        }
         for (KisNewsCollector.Walk w : r.walks()) {
             if (!w.complete()) {
                 System.out.println(w.kind() + " 걸음이 끝까지 가지 못했습니다: " + (w.reason() == null ? "호출 상한" : w.reason())
@@ -402,7 +410,7 @@ public final class CollectorMain {
                     new SnapshotManifest.Coverage(first.from().toLocalDate().toString(), null, null, created));
         }
         Path reportFile = CollectorReports.writeNews(o.reportDir, SnapshotFiles.readManifest(dir), stats, r,
-                client.tokensIssued(), budget.usedToday());
+                client.tokensIssued(), client.badRows(), budget.usedToday());
         System.out.println("스냅샷: " + dir + "\n품질 리포트: " + reportFile + " (종목코드 붙은 제목 " + stats.rows() + "건, 안 붙은 제목 "
                 + stats.untagged() + "건)");
         prune(o, root, "kis-news", dir);
