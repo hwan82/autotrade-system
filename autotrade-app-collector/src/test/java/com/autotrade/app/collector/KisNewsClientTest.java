@@ -85,6 +85,9 @@ class KisNewsClientTest {
         assertThatThrownBy(() -> client(http, redaction()).page("20261021", ""))
                 .isInstanceOf(KisNewsClient.KisRejected.class).hasMessageContaining("EGW00201")
                 .hasMessageContaining("--interval-ms").hasMessageNotContaining("초과하였습니다").hasMessageNotContaining("TOKEN");
+        FakeHttp other = new FakeHttp((u, n) -> FakeHttp.ok("{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00215\"}"));
+        assertThatThrownBy(() -> client(other, redaction()).page("20261021", ""))
+                .hasMessageContaining("EGW00215").hasMessageContaining("--interval-ms"); // 초당 한도 초과 다른 코드(D-054)
         FakeHttp weird = new FakeHttp((u, n) -> FakeHttp.ok("{\"rt_cd\":\"1\",\"msg_cd\":\"<script>KIS-APPKEY\"}"));
         assertThatThrownBy(() -> client(weird, redaction()).page("20261021", ""))
                 .hasMessageContaining("결과 코드 없음").hasMessageNotContaining("script");
