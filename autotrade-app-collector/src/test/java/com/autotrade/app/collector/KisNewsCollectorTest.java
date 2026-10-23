@@ -297,4 +297,41 @@ class KisNewsCollectorTest {
         assertThat(http.calls).anyMatch(u -> "000001".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
         assertThat(r.walks().getFirst().complete()).isTrue();
     }
+
+    @Test
+    void 쪽이_커서보다_앞선_날의_00시_행에서_끝나도_000000을_보내지_않고_센다() throws IOException {
+        // PR #228 architect: 커서는 10-21인데 쪽이 10-20 00:00:00 행에서 끝난다. 10-20의 000000을 보내면 안 된다
+        Path root = cache.resolve("kis-news");
+        Files.createDirectories(root);
+        Files.writeString(root.resolve(KisNewsCollector.COVERAGE_FILE), """
+                {"intervals":[{"from":"2026-10-19T00:00:00","to":"2026-10-19T12:00:00"}],"floor":null}""");
+        List<KisNewsFixtures.Row> rows = List.of(row("20261020", "000000", "A1", "005930"), row("20261020", "000000", "A2", "005930"),
+                row("20261019", "230000", "Y", "005930"), row("20261019", "110000", "Q", "005930"));
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(rows, 2));
+        KisNewsCollector.Result r = collector(http, seoul("2026-10-21T07:00:00"), 100).collect(null);
+        assertThat(http.calls).noneMatch(u -> "000000".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
+        assertThat(KisNewsFixtures.param(http.calls.get(1), "FID_INPUT_DATE_1")).isEqualTo("20261019");
+        assertThat(KisNewsFixtures.param(http.calls.get(1), "FID_INPUT_HOUR_1")).isEqualTo("235959");
+        assertThat(r.walks().getFirst().midnightCuts()).isEqualTo(1);
+        assertThat(KisNewsCollector.readDay(cache.resolve("kis-news"), LocalDate.of(2026, 10, 19)))
+                .extracting(KisNewsClient.Headline::serial).contains("Y");
+    }
+
+    @Test
+    void 자정_1초_행이_한_쪽보다_많으면_000001을_되풀이하지_않고_자정을_센다() throws IOException {
+        // PR #228 risk-ops R1: 000001로 다시 받아도 그 초 행으로 가득 차면 00:00:00 행을 볼 수 없다. 같은 커서를 되풀이해
+        // 호출 몫을 쓰지 않고, 전날로 넘어가며 셈해서 알린다
+        List<KisNewsFixtures.Row> rows = new ArrayList<>();
+        rows.add(row("20261021", "000005", "F", "005930"));
+        for (int i = 0; i < 4; i++) {
+            rows.add(row("20261021", "000001", "S" + i, "005930"));
+        }
+        rows.add(row("20261021", "000000", "Z", "005930"));
+        rows.add(row("20261020", "230000", "Y", "005930"));
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(rows, 2));
+        KisNewsCollector.Result r = collector(http, seoul("2026-10-21T07:00:00"), 100).collect(null);
+        assertThat(http.calls.stream().filter(u -> "000001".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")))).hasSizeLessThanOrEqualTo(2);
+        assertThat(r.walks().getFirst().midnightCuts()).isGreaterThanOrEqualTo(1);
+        assertThat(r.walks().getFirst().complete()).isTrue();
+    }
 }

@@ -15,7 +15,7 @@ status=0
 while IFS= read -r -d '' f; do
   [ -f "$f" ] || continue
   for p in "${patterns[@]}"; do
-    if grep -nEI "$p" "$f"; then
+    if grep -inEI "$p" "$f"; then
       echo "::error file=$f::수집기 키 값으로 보이는 문자열 (MD-11): $p"
       status=1
     fi
