@@ -129,20 +129,23 @@ $bad = @($st.session.failures | Where-Object { $_ }); "실패 계좌: $($bad.Cou
 ## 3. 주간 점검(매주 금요일 장 마감 뒤, 게이트웨이를 끈 다음)
 
 ```powershell
+if (-not $id) { "0장 두 줄을 먼저 넣으세요(실험 ID가 비어 있음)" } else { "ID: $id" }
 $gc = Join-Path (Get-Location) "build\weekly-gc"; New-Item -ItemType Directory -Force $gc > $null   # 저장소 경로는 공백·한글이 없어야 한다(0장 가정)
 $env:JAVA_TOOL_OPTIONS = "-Xlog:gc:file=$gc\weekly-gc-%p.log"
 $t0 = Get-Date
-.\gradlew :autotrade-app-experiment:runLiveWeeklyCheck -Pexperiment=$id
+.\gradlew :autotrade-app-experiment:runLiveWeeklyCheck "-Pexperiment=$id"
 "종료 코드: $LASTEXITCODE"
 "걸린 시간: {0:N0}분" -f ((Get-Date) - $t0).TotalMinutes
 Remove-Item Env:JAVA_TOOL_OPTIONS
 $max = 0; Get-ChildItem "$gc\weekly-gc-*.log" | Get-Content | ForEach-Object { if ($_ -match '(\d+)M->\d+M\(\d+M\)') { $max = [Math]::Max($max, [int]$matches[1]) } }
-"주간 점검 최대 힙 사용: ${max}MB"; Remove-Item "$gc\weekly-gc-*.log"
+"주간 점검 최대 힙 사용: ${max}MB"; .\gradlew --stop > $null; Remove-Item "$gc\weekly-gc-*.log"   # gc 기록을 잡고 있는 Gradle 데몬을 먼저 끈다
 Get-ChildItem "experiments\$id\weekly"
 ```
 
 - 종료 코드 0: 설명되지 않는 차이가 없다. 2: "설명 없음"이 있다(계획 4.1 I4, 바로 알린다). 4: 장 시간 보호·정지 요청(장 마감 뒤에 다시).
-- 걸리는 시간: 매주 운용 시작일부터 다시 읽어 주마다 길어진다. 첫 주 약 20분, 8주차 약 2~3시간 `[추론]`(계획 7장, D-115). 힙은 기간과 상관없다. 도중에 끄지 말고 PC가 잠들지 않게 둔다.
+- `"-Pexperiment=$id"`는 따옴표째 그대로 쓴다. 2026-10-23 사용자 PC에서 따옴표 없이 `-Pexperiment=$id`로 두 번 돌렸을 때 실험 ID가 빈 값으로 넘어가 종료 코드 1("실험 ID 인자가 없거나…")로 끝났고, ID를 직접 쓰자 돌았다(PowerShell 인자 처리로 추정 `[추론]`).
+- 출력을 `*> 파일`로 돌리지 않고 화면에 띄운다. 2026-10-23 파일로 돌린 실행은 계좌 대조 중에 끝나 결과 파일이 없었고, 저장소 안에 남은 출력 파일 때문에 결과의 code가 `dirty`로 찍혔다.
+- 걸리는 시간: 매주 운용 시작일부터 다시 읽어 주마다 길어진다. LIVE00 4일(10종목, 녹화 423만·입력 기록 398만 줄)은 사용자 PC에서 7분 29초였다(2026-10-23 실측). 단순 비례로 8주차(40일) 약 75분이다 `[추론]`. 단 10-26부터 게이트웨이 감시 종목을 100종목으로 넓히면(4.1) 녹화 줄이 늘어 점검이 그만큼 길어질 수 있다(10-30 첫 주에 다시 잰다, 계획 7장, D-115). 힙은 기간과 상관없다. 도중에 끄지 말고 PC가 잠들지 않게 둔다.
 - `OutOfMemoryError`로 멈추면 D-115 뒤에는 예상 밖이다. `-Pheap=8g`를 붙여 한 번 더 돌리고 결과와 함께 알린다. 입력 기록과 녹화는 디스크에 남으므로 고친 뒤 몰아서 돌릴 수 있다.
 - 결과 `experiments\<ID>\weekly\<날짜>.md`와 위 세 줄(종료 코드, 걸린 시간, 최대 힙)을 이 프로젝트 스레드에 올린다. Claude가 커밋하고 요약한다. 최대 힙 줄에는 Gradle 자체 메모리도 섞여 있어 조금 크게 나온다.
 
