@@ -70,3 +70,34 @@
 
 ## 판정
 수정 필요(B1 확인 못 함만 남음: 문서 내용 쪽 A-1·A-2·A-3은 모두 해결. 검토 환경의 Maven 저장소 404로 검토자가 `./gradlew build`를 직접 끝까지 돌리지 못했다. 빌드가 되는 환경에서 검토자가 `./gradlew build`를 다시 돌려 통과하면 승인으로 바꿀 수 있다. 실전 관련 PR이므로 그와 별개로 독립 QA와 사용자 머지)
+
+## 재검토 2 2026-10-24
+- 대상: PR #238 / 커밋 1674e5f1(GitHub PR head `1674e5f1f9e4f6ae2a40bcb322acd27ba1253367`와 일치, base main, open) / main 대비 diff(`git diff origin/main...HEAD`, 7파일: `D-140` M, `docs/qa/pending.md` M, `docs/reviews/pr-238/architect.md`·`risk-ops.md` A, `docs/runbooks/README.md` M, `docs/runbooks/stage-7-real-trading-tests.md` A, `docs/team/stage-7-readiness-plan.md` M). 재검토(079c7993 기준) 이후 커밋은 9c6706b1(이 파일, 재검토 원문)과 1674e5f1(`risk-ops.md` +46, risk-ops 재검토 원문)뿐이다. `git diff 079c7993 1674e5f1 -- docs/runbooks docs/decisions docs/team docs/qa` 0줄, 절차서·결정·계획·QA 요청 줄 본문은 재검토 때와 같다.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (별도 worktree `/tmp/claude-0/arch-238-re2`, HEAD 1674e5f1): 1회 + 2·4·8·16초 간격 재시도 4회, 5회 모두 `:build-logic:compilePluginsBlocks`에서 `Could not find kotlin-scripting-jvm-2.0.21.jar`(`repo.maven.apache.org`)로 BUILD FAILED(각 8~9초). 같은 jar를 `curl`로 받으면 `repo.maven.apache.org` 404, `repo1.maven.org` 200. 빌드 스크립트·저장소 설정은 이 PR이 바꾸지 않으므로 검토 환경 문제다 `[추론]`. 컴파일·테스트에 닿지 못했다.
+  - CI(GitHub REST `commits/1674e5f1/check-runs` 직접 조회): `Gradle build` success(run 40089086901, job 120857892201, 11:14:21~11:18:38Z), `Lab screens (Playwright)` success(job 120857892151), `DB schema (PostgreSQL 16)` success(job 120857892031), `Secret scan and collector boundary` success(job 120857892446). 모두 `head_sha` 1674e5f1 일치.
+  - **CI로 B1을 대신하는 사용자 결정 확인**:
+    - 저장소 기록: `docs/qa/checklists.md:32` B1은 여전히 "검토자가 직접 실행". 결정 로그(`docs/decisions/`)·`docs/qa-out-status.md`에 B1 예외 결정은 없다(`git grep -n "B1"` 결과 D-008의 다른 뜻 B1뿐). D-101·D-124는 "클라우드 컨테이너 Maven 429로 CI 결과로 확인"을 그 작업의 사실로 적었을 뿐 검토 규칙 예외를 정한 결정이 아니다.
+    - "2026-10-16 PR #124 결정"의 실제 기록은 PR #124 댓글 6208359636(`docs/reviews/pr-124/architect.md` 4차 재검토, 본문 "CI 결과를 B1 근거로 인정")이다. 그 뒤 이 예외는 **PR마다** 사용자 댓글로 받아 적용됐다: PR #131(댓글 6209727263), PR #218(실전 관련, 1차는 "PR #124 결정은 실전 관련 PR에도 같은지 따로 묻지 않았다"며 확인 못 함, 사용자 댓글 6307770592 뒤 승인), PR #220(실전 관련, 같은 방식, 댓글 6308494141). 즉 저장소 선례상 이 결정은 일반 규칙이 아니라 PR별 허락이고, 실전 관련 PR에는 그 PR의 댓글을 요구해 왔다.
+    - PR #238 댓글(GitHub REST `issues/238/comments`): **0건**. 리뷰도 없다.
+    - 판단: 검토 규칙상 메인 Claude가 전한 "사용자 결정이 있다"는 설명은 사실로 받지 않는다. 이 PR은 실전 관련 PR(사용자 머지)이고, 저장소 기록·선례 어디에도 PR #124 허락이 다른 PR, 특히 실전 관련 PR에 자동으로 넓어진다는 근거가 없다. 그래서 B1을 CI로 통과 처리하지 않는다.
+  - 참고 대조: risk-ops 재검토 R5(N3b 대기 시간)·R6(ABSENT 분기 시작 행)을 코드로 봤다. `Watchdog.java:241`이 `case ABSENT -> {`, 242-245가 본문이라 절차서 인용 `242-245`는 알림 줄을 가리키므로 틀리지 않았다. N3b 시간은 강제 종료 시 마지막 쓰기 나이 0~5초, 기준 15초, 점검 주기 5초라 종료 뒤 약 10~20초에 "멈춤"이 온다 `[추론]`. "약 15초"와 시행 시 넉넉히 기다리라는 R5 권고 모두 합격 기준을 바꾸지 않는다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 확인 못 함 | 직접 실행한 `./gradlew build` 5회 모두 `:build-logic` 의존성 해석 실패(위). 같은 head CI `Gradle build` success(run 40089086901, job 120857892201)는 직접 확인했으나, CI로 B1을 대신한다는 사용자 결정이 이 PR(댓글 0건)이나 저장소(`checklists.md:32`, 결정 로그)에 없다. 실전 관련 PR #218·#220 선례는 PR별 사용자 댓글을 요구했다 |
+| B2 | 해당 없음 | 운영 코드·빌드 스크립트·ArchUnit 규칙·보호 경로 변경 없음(diff 7파일 모두 `docs/`, `scripts/ci/protected-paths.txt`에 `docs/runbooks`·`docs/reviews` 없음) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 코드 없음 |
+| B6 | 해당 없음 | 새 코드 동작 없음, 테스트 삭제·건너뜀 없음(diff에 테스트 파일 없음) |
+| B7 | 해당(risk-ops 검토 필요) | 장애 대응 절차서·D-140 후속 문구를 바꾸는 실전 관련 PR. `docs/reviews/pr-238/risk-ops.md` 재검토 2026-10-24 판정은 승인(1674e5f1에 커밋됨, 그 판정은 이 검토의 근거로 쓰지 않고 있음만 확인). 독립 QA 요청 줄 `docs/qa/pending.md`에 있음. 사용자 머지 대상 |
+| B8 | 통과 | diff 전체(검토 원문 포함)에 키·계좌번호·토큰 없음. 계좌는 별칭만 |
+
+## 점검표 밖 발견(재검토 2)
+- 새 결함 없음. 1차 A-1·A-2·A-3 해결, A-4·A-5 반영 상태는 재검토와 같다(본문 변경 0줄).
+- 운영 메모(재기록): PR #124 4차 재검토에서 적었듯, 검토 규칙 예외(CI로 B1 대체)를 PR마다 댓글로 받는 대신 결정 로그에 범위(실전 관련 PR 포함 여부)를 정한 사용자 결정으로 남기거나 `docs/qa/checklists.md` B1을 사용자가 고치면 이런 판정 지연이 없어진다. 이 검토자는 그 문서를 고치지 않는다.
+
+## 판정
+수정 필요(B1 확인 못 함만 남음. 문서 내용 결함 없음. 검토 환경의 Maven 저장소 404로 `./gradlew build`를 직접 끝까지 돌리지 못했고, CI를 B1 근거로 인정하는 사용자 결정이 이 PR에 없다. 사용자가 PR #238에 "CI 결과를 B1 근거로 인정"을 남기거나 빌드가 되는 환경에서 검토자가 직접 통과시키면, 같은 head CI `Gradle build` success(1674e5f1, run 40089086901)로 B1을 판단해 승인으로 바꿀 수 있다. 실전 관련 PR이므로 그와 별개로 독립 QA와 사용자 머지)
