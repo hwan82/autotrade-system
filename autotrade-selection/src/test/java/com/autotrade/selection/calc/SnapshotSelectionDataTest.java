@@ -162,4 +162,45 @@ class SnapshotSelectionDataTest {
                 .as("상장주식수를 받았는데 기준일이 없음").isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("coverage.sharesAsOf");
     }
+
+    /**
+     * 실제 거래대금 파일(D-139)은 쓰는 선정이 처음 계산될 때 한 번만 읽고, 쓰지 않는 선정은 읽지 않는다. 일봉과 스냅샷 ID가 다른
+     * 파일은 받지 않는다.
+     */
+    @Test
+    void 실제_거래대금은_쓰는_선정에서_처음_한_번만_읽는다() throws IOException {
+        Path d = daily("{\"firstDate\":\"2026-09-30\",\"lastTradingDate\":\"2026-10-02\",\"sharesAsOf\":\"2026-10-02\"}");
+        FixtureData.Turnover t = new FixtureData.Turnover();
+        t.snapshotId = "krx-daily-snap";
+        for (LocalDate day : java.util.List.of(LocalDate.of(2026, 9, 30), LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 2))) {
+            t.put("005930", day, 30_000L).put("000660", day, 10_000L);
+        }
+        int[] calls = {0};
+        SnapshotSelectionData data = new SnapshotSelectionData(Market.KRX, SnapshotDailyBarSource.load(d),
+                SnapshotListedShares.load(d), null, null, () -> {
+                    calls[0]++;
+                    return t;
+                }, TradingDays.of(KRX), SnapshotSelectionData.calendarDigest(KRX), KRX.zone());
+        SelectionProfile marketCap = new SelectionProfile("snap-cap", 1, Market.KRX, TradingStyle.SWING, new TreeMap<>(Map.of(
+                "hypothesis", "테스트", "refresh", "POST_CLOSE_DAILY", "max-symbols", "10",
+                "gate.01.metric", "market-cap", "gate.01.op", "GE", "gate.01.value", "100000")));
+        new SelectionCalculator(data).calculate(marketCap, T);
+        assertThat(calls[0]).as("쓰지 않는 선정은 읽지 않음").isZero();
+
+        SelectionProfile turnover = new SelectionProfile("snap-tov", 1, Market.KRX, TradingStyle.SWING, new TreeMap<>(Map.of(
+                "hypothesis", "테스트", "refresh", "POST_CLOSE_DAILY", "max-symbols", "10",
+                "gate.01.metric", "turnover", "gate.01.window", "3", "gate.01.op", "GE", "gate.01.value", "20000")));
+        SelectionCalculator calc = new SelectionCalculator(data);
+        assertThat(calc.calculate(turnover, T).selected()).containsExactly(new SelectionResult.Selected("005930", 1));
+        calc.calculate(turnover, T);
+        assertThat(calls[0]).isEqualTo(1);
+
+        SnapshotSelectionData other = new SnapshotSelectionData(Market.KRX, SnapshotDailyBarSource.load(d), null, null, null,
+                () -> new FixtureData.Turnover(), TradingDays.of(KRX), SnapshotSelectionData.calendarDigest(KRX), KRX.zone());
+        assertThatThrownBy(() -> new SelectionCalculator(other).calculate(turnover, T))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("스냅샷 ID가 일봉과 다릅니다");
+        SnapshotSelectionData none = new SnapshotSelectionData(Market.KRX, SnapshotDailyBarSource.load(d), null, null, null,
+                null, TradingDays.of(KRX), SnapshotSelectionData.calendarDigest(KRX), KRX.zone());
+        assertThat(none.turnover()).isEmpty();
+    }
 }

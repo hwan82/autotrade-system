@@ -50,6 +50,20 @@ class ResultBundleReaderTest {
     }
 
     @Test
+    void 실제_거래대금_입력이_있는_선정_결과도_해시가_맞게_되살린다() throws IOException {
+        SampleReports.ComboSample s = SampleReports.combos("DEMO-20261024-01", 20, false, true);
+        String text = write(s);
+        assertThat(text).contains("\"turnover\":{\"last_date\":");
+        ResultBundleReader.Loaded loaded = read(text);
+
+        assertThat(loaded.selectionResults()).containsExactlyInAnyOrderElementsOf(s.results());
+        assertThat(loaded.selectionResults()).allSatisfy(r ->
+                assertThat(r.inputs().turnoverSha256()).isEqualTo("4".repeat(64)));
+        // 실제 거래대금 조건이 없는 결과에는 키가 아예 없다(D-139 전 해시 그대로). Run 지표의 "turnover"(회전율)와는 다른 칸이다
+        assertThat(write(SampleReports.combos("DEMO-20261024-01", 20))).doesNotContain("\"turnover\":{");
+    }
+
+    @Test
     void 선정_없는_실험과_실패한_Run도_되살린다() throws IOException {
         SampleReports.Sample s = SampleReports.krx("DEMO-20261008-01", 30);
         StringWriter out = new StringWriter();

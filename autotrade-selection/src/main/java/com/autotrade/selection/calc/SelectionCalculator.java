@@ -107,11 +107,12 @@ public final class SelectionCalculator {
         Set<Metric.Kind> kinds = criteria.inputKinds();
         checkInputs(kinds, cutoff);
         checkDisclosures(criteria, asOf, window);
+        SelectionData.TurnoverInput turnover = checkTurnover(kinds, cutoff);
 
         List<Scored> passed = new ArrayList<>();
         Map<String, SelectionResult.Evaluation> evaluations = new TreeMap<>();
         for (Symbol symbol : data.universe(cutoff)) {
-            Eval e = evaluate(symbol, criteria, asOf, cutoff, window);
+            Eval e = evaluate(symbol, criteria, asOf, cutoff, window, turnover);
             if (e.reasons.isEmpty()) {
                 passed.add(new Scored(symbol, e));
             } else {
@@ -148,7 +149,8 @@ public final class SelectionCalculator {
                 data.calendarDigest(),
                 kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().snapshotId() : null,
                 kinds.contains(Metric.Kind.DISCLOSURE) ? data.disclosures().orElseThrow().sha256() : null,
-                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, asOf) : null);
+                kinds.contains(Metric.Kind.DISCLOSURE) ? disclosuresThrough(criteria, asOf) : null,
+                turnover == null ? null : turnover.sha256(), turnover == null ? null : turnover.lastDate());
         return new SelectionResult(SelectionResult.Selection.of(profile), applyFrom, applyToFor(profile, applyFrom),
                 inputs, selected, List.copyOf(evaluations.values()));
     }
@@ -182,6 +184,27 @@ public final class SelectionCalculator {
                         + "보다 이릅니다: " + f.snapshotId());
             }
         }
+    }
+
+    /**
+     * 실제 거래대금 조건({@code turnover}, D-139)이 쓰는 입력을 본다. 일봉 스냅샷에 거래대금 파일이 없으면(D-133 전 스냅샷,
+     * {@code --without-turnover}) 근사({@code avg-turnover})로 조용히 바꾸지 않고 계산 전체를 멈춘다. 파일의 마지막 날짜가
+     * 기준 데이터일 c보다 이르면 {@code STALE_INPUT:}으로 시작하는 메시지로 멈춘다(실시간 모의 준비가 그날 입력 늦음으로 남김).
+     *
+     * @return 조건이 없으면 null
+     */
+    private SelectionData.TurnoverInput checkTurnover(Set<Metric.Kind> kinds, LocalDate cutoff) {
+        if (!kinds.contains(Metric.Kind.TURNOVER)) {
+            return null;
+        }
+        SelectionData.TurnoverInput in = data.turnover().orElseThrow(() -> new IllegalStateException(
+                "실제 거래대금 조건(turnover)이 있는데 일봉 스냅샷 " + data.barsSnapshotId()
+                        + "에 daily_turnover.csv가 없습니다. D-133 뒤 krx-daily로(--without-turnover 없이) 만든 스냅샷을 쓰세요"));
+        if (in.lastDate() == null || in.lastDate().isBefore(cutoff)) {
+            throw new IllegalStateException("STALE_INPUT: 실제 거래대금 파일 마지막 날짜 " + in.lastDate() + "이 기준 데이터일 "
+                    + cutoff + "보다 이릅니다: " + in.snapshotId());
+        }
+        return in;
     }
 
     /** 사유 코드: 공시 조건의 유형을 스냅샷이 받지 않음(ADR-012 3.2, strategy-researcher PR #191 m3). 계산 실패 메시지 머리말. */
@@ -263,7 +286,7 @@ public final class SelectionCalculator {
     }
 
     private Eval evaluate(Symbol symbol, SelectionCriteria c, LocalDate asOf, LocalDate cutoff,
-            List<LocalDate> window) {
+            List<LocalDate> window, SelectionData.TurnoverInput turnover) {
         Eval e = new Eval();
         Map<LocalDate, DailyBar> bars = new HashMap<>();
         for (DailyBar b : data.bars(symbol, window.get(0), cutoff)) {
@@ -287,7 +310,7 @@ public final class SelectionCalculator {
             e.reasons.add(FILTER_MIN_BAR_DAYS);
             return e;
         }
-        Context ctx = new Context(symbol, asOf, cutoff, window, bars);
+        Context ctx = new Context(symbol, asOf, cutoff, window, bars, turnover);
         for (Condition g : c.gates()) {
             Value v = g.metric() == Metric.DISCLOSURE_COUNT ? disclosureCount(ctx, g) : value(ctx, g.metric(), g.period());
             if (v.fallback) {
@@ -324,15 +347,18 @@ public final class SelectionCalculator {
         final LocalDate cutoff;
         final List<LocalDate> window;
         final Map<LocalDate, DailyBar> bars;
+        /** 실제 거래대금 입력. 조건이 없으면 null. */
+        final SelectionData.TurnoverInput turnover;
         FinancialsAt financials;
 
         Context(Symbol symbol, LocalDate applyFrom, LocalDate cutoff, List<LocalDate> window,
-                Map<LocalDate, DailyBar> bars) {
+                Map<LocalDate, DailyBar> bars, SelectionData.TurnoverInput turnover) {
             this.symbol = symbol;
             this.applyFrom = applyFrom;
             this.cutoff = cutoff;
             this.window = window;
             this.bars = bars;
+            this.turnover = turnover;
         }
 
         FinancialsAt financials() {
@@ -373,6 +399,7 @@ public final class SelectionCalculator {
             case VOLUME_RATIO -> volumeRatio(ctx, period);
             case RETURN -> periodReturn(ctx, period);
             case AVG_TURNOVER -> avgTurnover(ctx, period);
+            case TURNOVER -> actualTurnover(ctx, period);
             case DAY_RANGE -> dayRange(ctx);
             case CLOSE_STRENGTH -> closeStrength(ctx);
             case VOLUME_SPIKE -> volumeSpike(ctx, period);
@@ -447,6 +474,23 @@ public final class SelectionCalculator {
         BigDecimal sum = BigDecimal.ZERO;
         for (DailyBar b : bars) {
             sum = sum.add(b.close().multiply(BigDecimal.valueOf(b.volume())), WIDE);
+        }
+        return Value.of(sum.divide(BigDecimal.valueOf(w), WIDE), false);
+    }
+
+    /**
+     * c에서 끝나는 w거래일 실제 거래대금(KRX {@code ACC_TRDVAL}, 원, 수정 안 함) 합 ÷ w(D-139). 거래정지일 0원 행도 평균에 든다
+     * (정지가 길면 평균이 작아져 유동성 조건에서 떨어지는 것이 맞는 방향이다). w거래일 중 하루라도 그 종목 행이 없으면
+     * {@code NO_DATA}다(상장 전, 그날 일봉을 쓰지 않음, KRX가 값을 주지 않음). 일봉 행이 있는지는 보지 않는다.
+     */
+    private Value actualTurnover(Context ctx, int w) {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (LocalDate d : tail(ctx.window, w)) {
+            OptionalLong v = ctx.turnover.turnover(ctx.symbol, d);
+            if (v.isEmpty()) {
+                return Value.missing(NO_DATA, false);
+            }
+            sum = sum.add(BigDecimal.valueOf(v.getAsLong()), WIDE);
         }
         return Value.of(sum.divide(BigDecimal.valueOf(w), WIDE), false);
     }

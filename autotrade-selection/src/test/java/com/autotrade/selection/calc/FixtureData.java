@@ -44,6 +44,43 @@ final class FixtureData implements SelectionData {
     LocalDate financialsCollected = TO;
     /** 공시 입력(disclosure-count). 기본은 없음. */
     Disclosures disclosures;
+    /** 실제 거래대금 입력(turnover, D-139). 기본은 없음(D-133 전 스냅샷). */
+    Turnover turnover;
+
+    /** 손 계산용 실제 거래대금 입력: 종목·날짜 → 원. 마지막 날짜는 따로 정한다(기본은 들어간 행 중 가장 늦은 날). */
+    static final class Turnover implements TurnoverInput {
+        final Map<Symbol, NavigableMap<LocalDate, Long>> rows = new TreeMap<>();
+        LocalDate lastDate;
+        String snapshotId = "krx-daily-test";
+
+        Turnover put(String code, LocalDate date, long won) {
+            rows.computeIfAbsent(sym(code), k -> new TreeMap<>()).put(date, won);
+            lastDate = lastDate == null || date.isAfter(lastDate) ? date : lastDate;
+            return this;
+        }
+
+        @Override
+        public String snapshotId() {
+            return snapshotId;
+        }
+
+        @Override
+        public String sha256() {
+            return "e".repeat(64);
+        }
+
+        @Override
+        public LocalDate lastDate() {
+            return lastDate;
+        }
+
+        @Override
+        public OptionalLong turnover(Symbol symbol, LocalDate date) {
+            NavigableMap<LocalDate, Long> m = rows.get(symbol);
+            Long v = m == null ? null : m.get(date);
+            return v == null ? OptionalLong.empty() : OptionalLong.of(v);
+        }
+    }
 
     /** 손 계산용 공시 입력: 유형별 수집 구간 하나, 종목·유형·접수일 목록(정정·코드 없는 행은 넣지 않은 것으로 본다). */
     static final class Disclosures implements DisclosureInput {
@@ -253,6 +290,11 @@ final class FixtureData implements SelectionData {
     @Override
     public Optional<DisclosureInput> disclosures() {
         return Optional.ofNullable(disclosures);
+    }
+
+    @Override
+    public Optional<TurnoverInput> turnover() {
+        return Optional.ofNullable(turnover);
     }
 
     @Override

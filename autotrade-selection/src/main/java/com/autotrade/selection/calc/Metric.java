@@ -26,6 +26,11 @@ public enum Metric {
     RETURN("return", Kind.BARS, Param.WINDOW),
     /** 직전 {@code window}거래일 평균 거래대금(원가격 종가 × 거래량). */
     AVG_TURNOVER("avg-turnover", Kind.BARS, Param.WINDOW),
+    /**
+     * 직전 {@code window}거래일 평균 <b>실제</b> 거래대금: c에서 끝나는 w거래일 KRX {@code ACC_TRDVAL}(원, 수정 안 함) 합 ÷ w.
+     * 거래정지일 0원도 평균에 든다. 일봉 스냅샷의 {@code daily_turnover.csv}(D-133)를 읽는다(D-139). 근사 {@link #AVG_TURNOVER}는 그대로다.
+     */
+    TURNOVER("turnover", Kind.TURNOVER, Param.WINDOW),
     /** 직전 거래일 변동폭: (c 수정 고가 − c 수정 저가) ÷ c−1 수정 종가(ADR-012 3.2, 단타). */
     DAY_RANGE("day-range", Kind.BARS, Param.NONE),
     /** 직전 거래일 종가 강도: (c 종가 − c 저가) ÷ (c 고가 − c 저가). 1이면 고가 마감(ADR-012 3.2, 단타). */
@@ -47,8 +52,11 @@ public enum Metric {
     /** 장중 변동폭: (구간 최고 체결가 − 최저 체결가) ÷ 구간 첫 체결가. 체결이 없으면 NO_DATA({@code INTRADAY_AT}만). */
     SESSION_RANGE("session-range", Kind.SESSION, Param.NONE);
 
-    /** 지표가 읽는 입력. {@link #SESSION}은 일봉 스냅샷이 아니라 그날 입력 기록의 체결(장중 순위 선정 전용)이다. */
-    public enum Kind { BARS, SHARES, FINANCIAL, DISCLOSURE, SESSION }
+    /**
+     * 지표가 읽는 입력. {@link #SESSION}은 일봉 스냅샷이 아니라 그날 입력 기록의 체결(장중 순위 선정 전용)이다. {@link #TURNOVER}는
+     * 일봉 스냅샷 안의 선택 파일 {@code daily_turnover.csv}(D-133)다.
+     */
+    public enum Kind { BARS, SHARES, FINANCIAL, DISCLOSURE, SESSION, TURNOVER }
 
     /** 지표의 기간 파라미터. */
     public enum Param { NONE, WINDOW, YEARS }

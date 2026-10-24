@@ -13,6 +13,7 @@ import com.autotrade.marketdata.rules.KrxMarketRules;
 import com.autotrade.selection.calc.SelectionCalculator;
 import com.autotrade.selection.calc.SnapshotDisclosures;
 import com.autotrade.selection.calc.SnapshotSelectionData;
+import com.autotrade.selection.calc.SnapshotTurnover;
 import com.autotrade.sim.cost.CostModel;
 import com.autotrade.sim.cost.CostModels;
 import com.autotrade.sim.daily.SnapshotTradingDays;
@@ -27,6 +28,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 수집 스냅샷 폴더에서 읽은 일봉 실험 입력 묶음. 조합 실험({@link CombinationExperiment})과 워크포워드 판정
@@ -104,8 +106,13 @@ public record SnapshotInputs(Path barsDir, SnapshotDailyBarSource bars, LocalDat
         }
         gate.check();
         SnapshotTradingDays.Derived days = SnapshotTradingDays.derive(bars, bars.snapshotId(), market, first, last, calendar);
-        SnapshotSelectionData selectionData = new SnapshotSelectionData(market, bars, shares, financials, disclosures, days.days(),
-                days.digest(), calendar.zone());
+        // 실제 거래대금 파일(D-133)은 turnover 조건이 있는 선정이 처음 계산될 때만 읽는다(D-139). 없으면 그 선정만 계산 실패
+        Supplier<SnapshotTurnover> turnover = SnapshotTurnover.present(manifest) ? () -> {
+            log.accept("실제 거래대금 읽기: " + barsDir.resolve(SnapshotTurnover.FILE));
+            return SnapshotTurnover.load(barsDir);
+        } : null;
+        SnapshotSelectionData selectionData = new SnapshotSelectionData(market, bars, shares, financials, disclosures, turnover,
+                days.days(), days.digest(), calendar.zone());
         return new SnapshotInputs(barsDir, bars, first, last, shares, financials, disclosures, days, selectionData, calendar);
     }
 

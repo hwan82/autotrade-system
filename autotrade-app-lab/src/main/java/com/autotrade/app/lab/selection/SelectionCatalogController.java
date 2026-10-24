@@ -32,7 +32,7 @@ public class SelectionCatalogController {
     }
 
     /**
-     * @param kind 읽는 입력(BARS 일봉, SHARES 상장주식수, FINANCIAL 재무, DISCLOSURE 공시)
+     * @param kind 읽는 입력(BARS 일봉, SHARES 상장주식수, FINANCIAL 재무, DISCLOSURE 공시, SESSION 그날 입력 기록, TURNOVER 일봉 스냅샷의 실제 거래대금 파일)
      * @param param 기간 파라미터(NONE, WINDOW 거래일 {@code .window}, YEARS 사업연도 {@code .years})
      */
     public record MetricView(String key, String kind, String param) {

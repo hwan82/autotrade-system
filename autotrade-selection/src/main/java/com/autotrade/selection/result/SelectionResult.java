@@ -125,25 +125,42 @@ public record SelectionResult(
      * @param disclosuresSnapshotId 공시 조건이 없으면 null(그때 공시 칸 전체가 null이고 파일에 {@code disclosures} 키를 쓰지 않는다.
      *     공시 지표 전에 만든 결과의 내용 해시가 바뀌지 않게, ADR-012 3.2·D-123)
      * @param disclosuresCoveredThrough 공시 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날(기준 데이터일 이상)
+     * @param turnoverSha256 실제 거래대금 조건({@code turnover})이 있을 때만 일봉 스냅샷 {@code daily_turnover.csv}의 SHA-256(D-139).
+     *     없으면 null이고 파일에 {@code turnover} 키를 쓰지 않는다(D-139 전 결과의 내용 해시 불변). 스냅샷 ID는 일봉과 같아 따로 두지 않는다
+     * @param turnoverLastDate 그 파일의 가장 늦은 날짜(기준 데이터일 이상)
      */
     public record Inputs(
             String barsSnapshotId, String barsSha256, LocalDate barsLastTradingDate,
             String sharesSnapshotId, LocalDate sharesAsOfDate,
             String financialsSnapshotId, String financialsSha256, String financialsLastCollectedAt,
-            String calendarDigest, String disclosuresSnapshotId, String disclosuresSha256, LocalDate disclosuresCoveredThrough) {
+            String calendarDigest, String disclosuresSnapshotId, String disclosuresSha256, LocalDate disclosuresCoveredThrough,
+            String turnoverSha256, LocalDate turnoverLastDate) {
 
         /** 공시 입력이 없는 결과. */
         public Inputs(String barsSnapshotId, String barsSha256, LocalDate barsLastTradingDate, String sharesSnapshotId,
                 LocalDate sharesAsOfDate, String financialsSnapshotId, String financialsSha256, String financialsLastCollectedAt,
                 String calendarDigest) {
             this(barsSnapshotId, barsSha256, barsLastTradingDate, sharesSnapshotId, sharesAsOfDate, financialsSnapshotId,
-                    financialsSha256, financialsLastCollectedAt, calendarDigest, null, null, null);
+                    financialsSha256, financialsLastCollectedAt, calendarDigest, null, null, null, null, null);
+        }
+
+        /** 실제 거래대금 입력이 없는 결과(D-139 전 호출 모양). */
+        public Inputs(String barsSnapshotId, String barsSha256, LocalDate barsLastTradingDate, String sharesSnapshotId,
+                LocalDate sharesAsOfDate, String financialsSnapshotId, String financialsSha256, String financialsLastCollectedAt,
+                String calendarDigest, String disclosuresSnapshotId, String disclosuresSha256,
+                LocalDate disclosuresCoveredThrough) {
+            this(barsSnapshotId, barsSha256, barsLastTradingDate, sharesSnapshotId, sharesAsOfDate, financialsSnapshotId,
+                    financialsSha256, financialsLastCollectedAt, calendarDigest, disclosuresSnapshotId, disclosuresSha256,
+                    disclosuresCoveredThrough, null, null);
         }
 
         public Inputs {
             if ((disclosuresSnapshotId == null) != (disclosuresSha256 == null)
                     || (disclosuresSnapshotId == null) != (disclosuresCoveredThrough == null)) {
                 throw new IllegalArgumentException("공시 스냅샷 ID·SHA-256·수집 끝날은 함께 있거나 함께 없어야 합니다");
+            }
+            if ((turnoverSha256 == null) != (turnoverLastDate == null)) {
+                throw new IllegalArgumentException("실제 거래대금 SHA-256과 마지막 날짜는 함께 있거나 함께 없어야 합니다");
             }
             Objects.requireNonNull(barsSnapshotId, "barsSnapshotId");
             Objects.requireNonNull(barsSha256, "barsSha256");
@@ -176,6 +193,9 @@ public record SelectionResult(
             if (disclosuresSnapshotId != null) {
                 m.put("disclosures", Map.of("snapshot_id", disclosuresSnapshotId, "sha256", disclosuresSha256,
                         "covered_through", disclosuresCoveredThrough.toString()));
+            }
+            if (turnoverSha256 != null) {
+                m.put("turnover", Map.of("sha256", turnoverSha256, "last_date", turnoverLastDate.toString()));
             }
             return m;
         }
