@@ -74,3 +74,4 @@
 | 2026-10-22 | PR #225 검토해줘 | docs/reviews/pr-225/qa.md | 실전 관련 PR(보호 경로 수집기 `KisNewsClient`·`ApiCaller` 수정, `CollectorSecrets`·`CollectorMain` 보호 경로·CODEOWNERS 추가): D-136 후속 고침(PR #222 QA Q1~Q4·R2·R3, risk-ops 재검토 R1·R2). 브랜치 `claude/project-thread-jhpj43` |
 | 2026-10-23 | PR #228 검토해줘 | docs/reviews/pr-228/qa.md | 실전 관련 PR(보호 경로 수집기 `KisNewsClient` 수정, EGW00215 안내): D-136 후속 고침 2(PR #225 QA Q1~Q3·R2, architect 남은 권고, risk-ops R1). 브랜치 `claude/project-thread-jhpj43` |
 | 2026-10-24 | PR #235 검토해줘 | docs/reviews/pr-235/qa.md | 실전 관련 PR(문서만, 코드 무변경): 7단계 준비 계획, D-140 사용자 결정 6건(PANIC SELL 규칙 Q-016·Q-017·Q-057·Q-058, 장애 테스트 3-R Q-018, 첫 실전 증권사 Q-061), broker-and-fault-design.md 7장 3-R, Q-059·Q-060 등록. 브랜치 `claude/project-thread-ousa4v` |
+| 2026-10-24 | PR #235 재검토해줘 | docs/reviews/pr-235/qa.md | 실전 관련 PR(문서만): QA 1차 발견 1(3-R OS 한계 분기에서 화면 명령이 첫 엔진에 닿거나 "실전 상태 확인 불가" 표시)과 권고 Q1~Q6 반영(53d155b), risk-ops 재검토 (2) 승인. 브랜치 `claude/project-thread-ousa4v` |
