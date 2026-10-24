@@ -45,6 +45,10 @@ class StageSixRegistrationTest {
         LivePlan main = plan(MAIN);
         assertThat(trial.profiles()).isEqualTo(main.profiles());
         assertThat(trial.blacklist()).isEqualTo(main.blacklist());
+        // LIVE00(시험 운용, 끝남)은 처음 등록(D-113) 그대로: 1,000만 원, 대형주 10종목
+        assertThat(trial.seedCapital()).isEqualTo(Money.of(10_000_000L, com.autotrade.domain.market.Market.KRX.currency()));
+        assertThat(trial.boards().keySet()).containsExactlyInAnyOrder(
+                "005930", "000660", "035420", "005380", "373220", "068270", "105560", "035720", "247540", "028300");
         // D-138(운용 시작 전 사용자 결정): LIVE01만 시드머니 100만 원과 종가 5만 원 이하 종목으로 바꿨다. LIVE00은 그대로 둔다
         assertThat(main.seedCapital()).isEqualTo(Money.of(1_000_000L, com.autotrade.domain.market.Market.KRX.currency()));
         assertThat(main.boards().keySet()).containsExactlyInAnyOrder(
