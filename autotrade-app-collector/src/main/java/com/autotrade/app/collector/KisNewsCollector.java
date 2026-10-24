@@ -64,7 +64,7 @@ final class KisNewsCollector {
      * 걸음 하나의 결과. {@code complete}가 거짓이면 {@code reason}에 까닭. {@code crowdedSeconds}는 한 쪽이 모두 같은 초의 행이라
      * 그 초의 나머지 행을 받았는지 알 수 없이 1초 건너뛴 횟수. {@code midnightCuts}는 쪽 끝이 00:00:00 행이었는데 커서 000000을
      * 보낼 수 없어(시각 없음 = 지금으로 읽힘 `[가정]`) 그 초의 나머지 행을 확인하지 못하고 전날로 넘어간 횟수(PR #222 QA Q4). 둘 다
-     * 품질 리포트에 적고 0이 정상이다.
+     * 품질 리포트에 적고 0이 정상이다. 자정 셈은 넉넉하게 센다(쪽이 마침 00:00:00에서 끝나 실제로는 다 받았어도 셈).
      */
     record Walk(String kind, LocalDateTime top, LocalDateTime reached, boolean complete, String reason, int pages,
             int fresh, int crowdedSeconds, int midnightCuts, String stopped) {}
@@ -234,10 +234,16 @@ final class KisNewsCollector {
                     crowded++; // 한 쪽이 모두 같은 초인데 커서가 그 초를 넘어간다: 그 초의 나머지는 받았는지 알 수 없다
                 }
                 if (next.toLocalTime().equals(LocalTime.MIDNIGHT)) {
-                    next = next.minusSeconds(1); // 시각 000000은 "시각 없음"(= 그날 지금)으로 읽힌다 `[가정]` 2차 자료
-                    if (pageOldest.toLocalTime().equals(LocalTime.MIDNIGHT)) {
-                        midnightCuts++; // 00:00:00 행이 이 쪽 뒤에 더 있어도 받을 커서가 없다: 셈해서 알린다
-                    }
+                    // 시각 000000은 "시각 없음"(= 그날 지금)으로 읽힌다 `[가정]` 2차 자료. 그날(커서와 다른 날일 수 있음) 00:00:00 행을
+                    // 아직 한 번도 보지 못했으면 000001로 한 번 더 받아 그 행을 본다(PR #225 QA Q1). 아니면 전날 23:59:59로 넘어간다
+                    LocalDateTime dayStart = next;
+                    LocalDateTime oneSecond = dayStart.plusSeconds(1);
+                    next = current.isAfter(oneSecond) && pageOldest.isAfter(dayStart) ? oneSecond : dayStart.minusSeconds(1);
+                }
+                if (next.toLocalDate().isBefore(pageOldest.toLocalDate())) {
+                    // 전날로 넘어가는데 이 쪽이 전날 행까지 닿지 않았다(쪽이 그날 00:00:00 이후 행으로 가득 참): 그날 00:00:00 행을 다
+                    // 받았는지 확인할 커서가 없다. 셈해서 알린다
+                    midnightCuts++;
                 }
                 if (next.isBefore(stopAt)) {
                     complete = true; // 멈출 시각과 같은 초의 행을 다 받았다(다음 커서가 그보다 옛 시각)

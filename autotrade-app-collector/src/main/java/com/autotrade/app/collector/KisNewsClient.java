@@ -57,7 +57,7 @@ public final class KisNewsClient {
 
         KisRejected(String code) {
             super("한국투자 " + TR_ID + " 거절: " + code
-                    + ("EGW00201".equals(code) ? " (초당 호출 한도 초과, --interval-ms를 늘려 다시 실행)" : ""));
+                    + ("EGW00201".equals(code) || "EGW00215".equals(code) ? " (초당 호출 한도 초과, --interval-ms를 늘려 다시 실행)" : ""));
             this.code = code;
         }
 

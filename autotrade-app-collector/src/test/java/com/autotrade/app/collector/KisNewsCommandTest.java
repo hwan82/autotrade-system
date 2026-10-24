@@ -147,4 +147,31 @@ class KisNewsCommandTest {
         CollectorMain.run(args("kis-news"), morning, server(), waits::add, CollectorMainTest.PLENTY);
         assertThat(waits).isNotEmpty().allMatch(w -> w == CollectorMain.KIS_NEWS_INTERVAL_MS);
     }
+
+    @Test
+    void 거른_행과_자정_확인_못_함이_0이_아니면_콘솔과_리포트에_그_수가_찍힌다() throws IOException {
+        // PR #225 QA Q2·architect 남은 권고: 셈 값이 리포트·콘솔까지 그대로 가는지(배선)
+        writeKeys();
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(List.of(row("20261021", "063000", "N1", "005930"),
+                row("20261021", "93010", "BAD", "005930"), row("20261021", "000000", "M1", "005930"),
+                row("20261021", "000000", "M2", "005930"), row("20261021", "000000", "M3", "005930"),
+                row("20261020", "235000", "N0", "005930")), 2));
+        PrintStream old = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+        try {
+            assertThat(run(morning, http, "kis-news")).isZero();
+        } finally {
+            System.setOut(old);
+        }
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("날짜·시각을 읽을 수 없어 거른 행 1건");
+        Path root = config.resolve("snapshots").resolve("kis-news");
+        String id;
+        try (Stream<Path> st = Files.list(root)) {
+            id = st.map(p -> p.getFileName().toString()).filter(n -> n.startsWith("kis-news-")).findFirst().orElseThrow();
+        }
+        String text = Files.readString(reports.resolve(id + ".md"));
+        assertThat(text).contains("| 날짜·시각을 읽을 수 없어 거른 행(0이 정상) | 1 |");
+        assertThat(text).containsPattern("\\| 지금 \\|[^\\n]*\\| 0 \\| 1 \\| - \\|"); // 같은 초 0, 자정 확인 못 함 1
+    }
 }

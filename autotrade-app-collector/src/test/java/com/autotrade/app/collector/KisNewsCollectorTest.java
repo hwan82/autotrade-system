@@ -65,6 +65,7 @@ class KisNewsCollectorTest {
         assertThat(http.calls.getFirst().getRawQuery()).contains("FID_INPUT_DATE_1=20261021&FID_INPUT_HOUR_1=&");
         // 다음 쪽 커서 = 앞 쪽의 가장 옛 행 시각(겹침은 일련번호로 거름)
         assertThat(KisNewsFixtures.param(http.calls.get(1), "FID_INPUT_HOUR_1")).isEqualTo("050000");
+        assertThat(http.calls).hasSize(5); // 걸음의 호출 수: 06:30·05:00·03:30·02:00·00:30에서 시작하는 다섯 쪽(PR #225 QA Q3)
     }
 
     @Test
@@ -230,6 +231,7 @@ class KisNewsCollectorTest {
         KisNewsCollector.Walk w = r.walks().getFirst();
         assertThat(w.midnightCuts()).isEqualTo(1);
         assertThat(w.complete()).isTrue();
+        assertThat(http.calls).hasSize(1); // 멈출 시각을 넘은 커서로 더 부르지 않는다(PR #225 QA Q3)
         assertThat(http.calls).noneMatch(u -> "000000".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
     }
 
@@ -275,5 +277,61 @@ class KisNewsCollectorTest {
         KisNewsSnapshotBuilder.build(cache, List.of(new KisNewsCollector.Interval(LocalDateTime.parse("2026-10-21T00:30:00"),
                 LocalDateTime.parse("2026-10-21T06:30:00"))), out::add);
         assertThat(out).extracting(row -> row.get(1)).contains("C30", "C390").doesNotContain("A23", "B23");
+    }
+
+    @Test
+    void 새_행_없는_쪽이_00시_00분_01초에서_끝나면_000001로_한_번_더_받아_00시_행을_본다() throws IOException {
+        // PR #225 QA Q1·S3: 앞 실행(00:00:05) 뒤에 00:00:00 행 Z가 실렸다. 쪽 크기 2
+        List<KisNewsFixtures.Row> rows = new ArrayList<>();
+        for (int sec = 1; sec <= 4; sec++) {
+            rows.add(row("20261021", String.format("00000%d", sec), "T" + sec, "005930"));
+        }
+        rows.add(row("20261020", "230000", "Y1", "005930"));
+        rows.add(row("20261020", "220000", "Y2", "005930"));
+        collector(new FakeHttp(KisNewsFixtures.server(rows, 2)), seoul("2026-10-21T00:00:05"), 100).collect(null);
+        rows.add(row("20261021", "000000", "Z", "005930"));
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(rows, 2));
+        KisNewsCollector.Result r = collector(http, seoul("2026-10-21T00:05:00"), 100).collect(null);
+        assertThat(KisNewsCollector.readDay(cache.resolve("kis-news"), LocalDate.of(2026, 10, 21)))
+                .extracting(KisNewsClient.Headline::serial).contains("Z");
+        assertThat(http.calls).anyMatch(u -> "000001".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
+        assertThat(r.walks().getFirst().complete()).isTrue();
+    }
+
+    @Test
+    void 쪽이_커서보다_앞선_날의_00시_행에서_끝나도_000000을_보내지_않고_센다() throws IOException {
+        // PR #228 architect: 커서는 10-21인데 쪽이 10-20 00:00:00 행에서 끝난다. 10-20의 000000을 보내면 안 된다
+        Path root = cache.resolve("kis-news");
+        Files.createDirectories(root);
+        Files.writeString(root.resolve(KisNewsCollector.COVERAGE_FILE), """
+                {"intervals":[{"from":"2026-10-19T00:00:00","to":"2026-10-19T12:00:00"}],"floor":null}""");
+        List<KisNewsFixtures.Row> rows = List.of(row("20261020", "000000", "A1", "005930"), row("20261020", "000000", "A2", "005930"),
+                row("20261019", "230000", "Y", "005930"), row("20261019", "110000", "Q", "005930"));
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(rows, 2));
+        KisNewsCollector.Result r = collector(http, seoul("2026-10-21T07:00:00"), 100).collect(null);
+        assertThat(http.calls).noneMatch(u -> "000000".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")));
+        assertThat(KisNewsFixtures.param(http.calls.get(1), "FID_INPUT_DATE_1")).isEqualTo("20261019");
+        assertThat(KisNewsFixtures.param(http.calls.get(1), "FID_INPUT_HOUR_1")).isEqualTo("235959");
+        assertThat(r.walks().getFirst().midnightCuts()).isEqualTo(1);
+        assertThat(KisNewsCollector.readDay(cache.resolve("kis-news"), LocalDate.of(2026, 10, 19)))
+                .extracting(KisNewsClient.Headline::serial).contains("Y");
+    }
+
+    @Test
+    void 자정_1초_행이_한_쪽보다_많으면_000001을_되풀이하지_않고_자정을_센다() throws IOException {
+        // PR #228 risk-ops R1: 000001로 다시 받아도 그 초 행으로 가득 차면 00:00:00 행을 볼 수 없다. 같은 커서를 되풀이해
+        // 호출 몫을 쓰지 않고, 전날로 넘어가며 셈해서 알린다
+        List<KisNewsFixtures.Row> rows = new ArrayList<>();
+        rows.add(row("20261021", "000005", "F", "005930"));
+        for (int i = 0; i < 4; i++) {
+            rows.add(row("20261021", "000001", "S" + i, "005930"));
+        }
+        rows.add(row("20261021", "000000", "Z", "005930"));
+        rows.add(row("20261020", "230000", "Y", "005930"));
+        FakeHttp http = new FakeHttp(KisNewsFixtures.server(rows, 2));
+        KisNewsCollector.Result r = collector(http, seoul("2026-10-21T07:00:00"), 100).collect(null);
+        assertThat(http.calls.stream().filter(u -> "000001".equals(KisNewsFixtures.param(u, "FID_INPUT_HOUR_1")))).hasSizeLessThanOrEqualTo(2);
+        assertThat(r.walks().getFirst().midnightCuts()).isGreaterThanOrEqualTo(1);
+        assertThat(r.walks().getFirst().complete()).isTrue();
     }
 }
