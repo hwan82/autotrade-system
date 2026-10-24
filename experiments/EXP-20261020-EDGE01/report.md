@@ -2,6 +2,7 @@
 
 - 판정: **탈락**. EDGE01은 **참고 검사**다. KRX 일봉이 장 전에 게시되지 않아 LIVE02 C1·C2에는 원래 판이 아니라 하루 늦춘 판 `kr-intraday-hot-lag1@1`이 들어가고, 그 판정은 **EDGE04**(`EXP-20261022-EDGE04`)로 한다([D-137](../../docs/decisions/D-137-pre-open-daily-lag1.md) 6번, [LIVE02 계획](../../docs/strategy/live02-preregistration-plan.md) 3.3). 원래 판 (다)는 LIVE02 판정 대상이 아니었고, 이 결과로 바뀌는 것은 없다.
 - 실행: 사용자 PC, 결과 파일은 2026-10-24에 받음(실행 날짜는 파일에 없음). 커밋 `0a66d55`(main), `code-dirty: false`, 결정론 확인 `same`. 등록 파일 SHA-256 `4d26c5c0…`는 커밋된 `edge.yaml`과 같다 `[사실]`(`inputs.yaml`, `sha256sum`).
+- 재실행(2026-10-24 받음): 커밋 `c9125f7`(EDGE04와 같은 커밋)로 다시 돌린 결과 다섯 파일 중 `inputs.yaml`의 `code-commit` 줄만 다르고 `results.md`·`windows.tsv`·`days.tsv`·`null.tsv`는 바이트까지 같다 `[사실]`(`cmp`). 원자료는 처음 받은 `0a66d55` 실행 그대로 둔다.
 - 원자료: [results.md](results.md), [windows.tsv](windows.tsv), [days.tsv](days.tsv), [null.tsv](null.tsv), [inputs.yaml](inputs.yaml). 이 리포트는 해석만 덧붙인다.
 - 이 결과는 투자 자문이 아니다.
 
