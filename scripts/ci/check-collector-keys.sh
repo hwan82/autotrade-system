@@ -4,6 +4,10 @@
 # check-python-collectors.sh는 collectors/python만 보므로, 키를 실제로 다루는 Java 코드·문서·테스트를 여기서 함께 본다
 # (QA PR #39 R4, PR #222 QA R2, PR #225 QA R2: 대시 없는 appkey·appsecret, 작은따옴표, 값 안 -·_). 자리표시자(<...>)와 짧은 테스트 값은 허용(한국투자 키는 24자 미만 허용, 실제 앱키는 36자 `[가정]`). 검토 원문(docs/reviews)은 인용이라 뺀다.
 set -euo pipefail
+# 패턴이 좁아지면 알 수 있게 자체 시험을 먼저 돌린다(PR #228 QA R1). 자체 시험이 이 스크립트를 부를 때는 COLLECTOR_KEYS_SELF_TEST=0
+if [ "${COLLECTOR_KEYS_SELF_TEST:-1}" != 0 ]; then
+  "$(cd "$(dirname "$0")" && pwd)/test-check-collector-keys.sh"
+fi
 patterns=(
   'crtfc_key["'"'"']?\s*[:=]\s*["'"'"']?[A-Za-z0-9]{8,}'
   '"crtfc-key"\s*:\s*"[A-Za-z0-9]{8,}"'
