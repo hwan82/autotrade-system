@@ -37,3 +37,36 @@
 
 ## 판정
 수정 필요(A-1 3-R 5-2 감시 알림 기대값, A-2 N3 합격 기준, A-3 `docs/qa/pending.md` 요청 줄, B1 확인 못 함: 재검토 때 검토자가 `./gradlew build`를 다시 직접 실행한다)
+
+## 재검토 2026-10-24
+- 대상: PR #238 / 커밋 079c7993(1차 검토 40a50a85 이후 반영 커밋) / main 대비 diff(`git diff origin/main...HEAD`, 7파일 +230 −2: 1차의 4파일에 `docs/qa/pending.md` +1, `docs/reviews/pr-238/architect.md`·`risk-ops.md` 검토 원문 추가). 반영 커밋 자체는 `docs/qa/pending.md` +1, `docs/runbooks/stage-7-real-trading-tests.md` +11 −7
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (별도 worktree `/tmp/claude-0/arch-238-re`, HEAD 079c7993): 4회(1회 + 재시도 3회) 모두 `:build-logic:compilePluginsBlocks`에서 실패. `kotlin-scripting-jvm-2.0.21.jar`를 `repo.maven.apache.org`에서 찾지 못함(같은 URL을 `curl`로 직접 받아도 404). 컴파일·테스트 단계에 닿지 못해 빌드 통과 여부는 **다시 확인 못 함**.
+  - 참고(판정 근거 아님): GitHub check-runs로 본 079c7993 CI는 `DB schema (PostgreSQL 16)`·`Secret scan and collector boundary` success, `Gradle build`·`Lab screens (Playwright)`는 이 검토 시점 in_progress.
+  - 반영 내용과 코드 직접 대조(이 브랜치 HEAD 기준): `Watchdog.java:232-247`(STALE→"멈춤", ALIVE는 STALE·UNREADABLE에서 올 때만 "하트비트 회복", ABSENT는 이전 상태가 있을 때 "종료"(정상 종료)), `HeartbeatWriter.java:121-131`(`close()`에서 `Files.deleteIfExists`, 131행), `WatchdogSettingsTest#파일이_없으면_기본값이다`(점검 주기 5초, `heartbeatStale` 15초 → N3b "약 15초"는 15~20초 범위로 맞음). `scripts/ci/protected-paths.txt`에 `docs/reviews/` 경로 없음(새 기록 위치가 보호 경로와 겹치지 않음). `docs/qa/pending.md` 새 줄의 형식(요청일·요청 문구·보고서 위치·대상)이 앞 줄들과 같음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 확인 못 함 | 위 "직접 실행한 것": Maven 저장소 404로 `./gradlew build`가 `:build-logic`에서 멈춤. 1차와 같은 환경 원인. 이 PR은 `.md`만 바꾸고 빌드 입력이 바뀌지 않았지만, 검토 규칙상 검토자가 직접 돌린 결과가 아니므로 통과로 적지 않는다 |
+| B2 | 해당 없음 | 운영 코드·빌드 스크립트·ArchUnit 규칙 변경 없음(diff 7파일 모두 `docs/`) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음. P4는 시작 옵션 추가를 "다른 실전 관련 PR에서 할 일"로 추적표에만 둠(이 PR에서 바꾸지 않음) |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 코드 없음 |
+| B6 | 해당 없음 | 새 코드 동작 없음, 테스트 삭제·건너뜀 없음 |
+| B7 | 해당(risk-ops 검토 필요) | 장애 대응 절차서·D-140 후속 문구를 바꾸는 실전 관련 PR. `docs/reviews/pr-238/risk-ops.md` 1차 판정은 승인(40a50a85 이후의 반영 079c7993에 대한 risk-ops 재검토는 이 검토 시점 브랜치에 없음). 독립 QA 요청 줄은 이제 있음(`docs/qa/pending.md` 79행). 사용자 머지 대상 |
+| B8 | 통과 | diff 전체에 키·계좌번호·토큰 없음. 계좌는 별칭만 |
+
+## 1차 발견 처리 확인
+- **A-1 해결.** 6장 5-2가 1차 확인을 프로세스 조회 0줄로 두고, 감시 알림을 보조 신호로 낮췄다. Ctrl+C면 "engine 종료", 강제 종료면 약 15초 뒤 "engine 멈춤", 두 번째 엔진이 같은 하트비트 파일을 쓰면 알림이 없을 수 있음, "알림 유무로 판정하지 않는다"까지 적었다. 위 코드 대조와 맞다.
+- **A-2 해결.** N3이 N3a(Ctrl+C → 파일 삭제 → "종료", 재기동 시 회복 알림 없음)와 N3b(`Stop-Process` → "멈춤" → 재기동 시 "하트비트 회복")로 나뉘었고, 인용 행(`HeartbeatWriter.java:131`, `Watchdog.java:237-240`, `242-245`)이 이 브랜치 코드와 일치한다. 1차에 적은 "창 닫기(CTRL_CLOSE_EVENT)는 어느 쪽이 될지 정해지지 않음"은 N3a가 창 닫기가 아닌 Ctrl+C로 바꿔 적어 피했다.
+- **A-3 해결.** `docs/qa/pending.md`에 "PR #238 검토해줘 | docs/reviews/pr-238/qa.md | 실전 관련 PR(…)" 줄이 이 PR 브랜치에 들어갔다(지침 11장).
+- **A-4(권고) 반영.** P4 칸에 "[사실] 지금 저장소 어디에도 이 옵션이 없어 지금 설치본은 불합격"과 넣는 작업(보호 경로, 실전 관련 PR, 묶음 I 시행 전)을 적고 8장 추적표에 행을 더했다.
+- **A-5(권고) 반영.** 시험 기록 위치 `[가정]`을 `docs/reviews/stage-7-fault-tests/`로 옮기고 `docs/qa/` 밖에 두는 이유를 적었다. `docs/reviews/README.md`의 "위치" 목록에는 이 폴더가 없으므로 묶음 I 시행 PR에서 위치를 확정할 때 README 위치 목록에도 한 줄 더할 것(참고, 이 PR 범위 밖).
+- risk-ops R1·R2 반영분(5·8번 "E5 결정 전 잠정", 3-R PROTECTIVE 계좌 시행)은 원본(`broker-and-fault-design.md` 7장 3번 행 (a) 분기의 OPEN·PROTECTIVE)과 어긋나지 않고, 합격 기준을 느슨하게 하지 않으며 오히려 "E5 결정 없이는 조건을 채운 것으로 치지 않는다"로 엄격해졌다. 7장 E5 행·8장 추적표 행과도 서로 맞다.
+
+## 점검표 밖 발견
+- 새 결함 없음. 반영 커밋이 고친 곳 밖의 본문은 1차 검토 때와 같다(`git diff 40a50a85 079c7993 -- docs/runbooks docs/decisions docs/team`로 확인, 바뀐 곳은 위 처리 확인 범위뿐).
+
+## 판정
+수정 필요(B1 확인 못 함만 남음: 문서 내용 쪽 A-1·A-2·A-3은 모두 해결. 검토 환경의 Maven 저장소 404로 검토자가 `./gradlew build`를 직접 끝까지 돌리지 못했다. 빌드가 되는 환경에서 검토자가 `./gradlew build`를 다시 돌려 통과하면 승인으로 바꿀 수 있다. 실전 관련 PR이므로 그와 별개로 독립 QA와 사용자 머지)
