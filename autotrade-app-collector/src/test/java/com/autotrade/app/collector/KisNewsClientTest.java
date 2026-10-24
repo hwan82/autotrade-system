@@ -104,6 +104,31 @@ class KisNewsClientTest {
     }
 
     @Test
+    void 토큰_발급_거절은_결과_코드만_싣고_설명과_본문은_싣지_않는다() {
+        // 2026-10-24 사용자 첫 실행: HTTP 403만 보여 1분 제한인지 앱키 문제인지 알 수 없었다
+        FakeHttp limited = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        limited.postAnswer = n -> new HttpGetter.Response(403,
+                "{\"error_description\":\"MARKERDESC\",\"error_code\":\"EGW00133\",\"access_token\":\"MARKERTOKEN\"}");
+        assertThatThrownBy(() -> client(limited, redaction()).page("20261021", ""))
+                .hasMessageContaining("HTTP 403").hasMessageContaining("결과 코드 EGW00133").hasMessageContaining("1분 뒤")
+                .hasMessageNotContaining("MARKERDESC").hasMessageNotContaining("MARKERTOKEN").hasMessageNotContaining("실전투자용");
+        FakeHttp other = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        other.postAnswer = n -> new HttpGetter.Response(403, "{\"error_description\":\"MARKERDESC\",\"error_code\":\"EGW00103\"}");
+        assertThatThrownBy(() -> client(other, redaction()).page("20261021", ""))
+                .hasMessageContaining("결과 코드 EGW00103").hasMessageContaining("실전투자용").hasMessageContaining("3.9")
+                .hasMessageNotContaining("MARKERDESC");
+        FakeHttp weird = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        weird.postAnswer = n -> new HttpGetter.Response(500, "{\"error_code\":\"<b>KIS-APPKEY</b>\"}");
+        assertThatThrownBy(() -> client(weird, redaction()).page("20261021", ""))
+                .hasMessageContaining("HTTP 500").hasMessageContaining("결과 코드 없음").hasMessageNotContaining("KIS-APPKEY");
+        FakeHttp notJson = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        notJson.postAnswer = n -> new HttpGetter.Response(403, "<html>MARKERHTML</html>");
+        assertThatThrownBy(() -> client(notJson, redaction()).page("20261021", ""))
+                .hasMessageContaining("결과 코드 없음").hasMessageNotContaining("MARKERHTML");
+        assertThat(other.posts).hasSize(1);
+    }
+
+    @Test
     void 받은_토큰도_오류_메시지에서_가린다() throws Exception {
         Redaction r = redaction();
         FakeHttp http = new FakeHttp((u, n) -> FakeHttp.ok(KisNewsFixtures.body(List.of())));
