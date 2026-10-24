@@ -234,11 +234,12 @@ final class KisNewsCollector {
                     crowded++; // 한 쪽이 모두 같은 초인데 커서가 그 초를 넘어간다: 그 초의 나머지는 받았는지 알 수 없다
                 }
                 if (next.toLocalTime().equals(LocalTime.MIDNIGHT)) {
-                    // 시각 000000은 "시각 없음"(= 그날 지금)으로 읽힌다 `[가정]` 2차 자료. 그날(커서와 다른 날일 수 있음) 00:00:00 행을
-                    // 아직 한 번도 보지 못했으면 000001로 한 번 더 받아 그 행을 본다(PR #225 QA Q1). 아니면 전날 23:59:59로 넘어간다
+                    // 시각 000000은 "시각 없음"(= 그날 지금)으로 읽힌다 `[가정]` 2차 자료. 그날(커서와 다른 날일 수 있음) 00:00:00 행의
+                    // 나머지가 남았을 수 있으면 000001로 한 번 더 받는다(PR #225 QA Q1). 쪽 끝이 00:00:00 행이어도 같다(PR #228 QA Q1).
+                    // 지금 커서가 이미 00:00:01이면(000001 쪽을 받은 뒤) 같은 커서를 되풀이하지 않고 전날 23:59:59로 넘어간다
                     LocalDateTime dayStart = next;
                     LocalDateTime oneSecond = dayStart.plusSeconds(1);
-                    next = current.isAfter(oneSecond) && pageOldest.isAfter(dayStart) ? oneSecond : dayStart.minusSeconds(1);
+                    next = current.isAfter(oneSecond) ? oneSecond : dayStart.minusSeconds(1);
                 }
                 if (next.toLocalDate().isBefore(pageOldest.toLocalDate())) {
                     // 전날로 넘어가는데 이 쪽이 전날 행까지 닿지 않았다(쪽이 그날 00:00:00 이후 행으로 가득 참): 그날 00:00:00 행을 다
