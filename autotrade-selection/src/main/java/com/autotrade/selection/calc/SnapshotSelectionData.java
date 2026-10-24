@@ -99,14 +99,17 @@ public final class SnapshotSelectionData implements SelectionData {
         this.filingsBySymbol = Map.copyOf(by);
     }
 
-    /** 캘린더 하나로 거래일과 출처 요약을 함께 정한다. */
+    /**
+     * 캘린더 하나로 거래일과 출처 요약을 함께 정한다. 실제 거래대금 파일(D-139)은 잇지 않는다: {@code turnover} 조건이 있는
+     * 선정은 "daily_turnover.csv가 없습니다"로 멈춘다. 운영 경로는 거래대금을 잇는 {@code SnapshotInputs.load}를 쓴다.
+     */
     public static SnapshotSelectionData of(SnapshotDailyBarSource bars, SnapshotListedShares shares,
             SnapshotFinancials financials, ExchangeCalendar calendar) {
         return new SnapshotSelectionData(calendar.market(), bars, shares, financials, TradingDays.of(calendar),
                 calendarDigest(calendar), calendar.zone());
     }
 
-    /** 공시 스냅샷까지 받는 형태. */
+    /** 공시 스냅샷까지 받는 형태. 실제 거래대금은 위와 같이 잇지 않는다. */
     public static SnapshotSelectionData of(SnapshotDailyBarSource bars, SnapshotListedShares shares,
             SnapshotFinancials financials, DisclosureInput disclosures, ExchangeCalendar calendar) {
         return new SnapshotSelectionData(calendar.market(), bars, shares, financials, disclosures, TradingDays.of(calendar),

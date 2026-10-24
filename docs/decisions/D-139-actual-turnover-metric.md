@@ -14,7 +14,7 @@
 2. **입력**: 일봉 스냅샷 폴더의 선택 파일 `daily_turnover.csv`(D-133). 새 읽기 클래스 `SnapshotTurnover`(selection 모듈)가 manifest의 SHA-256·행 수와 맞춰 보고, 한 행이라도 형식이 틀리면(시장·코드·날짜·0 이상 정수 금액) 또는 같은 종목·날짜가 두 번 있으면 스냅샷 전체를 거부한다.
 3. **결측 규칙**(D-133 6번 제안 그대로):
    - 스냅샷에 파일이 없음(D-133 전 스냅샷, `--without-turnover`) → 그 선정 계산 전체 실패. 근사 `avg-turnover`로 조용히 바꾸지 않는다. 메시지에 `daily_turnover.csv가 없습니다`(실시간 모의 준비는 `PRODUCER_FAILED`로 남김).
-   - 파일의 가장 늦은 날짜가 c보다 이름(또는 행이 없음) → `STALE_INPUT:`으로 시작하는 메시지로 계산 실패(실시간 모의 준비는 `STALE_INPUT`으로 남김, `SelectionPreparer`).
+   - 파일의 가장 늦은 날짜가 c보다 이르면(또는 행이 없으면) → `STALE_INPUT:`으로 시작하는 메시지로 계산 실패(실시간 모의 준비는 `STALE_INPUT`으로 남김, `SelectionPreparer`).
    - w거래일 중 하루라도 그 종목 행이 없음 → 그 종목만 `GATE_<nn>_NO_DATA`(점수면 `SCORE_NO_DATA`). 0으로 채우지 않는다.
    - 거래정지일 0원 행은 0으로 평균에 넣는다. 일봉 행이 있는지는 보지 않는다(거래대금 파일만으로 계산).
 4. **결과 칸**: 실제 거래대금 조건이 있는 선정만 결과 `inputs.turnover = {"sha256": <daily_turnover.csv SHA-256>, "last_date": <파일 가장 늦은 날짜>}`를 쓴다. 스냅샷 ID는 일봉과 같아(D-133 3번, ID 해시가 두 파일을 덮음) 따로 두지 않는다. 조건이 없으면 키를 **아예 쓰지 않아** D-139 전 결과의 내용 해시는 그대로다(공시 칸 D-123과 같은 규칙). 결과 파일 읽기(`SelectionResultFile`)와 결과 묶음 읽기(`ResultBundleReader`)가 이 칸을 되살린다.
@@ -38,9 +38,9 @@
 
 - KRX `ACC_TRDVAL`에는 시간외 거래·대량매매가 들어갈 수 있다 `[추론]`(D-133 5번). 장중 단타 유동성의 근사로는 근사 `avg-turnover`보다 나을 수도 못할 수도 있다. 판단은 v2 EDGE 실험으로 한다.
 - 파일의 첫 날짜는 따로 확인하지 않는다(일봉과 같이 수집 시작일부터 있음). 수집 구간보다 앞선 날이 창에 들어가면 그 종목들이 `NO_DATA`로 빠진다. 일봉 지표(`avg-turnover`)도 같다.
-- 힙: 종목별 날짜(int)·금액(long) 배열로 행당 약 12바이트 + 종목당 배열 머리. 970만 행이면 약 120MB `[추론]`로, 일봉 행당 1KB 추정(`SnapshotHeap`, 970만 행이면 약 9.7GB)에 견주어 작아 따로 힙 검사를 두지 않는다. 실측은 v2 EDGE 실험 때 한다.
+- 힙: 종목별 날짜(int)·금액(long) 배열로 행당 약 12바이트 + 종목당 배열 머리. 970만 행이면 약 120MB `[추론]`로, 일봉 행당 1KB 추정(`SnapshotHeap`, 970만 행이면 약 9.7GB)에 견주어 작아 따로 힙 검사를 두지 않는다. 읽는 중에는 배열 확장 여유·복사본·종목 키가 함께 살아 순간 최대는 그 2~3배일 수 있다 `[추론]`(PR #233 architect F3). 실측(순간 최대 포함)은 v2 EDGE 실험 때 한다.
 - 읽기 시간: 970만 행 한 번 훑기(SHA-256 포함). 사용자 PC에서 첫 v2 실험 때 로그 시각으로 확인한다(미측정).
 
 ## 검증
 
-- `TurnoverSelectionCalculatorTest`(손 계산 골든: 30억 GE 경계 포함, 정지일 0원 포함 50억, 2,999,999,999.666667 탈락, 행 없음 `NO_DATA`, T 당일 행 미사용, 근사와 나란히, 파일 없음 실패·`STALE_INPUT`·KRX만), `SnapshotTurnoverTest`(읽기·정렬, manifest 불일치·형식 오류·중복 행·파일 없는 스냅샷 거부), `SnapshotSelectionDataTest#실제_거래대금은_쓰는_선정에서_처음_한_번만_읽는다`, `SnapshotInputsTurnoverTest`(스냅샷 폴더 → 계산 → 결과 파일 되읽기 해시 같음, 파일 없는 스냅샷은 그 선정만 실패), `ResultBundleReaderTest#실제_거래대금_입력이_있는_선정_결과도_해시가_맞게_되살린다`.
+- `TurnoverSelectionCalculatorTest`(손 계산 골든: 30억 GE 경계 포함, 정지일 0원 포함 50억, 2,999,999,999.666667 탈락, 행 없음 `NO_DATA`, T 당일 행 미사용, 근사와 나란히, 파일 없음 실패·`STALE_INPUT`·KRX만), `SnapshotTurnoverTest`(읽기·정렬, manifest 불일치·형식 오류·중복 행·파일 없는 스냅샷 거부), `SnapshotSelectionDataTest#실제_거래대금은_쓰는_선정에서_처음_한_번만_읽는다`, `TurnoverSelectionCalculatorTest#하루_늦춘_판은_T_전날_행을_읽지_않는다`(PR #233 strategy-researcher n4), `SnapshotInputsTurnoverTest`(스냅샷 폴더 → 계산 → 결과 파일 되읽기 해시 같음, 파일 없는 스냅샷은 그 선정만 실패), `ResultBundleReaderTest#실제_거래대금_입력이_있는_선정_결과도_해시가_맞게_되살린다`.

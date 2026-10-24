@@ -86,6 +86,30 @@ class TurnoverSelectionCalculatorTest {
         assertThat(r.canonicalJson()).contains("\"turnover\":{\"last_date\":\"2026-03-16\",\"sha256\":\"" + "e".repeat(64) + "\"}");
     }
 
+    /**
+     * 하루 늦춘 판(D-137): T+1(03-17)에 적용할 LAG1 결과는 정보 시점이 T(03-16)라 c = 03-13이다. T(= T+1의 전날) 행
+     * (700050의 1조 원)은 읽지 않고, 파일이 c까지만 있어도 계산한다(PR #233 strategy-researcher n4).
+     */
+    @Test
+    void 하루_늦춘_판은_T_전날_행을_읽지_않는다() {
+        TreeMap<String, String> p = new TreeMap<>(profile(Market.KRX).parameters());
+        p.put("refresh", "PRE_OPEN_DAILY_LAG1");
+        SelectionProfile lag = new SelectionProfile("turnover-test-lag1", 1, Market.KRX, TradingStyle.INTRADAY, p);
+        LocalDate next = T.plusDays(1);
+        SelectionResult base = new SelectionCalculator(fixture()).calculate(profile(Market.KRX), T);
+        SelectionResult r = new SelectionCalculator(fixture()).calculate(lag, next);
+        assertThat(r.selected()).isEqualTo(base.selected());
+        assertThat(r.evaluations()).isEqualTo(base.evaluations());
+        assertThat(eval(r, "700050").values()).containsEntry("gate.01", "4000000000");
+
+        FixtureData d = fixture();
+        d.turnover.lastDate = C;
+        assertThat(new SelectionCalculator(d).calculate(lag, next).inputs().turnoverLastDate()).isEqualTo(C);
+        d.turnover.lastDate = D2;
+        assertThatThrownBy(() -> new SelectionCalculator(d).calculate(lag, next))
+                .isInstanceOf(IllegalStateException.class).hasMessageStartingWith("STALE_INPUT:");
+    }
+
     @Test
     void 근사_거래대금과_따로_계산하고_쓰지_않는_선정의_결과에는_turnover_칸이_없다() {
         FixtureData d = fixture();
