@@ -93,4 +93,18 @@ class ApiCallerTest {
         assertThat(CollectorMain.redaction(s).clean("a KRXKEYAAAAAAAAAA b DARTKEYBBBBBBBB c KISKEYCCCCCCCCCC d KISSECRETDDDDDDDD"))
                 .isEqualTo("a **** b **** c **** d ****");
     }
+
+    @Test
+    void postAnswered는_거절도_한_번만_보내고_돌려주며_post는_그대로_예외다() throws Exception {
+        // 2026-10-24 토큰 발급 403: 결과 코드를 읽으려 거절 응답을 돌려받되, 재시도는 하지 않는다(1분 1회 발급)
+        FakeHttp http = new FakeHttp((u, n) -> FakeHttp.ok("{}"));
+        http.postAnswer = n -> new HttpGetter.Response(403, "{\"error_code\":\"EGW00133\"}");
+        ApiCaller c = caller(http, 10);
+        HttpGetter.Response r = c.postAnswered(URI.create("https://kis.test/oauth2/tokenP"), Map.of(), "{}");
+        assertThat(r.status()).isEqualTo(403);
+        assertThat(http.posts).hasSize(1);
+        assertThatThrownBy(() -> c.post(URI.create("https://kis.test/oauth2/tokenP"), Map.of(), "{}"))
+                .hasMessageContaining("HTTP 403").hasMessageNotContaining("EGW00133");
+        assertThat(http.posts).hasSize(2);
+    }
 }

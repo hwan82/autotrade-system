@@ -84,6 +84,18 @@ public final class ApiCaller {
      * 발급 제한 오류만 받는다. 상한 확인·간격·장 시간 확인은 GET과 같다. 응답 본문은 메시지에 넣지 않는다(토큰이 실릴 수 있음).
      */
     public String post(URI uri, Map<String, String> headers, String jsonBody) throws IOException {
+        HttpGetter.Response r = postAnswered(uri, headers, jsonBody);
+        if (r.status() != 200) {
+            throw new IOException("HTTP " + r.status() + ": " + redaction.clean(uri.toString()));
+        }
+        return r.body();
+    }
+
+    /**
+     * {@link #post}와 같되 200이 아닌 응답도 예외 없이 돌려준다. 거절 본문의 결과 코드를 읽어 원인을 알리려는 호출자용이다(한국투자 토큰
+     * 발급 거절, 2026-10-24 첫 실행 HTTP 403). 호출자는 본문을 메시지에 그대로 싣지 않는다.
+     */
+    public HttpGetter.Response postAnswered(URI uri, Map<String, String> headers, String jsonBody) throws IOException {
         pause(0);
         beforeCall.run();
         budget.acquire();
@@ -93,10 +105,7 @@ public final class ApiCaller {
         } catch (IOException e) {
             throw new IOException("요청 실패(" + e.getClass().getSimpleName() + "): " + redaction.clean(uri.toString()));
         }
-        if (r.status() != 200) {
-            throw new IOException("HTTP " + r.status() + ": " + redaction.clean(uri.toString()));
-        }
-        return r.body();
+        return r;
     }
 
     private void pause(int attempt) throws IOException {
