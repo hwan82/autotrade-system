@@ -104,7 +104,7 @@ public record SelectionCriteria(
         return switch (m) {
             case VOLUME_RATIO -> 2 * period;
             case RETURN -> period + 1;
-            case AVG_TURNOVER -> period;
+            case AVG_TURNOVER, TURNOVER -> period;
             case DAY_RANGE -> 2;
             case VOLUME_SPIKE -> period + 1;
             case DISCLOSURE_COUNT -> period; // 구간 시작 = c에서 끝나는 w거래일의 첫날
@@ -297,10 +297,13 @@ public record SelectionCriteria(
         }
     }
 
-    /** 재무·공시 지표는 OpenDART(국내) 출처라 KRX 선정에만 쓴다(D-041 5장, ADR-012 3.2). */
+    /** 재무·공시 지표는 OpenDART(국내), 실제 거래대금은 KRX 출처라 KRX 선정에만 쓴다(D-041 5장, ADR-012 3.2, D-139). */
     private static void requireMarket(SelectionProfile profile, String prefix, Metric metric) {
         if (metric.kind() == Metric.Kind.FINANCIAL && profile.market() != Market.KRX) {
             throw fail(profile, prefix + ".metric", "재무 지표는 KRX 선정에만 쓸 수 있습니다(미국 재무 출처 없음)");
+        }
+        if (metric.kind() == Metric.Kind.TURNOVER && profile.market() != Market.KRX) {
+            throw fail(profile, prefix + ".metric", "실제 거래대금 지표는 KRX 선정에만 쓸 수 있습니다(KRX ACC_TRDVAL, D-133)");
         }
         if (metric.kind() == Metric.Kind.DISCLOSURE && profile.market() != Market.KRX) {
             throw fail(profile, prefix + ".metric", "공시 지표는 KRX 선정에만 쓸 수 있습니다(미국 공시 신호는 D-056 ③ 앞으로 전용)");

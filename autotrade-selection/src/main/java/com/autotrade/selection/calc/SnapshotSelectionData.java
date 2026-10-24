@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 
 /**
  * 수집 스냅샷(D-019, ADR-008) 폴더에서 읽은 선정 입력. 일봉 스냅샷(상장주식수 파일 포함 가능)과 재무 스냅샷은 따로 받는다.
@@ -44,6 +45,9 @@ public final class SnapshotSelectionData implements SelectionData {
     private final LocalDate barsLastTradingDate;
     private final LocalDate sharesAsOf;
     private final DisclosureInput disclosures;
+    /** 실제 거래대금 파일을 읽는 함수. 파일이 없으면 null. 처음 쓸 때 한 번만 부른다(쓰지 않는 선정은 970만 행을 읽지 않음). */
+    private final Supplier<? extends TurnoverInput> turnoverLoader;
+    private TurnoverInput turnover;
 
     /**
      * @param shares 일봉 스냅샷의 {@code listed_shares.csv}. 없으면 null(시가총액 조건은 결측으로 탈락)
@@ -61,7 +65,18 @@ public final class SnapshotSelectionData implements SelectionData {
     public SnapshotSelectionData(Market market, SnapshotDailyBarSource bars, SnapshotListedShares shares,
             SnapshotFinancials financials, DisclosureInput disclosures, TradingDays tradingDays, String calendarDigest,
             ZoneId zone) {
+        this(market, bars, shares, financials, disclosures, null, tradingDays, calendarDigest, zone);
+    }
+
+    /**
+     * @param turnover 일봉 스냅샷의 실제 거래대금 파일을 읽는 함수(보통 {@code () -> SnapshotTurnover.load(일봉 폴더)}, D-139).
+     *     파일이 없으면 null(실제 거래대금 조건은 계산 실패). 처음 {@link #turnover()}를 부를 때 한 번 부르고, 실패하면 다음에 다시 부른다
+     */
+    public SnapshotSelectionData(Market market, SnapshotDailyBarSource bars, SnapshotListedShares shares,
+            SnapshotFinancials financials, DisclosureInput disclosures, Supplier<? extends TurnoverInput> turnover,
+            TradingDays tradingDays, String calendarDigest, ZoneId zone) {
         this.disclosures = disclosures;
+        this.turnoverLoader = turnover;
         this.market = Objects.requireNonNull(market, "market");
         this.bars = Objects.requireNonNull(bars, "bars");
         this.shares = shares;
@@ -205,6 +220,22 @@ public final class SnapshotSelectionData implements SelectionData {
     @Override
     public Optional<DisclosureInput> disclosures() {
         return Optional.ofNullable(disclosures);
+    }
+
+    @Override
+    public synchronized Optional<TurnoverInput> turnover() {
+        if (turnoverLoader == null) {
+            return Optional.empty();
+        }
+        if (turnover == null) {
+            TurnoverInput in = Objects.requireNonNull(turnoverLoader.get(), "turnover");
+            if (!in.snapshotId().equals(bars.snapshotId())) {
+                throw new IllegalStateException("실제 거래대금 파일의 스냅샷 ID가 일봉과 다릅니다: " + in.snapshotId() + " ≠ "
+                        + bars.snapshotId());
+            }
+            turnover = in;
+        }
+        return Optional.of(turnover);
     }
 
     @Override

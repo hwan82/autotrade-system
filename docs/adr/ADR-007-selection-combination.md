@@ -156,7 +156,8 @@ parameters:
     "shares": {"snapshot_id": "...", "as_of_date": "2026-10-12"},
     "financials": null,
     "calendar": {"sources_digest": "<hex64>"},
-    "disclosures": {"snapshot_id": "...", "sha256": "<hex64>", "covered_through": "2026-10-12"}
+    "disclosures": {"snapshot_id": "...", "sha256": "<hex64>", "covered_through": "2026-10-12"},
+    "turnover": {"sha256": "<hex64>", "last_date": "2026-10-12"}
   },
   "selected": [{"code": "005930", "rank": 1}],
   "evaluations": [{"code": "000020", "passed": false, "reasons": ["GATE_01"], "values": {"gate.01": "1.42"}, "restatement_fallback": false}],
@@ -167,6 +168,7 @@ parameters:
 ```
 
 - **`inputs.disclosures`**(D-123): 공시 조건(`disclosure-count`)이 있는 선정만 쓴다. 공시 조건이 없으면 키를 **아예 쓰지 않는다**(`null`도 쓰지 않음). 그래서 D-123 전 결과의 내용 해시는 그대로다. `sha256`은 공시 스냅샷의 `disclosures.csv` 파일 SHA-256(manifest의 그 파일 항목과 같음)이고, `covered_through`는 조건이 쓴 유형들의 수집 구간 끝날 중 가장 이른 날이다. 7단계 `SelectionValidity`의 `STALE_INPUT`에 공시 입력을 넣을지는 실전 판정 변경이라 risk-ops 검토로 정한다(지금 판정 함수는 이 필드를 보지 않는다. 생산 쪽 계산기는 공시 스냅샷이 구간 [w거래일 첫날, `apply_from` 전날]을 못 덮으면 결과를 만들지 않는다).
+- **`inputs.turnover`**(D-139): 실제 거래대금 조건(`turnover`)이 있는 선정만 쓴다. 없으면 키를 쓰지 않아 D-139 전 결과의 내용 해시는 그대로다. `sha256`은 일봉 스냅샷의 `daily_turnover.csv` SHA-256, `last_date`는 그 파일의 가장 늦은 날짜(기준 데이터일 이상)다. 스냅샷 ID는 `inputs.bars.snapshot_id`와 같아 따로 두지 않는다(D-133 3번: 일봉 스냅샷 ID가 두 파일을 함께 해시). 7단계 `SelectionValidity`가 이 칸을 볼지는 공시 칸과 같이 risk-ops 검토로 정한다(지금은 보지 않고, 생산 쪽 계산기가 파일이 없거나 c까지 오지 않으면 결과를 만들지 않는다).
 - **선정 기준일 = `apply_from`**(그 결과를 처음 적용하는 거래일, STR-15). 계산은 `apply_from`의 직전 거래일까지의 데이터만 쓴다(MD-10). `PRE_OPEN_DAILY_LAG1`은 하루 더 앞, 즉 `apply_from`의 두 거래일 전까지다(D-137).
 - **적용 거래일 범위**(거래소 현지 날짜, 양끝 포함, `ExchangeCalendar` 기준):
 

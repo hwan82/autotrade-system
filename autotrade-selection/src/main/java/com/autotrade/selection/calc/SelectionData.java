@@ -64,6 +64,30 @@ public interface SelectionData {
     }
 
     /**
+     * 실제 거래대금 입력(지표 {@code turnover}, D-139). 일봉 스냅샷에 {@code daily_turnover.csv}(D-133)가 없으면 빈 값.
+     * 구현은 처음 부를 때 파일을 읽을 수 있고, 파일이 깨졌으면 {@link IllegalStateException}을 던진다.
+     */
+    default Optional<TurnoverInput> turnover() {
+        return Optional.empty();
+    }
+
+    /** 일봉 스냅샷의 실제 거래대금 파일(KRX {@code ACC_TRDVAL}, 원, 수정 안 함, D-133). {@link SnapshotTurnover}. */
+    interface TurnoverInput {
+
+        /** 파일이 든 일봉 스냅샷 ID(일봉 스냅샷과 같다). */
+        String snapshotId();
+
+        /** {@code daily_turnover.csv} SHA-256. */
+        String sha256();
+
+        /** 파일에 든 가장 늦은 날짜. 행이 하나도 없으면 null. */
+        LocalDate lastDate();
+
+        /** 그 종목 그날 실제 거래대금(원). 행이 없으면 빈 값(거래정지일은 0원 행이 있다). */
+        OptionalLong turnover(Symbol symbol, LocalDate date);
+    }
+
+    /**
      * 공시 스냅샷(D-123). 세는 행은 종목 코드가 붙고 정정 공시가 아닌 행이다({@link SnapshotDisclosures}).
      */
     interface DisclosureInput {

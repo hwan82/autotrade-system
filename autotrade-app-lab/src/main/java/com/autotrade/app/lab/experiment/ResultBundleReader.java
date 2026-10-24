@@ -232,6 +232,8 @@ final class ResultBundleReader {
         boolean noFin = fin == null || fin.isNull();
         JsonNode dis = in.get("disclosures"); // 공시 조건이 있는 선정만(D-123)
         boolean noDis = dis == null || dis.isNull();
+        JsonNode tov = in.get("turnover"); // 실제 거래대금 조건이 있는 선정만(D-139)
+        boolean noTov = tov == null || tov.isNull();
         SelectionResult.Inputs inputs = new SelectionResult.Inputs(text(bars, "snapshot_id"), text(bars, "sha256"),
                 date(bars, "last_trading_date"),
                 noShares ? null : text(shares, "snapshot_id"), noShares ? null : date(shares, "as_of_date"),
@@ -239,7 +241,8 @@ final class ResultBundleReader {
                 noFin ? null : nullableText(fin, "last_collected_at"),
                 text(in.get("calendar"), "sources_digest"),
                 noDis ? null : text(dis, "snapshot_id"), noDis ? null : text(dis, "sha256"),
-                noDis ? null : date(dis, "covered_through"));
+                noDis ? null : date(dis, "covered_through"),
+                noTov ? null : text(tov, "sha256"), noTov ? null : date(tov, "last_date"));
         List<SelectionResult.Selected> selected = new ArrayList<>();
         b.get("selected").forEach(x -> selected.add(new SelectionResult.Selected(text(x, "code"), x.path("rank").asInt())));
         List<SelectionResult.Evaluation> evaluations = new ArrayList<>();

@@ -10,13 +10,13 @@ let cloneSource = null;
 let catalogCache = null;
 
 const OP = { GE: '≥ 이상', GT: '> 초과', LE: '≤ 이하', LT: '< 미만' };
-const KIND = { BARS: '일봉', SHARES: '상장주식수', FINANCIAL: '재무', DISCLOSURE: '공시' };
+const KIND = { BARS: '일봉', SHARES: '상장주식수', FINANCIAL: '재무', DISCLOSURE: '공시', TURNOVER: '실제 거래대금' };
 const PERIOD = { WINDOW: { key: 'window', label: '거래일' }, YEARS: { key: 'years', label: '사업연도' } };
 // 지표 이름(카탈로그 키 → 화면 이름). 모르는 키는 키 그대로 보인다.
 const METRIC = {
   'op-margin-growth': '영업이익률 증가율', 'total-assets-growth': '자산총계 증가율', 'revenue-growth': '매출액 증가율',
   'op-margin': '영업이익률', 'debt-ratio': '부채비율', 'market-cap': '시가총액(원)', 'volume-ratio': '거래량 배율',
-  return: '수익률', 'avg-turnover': '평균 거래대금(원)',
+  return: '수익률', 'avg-turnover': '평균 거래대금(원)', turnover: '평균 실제 거래대금(원)',
   'day-range': '전일 변동폭', 'close-strength': '전일 종가 강도', 'volume-spike': '전일 거래량 급증 배율',
   'disclosure-count': '공시 건수',
 };

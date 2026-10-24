@@ -86,6 +86,11 @@ public final class SampleReports {
 
     /** @param disclosures 선정 결과 입력에 공시 스냅샷(D-123)을 넣을지 */
     public static ComboSample combos(String experimentId, int tradingDays, boolean disclosures) {
+        return combos(experimentId, tradingDays, disclosures, false);
+    }
+
+    /** @param turnover 선정 결과 입력에 실제 거래대금 파일(D-139)을 넣을지 */
+    public static ComboSample combos(String experimentId, int tradingDays, boolean disclosures, boolean turnover) {
         List<LocalDate> days = weekdays(LocalDate.of(2026, 9, 1), tradingDays);
         LocalDate from = days.get(0);
         LocalDate to = days.get(days.size() - 1);
@@ -110,7 +115,7 @@ public final class SampleReports {
             }
             if (w < 2) {
                 LocalDate weekEnd = d.with(java.time.DayOfWeek.FRIDAY);
-                SelectionResult r = result(sel, d, weekEnd, w == 0, disclosures);
+                SelectionResult r = result(sel, d, weekEnd, w == 0, disclosures, turnover);
                 results.add(r);
                 hashByWeek.put(w, r.contentHash());
                 java.util.TreeSet<Symbol> syms = new java.util.TreeSet<>();
@@ -145,12 +150,13 @@ public final class SampleReports {
     }
 
     private static SelectionResult result(SelectionProfile sel, LocalDate applyFrom, LocalDate applyTo,
-            boolean withFallback, boolean disclosures) {
+            boolean withFallback, boolean disclosures, boolean turnover) {
         SelectionResult.Inputs inputs = new SelectionResult.Inputs("KRX-DAILY-20260930", "0".repeat(64),
                 applyFrom.minusDays(1), "KRX-SHARES-20260930", applyFrom.minusDays(1), "DART-FIN-20260930",
                 "1".repeat(64), "2026-08-31T09:00:00Z", "2".repeat(64),
                 disclosures ? "dart-disclosures-2026-09-30-0a1b2c3d" : null, disclosures ? "3".repeat(64) : null,
-                disclosures ? applyFrom.minusDays(1) : null);
+                disclosures ? applyFrom.minusDays(1) : null,
+                turnover ? "4".repeat(64) : null, turnover ? applyFrom.minusDays(1) : null);
         List<SelectionResult.Evaluation> evals = List.of(
                 new SelectionResult.Evaluation("005930", true, List.of(), values("0.8", "0.4"), false),
                 new SelectionResult.Evaluation("000660", true, List.of(), values("0.6", "0.9"), withFallback),
