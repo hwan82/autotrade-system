@@ -2,6 +2,7 @@ package com.autotrade.sim.live;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.autotrade.domain.Money;
 import com.autotrade.marketdata.calendar.ExchangeCalendar;
 import com.autotrade.sim.recording.RecordingPlan;
 import java.io.IOException;
@@ -43,16 +44,22 @@ class StageSixRegistrationTest {
         LivePlan trial = plan(TRIAL);
         LivePlan main = plan(MAIN);
         assertThat(trial.profiles()).isEqualTo(main.profiles());
-        assertThat(trial.boards()).isEqualTo(main.boards());
         assertThat(trial.blacklist()).isEqualTo(main.blacklist());
-        assertThat(trial.seedCapital()).isEqualTo(main.seedCapital());
+        // LIVE00(시험 운용, 끝남)은 처음 등록(D-113) 그대로: 1,000만 원, 대형주 10종목
+        assertThat(trial.seedCapital()).isEqualTo(Money.of(10_000_000L, com.autotrade.domain.market.Market.KRX.currency()));
+        assertThat(trial.boards().keySet()).containsExactlyInAnyOrder(
+                "005930", "000660", "035420", "005380", "373220", "068270", "105560", "035720", "247540", "028300");
+        // D-138(운용 시작 전 사용자 결정): LIVE01만 시드머니 100만 원과 종가 5만 원 이하 종목으로 바꿨다. LIVE00은 그대로 둔다
+        assertThat(main.seedCapital()).isEqualTo(Money.of(1_000_000L, com.autotrade.domain.market.Market.KRX.currency()));
+        assertThat(main.boards().keySet()).containsExactlyInAnyOrder(
+                "010170", "403870", "009830", "316140", "043260", "067310", "396300", "047040", "003490", "035720");
         assertThat(main.profiles().subList(0, 2)).containsExactly(
                 new RecordingPlan.ProfileRef("kr-bh-baseline", 2), new RecordingPlan.ProfileRef("kr-random-control", 1));
         assertThat(main.boards()).hasSize(10);
         // 블랙리스트 확인 종목은 받는 종목 안에 있어야 "체결 0건"이 뜻을 가진다(계획 4.1 I2)
         assertThat(main.blacklist()).containsExactly("035720");
         assertThat(main.boards()).containsKeys(main.blacklist().toArray(String[]::new));
-        assertThat(main.benchmark()).contains("005930");
+        assertThat(main.benchmark()).contains("010170");
     }
 
     @Test
