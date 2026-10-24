@@ -101,3 +101,30 @@
 
 ## 판정
 수정 필요(B1 확인 못 함만 남음. 문서 내용 결함 없음. 검토 환경의 Maven 저장소 404로 `./gradlew build`를 직접 끝까지 돌리지 못했고, CI를 B1 근거로 인정하는 사용자 결정이 이 PR에 없다. 사용자가 PR #238에 "CI 결과를 B1 근거로 인정"을 남기거나 빌드가 되는 환경에서 검토자가 직접 통과시키면, 같은 head CI `Gradle build` success(1674e5f1, run 40089086901)로 B1을 판단해 승인으로 바꿀 수 있다. 실전 관련 PR이므로 그와 별개로 독립 QA와 사용자 머지)
+
+## 재검토 3 2026-10-24
+- 대상: PR #238 / 커밋 6721d52b(GitHub PR head `6721d52bcb044b7d621197eb86be823ea5c5bfbd`와 일치, base main, open, mergeable_state clean) / main 대비 diff(`git diff origin/main...HEAD --name-status`, 7파일: `D-140` M, `docs/qa/pending.md` M, `docs/reviews/pr-238/architect.md`·`risk-ops.md` A, `docs/runbooks/README.md` M, `docs/runbooks/stage-7-real-trading-tests.md` A, `docs/team/stage-7-readiness-plan.md` M). 재검토 2(1674e5f1 기준) 이후 커밋은 6721d52b(이 파일 +31, 재검토 2 원문)뿐이다(`git diff --stat 1674e5f1 6721d52b`). `git diff 079c7993 6721d52b -- docs/runbooks docs/decisions docs/team docs/qa` 0줄, 절차서·결정·계획·QA 요청 줄 본문은 재검토 때와 같다.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (별도 worktree `/tmp/claude-0/arch-238-re3`, HEAD 6721d52b): `:build-logic:compilePluginsBlocks`에서 `Could not find kotlin-scripting-jvm-2.0.21.jar`(`repo.maven.apache.org`)로 BUILD FAILED(29초). 앞 검토들과 같은 검토 환경 의존성 해석 실패이고, 이 PR은 빌드 입력(`.java`·`.kts`·Gradle 파일)을 바꾸지 않는다 `[추론]`. 컴파일·테스트에 닿지 못했다.
+  - CI(GitHub `pull_request_read` get_check_runs와 REST `commits/6721d52b…/check-runs` 직접 조회, 모두 `head_sha` 6721d52b 일치): `Gradle build` success(run 40089610202, job 120859427848, 11:22:01~11:25:52Z, 단계 "Build and test"·"Start each process once (ARC-03)" success), `Lab screens (Playwright)` success(job 120859427793), `DB schema (PostgreSQL 16)` success(job 120859427975), `Secret scan and collector boundary` success(job 120859427955).
+  - **사용자 댓글 확인**(GitHub `pull_request_read` get_comments, REST `GET /repos/hwan82/autotrade-system/issues/comments/6383937322`): 작성자 `hwan82`(type User, author_association OWNER), 작성 2026-10-24T11:59:55Z, 수정 없음(updated_at 같음), `performed_via_github_app` 없음, 본문 "CI 결과를 B1 근거로 인정", PR #238의 유일한 댓글. 작성 시각은 재검토 2 커밋(6721d52b, 11:21:50Z)과 그 head CI 완료(11:25:52Z)보다 뒤다. 메인 Claude가 전한 시각 11:59:58Z와 API 값 11:59:55Z가 3초 다르다. 판정에는 API 값을 쓴다.
+  - **한계(기록)**: 이 컨테이너의 `gh` 인증 계정도 `hwan82`다(`gh api user` → `hwan82`). API 응답만으로는 같은 토큰을 쓰는 에이전트가 쓴 댓글과 사용자가 직접 쓴 댓글을 가를 수 없다. 저장소 선례(PR #124·#131, 실전 관련 PR #218·#220)와 같이 저장소 소유자 계정의 PR 댓글을 사용자 결정으로 보고 진행한다. 재검토 2에서 요구한 "이 PR에 사용자 댓글"이라는 조건을 채운다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(사용자 결정에 따라 CI로) | 직접 실행한 `./gradlew build`는 `:build-logic` 의존성 해석 실패(위). 사용자 hwan82의 PR #238 댓글 6383937322 "CI 결과를 B1 근거로 인정"에 따라 같은 head 6721d52b의 CI `Gradle build` success(run 40089610202, job 120859427848, "Build and test" 단계 success)를 근거로 씀. diff 7파일 모두 `docs/`의 `.md`라 빌드 입력 변경 없음. 위 "한계"의 조건이 붙는다 |
+| B2 | 해당 없음 | 운영 코드·빌드 스크립트·ArchUnit 규칙·보호 경로 변경 없음(diff 7파일 모두 `docs/`) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 코드 없음 |
+| B6 | 해당 없음 | 새 코드 동작 없음, 테스트 삭제·건너뜀 없음(diff에 테스트 파일 없음) |
+| B7 | 해당(risk-ops 검토 필요) | 장애 대응 절차서·D-140 후속 문구를 바꾸는 실전 관련 PR. `docs/reviews/pr-238/risk-ops.md` 재검토 판정 승인이 브랜치에 있음(근거로 쓰지 않고 있음만 확인). 독립 QA 요청 줄 `docs/qa/pending.md`에 있음. 사용자 머지 대상 |
+| B8 | 통과 | diff 전체(검토 원문 포함)에 키·계좌번호·토큰 없음. 계좌는 별칭만 |
+
+## 점검표 밖 발견(재검토 3)
+- 새 결함 없음. 1차 A-1·A-2·A-3 해결, A-4·A-5 반영 상태는 재검토·재검토 2와 같다(본문 변경 0줄). A-6(D-140 후속 문구는 머지하는 사용자가 직접 확인)은 그대로 남는다.
+- 운영 메모(재기록): CI로 B1을 대신하는 허락을 PR마다 댓글로 받는 대신 결정 로그나 `docs/qa/checklists.md` B1에 범위를 정해 두면 이런 재검토 왕복이 줄어든다. 이 검토자는 그 문서를 고치지 않는다.
+
+## 판정
+승인(사용자 hwan82의 PR #238 댓글 6383937322 "CI 결과를 B1 근거로 인정"에 따라 B1을 같은 head CI `Gradle build` success(6721d52b, run 40089610202)로 판단함. 그 댓글이 사용자 본인 것이 아니면 이 승인은 무효. B7: 실전 관련 PR이므로 독립 QA와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
