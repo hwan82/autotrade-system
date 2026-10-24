@@ -35,3 +35,49 @@
 
 ## 판정
 승인(점검표 A 실패·확인 못 함 없음. R1·R2는 권고, R3·R4는 참고. 로컬 빌드는 Maven Central 429로 직접 실행하지 못했고 CI 성공을 보조 근거로 적음. 장애 대응 절차 문서이므로 실전 관련 PR: 독립 QA와 사용자 머지)
+
+## 재검토 2026-10-24
+- 대상: 검토 반영 커밋 079c7993(그 뒤 9c6706b1은 architect 재검토 원문 추가뿐) 포함 `git diff origin/main...origin/claude/project-thread-vodfc0` 전체. 바뀐 파일은 여전히 문서뿐(`docs/runbooks/stage-7-real-trading-tests.md`, `docs/runbooks/README.md`, `docs/decisions/D-140-…md`, `docs/team/stage-7-readiness-plan.md`, `docs/qa/pending.md` +1줄, `docs/reviews/pr-238/*`). `.md` 밖 파일 변경 0, 보호 경로(`scripts/ci/protected-paths.txt`: `docs/qa/README.md`·`checklists.md` 등) 변경 없음.
+- 직접 실행한 것:
+  - `./gradlew build`(일반 4회, `--refresh-dependencies` 1회): **모두 `:build-logic` 의존성 단계에서 실패**(`Could not find kotlin-scripting-jvm-2.0.21.jar`, `Could not find kotlin-stdlib:2.0.21`). 같은 URL을 curl로 받으면 200이 나와 이 환경의 간헐 네트워크·캐시 문제로 본다 `[추론]`. 1차와 같이 `:autotrade-risk:test`, `:autotrade-architecture-test:test`, `:autotrade-app-engine:test`를 직접 돌리지 못했다.
+  - 보조 근거(직접 실행 아님): `gh run list` → 9c6706b1(079c7993 내용 포함 + 검토 원문) CI `success`. 079c7993 단독 실행은 다음 push로 `cancelled`.
+  - 079c7993의 새 사실 주장을 코드로 대조:
+    - N3a: `HeartbeatWriter.java:131` `Files.deleteIfExists(file)`(정상 종료 표시), 엔진 종료 훅 `EngineMain.java:73-76` → `Engine.close()`가 `heartbeat.close()` 호출(`EngineMain.java:373`), 감시는 ABSENT 전이에 "`<p>` 종료" 알림(`Watchdog.java:241-245`), 회복 알림은 STALE·UNREADABLE에서 ALIVE로 올 때만(`Watchdog.java:237-240`) — 일치.
+    - N3b: 강제 종료면 파일이 남아 나이가 `heartbeat-stale-seconds`(기본 15, `WatchdogSettings.java:59`)를 넘을 때 "`<p>` 멈춤"(`Watchdog.java:232`, `HeartbeatWatch.java:83`) — 일치.
+    - 6장 5-2: 3-R 상황에서 두 번째 엔진이 같은 설정 폴더 `heartbeat/engine` 파일을 쓰므로(`EngineMain.java:143`) 첫 엔진의 Ctrl+C가 그 파일을 지우고 두 번째 엔진이 5초 안에 다시 쓴다 → 감시 알림이 엇갈릴 수 있다. 절차서가 1차 확인을 **프로세스 조회 0줄**로 바꾸고 알림을 보조 신호로 내린 것은 이 동작과 맞고, 1차 판정(알림 도착을 확인 조건으로 둔 것)보다 안전하다.
+    - P4: 저장소 전체(`*.kts`, `*.gradle`, `*.bat`, `*.properties`, `*.java`)에 `DisableAttachMechanism` 0건 — "[사실] 지금 설치본은 불합격" 문구 일치. 전제 조건을 불합격으로 정직하게 둔 것이며 약화가 아니다.
+    - 1장 기록 위치 `docs/reviews/stage-7-fault-tests/`: 보호 경로 밖, 지금 폴더 없음(묶음 I에서 만듦) — 문제없음.
+    - `docs/qa/pending.md` PR #238 줄: 표 4칸 형식, 요청 문구 "PR #238 검토해줘" — 지침 11장 형식과 일치.
+
+### 1차 권고 처리
+| 권고 | 처리 | 근거 |
+|---|---|---|
+| R1 (5·8번 "해당 없음") | 반영됨 | 5장 5번·8번에 "**E5 결정 전 잠정** … E5 결정 없이는 실전 활성화 조건을 채운 것으로 치지 않는다", 8장 추적표에 "계획 T5, PR #238 risk-ops R1 … 사용자 결정 남음" 행 |
+| R2 (3-R PROTECTIVE 계좌) | 반영됨 | 6장 1번에 "PROTECTIVE 계좌로도 같은 절차를 한 번 더 한다(계좌 둘을 OPEN·PROTECTIVE로 두고 한 번에 해도 된다)" — 원본 7장 3번 (a) 분기 "OPEN·PROTECTIVE 계좌를 가진 첫 엔진"과 맞음 |
+| R3·R4 (참고) | 변경 없음(필요 없음) | D-140 결정 표 ①~⑥ 그대로. 5-1 명령은 여전히 `[가정]`이고 5-2 확인이 프로세스 조회 0줄로 더 구체화됨 |
+
+### 점검표 A (재검토 시점 전체 diff 기준)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드·설정 변경 없음. 머리말·4장 1번·4장 3번·6장 6번 Guard OFF 문구 그대로. 079c7993에 Guard를 약화하는 문구 없음 |
+| A2 | 해당 없음 | 주문 출구·Guard 팩토리·ArchUnit 규칙 변경 없음(diff에 `.java`·`autotrade-architecture-test` 없음) |
+| A3 | 통과 | 5장 5번은 원본 7장 5번 그대로 + 잠정 표시만 추가. 다른 증권사로 주문을 돌리는 절차 없음. 6장 5-3 수동 취소는 계좌 증권사(한국투자) 앱만 |
+| A4 | 통과 | 5장 4번 "타임아웃 뒤 재주문 0, 조회 먼저(멱등 키 `{date}-{code}-{side}-{seq}`)" 그대로 |
+| A5 | 통과 | 5장 3번·6장 7번 재기동 뒤 중복 0 기록 그대로. 6장 1번 PROTECTIVE 추가 시행도 같은 기록 항목을 거침 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 종목을 다루는 문구·코드 없음 |
+| A7 | 통과 | 5장 8번 원본 기준 유지, 계좌 1개 "해당 없음"은 E5 결정 전 잠정으로 합격에 세지 않음(R1 반영) |
+| A8 | 통과 | 1장 LIVE01 기간 게이트웨이 정지·설정 변경 시험 금지, 2장 P9·P10 그대로 |
+| A9 | 통과 | 4장 4번·6장 5-3 서버 측 손절 조건주문은 남김(D-140 ⑤), 4장 2번 재기동 뒤 보호 모드, 5장 1번 보호 폴링(D10) 기준 그대로. 6장 5-2가 알림이 아니라 프로세스 조회로 엔진 종료를 확인해 "엔진이 살아 있는데 멈춘 줄 아는" 위험을 줄임 |
+| A10 | 통과 | 079c7993 diff 육안 확인: 키·계좌번호·토큰 없음(계좌 별칭만). CI(9c6706b1, gitleaks 포함) 성공은 보조 근거 |
+| A11 | 통과 | 보호 테스트·고정 값 변경 없음. P4·8장 추적표가 `-XX:+DisableAttachMechanism` 추가를 "보호 경로, 실전 관련 PR"로 따로 하도록 적어 보호 규칙을 강화 방향으로 둠. 시험 기록을 보호 경로(`docs/qa/`) 밖으로 옮겨 기록 PR이 보호 경로를 건드리지 않게 함 |
+| A12 | 통과 | 장애 대응표·8종 합격 기준을 바꾸지 않음(머리말 "원본이 이긴다" 유지). 6장 3-R이 원본 7장 3번 (a) 분기 대상 계좌(OPEN·PROTECTIVE)와 이제 일치. 5·8번 "해당 없음"이 E5 결정 전 합격으로 세지 않도록 바뀌어 원본보다 느슨해질 여지가 사라짐. 3장 N3a·N3b 기대값이 감시 코드 동작과 일치(위 대조) |
+| A13 | 해당 없음 | 미국 시장 경로 변경 없음 |
+| A14 | 통과 | 새 결정 없음. D-140 후속 문구 고침은 1차와 같음. 남은 사용자 결정(E1·E2·E5)과 A-4 후속이 8장 추적표에 있음. `docs/qa/pending.md`에 독립 QA 요청 줄 추가(지침 11장) |
+
+### 점검표 밖 발견
+- **R5 (참고)** 3장 N3b "약 15초 뒤"는 기본 `heartbeat-stale-seconds` 15(`WatchdogSettings.java:59`)만 센 값이다. 마지막 하트비트 나이(쓰기 주기 5초, `HeartbeatWriter.java:24`)와 감시 점검 주기(5초, `WatchdogSettings.java:58`)를 더하면 실제로는 15~25초쯤 걸릴 수 있다 `[추론]`. 시행 때 기다리는 시간을 25초 이상으로 잡을 것. 막지 않는다.
+- **R6 (참고)** 3장 N3a 근거 `Watchdog.java:242-245`의 ABSENT 분기는 241행부터다(줄 번호 1줄 차이). 내용은 맞다.
+- **실행 한계**: 1차와 같이 로컬 `./gradlew build`가 의존성 단계에서 멈춰 테스트를 직접 돌리지 못했다. 변경이 `.md`뿐이라 빌드·테스트 입력이 바뀌지 않았고 최신 브랜치 커밋 CI가 성공했으므로 점검표 판정은 diff와 코드 대조로 했다. 머지하는 사용자는 PR CI가 초록인지 확인한다.
+
+### 판정
+승인(점검표 A 실패·확인 못 함 없음. 1차 R1·R2 반영 확인. R5·R6은 참고. 로컬 빌드는 의존성 받기 실패로 직접 실행하지 못했고 CI 성공을 보조 근거로 적음. 장애 대응 절차 문서이므로 실전 관련 PR: 독립 QA와 사용자 머지)
