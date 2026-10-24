@@ -115,7 +115,7 @@
 
 | # | 시험 | 상태 | 막힌 곳 | 묶음 |
 |---|---|---|---|---|
-| T1 | 1순위 시세 강제 차단, 3초 내 전환, 보유 손절 감시 공백 없음 | 부분 | 게이트웨이 재배분은 소켓 종료 기준으로 됨. 엔진 보호 감시(D10) 없음, 무응답 감지값은 Q-015 | I |
+| T1 | 1순위 시세 강제 차단, 3초 내 전환, 보유 손절 감시 공백 없음 | 부분 | 한국투자 실전 계좌를 설정하면 게이트웨이 실시간 소스가 키움 하나뿐이라 전환 대상이 없고, 보유 보호는 D10 한국투자 보호 폴링으로만 합격(D-140 후속, QA 권고 Q2). 게이트웨이 재배분은 소켓 종료 기준으로 됨. 엔진 보호 감시(D10) 없음, 무응답 감지값은 Q-015 | I |
 | T1-0 | 정상 설정 차단 확인, 엔진 밖 토스 미사용 | 부분 | D9 | I |
 | T1-T / T1-TK | 토스 단독·동시 | **해당 없음**(D-059 동안, Q-047) | — | — |
 | T1-TR | 토스 토큰 무효화 | 안 됨(시행 불가) | D8 R1·R7, 시험 하네스 | I |
@@ -154,7 +154,7 @@
 | 0 | 결정 기록과 문서: 4장 결정 반영(D 번호), D-037 보충(P10), Q-047 닫기(D17), TST-06 대응표(K9), K10 검토, 기획서 RSK-11·13 문구 | `docs/decisions/`, `docs/spec/autotrade-spec.md` | 4장 사용자 답 | 답 받는 대로 | 모두와 병렬(문서만) |
 | A | 명령 채널 견고화: C1~C12, C15의 시험 | `autotrade-control`(`ControlServer`), E/command(`EngineCommandHandler`, `OperatorAuthenticator`, `OperatorPasswordHash`), `EngineMain` | 없음(C3 기한 방식은 architect 추천으로 자율) | **지금** | B·D·G와 병렬 |
 | B | 실전 엔진 저장소: B0 설계 ADR → B1~B7 | 새 패키지(E/store 등 [추론]), `R/guard/RealTradingGuard`(감사 인터페이스), `docs/adr/ADR-015…`, `V*.sql`은 실전 전용 위치 [추론] | B0 ADR | **지금(ADR)** | A·D·G와 병렬. A와 `EngineMain` 배선이 겹치면 A 먼저 머지 |
-| D-H / D-K / D-T | 첫 실전 증권사 주문·잔고·조회·체결 통보(D1~D10, D14) | 해당 `autotrade-broker-*` 모듈 하나, `BrokerCapability` | Q-061, Q-015 실측(사용자 PC), Q-002 | Q-061 답 뒤. 실측 없이 할 수 있는 클라이언트·시험은 먼저 | 증권사끼리 병렬 가능(모듈이 다름). 첫 실전은 하나만 권함 |
+| D-H / D-K / D-T | 첫 실전 증권사 주문·잔고·조회·체결 통보(D1~D10, D14) | 해당 `autotrade-broker-*` 모듈 하나, `BrokerCapability` | Q-061, Q-015 실측(사용자 PC), Q-002 | Q-061 답 뒤(D-140 ⑥ 한국투자). 실측 없이 할 수 있는 클라이언트·시험은 먼저. 사용자 PC에 한국투자 실전 계좌를 설정하는 순간 게이트웨이 예비 소스가 사라지므로 설정 시점은 LIVE01과 조율 | 증권사끼리 병렬 가능(모듈이 다름). 첫 실전은 하나만 권함 |
 | G | 게이트웨이: 엔진 시세 전달(D12), `unservedHeld` 알림·구독 거절(D11), watchlist 상한(D13) | `autotrade-app-gateway`, `autotrade-marketdata`(feed), ADR-010 개정 | D12 설계, Q-060 | D12 설계 **지금**, D13은 Q-061 뒤 | A·B·D와 병렬. 6단계 운용 중이라 게이트웨이 변경은 LIVE01 녹화를 건드리지 않는 범위로(6단계 스레드와 조율) |
 | C | 출구 검사·리스크: K1~K4, K6, P9 | `R/guard/GuardedOrderGateway`, `R/RiskChain`, `Blacklist*` | B3·B4·B5, Q-008 값(K2·K6) | B 머지 뒤 | D와 병렬 |
 | E | 엔진 실행부: `ActivationStepRunner`·`PanicLiquidator` 실제 구현(P1~P8), 대사, 보호 감시(D10), 시험 모드 조회(T1 전제), 수동 청산 명령(C13), 보호 모드 진입(C14), 엔진 알림(W5), 조합 지정(S1·S3·S4), 캘린더 분리(S6), CFG-05(K5) | E/command, E/order, `EngineMain`, `RealOrderGateways` | A·B·C·D 머지, Q-016·Q-017·Q-057·Q-058 | 1월 초 [추론] | 작게 쪼개되 같은 파일이라 **순서대로** |
