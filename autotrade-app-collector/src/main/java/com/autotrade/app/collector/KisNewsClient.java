@@ -207,15 +207,18 @@ public final class KisNewsClient {
         }
         String body = JSON.createObjectNode().put("grant_type", "client_credentials").put("appkey", appKey.reveal())
                 .put("appsecret", appSecret.reveal()).toString();
-        String answer;
+        URI uri = URI.create(base + TOKEN_PATH);
+        HttpGetter.Response r;
         try {
-            answer = caller.post(URI.create(base + TOKEN_PATH), Map.of("content-type", "application/json; charset=utf-8"),
-                    body);
+            r = caller.postAnswered(uri, Map.of("content-type", "application/json; charset=utf-8"), body);
         } catch (IOException e) {
             throw new IOException("한국투자 접근토큰 발급 실패(1분에 1번만 발급되므로 1분 뒤 다시 실행): "
                     + redaction.clean(e.getMessage()));
         }
-        String t = read(answer).path("access_token").asText("");
+        if (r.status() != 200) {
+            throw new IOException(tokenRejected(r));
+        }
+        String t = read(r.body()).path("access_token").asText("");
         if (t.isBlank()) {
             throw new IOException("한국투자 접근토큰 응답에 access_token이 없습니다");
         }
@@ -223,6 +226,29 @@ public final class KisNewsClient {
         token = Secret.of(t);
         redaction.add(token);
         return token;
+    }
+
+    /**
+     * 토큰 발급 거절 메시지. 한국투자 결과 코드({@code error_code} 또는 {@code msg_cd})가 코드 모양일 때만 싣고, 설명 문구·본문은
+     * 싣지 않는다(본문에 토큰이 실릴 수 있음). 2026-10-24 첫 실행에서 HTTP 403만 보여 원인을 알 수 없었다.
+     */
+    static String tokenRejected(HttpGetter.Response r) {
+        String code = "";
+        try {
+            JsonNode n = JSON.readTree(r.body() == null ? "" : r.body());
+            if (n != null && n.isObject()) {
+                code = n.hasNonNull("error_code")
+                        ? resultCode(JSON.createObjectNode().put("msg_cd", n.path("error_code").asText("")))
+                        : resultCode(n);
+            }
+        } catch (IOException | RuntimeException e) {
+            code = "";
+        }
+        String shown = code.isEmpty() ? "결과 코드 없음" : "결과 코드 " + code;
+        String hint = "EGW00133".equals(code) ? "1분에 1번만 발급되므로 1분 뒤 다시 실행"
+                : "1분 발급 제한이면 1분 뒤 다시 실행. 아니면 collector-secrets.json kis-news 앱키·앱시크릿이 실전투자용인지, 값에 공백이 없는지 확인"
+                        + "(docs/runbooks/collector.md 3.9)";
+        return "한국투자 접근토큰 발급 거절(HTTP " + r.status() + ", " + shown + "): " + hint;
     }
 
     private static JsonNode read(String body) throws IOException {
