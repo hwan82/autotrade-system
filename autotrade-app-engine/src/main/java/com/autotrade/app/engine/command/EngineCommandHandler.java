@@ -564,19 +564,20 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         return relock(account);
     }
 
-    /** 내려가는 전이로 보호 모드를 고정한다(세대는 올리지 않음). */
+    /**
+     * 내려가는 전이로 보호 모드를 고정한다(세대는 올리지 않음). 상태를 읽고 전이를 고르면 그 사이 활성화가 OPEN으로 올릴 수 있어
+     * (risk-ops PR #240 R-6), Guard 계좌 잠금 안에서 전이를 고르는 {@code deactivate} 하나로 내린다(OPEN → 보호 모드,
+     * ACTIVATING → 출발 상태). 결과 문구는 전이 뒤 실제 상태로 쓴다.
+     */
     private PanicStepResult relock(AccountRef account) {
         GuardState before = guard.state(account.id());
-        switch (before) {
-            case OPEN -> guard.deactivate(account.id(), OperatorAuthenticator.OPERATOR, "PANIC SELL 보호 모드 고정");
-            case ACTIVATING -> guard.failActivation(account.id(), "PANIC SELL로 활성화 중단");
-            case PROTECTIVE, OFF -> {
-                return PanicSteps.result(account, PanicSteps.PROTECTIVE_LOCK, PanicSteps.SKIPPED,
-                        "이미 " + before + " 상태입니다(신규 주문 차단됨)");
-            }
+        guard.deactivate(account.id(), OperatorAuthenticator.OPERATOR, "PANIC SELL 보호 모드 고정(활성화 중이면 중단)");
+        GuardState after = guard.state(account.id());
+        if (after == before) {
+            return PanicSteps.result(account, PanicSteps.PROTECTIVE_LOCK, PanicSteps.SKIPPED,
+                    "이미 " + after + " 상태입니다(신규 주문 차단됨)");
         }
-        return PanicSteps.result(account, PanicSteps.PROTECTIVE_LOCK, PanicSteps.DONE,
-                before + " → " + guard.state(account.id()));
+        return PanicSteps.result(account, PanicSteps.PROTECTIVE_LOCK, PanicSteps.DONE, before + " → " + after);
     }
 
     private static List<PanicStepResult> offAccountSkipped(AccountRef account) {
