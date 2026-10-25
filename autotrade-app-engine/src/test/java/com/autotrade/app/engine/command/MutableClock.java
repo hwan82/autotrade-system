@@ -8,7 +8,7 @@ import java.time.ZoneOffset;
 
 /** 테스트용 시계. 2차 확인은 계좌마다 시각이 앞으로 가야 하므로 명령마다 조금씩 움직인다. */
 final class MutableClock extends Clock {
-    private Instant now;
+    private volatile Instant now;
 
     MutableClock(Instant start) {
         this.now = start;

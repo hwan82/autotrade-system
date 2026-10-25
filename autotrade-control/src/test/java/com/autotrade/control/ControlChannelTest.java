@@ -41,13 +41,18 @@ class ControlChannelTest {
                         "KIS-1", "KIS", "KRX", "OFF", List.of(), true))), List.of());
     }
 
+    /** 자가 확인을 끈 서버(시험이 checkIntegrity를 직접 부른다). */
+    private ControlServer start(java.util.function.Function<ControlRequest, ControlResponse> handler) throws IOException {
+        return ControlServer.start(socket(), (r, receivedAt) -> handler.apply(r), ControlServer.Listener.NONE, Duration.ZERO);
+    }
+
     private Path socket() {
         return dir.resolve("run").resolve("engine-control.sock");
     }
 
     @Test
     void 요청_하나에_응답_하나를_주고받는다() throws Exception {
-        try (ControlServer server = ControlServer.start(socket(), this::echo);
+        try (ControlServer server = start(this::echo);
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
             ControlResponse r = client.send(ControlRequest.activate("KIS-1", "KIS-1", "pw-placeholder"));
 
@@ -70,7 +75,7 @@ class ControlChannelTest {
 
     @Test
     void 형식이_틀리거나_모르는_필드가_있으면_처리기를_부르지_않는다() throws Exception {
-        try (ControlServer server = ControlServer.start(socket(), this::echo)) {
+        try (ControlServer server = start(this::echo)) {
             List<String> responses = List.of(
                     raw("{\"command\":\"ACTIVATE\",\"password\":\"pw-placeholder\",\"extra\":1}\n"),
                     raw("{\"command\":\"LAUNCH\"}\n"),
@@ -90,7 +95,7 @@ class ControlChannelTest {
 
     @Test
     void 메시지_크기는_줄바꿈을_포함해_MAX_BYTES까지_받는다() throws Exception {
-        try (ControlServer server = ControlServer.start(socket(), this::echo)) {
+        try (ControlServer server = start(this::echo)) {
             assertThat(raw(sized(ControlCodec.MAX_BYTES - 1) + "\n")).contains("\"code\":\"OK\"");
             assertThat(raw(sized(ControlCodec.MAX_BYTES) + "\n")).contains("BAD_REQUEST");
             assertThat(received).hasSize(1);
@@ -108,7 +113,7 @@ class ControlChannelTest {
 
     @Test
     void 요청을_보내지_않는_연결은_시간_초과로_닫힌다() throws Exception {
-        try (ControlServer server = ControlServer.start(socket(), this::echo);
+        try (ControlServer server = start(this::echo);
                 SocketChannel idle = SocketChannel.open(StandardProtocolFamily.UNIX)) {
             idle.connect(UnixDomainSocketAddress.of(socket()));
             long start = System.nanoTime();
@@ -123,7 +128,7 @@ class ControlChannelTest {
     @Test
     void 동시_연결_상한을_넘으면_닫고_자리가_나면_다시_받는다() throws Exception {
         List<SocketChannel> idle = new ArrayList<>();
-        try (ControlServer server = ControlServer.start(socket(), this::echo);
+        try (ControlServer server = watched(this::echo);
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
             for (int i = 0; i < ControlServer.MAX_CONNECTIONS; i++) {
                 SocketChannel ch = SocketChannel.open(StandardProtocolFamily.UNIX);
@@ -137,6 +142,11 @@ class ControlChannelTest {
                 assertThat(readUntilClosed(extra)).isEqualTo(-1);
                 assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(2));
             }
+            // 상한 도달은 엔진이 긴급 알림으로 바꾸도록 알린다(C5, 1분에 한 번). 알림은 연결을 닫은 뒤에 간다
+            for (int i = 0; i < 100 && events.isEmpty(); i++) {
+                Thread.sleep(20);
+            }
+            assertThat(events).singleElement().asString().startsWith("CONNECTIONS_SATURATED");
             for (SocketChannel ch : idle) {
                 ch.close();
             }
@@ -151,7 +161,7 @@ class ControlChannelTest {
 
     @Test
     void 처리기_예외는_내부_오류로_돌려주고_서버는_계속_돈다() throws Exception {
-        try (ControlServer server = ControlServer.start(socket(), r -> {
+        try (ControlServer server = start(r -> {
                     throw new IllegalStateException("secret detail");
                 });
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
@@ -163,19 +173,20 @@ class ControlChannelTest {
     }
 
     @Test
-    void 올리는_명령과_PANIC은_한_번에_하나씩_처리하고_둘_다_응답한다() throws Exception {
-        CountDownLatch inside = new CountDownLatch(1);
+    void 명령은_서로_기다리지_않고_연결마다_바로_처리기에_간다() throws Exception {
+        // 명령끼리의 순서·계좌별 처리·기한은 처리기(EngineCommandHandler)가 정한다(D-142). 서버는 긴 명령 중에도 다른 명령을 바로 넘긴다
+        CountDownLatch inside = new CountDownLatch(2);
         CountDownLatch release = new CountDownLatch(1);
         AtomicInteger concurrent = new AtomicInteger();
         AtomicInteger max = new AtomicInteger();
-        AtomicInteger calls = new AtomicInteger();
-        try (ControlServer server = ControlServer.start(socket(), r -> {
-                    calls.incrementAndGet();
-                    max.accumulateAndGet(concurrent.incrementAndGet(), Math::max);
-                    inside.countDown();
-                    await(release);
-                    concurrent.decrementAndGet();
-                    return ControlResponse.accepted("", null, List.of());
+        try (ControlServer server = start(r -> {
+                    if (r.command() != ControlCommand.STATUS && r.command() != ControlCommand.DEACTIVATE) {
+                        max.accumulateAndGet(concurrent.incrementAndGet(), Math::max);
+                        inside.countDown();
+                        await(release);
+                        concurrent.decrementAndGet();
+                    }
+                    return echo(r);
                 });
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
             List<ControlResponse> responses = new CopyOnWriteArrayList<>();
@@ -183,117 +194,36 @@ class ControlChannelTest {
             Thread b = Thread.ofVirtual().start(() ->
                     responses.add(sendQuietly(client, ControlRequest.activate("KIS-1", "KIS-1", "y"))));
             assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
-            Thread.sleep(200);
+
+            assertThat(client.send(ControlRequest.status(), Duration.ofSeconds(2)).message()).isEqualTo("STATUS");
+            assertThat(client.send(ControlRequest.deactivate("KIS-1", null), Duration.ofSeconds(2)).message())
+                    .isEqualTo("DEACTIVATE");
             release.countDown();
             a.join(10_000);
             b.join(10_000);
 
-            assertThat(calls).hasValue(2);
-            assertThat(max).hasValue(1);
+            assertThat(max).hasValue(2);
             assertThat(responses).hasSize(2).allSatisfy(r -> assertThat(r.ok()).isTrue());
         }
     }
 
     @Test
-    void 명령을_처리하는_중에도_상태_조회와_내리기는_바로_답한다() throws Exception {
-        CountDownLatch inside = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        try (ControlServer server = ControlServer.start(socket(), r -> {
-                    if (r.command() == ControlCommand.PANIC_ALL) {
-                        inside.countDown();
-                        await(release);
-                    }
+    void 처리기는_연결을_받은_시각을_받는다() throws Exception {
+        List<Long> times = new CopyOnWriteArrayList<>();
+        try (ControlServer server = ControlServer.start(socket(), (r, receivedAt) -> {
+                    times.add(System.nanoTime() - receivedAt);
                     return echo(r);
-                });
-                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
-            Thread busy = Thread.ofVirtual().start(() -> sendQuietly(client, ControlRequest.panicAll("x", "y")));
-            assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
-
-            assertThat(client.send(ControlRequest.status(), Duration.ofSeconds(2)).message()).isEqualTo("STATUS");
-            assertThat(client.send(ControlRequest.deactivate("KIS-1", null), Duration.ofSeconds(2)).message())
-                    .isEqualTo("DEACTIVATE");
-
-            release.countDown();
-            busy.join(10_000);
-        }
-    }
-
-    @Test
-    void 대기열이_차면_활성화는_BUSY로_거절하고_PANIC은_받는다() throws Exception {
-        CountDownLatch release = new CountDownLatch(1);
-        try (ControlServer server = ControlServer.start(socket(), r -> {
-                    if (r.command() == ControlCommand.ACTIVATE) {
-                        await(release);
-                    }
-                    return echo(r);
-                });
-                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
-            List<Thread> waiting = new ArrayList<>();
-            for (int i = 0; i < ControlServer.MAX_QUEUED; i++) {
-                waiting.add(Thread.ofVirtual().start(() ->
-                        sendQuietly(client, ControlRequest.activate("KIS-1", "KIS-1", "y"))));
+                }, ControlServer.Listener.NONE, Duration.ZERO);
+                SocketChannel slow = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+            slow.connect(UnixDomainSocketAddress.of(socket()));
+            Thread.sleep(400);
+            ByteBuffer out = ByteBuffer.wrap("{\"command\":\"STATUS\"}\n".getBytes(StandardCharsets.UTF_8));
+            while (out.hasRemaining()) {
+                slow.write(out);
             }
-            Thread.sleep(300);
-
-            ControlResponse busy = client.send(ControlRequest.activate("KIS-1", "KIS-1", "y"));
-            List<ControlResponse> panic = new CopyOnWriteArrayList<>();
-            Thread panicThread = Thread.ofVirtual().start(() ->
-                    panic.add(sendQuietly(client, ControlRequest.panicAll("x", "y"))));
-            Thread.sleep(300);
-            release.countDown();
-            panicThread.join(10_000);
-            for (Thread t : waiting) {
-                t.join(10_000);
-            }
-
-            assertThat(busy.code()).isEqualTo(ControlCodes.BUSY);
-            assertThat(panic).singleElement().satisfies(r -> assertThat(r.ok()).isTrue());
-            assertThat(received).extracting(ControlRequest::command)
-                    .containsOnlyOnce(ControlCommand.PANIC_ALL)
-                    .filteredOn(c -> c == ControlCommand.ACTIVATE).hasSize(ControlServer.MAX_QUEUED);
-        }
-    }
-
-    @Test
-    void 오래_기다린_활성화는_버리고_PANIC은_기다렸어도_실행한다() throws Exception {
-        CountDownLatch inside = new CountDownLatch(1);
-        try (ControlServer server = ControlServer.start(socket(), r -> {
-                    if (r.command() == ControlCommand.PANIC_ACCOUNT && inside.getCount() > 0) {
-                        inside.countDown();
-                        sleep(600);
-                    }
-                    return echo(r);
-                }, Duration.ofMillis(200));
-                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
-            Thread first = Thread.ofVirtual().start(() ->
-                    sendQuietly(client, ControlRequest.panicAccount("KIS-1", "KIS-1", "y")));
-            assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
-
-            ControlResponse stale = client.send(ControlRequest.activate("KIS-1", "KIS-1", "y"));
-            first.join(10_000);
-
-            assertThat(stale.ok()).isFalse();
-            assertThat(stale.code()).isEqualTo(ControlCodes.STALE);
-            assertThat(received).extracting(ControlRequest::command).containsExactly(ControlCommand.PANIC_ACCOUNT);
-        }
-        received.clear();
-        CountDownLatch inside2 = new CountDownLatch(1);
-        try (ControlServer server = ControlServer.start(socket(), r -> {
-                    if (inside2.getCount() > 0) {
-                        inside2.countDown();
-                        sleep(600);
-                    }
-                    return echo(r);
-                }, Duration.ofMillis(200));
-                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
-            Thread first = Thread.ofVirtual().start(() -> sendQuietly(client, ControlRequest.panicAll("x", "y")));
-            assertThat(inside2.await(5, TimeUnit.SECONDS)).isTrue();
-
-            ControlResponse late = client.send(ControlRequest.panicAll("x", "y"));
-            first.join(10_000);
-
-            assertThat(late.ok()).isTrue();
-            assertThat(received).hasSize(2);
+            readLine(slow);
+            // 요청을 늦게 보내도 기한은 연결을 받은 때부터 잰다(요청 읽기 시간이 기한 안에 든다)
+            assertThat(times).singleElement().satisfies(t -> assertThat(t).isGreaterThanOrEqualTo(Duration.ofMillis(350).toNanos()));
         }
     }
 
@@ -337,7 +267,7 @@ class ControlChannelTest {
 
     @Test
     void 엔진이_살아_있는데_소켓만_없어지면_실행_중이_아님이_아니라_알_수_없음이다() throws Exception {
-        try (ControlServer server = ControlServer.start(socket(), this::echo);
+        try (ControlServer server = start(this::echo);
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(1))) {
             assertThat(Files.readString(socket().getParent().resolve(ControlServer.LOCK_FILE)))
                     .isEqualTo(Long.toString(ProcessHandle.current().pid()));
@@ -352,7 +282,7 @@ class ControlChannelTest {
     @Test
     void 응답하지_않는_엔진은_상태를_알_수_없음으로_알린다() throws Exception {
         CountDownLatch release = new CountDownLatch(1);
-        try (ControlServer server = ControlServer.start(socket(), r -> {
+        try (ControlServer server = start(r -> {
                     await(release);
                     return ControlResponse.accepted("", null, List.of());
                 });
@@ -412,7 +342,7 @@ class ControlChannelTest {
     @Test
     void 설정_경고는_상태와_함께_전달된다() throws Exception {
         EngineStatus warned = new EngineStatus(false, null, List.of(), "runtime-config.json을(를) 쓰지 않고 default로 기동: x");
-        try (ControlServer server = ControlServer.start(socket(), r -> ControlResponse.accepted("", warned, List.of()));
+        try (ControlServer server = start(r -> ControlResponse.accepted("", warned, List.of()));
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
             assertThat(client.send(ControlRequest.status()).status()).isEqualTo(warned);
         }
@@ -428,7 +358,7 @@ class ControlChannelTest {
         String emoji = "a" + "😀".repeat(EngineStatus.MAX_CONFIG_WARNING);
         assertThat(new EngineStatus(false, null, List.of(), emoji).configWarning())
                 .isEqualTo("a" + "😀".repeat((EngineStatus.MAX_CONFIG_WARNING - 1) / 2) + EngineStatus.TRUNCATED_MARK);
-        try (ControlServer server = ControlServer.start(socket(), r -> ControlResponse.accepted("", warned, List.of()));
+        try (ControlServer server = start(r -> ControlResponse.accepted("", warned, List.of()));
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
             assertThat(client.send(ControlRequest.status()).status().configWarning()).isEqualTo(warned.configWarning());
         }
@@ -436,14 +366,14 @@ class ControlChannelTest {
 
     @Test
     void 같은_폴더에_엔진이_떠_있으면_소켓을_지워도_시작하지_않는다() throws Exception {
-        try (ControlServer first = ControlServer.start(socket(), this::echo)) {
-            assertThatThrownBy(() -> ControlServer.start(socket(), this::echo))
+        try (ControlServer first = start(this::echo)) {
+            assertThatThrownBy(() -> start(this::echo))
                     .isInstanceOf(IOException.class).hasMessageContaining("이미 실행 중");
             Files.delete(socket());
-            assertThatThrownBy(() -> ControlServer.start(socket(), this::echo))
+            assertThatThrownBy(() -> start(this::echo))
                     .isInstanceOf(IOException.class).hasMessageContaining("이미 실행 중");
         }
-        try (ControlServer again = ControlServer.start(socket(), this::echo)) {
+        try (ControlServer again = start(this::echo)) {
             assertThat(socket()).exists();
         }
     }
@@ -452,7 +382,7 @@ class ControlChannelTest {
     void 죽은_엔진의_소켓은_지우고_시작한다() throws Exception {
         deadSocket();
         assertThat(socket()).exists();
-        try (ControlServer server = ControlServer.start(socket(), this::echo);
+        try (ControlServer server = start(this::echo);
                 ControlClient client = new ControlClient(socket(), Duration.ofSeconds(5))) {
             assertThat(client.send(ControlRequest.status()).ok()).isTrue();
         }
@@ -463,7 +393,7 @@ class ControlChannelTest {
         Path real = Files.createDirectory(dir.resolve("elsewhere"));
         Files.createSymbolicLink(dir.resolve("run"), real);
 
-        assertThatThrownBy(() -> ControlServer.start(socket(), this::echo))
+        assertThatThrownBy(() -> start(this::echo))
                 .isInstanceOf(IOException.class).hasMessageContaining("심볼릭 링크");
         assertThat(real.resolve("engine-control.sock")).doesNotExist();
     }
@@ -473,12 +403,176 @@ class ControlChannelTest {
         if (!FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
             return;
         }
-        try (ControlServer server = ControlServer.start(socket(), this::echo)) {
+        try (ControlServer server = start(this::echo)) {
             assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(socket().getParent())))
                     .isEqualTo("rwx------");
             assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(socket())))
                     .isEqualTo("rw-------");
         }
+    }
+
+    // ---- 자가 확인(C6)·잠금 파일(C8)·시험 연결(C9)·닫기(C7)·응답 멈춤 ----
+
+    private final List<String> events = new CopyOnWriteArrayList<>();
+
+    private ControlServer watched(java.util.function.Function<ControlRequest, ControlResponse> handler) throws IOException {
+        return ControlServer.start(socket(), (r, receivedAt) -> handler.apply(r),
+                (event, detail) -> events.add(event + " " + detail), Duration.ZERO);
+    }
+
+    @Test
+    void 지워진_소켓은_자가_확인으로_다시_만들어_명령이_이_엔진에_다시_닿는다() throws Exception {
+        try (ControlServer server = watched(this::echo);
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(2))) {
+            Files.delete(socket());
+            assertThatThrownBy(() -> client.send(ControlRequest.status()))
+                    .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
+                            e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.UNKNOWN));
+
+            server.checkIntegrity();
+
+            assertThat(client.send(ControlRequest.status()).message()).isEqualTo("STATUS");
+            assertThat(events).singleElement().asString().startsWith("SOCKET_RECREATED");
+            server.checkIntegrity();
+            assertThat(events).hasSize(1);
+        }
+    }
+
+    @Test
+    void run_폴더를_통째로_지우면_폴더_잠금_소켓을_다시_만들어_두_번째_서버가_뜨지_못한다() throws Exception {
+        try (ControlServer server = watched(this::echo);
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(2))) {
+            Path run = socket().getParent();
+            Files.delete(socket());
+            Files.delete(run.resolve(ControlServer.LOCK_FILE));
+            Files.delete(run);
+
+            server.checkIntegrity();
+
+            assertThat(events).extracting(e -> e.split(" ")[0])
+                    .containsExactly("RUN_DIR_RECREATED", "LOCK_RECREATED", "SOCKET_RECREATED");
+            assertThat(Files.readString(run.resolve(ControlServer.LOCK_FILE)))
+                    .isEqualTo(Long.toString(ProcessHandle.current().pid()));
+            assertThat(client.send(ControlRequest.status()).ok()).isTrue();
+            // 다시 만든 잠금을 이 엔진이 쥐고 있으므로 두 번째 서버는 뜨지 않는다
+            assertThatThrownBy(() -> start(this::echo))
+                    .isInstanceOf(IOException.class).hasMessageContaining("이미 실행 중");
+            if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+                assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(run))).isEqualTo("rwx------");
+                assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(socket()))).isEqualTo("rw-------");
+            }
+        }
+    }
+
+    @Test
+    void 지운_뒤_다른_프로세스가_잡은_잠금과_소켓은_빼앗지_않고_알린다() throws Exception {
+        Path run = socket().getParent();
+        try (ControlServer server = watched(this::echo)) {
+            Files.delete(socket());
+            Files.delete(run.resolve(ControlServer.LOCK_FILE));
+            // 두 번째 엔진 흉내: 새 잠금 파일을 잡고 새 소켓에서 듣는다
+            try (java.nio.channels.FileChannel other = java.nio.channels.FileChannel.open(run.resolve(ControlServer.LOCK_FILE),
+                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
+                    java.nio.channels.FileLock held = other.lock();
+                    ServerSocketChannel second = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+                second.bind(UnixDomainSocketAddress.of(socket()));
+
+                server.checkIntegrity();
+                server.checkIntegrity();
+
+                assertThat(events).extracting(e -> e.split(" ")[0]).containsExactly("LOCK_TAKEN", "SOCKET_TAKEN");
+                assertThat(socket()).exists();
+                server.close();
+                // 닫을 때 다른 프로세스의 소켓 파일을 지우지 않는다
+                assertThat(socket()).exists();
+            }
+        }
+    }
+
+    @Test
+    void 응답을_멈춘_서버는_어떤_요청에도_답하지_않는다() throws Exception {
+        try (ControlServer server = watched(this::echo);
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(2))) {
+            assertThat(client.send(ControlRequest.status()).ok()).isTrue();
+            server.silence("시험");
+            received.clear();
+
+            assertThatThrownBy(() -> client.send(ControlRequest.status()))
+                    .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
+                            e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.UNKNOWN));
+            assertThatThrownBy(() -> client.send(ControlRequest.deactivate("KIS-1", null)))
+                    .isInstanceOf(ControlClient.EngineUnreachableException.class);
+            assertThat(received).isEmpty();
+            assertThat(server.silenced()).isTrue();
+        }
+    }
+
+    @Test
+    void 잠금_파일이_심볼릭_링크면_따라가지_않고_시작하지_않는다() throws Exception {
+        Path run = Files.createDirectories(socket().getParent());
+        Path target = Files.writeString(dir.resolve("victim.txt"), "keep");
+        Files.createSymbolicLink(run.resolve(ControlServer.LOCK_FILE), target);
+
+        assertThatThrownBy(() -> start(this::echo)).isInstanceOf(IOException.class);
+        assertThat(Files.readString(target)).isEqualTo("keep");
+    }
+
+    @Test
+    void 잠금_파일은_PID만_담는다() throws Exception {
+        Path lock = Files.createDirectories(socket().getParent()).resolve(ControlServer.LOCK_FILE);
+        Files.writeString(lock, "99999999999999999999 이전 내용");
+        try (ControlServer server = start(this::echo)) {
+            assertThat(Files.readString(lock)).isEqualTo(Long.toString(ProcessHandle.current().pid()));
+        }
+    }
+
+    @Test
+    void 기존_엔진_확인용_시험_연결은_상한_안에_끝난다() throws Exception {
+        Path busy = dir.resolve("busy.sock");
+        try (ServerSocketChannel stuck = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+            stuck.bind(UnixDomainSocketAddress.of(busy), 1);
+            List<Thread> fillers = new ArrayList<>();
+            // 받지 않는 서버의 접속 대기열을 채워 다음 연결이 멈추게 한다(멈춘 연결은 서버를 닫으면 풀린다)
+            for (int i = 0; i < 6; i++) {
+                fillers.add(Thread.ofVirtual().start(() -> {
+                    try {
+                        SocketChannel c = SocketChannel.open(StandardProtocolFamily.UNIX);
+                        c.connect(UnixDomainSocketAddress.of(busy));
+                    } catch (IOException ignored) {
+                        // 서버가 닫히면 끝난다
+                    }
+                }));
+            }
+            Thread.sleep(300);
+            long started = System.nanoTime();
+            boolean listening = ControlServer.isListening(busy);
+            long took = System.nanoTime() - started;
+
+            assertThat(listening).isTrue();
+            assertThat(Duration.ofNanos(took)).isLessThan(ControlServer.PROBE_TIMEOUT.plusSeconds(2));
+        }
+        assertThat(ControlServer.isListening(dir.resolve("none.sock"))).isFalse();
+    }
+
+    @Test
+    void 닫을_때_진행_중인_명령은_응답을_마친다() throws Exception {
+        CountDownLatch inside = new CountDownLatch(1);
+        List<ControlResponse> responses = new CopyOnWriteArrayList<>();
+        ControlServer server = start(r -> {
+            if (r.command() == ControlCommand.PANIC_ALL) {
+                inside.countDown();
+                sleep(500);
+            }
+            return echo(r);
+        });
+        try (ControlClient client = new ControlClient(socket(), Duration.ofSeconds(10))) {
+            Thread t = Thread.ofVirtual().start(() -> responses.add(sendQuietly(client, ControlRequest.panicAll("x", "y"))));
+            assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
+            server.close();
+            t.join(10_000);
+        }
+        assertThat(responses).singleElement().satisfies(r -> assertThat(r.message()).isEqualTo("PANIC_ALL"));
+        assertThat(socket()).doesNotExist();
     }
 
     /** 바인드했다가 닫아 듣는 쪽 없이 파일만 남은 소켓을 만든다. */

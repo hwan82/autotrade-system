@@ -49,13 +49,22 @@ public record EngineStatus(boolean passwordConfigured, String lockedUntil, List<
      * @param state Guard 상태(OFF, ACTIVATING, OPEN, PROTECTIVE)
      * @param completedSteps 활성화 중 통과한 단계
      * @param accountNumberConfigured 계좌번호가 secrets.json에 있는지(값은 내보내지 않는다)
+     * @param lastResult 이 계좌의 마지막 활성화·PANIC 결과 한 줄(시각 포함, 비밀값 없음). 응답 기한 뒤에 끝난 활성화·청산의 결과를
+     *     화면이 볼 수 있게 한다(D-142, C1·C2). 없으면 빈 문자열. 이 필드가 없는 옛 엔진의 응답은 빈 문자열로 읽는다
      */
     public record AccountStatus(
             String id, String broker, String market, String state, List<String> completedSteps,
-            boolean accountNumberConfigured) {
+            boolean accountNumberConfigured, String lastResult) {
 
         public AccountStatus {
             completedSteps = completedSteps == null ? List.of() : List.copyOf(completedSteps);
+            lastResult = lastResult == null ? "" : lastResult;
+        }
+
+        /** 마지막 결과가 없는 계좌. */
+        public AccountStatus(String id, String broker, String market, String state, List<String> completedSteps,
+                boolean accountNumberConfigured) {
+            this(id, broker, market, state, completedSteps, accountNumberConfigured, "");
         }
     }
 }

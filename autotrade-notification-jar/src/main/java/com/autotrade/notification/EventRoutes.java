@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
  *
  * <p>운영 이벤트(감시·엔진 연결, D-100): 긴급 = {@value #PROCESS_STALE}·{@value #HEARTBEAT_UNREADABLE}·{@value #PROCESS_RESTARTED}·
  * {@value #STOP_REQUEST_ON}·{@value #READING_MISSING}·{@value #CONFIG_WARNING}·{@value #REAL_TRADING_COMMAND}·
- * {@value #NOTIFICATION_CHANNEL}, 정보 = {@value #PROCESS_RECOVERED}·{@value #PROCESS_STOPPED}·{@value #STOP_REQUEST_OFF}·
+ * {@value #NOTIFICATION_CHANNEL}·{@value #CONTROL_CHANNEL}·{@value #REAL_CONFIG_CHANGED}·{@value #ENGINE_STARTED_REAL}·
+ * {@value #OPERATOR_LOCKED}(D-142), 정보 = {@value #PROCESS_RECOVERED}·{@value #PROCESS_STOPPED}·{@value #STOP_REQUEST_OFF}·
  * {@value #READING_RECOVERED}·{@value #WATCHDOG_STARTED}·{@value #ENGINE_STARTED}.
  *
  * <p>표에 없는 종류는 긴급으로 보낸다. 새 종류를 표에 넣기 전에 보낸 알림이 조용히 묻히지 않게 하는 안전한 쪽 기본값이다.
@@ -66,6 +67,14 @@ public final class EventRoutes {
     public static final String REAL_TRADING_COMMAND = "real-trading-command";
     /** 알림 채널 자체의 문제(예: 카카오 재동의 필요). */
     public static final String NOTIFICATION_CHANNEL = "notification-channel";
+    /** 실전 제어 명령 채널 문제: 소켓·잠금 파일을 다시 만듦, 다른 엔진이 잡음, 연결 상한, 두 엔진이 같이 돎(D-142 C5·C6). */
+    public static final String CONTROL_CHANNEL = "control-channel";
+    /** 실행 중 실전 설정(계좌, 계좌번호, 운영자 비밀번호 해시)이 바뀌거나 읽히지 않음(D-142 C11). */
+    public static final String REAL_CONFIG_CHANGED = "real-config-changed";
+    /** 실전 계좌가 있는 엔진이 시작함(재기동 알림, D-142 C11). 실전 계좌가 없으면 {@link #ENGINE_STARTED}. */
+    public static final String ENGINE_STARTED_REAL = "engine-started-real";
+    /** 2차 확인이 연속 실패로 잠김(D-142 C10). */
+    public static final String OPERATOR_LOCKED = "operator-locked";
 
     private static final Pattern KIND = Pattern.compile("[a-z0-9][a-z0-9-]{0,39}");
 
@@ -85,6 +94,10 @@ public final class EventRoutes {
             .with(CONFIG_WARNING, Severity.URGENT)
             .with(REAL_TRADING_COMMAND, Severity.URGENT)
             .with(NOTIFICATION_CHANNEL, Severity.URGENT)
+            .with(CONTROL_CHANNEL, Severity.URGENT)
+            .with(REAL_CONFIG_CHANGED, Severity.URGENT)
+            .with(ENGINE_STARTED_REAL, Severity.URGENT)
+            .with(OPERATOR_LOCKED, Severity.URGENT)
             .with(PROCESS_RECOVERED, Severity.INFO)
             .with(PROCESS_STOPPED, Severity.INFO)
             .with(STOP_REQUEST_OFF, Severity.INFO)
