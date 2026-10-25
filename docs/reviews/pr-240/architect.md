@@ -74,3 +74,28 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-25 (2)
+- 대상: PR #240 / 커밋 85e16c25(위 재검토를 쓰는 사이 올라온 커밋. 위 재검토는 d8811c60까지만 본 것이고 그 판정은 85e16c25를 포함하지 않았다) / `git diff origin/main...HEAD` 전체, 추가분은 `git show 85e16c25`(EngineCommandHandler `relock`, ADR-006 2.8 한 문장)
+- 점검표: B
+- 직접 실행한 것:
+  - 별도 `git worktree`(85e16c25)에서 `./gradlew build --continue`: **BUILD SUCCESSFUL**, 실패 시험 0.
+  - R1 재현 시험(`ArchProbeR1bTest`, 커밋하지 않고 실행 뒤 지움)을 다시 돌림: 최종 상태 `PROTECTIVE`.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 85e16c25 직접 빌드 성공 |
+| B2 | 통과 | 모듈·ArchUnit 변화 없음, 빌드 통과 |
+| B3 | 통과 | 계약 변경 없음. ADR-006 2.8에 "1단계는 Guard 잠금 안 `deactivate` 하나" 반영 |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음 |
+| B5 | 해당 없음 | 금액 변경 없음 |
+| B6 | 통과 | 기존 PANIC·R1 시험 모두 통과. 바뀐 것은 전이 선택을 Guard 잠금 안으로 옮긴 것뿐이라 기존 시험이 그대로 덮는다 |
+| B7 | risk-ops 검토 필요 | 실전 PANIC 경로 변경. risk-ops R-6 재검토 대상 |
+| B8 | 통과 | 비밀값 없음 |
+
+### 추가분 판단
+- `relock`이 상태를 읽고 `deactivate`/`failActivation`을 고르던 것을 `guard.deactivate` 하나로 바꿨다. `RealTradingGuard.deactivate`는 계좌 잠금 안에서 OPEN → PROTECTIVE, ACTIVATING → 출발 상태를 고르므로(RealTradingGuard.java `deactivate`) 읽기와 전이 사이에 OPEN으로 올라가는 틈이 없어진다. 맞는 고침이다.
+- 참고(판정에 넣지 않음) N8: `before`·`after`를 잠금 밖에서 읽어서, 그 사이 OFF → ACTIVATING → (deactivate로) OFF처럼 돌면 실제로 활성화를 내렸어도 결과는 `SKIPPED 이미 OFF`로 적힌다. 표시 문구만의 문제이고 Guard 감사 로그에는 전이가 남는다. Guard 감사 행위자가 `SYSTEM`(failActivation)에서 `operator`로 바뀐 것은 사람이 보낸 PANIC이라 맞다.
+
+## 판정
+승인
