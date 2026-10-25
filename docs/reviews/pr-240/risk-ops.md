@@ -64,3 +64,36 @@
 
 ## 판정 (재검토)
 수정 필요(A9·R-6 PANIC 1단계 relock의 상태 읽기와 전이 사이 경쟁: 2차 확인이 실패한 PANIC 뒤 계좌가 OPEN으로 남을 수 있음)
+
+## 재검토 (2) 2026-10-25
+- 대상: PR #240 / 커밋 85e16c25(R-6 수정, 앞 커밋 모두 포함, 그 뒤 f95c1b67은 architect 검토 원문뿐) / `git diff origin/main...HEAD` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --continue` (85e16c25): BUILD SUCCESSFUL
+  - 출력 재사용을 피하려 `:autotrade-risk`·`:autotrade-architecture-test`·`:autotrade-app-engine`·`:autotrade-control`을 `cleanTest test --no-build-cache`로 다시 돌림: BUILD SUCCESSFUL, 결과 파일 시각이 실행 시각(09:38)으로 갱신됨. 실패·오류·건너뜀 0: risk 57, architecture-test 46, app-engine 103, control 30 (notification-jar 86, app-lab 269는 전체 빌드 결과)
+  - 정정: 앞 재검토(1)에서 "`--rerun`으로 네 모듈을 다시 돌렸다"고 썼으나, Gradle의 `--rerun`은 바로 앞 작업 하나(`:autotrade-control:test`)에만 걸려 나머지 세 모듈은 입력이 같은 UP-TO-DATE 결과였다. 이번에 `cleanTest`로 네 모듈을 실제로 다시 돌려 확인했다
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 변경 없음. 수정은 내리는 전이 하나(`deactivate`)로 바꾼 것 |
+| A2 | 통과 | ArchUnit 규칙·고정 예제 변경 없음, `ArchitectureTest`·`RealPathReflectionTest` 통과 |
+| A3 | 해당 없음 | 증권사 주문 연동·라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 전송·타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음, 청산은 미연동 스텁 |
+| A7 | 통과 | 계좌별 작업 줄·세대 값 그대로. 계좌끼리 기다리지 않음 시험 통과 |
+| A8 | 통과 | 프로세스 분리 변경 없음(`verifyProcessIsolation` 통과) |
+| A9 | 통과 | R-6 고쳐짐: `EngineCommandHandler.relock`(567~581행)이 상태를 읽고 전이를 고르지 않고 `guard.deactivate` 하나를 부른다. `RealTradingGuard.deactivate`는 계좌 잠금 안에서 OPEN→PROTECTIVE, ACTIVATING→출발 상태를 고르므로, 활성화의 `completeStep`이 앞서면 OPEN이 PROTECTIVE로 내려가고 뒤서면 `GuardClosedException`이 된다. 세대 값을 `relock` 전에 올리므로, `deactivate` 뒤에 `beginActivation`이 일어나도 다음 단계 확인에서 멈춘다. 2차 확인이 실패한 PANIC도 OPEN을 남기지 않는다. 결과 문구는 전이 뒤 상태로 쓴다. 이 경쟁 순서를 직접 고정한 시험은 없고 원자 전이 하나만 부르는 구조와 주석으로 갈음했다(재검토(1)에서 허용한 방식). R-1 순서 시험 3건과 1차 재현 시험 결과는 그대로 유효(바뀐 줄이 아님) |
+| A10 | 통과 | 수정 커밋에 비밀값 없음 |
+| A11 | 통과 | 보호 테스트·고정 값 변경 없음. `EngineCommandHandlerTest` 전부 통과(기존 PANIC 1단계 시험이 OPEN·ACTIVATING·PROTECTIVE·OFF 각 상태의 결과를 그대로 확인) |
+| A12 | 통과 | 재검토(1) 근거 그대로(존재 파일, 응답을 멈춘 엔진이 자리 내줌). 수정 커밋은 장애 대응 경로를 바꾸지 않음 |
+| A13 | 해당 없음 | 시장별 규칙·시간대·통화 변경 없음 |
+| A14 | 통과 | ADR-006 2.8의 PANIC 우선 서술에 1단계가 `deactivate` 하나로 내린다는 내용이 더해졌고, D-142와 맞음 |
+
+## 점검표 밖 발견 (재검토 (2))
+- 참고(판정 영향 없음): PROTECTIVE 계좌에서 `relock` 전에 활성화가 시작돼 ACTIVATING(출발 PROTECTIVE)이 됐다가 `deactivate`로 PROTECTIVE로 돌아오면, 상태가 같아 1단계 결과가 "이미 PROTECTIVE(SKIPPED)"로 적힌다. 최종 상태는 맞고 활성화는 멈춘다. 문구만 조금 덜 정확하다.
+- 1차 R-3(해시 다시 만들기 안내)·R-4(끊기지 않는 검증 대기)는 D-142 위험·후속에 기록된 대로 묶음 I·릴리스 안내에서 처리하는 것을 확인했다.
+- 실전 관련 PR이므로 지침 10·11장대로 독립 QA 뒤 사용자가 직접 머지한다.
+
+## 판정 (재검토 (2))
+승인
