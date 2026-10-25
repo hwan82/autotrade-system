@@ -2,21 +2,26 @@ package com.autotrade.app.engine;
 
 import com.autotrade.config.RuntimeConfig;
 import com.autotrade.domain.account.AccountRef;
+import com.autotrade.monitor.AtomicFile;
 import com.autotrade.monitor.Heartbeat;
 import com.autotrade.monitor.HeartbeatWriter;
+import com.autotrade.monitor.SmallFile;
 import com.autotrade.notification.EventRoutes;
 import com.autotrade.risk.guard.GuardTransition;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.io.IOException;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -30,14 +35,17 @@ import java.util.function.Supplier;
  * 엔진 단위로 두 가지를 본다.
  *
  * <ol>
- *   <li>두 엔진이 같이 도는지: 하트비트 파일({@code heartbeat/engine.hb})을 다른 살아 있는 엔진이 최근에 썼으면 두 엔진이 같이 돈다.
- *       잠금 파일과 run 폴더를 지워도 하트비트 폴더는 남으므로 두 번째 증거가 된다. 늦게 뜬 쪽이 명령 응답을 멈추고({@code silence})
- *       자기 계좌를 모두 내린다(OPEN → 보호 모드, ACTIVATING → 출발 상태). 먼저 뜬 쪽은 그대로 돌고 알리기만 한다.</li>
+ *   <li>두 엔진이 같이 도는지: 엔진마다 자기 PID 이름의 존재 파일({@code heartbeat/engine-<pid>.presence}, 하트비트 형식)을
+ *       확인할 때마다 쓰고, 다른 살아 있는 엔진의 존재 파일이 {@link #FRESH} 안에 쓰였으면 두 엔진이 같이 돈다. 공용 하트비트
+ *       ({@code engine.hb})는 두 엔진이 같은 파일을 덮어써 서로를 놓칠 수 있어(architect·risk-ops PR #240 R2) 존재 파일을 따로 둔다.
+ *       잠금 파일과 run 폴더를 지워도 하트비트 폴더는 남으므로 두 번째 증거가 된다. 늦게 뜬 쪽이 명령 응답을 멈추고 소켓·잠금
+ *       자리를 내주며({@code silence}) 자기 계좌를 모두 내린다(OPEN → 보호 모드, ACTIVATING → 출발 상태). 먼저 뜬 쪽은 그대로
+ *       돌고 알리기만 한다. 시작 시각이 같으면 PID가 큰 쪽을 늦게 뜬 것으로 본다.</li>
  *   <li>실전 설정이 바뀌었는지: 계좌 목록·계좌번호·운영자 비밀번호 해시를 다시 읽어 마지막으로 본 값과 다르면 알린다. 엔진은 다시
  *       시작하기 전에는 새 값을 쓰지 않는다. 알림에 값은 싣지 않는다.</li>
  * </ol>
  *
- * <p>기동 전에는 {@link #otherEngine}로 같은 하트비트를 보고, 다른 엔진이 돌고 있으면 기동하지 않는다(run 폴더를 지운 뒤의 두 번째
+ * <p>기동 전에는 {@link #otherEngine}로 공용 하트비트와 존재 파일을 보고, 다른 엔진이 돌고 있으면 기동하지 않는다(run 폴더를 지운 뒤의 두 번째
  * 엔진 차단).
  *
  * <p>어떤 확인 실패도 엔진을 멈추지 않는다. 같은 일은 한 번만 알린다.
@@ -48,6 +56,10 @@ final class EngineSelfCheck implements AutoCloseable {
     static final Duration INTERVAL = HeartbeatWriter.DEFAULT_INTERVAL;
     /** 이 안에 쓴 하트비트면 그 엔진이 돈다고 본다. 감시의 멈춤 기준(하트비트 주기의 세 배)과 같다. */
     static final Duration FRESH = HeartbeatWriter.DEFAULT_INTERVAL.multipliedBy(3);
+
+    /** 존재 파일 이름 앞뒤({@code engine-<pid>.presence}). 감시가 읽는 {@code .hb}와 겹치지 않는다. */
+    static final String PRESENCE_PREFIX = EngineMain.PROCESS + "-";
+    static final String PRESENCE_SUFFIX = ".presence";
 
     private static final Logger LOG = System.getLogger("com.autotrade." + EngineMain.PROCESS);
 
@@ -69,6 +81,7 @@ final class EngineSelfCheck implements AutoCloseable {
     private long reportedPid = -1;
     private boolean silenced;
     private boolean configUnreadable;
+    private long presenceSeq;
     private ScheduledExecutorService scheduler;
 
     /**
@@ -92,27 +105,40 @@ final class EngineSelfCheck implements AutoCloseable {
     }
 
     /**
-     * 이 PID가 아닌 살아 있는 엔진이 {@link #FRESH} 안에 하트비트를 썼으면 그 하트비트. 하트비트가 없거나, 읽히지 않거나, 오래됐거나,
-     * 쓴 프로세스가 없으면 빈 값(잠금 파일 검사가 그다음을 맡는다).
+     * 이 PID가 아닌 살아 있는 엔진이 {@link #FRESH} 안에 공용 하트비트나 존재 파일을 썼으면 그중 가장 먼저 뜬 엔진의 기록. 없거나,
+     * 읽히지 않거나, 오래됐거나, 쓴 프로세스가 없으면 빈 값(잠금 파일 검사가 그다음을 맡는다). 죽은 프로세스의 존재 파일은 지운다.
      */
     static Optional<Heartbeat> otherEngine(Path configDir, long myPid, Clock clock) {
-        Path file = Heartbeat.file(configDir, EngineMain.PROCESS);
+        List<Heartbeat> others = new ArrayList<>();
+        Instant now = clock.instant();
+        consider(Heartbeat.file(configDir, EngineMain.PROCESS), myPid, now, false, others);
+        Path dir = configDir.resolve(Heartbeat.DIR);
+        if (Files.isDirectory(dir)) {
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(dir, PRESENCE_PREFIX + "*" + PRESENCE_SUFFIX)) {
+                for (Path file : files) {
+                    consider(file, myPid, now, true, others);
+                }
+            } catch (IOException | RuntimeException e) {
+                LOG.log(Level.WARNING, "엔진 존재 파일을 읽지 못했습니다(이번에는 공용 하트비트만 봄): {0}",
+                        e.getClass().getSimpleName());
+            }
+        }
+        return others.stream().min(Comparator.comparing(Heartbeat::startedAt).thenComparingLong(Heartbeat::pid));
+    }
+
+    private static void consider(Path file, long myPid, Instant now, boolean presence, List<Heartbeat> others) {
         String text;
         try {
-            text = Files.readString(file, StandardCharsets.UTF_8);
+            text = SmallFile.read(file);
         } catch (NoSuchFileException e) {
-            return Optional.empty();
+            return;
         } catch (IOException | RuntimeException e) {
-            LOG.log(Level.WARNING, "엔진 하트비트를 읽지 못했습니다(두 엔진 확인을 이번에는 건너뜀): {0}", e.getClass().getSimpleName());
-            return Optional.empty();
+            LOG.log(Level.WARNING, "엔진 하트비트를 읽지 못했습니다(이 파일은 이번에 건너뜀): {0}", e.getClass().getSimpleName());
+            return;
         }
         Optional<Heartbeat> hb = Heartbeat.parse(text);
         if (hb.isEmpty() || hb.get().pid() == myPid) {
-            return Optional.empty();
-        }
-        Instant now = clock.instant();
-        if (hb.get().writtenAt().isBefore(now.minus(FRESH))) {
-            return Optional.empty();
+            return;
         }
         boolean alive;
         try {
@@ -121,7 +147,37 @@ final class EngineSelfCheck implements AutoCloseable {
             // 프로세스 정보를 볼 수 없으면 도는 것으로 본다(두 번째 엔진을 막는 쪽)
             alive = true;
         }
-        return alive ? hb : Optional.empty();
+        if (!alive) {
+            if (presence) {
+                deleteQuietly(file);
+            }
+            return;
+        }
+        if (!hb.get().writtenAt().isBefore(now.minus(FRESH))) {
+            others.add(hb.get());
+        }
+    }
+
+    /** 이 엔진의 존재 파일 위치. */
+    static Path presenceFile(Path configDir, long pid) {
+        return configDir.resolve(Heartbeat.DIR).resolve(PRESENCE_PREFIX + pid + PRESENCE_SUFFIX);
+    }
+
+    private void writePresence() {
+        try {
+            AtomicFile.write(presenceFile(configDir, myPid),
+                    new Heartbeat(EngineMain.PROCESS, myPid, myStartedAt, clock.instant(), ++presenceSeq).format());
+        } catch (IOException | RuntimeException e) {
+            LOG.log(Level.WARNING, "엔진 존재 파일을 쓰지 못했습니다: {0}", e.getClass().getSimpleName());
+        }
+    }
+
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException | RuntimeException e) {
+            // 다음 확인 때 다시 시도한다
+        }
     }
 
     /** 주기 확인을 시작한다(데몬 스레드 하나). */
@@ -130,6 +186,7 @@ final class EngineSelfCheck implements AutoCloseable {
             if (scheduler != null) {
                 throw new IllegalStateException("이미 시작했습니다");
             }
+            writePresence();
             scheduler = Executors.newSingleThreadScheduledExecutor(
                     Thread.ofPlatform().name("engine-self-check").daemon(true).factory());
             scheduler.scheduleWithFixedDelay(this::checkQuietly, interval.toMillis(), interval.toMillis(),
@@ -148,6 +205,7 @@ final class EngineSelfCheck implements AutoCloseable {
     /** 한 번 확인한다. */
     void check() {
         synchronized (lock) {
+            writePresence();
             checkOtherEngine();
             checkRealConfig();
         }
@@ -160,7 +218,8 @@ final class EngineSelfCheck implements AutoCloseable {
         }
         Heartbeat hb = other.get();
         reportedPid = hb.pid();
-        boolean iAmLate = hb.startedAt().isBefore(myStartedAt);
+        boolean iAmLate = hb.startedAt().isBefore(myStartedAt)
+                || hb.startedAt().equals(myStartedAt) && hb.pid() < myPid;
         if (iAmLate) {
             if (!silenced) {
                 silenced = true;
@@ -214,6 +273,7 @@ final class EngineSelfCheck implements AutoCloseable {
             if (scheduler != null) {
                 scheduler.shutdownNow();
             }
+            deleteQuietly(presenceFile(configDir, myPid));
         }
     }
 }

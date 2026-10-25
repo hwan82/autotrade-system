@@ -63,7 +63,7 @@ public final class SecondConfirmation {
      */
     public static final class Issuer {
 
-        /** 이 발급기를 내주는 Guard(표시용). 인자 없는 생성자를 두지 않아 데이터 바인딩이 만들 수 없게 한다(RealPathReflectionTest). */
+        /** 이 발급기를 내준 Guard. 읽는 곳은 없다. 인자 없는 생성자를 두지 않아 데이터 바인딩이 만들 수 없게 하려고 받는다(RealPathReflectionTest, architect PR #240 N4). */
         private final RealTradingGuard owner;
 
         Issuer(RealTradingGuard owner) {

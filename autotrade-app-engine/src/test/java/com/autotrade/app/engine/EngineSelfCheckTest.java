@@ -142,4 +142,66 @@ class EngineSelfCheckTest {
 
         assertThat(silenced).hasSize(1);
     }
+
+    private void presence(long pid, Instant startedAt, Instant writtenAt) throws IOException {
+        Path file = EngineSelfCheck.presenceFile(dir, pid);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, new Heartbeat("engine", pid, startedAt, writtenAt, 1).format());
+    }
+
+    @Test
+    void 공용_하트비트를_내가_덮어써도_먼저_뜬_엔진의_존재_파일을_보고_응답을_멈춘다() throws IOException {
+        // PR #240 R2: 두 엔진이 같은 engine.hb를 덮어써 확인 순간에는 늘 자기 PID만 보이는 경우
+        heartbeat(ME, NOW.minusSeconds(10), NOW);
+        presence(OTHER, NOW.minusSeconds(600), NOW);
+        EngineSelfCheck c = check(NOW.minusSeconds(10));
+
+        c.check();
+
+        assertThat(silenced).singleElement().asString().contains("PID " + OTHER);
+        assertThat(EngineSelfCheck.otherEngine(dir, ME, CLOCK)).hasValueSatisfying(hb -> assertThat(hb.pid()).isEqualTo(OTHER));
+    }
+
+    @Test
+    void 확인할_때마다_자기_존재_파일을_쓰고_닫으면_지운다() throws IOException {
+        EngineSelfCheck c = check(NOW);
+        Path mine = EngineSelfCheck.presenceFile(dir, ME);
+
+        c.check();
+        assertThat(Heartbeat.parse(Files.readString(mine))).hasValueSatisfying(hb -> {
+            assertThat(hb.pid()).isEqualTo(ME);
+            assertThat(hb.startedAt()).isEqualTo(NOW);
+        });
+        // 다른 엔진(이 시험 프로세스)이 보기에 내 존재 파일은 다른 엔진이다. 다만 ME는 없는 프로세스라 지운다
+        assertThat(EngineSelfCheck.otherEngine(dir, OTHER, CLOCK)).isEmpty();
+        assertThat(mine).doesNotExist();
+
+        c.check();
+        assertThat(mine).exists();
+        c.close();
+        assertThat(mine).doesNotExist();
+        assertThat(silenced).isEmpty();
+    }
+
+    @Test
+    void 오래된_존재_파일은_두_엔진으로_보지_않고_공용_하트비트가_없어도_존재_파일로_기동을_막는다() throws IOException {
+        presence(OTHER, NOW.minusSeconds(600), NOW.minus(EngineSelfCheck.FRESH).minusSeconds(1));
+        assertThat(EngineSelfCheck.otherEngine(dir, ME, CLOCK)).isEmpty();
+
+        presence(OTHER, NOW.minusSeconds(600), NOW);
+        assertThat(Heartbeat.file(dir, "engine")).doesNotExist();
+        assertThat(EngineSelfCheck.otherEngine(dir, ME, CLOCK)).isPresent();
+    }
+
+    @Test
+    void 시작_시각이_같으면_PID가_큰_쪽이_늦게_뜬_엔진이다() throws IOException {
+        presence(OTHER, NOW, NOW);
+        long bigger = Math.max(ME, OTHER + 1);
+        EngineSelfCheck late = new EngineSelfCheck(dir, bigger, NOW, CLOCK, guard, silenced::add, config("hash-a"),
+                () -> current, (kind, title, body) -> alerts.add(kind + " " + title));
+
+        late.check();
+
+        assertThat(silenced).hasSize(1);
+    }
 }

@@ -498,12 +498,51 @@ class ControlChannelTest {
             received.clear();
 
             assertThatThrownBy(() -> client.send(ControlRequest.status()))
-                    .isInstanceOfSatisfying(ControlClient.EngineUnreachableException.class,
-                            e -> assertThat(e.reach()).isEqualTo(ControlClient.Reach.UNKNOWN));
+                    .isInstanceOf(ControlClient.EngineUnreachableException.class);
             assertThatThrownBy(() -> client.send(ControlRequest.deactivate("KIS-1", null)))
                     .isInstanceOf(ControlClient.EngineUnreachableException.class);
             assertThat(received).isEmpty();
             assertThat(server.silenced()).isTrue();
+            // 자리를 내준다: 소켓 파일은 남기고 듣지 않으며, 잠금을 풀었다. 스스로 다시 만들지 않는다
+            assertThat(socket()).exists();
+            assertThat(ControlServer.isListening(socket())).isFalse();
+            try (java.nio.channels.FileChannel probe = java.nio.channels.FileChannel.open(
+                    socket().getParent().resolve(ControlServer.LOCK_FILE), java.nio.file.StandardOpenOption.WRITE);
+                    java.nio.channels.FileLock taken = probe.tryLock()) {
+                assertThat(taken).isNotNull();
+            }
+            server.checkIntegrity();
+            assertThat(events).isEmpty();
+        }
+    }
+
+    @Test
+    void 늦게_뜬_서버가_응답을_멈추면_먼저_뜬_서버가_잠금과_소켓을_되찾아_명령이_먼저_뜬_서버에_닿는다() throws Exception {
+        Path run = socket().getParent();
+        try (ControlServer first = watched(this::echo);
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(2))) {
+            // run 폴더를 지운 뒤 두 번째 서버가 새 폴더·잠금·소켓을 잡는다(3-R)
+            Files.delete(socket());
+            Files.delete(run.resolve(ControlServer.LOCK_FILE));
+            Files.delete(run);
+            List<ControlRequest> late = new CopyOnWriteArrayList<>();
+            try (ControlServer second = ControlServer.start(socket(), (r, at) -> {
+                        late.add(r);
+                        return ControlResponse.rejected(ControlCodes.INTERNAL, "늦게 뜬 서버", null);
+                    }, ControlServer.Listener.NONE, Duration.ZERO)) {
+                first.checkIntegrity();
+                assertThat(events).extracting(e -> e.split(" ")[0]).containsExactly("LOCK_TAKEN", "SOCKET_TAKEN");
+
+                second.silence("먼저 뜬 엔진이 돈다");
+                first.checkIntegrity();
+
+                assertThat(events).extracting(e -> e.split(" ")[0])
+                        .containsExactly("LOCK_TAKEN", "SOCKET_TAKEN", "LOCK_RECREATED", "SOCKET_RECREATED");
+                assertThat(client.send(ControlRequest.status()).message()).isEqualTo("STATUS");
+                assertThat(late).isEmpty();
+                assertThat(Files.readString(run.resolve(ControlServer.LOCK_FILE)))
+                        .isEqualTo(Long.toString(ProcessHandle.current().pid()));
+            }
         }
     }
 

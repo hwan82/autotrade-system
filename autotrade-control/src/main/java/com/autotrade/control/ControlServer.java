@@ -195,14 +195,27 @@ public final class ControlServer implements AutoCloseable {
     }
 
     /**
-     * 이 엔진이 같은 설정 폴더의 두 번째 엔진이라고 판단됐을 때 부른다. 그 뒤로는 어떤 요청에도 답하지 않고 연결을 닫는다. 화면은
-     * 이 엔진의 상태(모두 OFF)를 보지 못하고 "확인 불가"가 된다(D-140 ③, C6). 되돌릴 수 없다.
+     * 이 엔진이 같은 설정 폴더의 두 번째(늦게 뜬) 엔진이라고 판단됐을 때 부른다. 그 뒤로는 어떤 요청에도 답하지 않는다. 자리도
+     * 내준다: 자가 확인을 멈추고(다시 만들지 않음), 듣기 소켓을 닫고, 잠금을 푼다. 파일은 지우지 않는다. 그러면 먼저 뜬 엔진의 자가
+     * 확인이 다음 주기({@link #CHECK_INTERVAL})에 잠금과 소켓을 다시 잡아 화면 명령이 먼저 뜬 엔진에 닿는다(D-140 ③ 3-R, C6,
+     * architect PR #240 N1). 되돌릴 수 없다.
      */
     public void silence(String reason) {
-        if (silenced == null) {
-            silenced = Objects.requireNonNull(reason, "reason");
-            LOG.log(Level.ERROR, "명령 채널이 응답을 멈춥니다: {0}", reason);
+        Objects.requireNonNull(reason, "reason");
+        ServerSocketChannel current;
+        synchronized (state) {
+            if (silenced != null) {
+                return;
+            }
+            silenced = reason;
+            checker.shutdownNow();
+            current = server;
+            release(lock, lockChannel);
+            lock = null;
+            lockChannel = null;
         }
+        closeQuietly(current);
+        LOG.log(Level.ERROR, "명령 채널이 응답을 멈추고 소켓·잠금 자리를 내줍니다: {0}", reason);
     }
 
     public boolean silenced() {
@@ -331,7 +344,7 @@ public final class ControlServer implements AutoCloseable {
      */
     void checkIntegrity() {
         synchronized (state) {
-            if (closed) {
+            if (closed || silenced != null) {
                 return;
             }
             try {

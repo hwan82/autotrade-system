@@ -144,6 +144,8 @@ public final class EngineMain {
                 guard.accounts().size());
         EngineCommandHandler handler = null;
         ControlServer server = null;
+        HeartbeatWriter heartbeat = null;
+        EngineSelfCheck selfCheck = null;
         try {
             Path configDir = paths.runtimeFile().getParent();
             long pid = ProcessHandle.current().pid();
@@ -165,8 +167,8 @@ public final class EngineMain {
             LOG.log(Level.INFO, "실전 제어 명령 채널을 열었습니다(로컬 소켓, 네트워크 포트 없음)");
             Instant startedAt = clock.instant();
             // 하트비트 쓰기 실패는 로그만 남기고 엔진을 멈추지 않는다(HeartbeatWriter)
-            HeartbeatWriter heartbeat = HeartbeatWriter.start(configDir, PROCESS, clock, HeartbeatWriter.DEFAULT_INTERVAL);
-            EngineSelfCheck selfCheck = new EngineSelfCheck(configDir, pid, startedAt, clock, guard, server::silence,
+            heartbeat = HeartbeatWriter.start(configDir, PROCESS, clock, HeartbeatWriter.DEFAULT_INTERVAL);
+            selfCheck = new EngineSelfCheck(configDir, pid, startedAt, clock, guard, server::silence,
                     config.realTrading(), () -> new ConfigLoader().load(paths).config().realTrading(),
                     (kind, title, body) -> notifications.offer(kind, PROCESS, title, body));
             selfCheck.start(EngineSelfCheck.INTERVAL);
@@ -183,6 +185,13 @@ public final class EngineMain {
             }
             return new Engine(guard, handler, server, heartbeat, selfCheck, notifications);
         } catch (IOException | RuntimeException e) {
+            // 연 순서의 반대로 닫는다(architect PR #240 N3)
+            if (selfCheck != null) {
+                selfCheck.close();
+            }
+            if (heartbeat != null) {
+                heartbeat.close();
+            }
             if (server != null) {
                 server.close();
             }

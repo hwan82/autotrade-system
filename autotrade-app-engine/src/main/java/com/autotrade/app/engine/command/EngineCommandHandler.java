@@ -34,6 +34,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
@@ -55,6 +56,11 @@ import java.util.function.Predicate;
  *       않으면 보호 모드에 남겨 손절이 계속되게 한다. 계좌끼리 서로 기다리지 않는다(C2). 응답 기한 안에 끝나지 않은 계좌는 "진행 중"
  *       ({@link PanicSteps#PENDING})으로 답하고 청산은 계속한다. 같은 계좌의 청산이 이미 돌고 있으면 새로 시작하지 않고 그 결과를 쓴다.</li>
  * </ul>
+ *
+ * <p>PANIC은 활성화보다 앞선다(architect·risk-ops PR #240 R1). PANIC을 받으면 그 계좌의 PANIC 세대 값을 1 올린 뒤 보호 모드를
+ * 고정한다. 활성화는 받을 때 세대 값을 적어 두고 {@code beginActivation} 직전, 각 단계 직전, 각 단계 통과 직전에 다시 본다. 그 사이
+ * PANIC이 들어왔으면 활성화를 멈추고 출발 상태로 돌린다. 그래서 2차 확인 중이던 활성화가 PANIC 뒤에 계좌를 OPEN으로 올리지 않는다.
+ * 청산 작업도 시작할 때 계좌 작업 스레드 안에서 보호 모드를 다시 고정한다.
  *
  * <p>응답 기한까지 기다리는 연결은 {@link Limits#maxWaiting()}개까지만 둔다. 넘치면 기다리지 않고 바로 "진행 중"으로 답해, 새로
  * 들어오는 내리기·PANIC이 읽힐 연결 자리를 남긴다(C5, {@link ControlServer#RESERVED_FOR_NEW}).
@@ -121,6 +127,8 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
     private final Semaphore waiters;
     private final Map<AccountId, CompletableFuture<List<PanicStepResult>>> liquidations = new ConcurrentHashMap<>();
     private final Map<String, String> lastResults = new ConcurrentHashMap<>();
+    /** 계좌별 PANIC 세대(받을 때마다 1 올림). 활성화가 자기가 받은 뒤 PANIC이 들어왔는지 본다. */
+    private final Map<AccountId, AtomicLong> panicGenerations;
     private volatile boolean closing;
 
     public EngineCommandHandler(
@@ -153,11 +161,14 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         this.pendingActivations = new Semaphore(limits.maxPendingActivations());
         this.waiters = new Semaphore(limits.maxWaiting());
         Map<AccountId, ExecutorService> map = new LinkedHashMap<>();
+        Map<AccountId, AtomicLong> generations = new LinkedHashMap<>();
         for (AccountRef ref : guard.accounts()) {
             map.put(ref.id(), Executors.newSingleThreadExecutor(
                     Thread.ofPlatform().name("engine-account-" + ref.id().value()).daemon(true).factory()));
+            generations.put(ref.id(), new AtomicLong());
         }
         this.lanes = Map.copyOf(map);
+        this.panicGenerations = Map.copyOf(generations);
     }
 
     /** 지금 시각을 받은 시각으로 보고 처리한다(시험·내부 호출용). */
@@ -208,6 +219,8 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             return reject(ControlCodes.UNKNOWN_ACCOUNT, "설정에 없는 실전 계좌입니다");
         }
         AccountRef account = found.get();
+        // 상태를 보기 전에 PANIC 세대를 적는다. 이 뒤에 들어온 PANIC은 이 활성화를 멈춘다
+        long generation = panicGeneration(account);
         if (closing) {
             return reject(ControlCodes.INVALID_STATE, "실전 엔진이 종료 중이라 활성화를 받지 않습니다");
         }
@@ -235,6 +248,9 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             if (expired(receivedAt, limits.beginWithin())) {
                 return stale(account, "2차 확인이 활성화 기한 뒤에 끝나 활성화를 시작하지 않았습니다");
             }
+            if (panicked(account, generation)) {
+                return panicStopped(account, "활성화를 시작하지 않았습니다");
+            }
             try {
                 guard.beginActivation(authenticator.confirmationFor(verification, account.id()));
             } catch (GuardClosedException | IllegalArgumentException | IllegalStateException e) {
@@ -247,7 +263,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         try {
             lanes.get(account.id()).execute(() -> {
                 try {
-                    done.complete(runActivation(account, receivedAt));
+                    done.complete(runActivation(account, receivedAt, generation));
                 } catch (Throwable t) {
                     // Error도 기다리는 연결에 알린다(응답 기한까지 묶이지 않게). 계좌는 runActivation이 이미 출발 상태로 내렸다
                     done.completeExceptionally(t);
@@ -264,10 +280,10 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
     }
 
     /** 계좌 작업 스레드에서 단계를 돌리고, 어떻게 끝나든 ACTIVATING에 남기지 않으며, 결과를 기록한다. */
-    private ControlResponse runActivation(AccountRef account, long receivedAt) {
+    private ControlResponse runActivation(AccountRef account, long receivedAt, long generation) {
         ControlResponse response = null;
         try {
-            response = runActivationSteps(account, receivedAt);
+            response = runActivationSteps(account, receivedAt, generation);
         } catch (RuntimeException e) {
             response = ControlResponse.accepted("활성화 처리 중 예기치 않은 중단(" + e.getClass().getSimpleName() + ")",
                     null, List.of());
@@ -293,11 +309,14 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         return new ControlResponse(response.ok(), response.code(), response.message(), status(), response.steps());
     }
 
-    private ControlResponse runActivationSteps(AccountRef account, long receivedAt) {
+    private ControlResponse runActivationSteps(AccountRef account, long receivedAt, long generation) {
         for (ActivationStep step : ActivationStep.values()) {
             // ② 단계 직전
             if (expired(receivedAt, limits.activationWithin())) {
                 return activationStale(account, step);
+            }
+            if (panicked(account, generation)) {
+                return activationPanicked(account, step);
             }
             Optional<String> failure;
             try {
@@ -315,6 +334,9 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             if (expired(receivedAt, limits.activationWithin())) {
                 return activationStale(account, step);
             }
+            if (panicked(account, generation)) {
+                return activationPanicked(account, step);
+            }
             try {
                 guard.completeStep(account.id(), step);
             } catch (GuardClosedException e) {
@@ -331,6 +353,28 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         guard.failActivation(account.id(), reason);
         return ControlResponse.rejected(ControlCodes.STALE, reason + "로 " + guard.state(account.id())
                 + " 상태로 돌아갔습니다. 상태를 확인하고 다시 시도하세요", null);
+    }
+
+    private ControlResponse activationPanicked(AccountRef account, ActivationStep step) {
+        String reason = "PANIC SELL이 들어와 활성화 중단(" + step + " 단계)";
+        if (guard.state(account.id()) == GuardState.ACTIVATING) {
+            guard.failActivation(account.id(), reason);
+        }
+        return ControlResponse.accepted(reason + ". 현재 " + guard.state(account.id()) + " 상태입니다", null, List.of());
+    }
+
+    private ControlResponse panicStopped(AccountRef account, String what) {
+        recordOutcome(ControlCommand.ACTIVATE, account, OUTCOME_ACTIVATION_FAILED);
+        return reject(ControlCodes.INVALID_STATE, "2차 확인 중에 PANIC SELL이 들어와 " + what + ". 현재 "
+                + guard.state(account.id()) + " 상태입니다");
+    }
+
+    private long panicGeneration(AccountRef account) {
+        return panicGenerations.get(account.id()).get();
+    }
+
+    private boolean panicked(AccountRef account, long generation) {
+        return panicGeneration(account) != generation;
     }
 
     private ControlResponse stale(AccountRef account, String why) {
@@ -515,6 +559,13 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
 
     /** 1단계: 보호 모드 고정(신규 주문 즉시 차단). 내려가는 전이만 쓴다. */
     private PanicStepResult lock(AccountRef account) {
+        // 세대를 먼저 올린다: 이 뒤로는 진행 중인 활성화가 다음 확인 지점에서 멈춘다(그 사이 OPEN이 됐으면 아래에서 내린다)
+        panicGenerations.get(account.id()).incrementAndGet();
+        return relock(account);
+    }
+
+    /** 내려가는 전이로 보호 모드를 고정한다(세대는 올리지 않음). */
+    private PanicStepResult relock(AccountRef account) {
         GuardState before = guard.state(account.id());
         switch (before) {
             case OPEN -> guard.deactivate(account.id(), OperatorAuthenticator.OPERATOR, "PANIC SELL 보호 모드 고정");
@@ -539,6 +590,8 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
 
     /** 2~6단계(계좌 작업 스레드에서). OFF 계좌는 주문 세션이 없어 증권사 단계를 할 수 없다. */
     private List<PanicStepResult> afterLock(AccountRef account) {
+        // 같은 계좌 작업 스레드에서 앞서 돈 활성화가 1단계 뒤에 OPEN으로 올렸을 수 있다. 증권사 단계 전에 다시 고정한다(R1)
+        relock(account);
         if (guard.state(account.id()) == GuardState.OFF) {
             return offAccountSkipped(account);
         }
@@ -555,7 +608,12 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             guard.shutdown(account.id(), OperatorAuthenticator.OPERATOR, "PANIC SELL 완료");
             results.add(PanicSteps.result(account, PanicSteps.GUARD_OFF, PanicSteps.DONE, "PROTECTIVE → OFF"));
         } else {
-            results.add(keepProtective(account, broker));
+            // 청산 중에 다른 연결의 활성화가 시작됐을 수 있다. 결과를 적기 전에 다시 고정하고, 문구는 실제 상태로 쓴다
+            relock(account);
+            results.add(guard.state(account.id()) == GuardState.OFF
+                    ? PanicSteps.result(account, PanicSteps.GUARD_OFF, PanicSteps.SKIPPED,
+                            "매도가 확인되지 않았고 계좌는 OFF입니다(신규 주문 없음). 증권사 화면에서 보유를 확인하세요")
+                    : keepProtective(account, broker));
         }
         return results;
     }
