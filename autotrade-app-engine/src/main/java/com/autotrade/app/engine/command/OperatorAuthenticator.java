@@ -12,8 +12,8 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 /**
@@ -28,7 +28,7 @@ import java.util.function.Consumer;
  * <p>검증 결과는 {@link Verification} 하나로 돌려준다. 그 계좌 별칭으로 통과한 검증만 {@link #confirmationFor}가 한 번 쓸 수 있다.
  * 다른 계좌의 2차 확인으로 쓸 수 없고, 다른 명령의 검증과 섞이지 않는다(명령마다 따로 들고 다닌다).
  *
- * <p>잠금 두 개를 나눠 쓴다(C4). 해시 계산은 검증 잠금({@link ReentrantLock}, 공정)을 쥔 채 한 번에 하나씩 해서 대입 시도를
+ * <p>잠금 두 개를 나눠 쓴다(C4). 해시 계산은 검증 잠금({@link Semaphore} 허가 1개, 공정)을 쥔 채 한 번에 하나씩 해서 대입 시도를
  * 병렬로 늘릴 수 없게 하고, 실패 횟수·잠금 시각은 따로 짧게 잠근다. 그래서 검증이 도는 동안에도 상태 조회({@link #lockedUntil()})는
  * 막히지 않는다.
  */
@@ -45,8 +45,8 @@ public final class OperatorAuthenticator {
     private final Clock clock;
     private final SecondConfirmation.Issuer issuer;
     private final Consumer<Instant> onLocked;
-    /** 해시 검증은 한 번에 하나씩. 상태 잠금과 따로 둔다. */
-    private final ReentrantLock attempts = new ReentrantLock(true);
+    /** 해시 검증은 한 번에 하나씩(먼저 온 순서). 상태 잠금과 따로 둔다. */
+    private final Semaphore attempts = new Semaphore(1, true);
     private final Object state = new Object();
     private int failures;
     private Instant lockedUntil;
@@ -104,7 +104,7 @@ public final class OperatorAuthenticator {
             if (hash.isEmpty()) {
                 return new Verification(this, Result.NOT_CONFIGURED, null);
             }
-            attempts.lock();
+            attempts.acquireUninterruptibly();
             try {
                 // 앞선 검증이 잠금을 걸었을 수 있어 검증 잠금을 쥔 뒤에 본다(기다리던 시도가 잠금을 건너뛰지 않게)
                 if (lockedUntil().isPresent()) {
@@ -129,7 +129,7 @@ public final class OperatorAuthenticator {
                     return new Verification(this, Result.FAILED, null);
                 }
             } finally {
-                attempts.unlock();
+                attempts.release();
             }
         } finally {
             if (password != null) {
