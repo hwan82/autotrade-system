@@ -77,3 +77,4 @@
 | 2026-10-24 | PR #235 검토해줘 | docs/reviews/pr-235/qa.md | 실전 관련 PR(문서만, 코드 무변경): 7단계 준비 계획, D-140 사용자 결정 6건(PANIC SELL 규칙 Q-016·Q-017·Q-057·Q-058, 장애 테스트 3-R Q-018, 첫 실전 증권사 Q-061), broker-and-fault-design.md 7장 3-R, Q-059·Q-060 등록. 브랜치 `claude/project-thread-ousa4v` |
 | 2026-10-24 | PR #235 재검토해줘 | docs/reviews/pr-235/qa.md | 실전 관련 PR(문서만): QA 1차 발견 1(3-R OS 한계 분기에서 화면 명령이 첫 엔진에 닿거나 "실전 상태 확인 불가" 표시)과 권고 Q1~Q6 반영(53d155b), risk-ops 재검토 (2) 승인. 브랜치 `claude/project-thread-ousa4v` |
 | 2026-10-24 | PR #238 검토해줘 | docs/reviews/pr-238/qa.md | 실전 관련 PR(장애 대응 절차: 7단계 실행·시험 절차서 뼈대 I1, 3-R 상세 절차, 사용자 결정 D-140 후속 문구 고침, 브랜치 claude/project-thread-vodfc0) |
+| 2026-10-25 | PR #238 재검토해줘 | docs/reviews/pr-238/qa.md(재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A12 F1·F2와 권고 Q1~Q4를 절차서 6장·1장·3장에 반영, 브랜치 claude/project-thread-vodfc0) |
