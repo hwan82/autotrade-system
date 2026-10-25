@@ -33,3 +33,34 @@
 
 ## 판정
 수정 필요(A9·R-1 활성화 확인 중 PANIC 순서 역전과 OPEN 상태 청산, A12·R-2 실행 중 두 엔진 감지가 사실상 발동하지 않음, A14 D-142·ADR-006 서술 정정)
+
+## 재검토 2026-10-25
+- 대상: PR #240 / 커밋 d8811c60(수정 커밋, 앞 커밋 4fa9f110·16326b2a·6344545c·f6812e81·491be589 포함) / `git diff origin/main...HEAD` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --continue` (d8811c60): BUILD SUCCESSFUL. 시험 실패·오류·건너뜀 0: autotrade-risk 57, autotrade-architecture-test 46, autotrade-app-engine 103, autotrade-control 30, autotrade-notification-jar 86, autotrade-app-lab 269. 시험 출력이 커밋보다 먼저(같은 작업 폴더) 만들어져 UP-TO-DATE로 나와서 `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-control:test --rerun`으로 다시 돌렸고 BUILD SUCCESSFUL
+  - 1차의 임시 재현 시험(`ZzRiskOpsProbeTest`, 활성화 2차 확인 중 PANIC_ACCOUNT)을 다시 만들어 돌린 뒤 지웠다(커밋 안 함). 결과: 활성화 `INVALID_STATE`("2차 확인 중에 PANIC SELL이 들어와 활성화를 시작하지 않았습니다"), 청산 호출 없음, 최종 OFF. 1차 결함(R-1) 재현 안 됨
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 변경 없음(1차 근거 그대로). 수정 커밋은 내리는 방향(활성화 중단, 보호 모드 재고정)만 더함 |
+| A2 | 통과 | ArchUnit 규칙·고정 예제 변경 없음, `ArchitectureTest`·`RealPathReflectionTest` 통과. 수정 커밋의 `SecondConfirmation.Issuer` 변경은 주석뿐 |
+| A3 | 해당 없음 | 증권사 주문 연동·라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 전송·타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음, 청산은 미연동 스텁 |
+| A7 | 통과 | 계좌별 작업 줄·PANIC 세대 값이 계좌마다 따로(`EngineCommandHandler` 생성자 `panicGenerations`). 계좌끼리 서로 기다리지 않음 시험 통과 |
+| A8 | 통과 | 프로세스 분리 변경 없음(`verifyProcessIsolation` 통과). 응답을 멈춘 엔진이 소켓·잠금을 내주는 경로(`ControlServer.silence` 203행~)는 다른 프로세스에 의존하지 않음 |
+| A9 | 실패 | R-1은 고쳐졌다: 세대 확인(`EngineCommandHandler` 251·318·337행), 청산 시작·미완료 때 재고정(594·612행), 미완료 문구를 실제 상태로. `EngineCommandHandlerTest#활성화_2차_확인_중에_PANIC이_들어오면_활성화를_시작하지_않는다`, `#활성화_단계_중에_PANIC이_들어오면_청산이_끝나지_않아도_OPEN이_되지_않는다`, `#느린_2차_확인과_PANIC이_어떤_순서로_겹쳐도_…` 통과, 재현 시험 통과. **남은 틈 R-6**(아래): PANIC 1단계 `relock`(568~580행)이 상태를 읽은 뒤 그 상태에 맞는 전이를 따로 부른다. 활성화가 마지막 세대 확인(337행)을 이미 지난 뒤 PANIC이 세대를 올리고 `relock`이 ACTIVATING을 읽은 순간 활성화가 `completeStep`(341행)으로 OPEN이 되면, `failActivation`은 ACTIVATING이 아니어서 아무것도 하지 않는다. 2차 확인이 통과한 PANIC은 청산 작업의 재고정(594행)이 바로잡지만, **확인이 틀렸거나 잠겼거나 비밀번호 미설정인 PANIC은 청산 작업이 없어 계좌가 OPEN으로 남고**, 1단계 결과는 `DONE "ACTIVATING → OPEN"`, 응답은 "보호 모드 고정(신규 주문 차단)만 했고"라고 답한다. 코드 읽기로 확인(`[추론]`, 틈이 나노~마이크로초라 재현 시험은 못 만듦). 지금은 활성화 첫 단계가 늘 `BROKER_NOT_CONNECTED`로 실패해 운영에서 OPEN이 될 수 없으므로 실제 영향은 묶음 E부터 |
+| A10 | 통과 | 수정 커밋에 비밀값 없음. 존재 파일 내용은 하트비트 형식(프로세스 이름·PID·시각·순번) |
+| A11 | 통과 | 보호 테스트 삭제·약화·고정 값 변경 없음. 새 동작 시험 8건 추가(위 3건, `EngineSelfCheckTest` 4건, `ControlChannelTest#늦게_뜬_서버가_응답을_멈추면_먼저_뜬_서버가_잠금과_소켓을_되찾아_명령이_먼저_뜬_서버에_닿는다`), 실패 경우 포함 |
+| A12 | 통과 | R-2 고쳐짐: 엔진마다 `heartbeat/engine-<pid>.presence`를 확인할 때마다 먼저 쓰고(`EngineSelfCheck` 189·208행) 다른 PID의 존재 파일을 읽어, 공용 `engine.hb` 덮어쓰기 경쟁이 없다. 기동 검사도 존재 파일을 본다. 늦게 뜬 엔진은 `silence`로 응답을 멈추고 듣기 소켓을 닫고 잠금을 풀어, 먼저 뜬 엔진이 다음 1초 확인에서 잠금·소켓을 되찾는다(3-R "화면 명령이 첫 엔진에 닿음" 분기). 시작 시각이 같으면 PID 큰 쪽이 늦은 쪽(221행). `EngineSelfCheckTest#공용_하트비트를_내가_덮어써도_먼저_뜬_엔진의_존재_파일을_보고_응답을_멈춘다`, `ControlChannelTest` 위 시험 통과. Windows·macOS 파일 키·PID 확인은 3-R 시행(I1) 때 확인으로 D-142에 남아 있음 |
+| A13 | 해당 없음 | 시장별 규칙·시간대·통화 변경 없음 |
+| A14 | 통과 | ADR-006 2.2·2.8·4·5장과 D-142가 PANIC 우선(세대 값)과 존재 파일·자리 내주기로 정정됐고, R-3(해시 다시 만들기 안내)·R-4(끊기지 않는 검증 대기, 받아들임)가 D-142 위험·후속에 기록됨. R-6은 문서에 없음(고치면 문서 변경 불필요) |
+
+## 점검표 밖 발견 (재검토)
+- **R-6 (수정 필요, A9)** PANIC 1단계의 읽고-나서-전이 경쟁. 고칠 방향(예): `relock`에서 OPEN·ACTIVATING 모두 `guard.deactivate(...)` 하나로 내린다. `deactivate`는 Guard 계좌 잠금 안에서 OPEN→PROTECTIVE, ACTIVATING→출발 상태를 원자적으로 고르므로(`RealTradingGuard.deactivate`), 그 뒤 `completeStep`은 `GuardClosedException`이 되고 앞서 OPEN이 됐으면 PROTECTIVE로 내려간다. 결과 문구는 전이 뒤 실제 상태로 쓴다. 시험: `ActivationStepRunner`가 마지막 단계에서 멈춘 사이 세대 확인을 지나게 하는 것은 어렵기 때문에, 최소한 "`relock` 직전 상태가 ACTIVATING이고 직후 OPEN으로 바뀌어도 PANIC(확인 실패) 뒤 OPEN이 아니다"를 Guard 쪽 순서 주입(예: 감사 기록 훅에서 전이 끼워 넣기)으로 고정하거나, 원자 전이 하나만 부른다는 구조 자체로 갈음하고 그 이유를 주석에 남긴다.
+- R-1·R-2·R-4·N1~N4 처리는 위 표대로 확인했다. 1차 R-3은 D-142 후속(I1, 릴리스 안내)으로 옮겨진 것을 확인했다.
+
+## 판정 (재검토)
+수정 필요(A9·R-6 PANIC 1단계 relock의 상태 읽기와 전이 사이 경쟁: 2차 확인이 실패한 PANIC 뒤 계좌가 OPEN으로 남을 수 있음)
