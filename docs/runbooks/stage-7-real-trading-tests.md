@@ -90,9 +90,9 @@
    - **운영 실전 엔진**: 시험 동안 운영 실전 엔진은 끈다. 끌 수 없으면 시험을 하지 않는다. 화면 단추를 누르기 전에 `#/real`에 **시험 계좌 별칭만** 보이는지 확인한다.
    - **알림**: 첫 엔진 긴급 알림을 받을 수 있게 시험 폴더에 알림 설정을 둔다(3장 N1처럼 시험 보내기로 먼저 확인).
    - **되돌리기**: 시험 뒤 실험실·감시·엔진이 다시 원래 설정 폴더로 떠 있는지 확인한다(1장 공통 전제). 설정 폴더는 `-Dautotrade.config-dir`가 `AUTOTRADE_CONFIG_DIR`보다 먼저 적용되므로(`ConfigPaths.java:27-37`) 환경 변수 값만으로는 확정하지 않는다(PR #238 risk-ops 재검토 3 T1, architect C-3). 확인은 코드에 있는 것으로 한다:
-     - 모든 프로세스: 명령줄의 `-Dautotrade.config-dir` 값(있으면 그것이 설정 폴더). 5-1의 `Get-CimInstance … CommandLine`으로 본다.
+     - 모든 프로세스: 명령줄의 `-Dautotrade.config-dir` 값(있으면 그것이 설정 폴더), 실험실은 실행 인자 `--autotrade.config-dir=`도 본다(risk-ops R12). 5-1의 `Get-CimInstance … CommandLine`으로 본다.
      - 감시: 기동 로그의 "감시 시작: 설정 폴더 …" 줄(`WatchdogMain.java:116`).
-     - 엔진: 기동 로그에 설정 폴더 줄이 없으므로, 운영 폴더에 `run/engine.lock`·소켓과 `heartbeat/engine`이 새로 생겼는지 본다.
+     - 엔진: 기동 로그의 "engine 기동 …, 설정 … (설정 폴더)" 줄(`ProcessStartup.java:22-23`)이 운영 폴더인지 보고, 운영 폴더의 `run/engine.lock`·소켓과 `heartbeat/engine`이 **시험 뒤 시각으로 갱신**됐는지 본다(잠금 파일은 엔진이 꺼진 뒤에도 남을 수 있으므로 있는지만 보지 않는다, risk-ops 재검토 4 R11).
      - 실험실: `#/real`에 운영 계좌 별칭이 보이고 "가상"이 아닌지 본다.
    - **실험실 포트**: 실험실 기본 포트는 8480 하나다(`AUTOTRADE_UI_PORT`로 바꿈). 시험용 실험실은 LIVE01 실험실을 멈추고 띄우거나 다른 포트로 띄운다. 어느 쪽인지는 시행 PR에서 정한다(architect C-4, risk-ops R9).
 1. 시험 계좌를 OPEN(모의 도메인)으로 둔다. 시각을 기록한다. 원본 (a) 분기는 OPEN·PROTECTIVE 계좌를 함께 말하므로 PROTECTIVE 계좌로도 같은 절차를 한 번 더 한다(계좌 둘을 하나씩 OPEN·PROTECTIVE로 두고 한 번에 해도 된다, PR #238 risk-ops R2).
