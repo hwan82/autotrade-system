@@ -326,6 +326,46 @@ class EngineStoreTest {
     }
 
     @Test
+    void 블랙리스트_원장을_읽지_못하면_기동은_하고_모든_계좌를_전면_차단한다() throws Exception {
+        // 원장 이름의 폴더: 읽으면 IOException. PR #248 risk-ops R-1 재현
+        Files.createDirectories(config.resolve("engine-store/blacklist/blacklist.jsonl"));
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("블랙리스트 원장 손상").contains("읽기 실패");
+            assertThat(e.store.fullBlock(KIWOOM)).isPresent();
+            assertThatThrownBy(() -> e.guard.enterProtective(e.confirm(KIWOOM))).isInstanceOf(RaiseNotAppliedException.class);
+            e.guard.shutdown(KIWOOM, "BAE", "킬스위치");
+        }
+    }
+
+    @Test
+    void 기동_원장을_읽지_못하면_옮겨_두고_경고만_하고_기동한다() throws Exception {
+        Files.createDirectories(config.resolve("engine-store/boot/boot.jsonl/x"));
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.report().warnings()).anyMatch(w -> w.contains("기동 원장 손상") && w.contains("읽기 실패"));
+            assertThat(e.store.fullBlock(KIS)).isEmpty();
+            e.guard.enterProtective(e.confirm(KIS));
+        }
+        assertThat(Files.isDirectory(config.resolve("engine-store/boot/boot.jsonl.corrupt-1/x"))).isTrue();
+        assertThat(lines(config.resolve("engine-store/boot/boot.jsonl")).get(0)).contains("\"type\":\"boot\"");
+    }
+
+    @Test
+    void 명령_원장을_읽지_못하면_폴더째_옮겨_두고_경고만_하고_기동한다() throws Exception {
+        Files.createDirectories(config.resolve("engine-store/audit/commands/2026-10-26.jsonl"));
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.report().warnings()).anyMatch(w -> w.contains("명령 감사 원장 손상") && w.contains("읽기 실패"));
+            assertThat(e.store.fullBlock(KIS)).isEmpty();
+            e.store.recordCommand("STATUS", "-", "OK");
+        }
+        assertThat(Files.isDirectory(config.resolve("engine-store/audit/commands.corrupt-1/2026-10-26.jsonl"))).isTrue();
+        Path commands = LedgerScan.datedFiles(config.resolve("engine-store/audit/commands")).get(0);
+        assertThat(Files.readString(commands, StandardCharsets.UTF_8)).contains("\"command\":\"STATUS\"");
+        try (EngineStore s = EngineStore.open(options(config, clock, alerts))) {
+            assertThat(s.report().warnings()).isEmpty();
+        }
+    }
+
+    @Test
     void 잠금을_쥔_채널로도_잠금_파일_내용을_대조할_수_있다() throws Exception {
         // Windows에서는 자기 배타 잠금 구간을 다른 핸들로 읽지 못해 이 길로 대조한다(PR #248 risk-ops F-3)
         try (WriterLock lock = WriterLock.acquire(Files.createDirectories(config.resolve("engine-store")).resolve("writer.lock"))) {

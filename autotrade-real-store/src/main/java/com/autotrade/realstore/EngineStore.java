@@ -173,9 +173,11 @@ public final class EngineStore implements AutoCloseable {
         long maxBoot = 0;
 
         // ③ 공통 원장
-        LedgerScan.Result bootScan = LedgerScan.single(paths.bootFile(), StorePaths.BOOT_STREAM, now);
-        LedgerScan.Result commandScan = LedgerScan.dated(paths.commandsDir(), StorePaths.COMMANDS_STREAM, now);
-        LedgerScan.Result blacklistScan = LedgerScan.single(paths.blacklistFile(), StorePaths.BLACKLIST_STREAM, now);
+        // 읽기 오류는 기동 거부가 아니라 손상과 같이 다룬다: 블랙리스트면 모든 계좌 전면 차단, 기동·명령이면 옮기고 경고(2.7 ③,
+        // PR #248 risk-ops R-1)
+        LedgerScan.Result bootScan = scanCommon(StorePaths.BOOT_STREAM, paths.bootFile(), false, now);
+        LedgerScan.Result commandScan = scanCommon(StorePaths.COMMANDS_STREAM, paths.commandsDir(), true, now);
+        LedgerScan.Result blacklistScan = scanCommon(StorePaths.BLACKLIST_STREAM, paths.blacklistFile(), false, now);
         for (LedgerScan.Result r : List.of(bootScan, commandScan, blacklistScan)) {
             maxBoot = Math.max(maxBoot, r.maxBoot());
             noteCut(r, warnings);
@@ -184,7 +186,7 @@ public final class EngineStore implements AutoCloseable {
             }
         }
         if (blacklistScan.status() == LedgerScan.Status.CORRUPT) {
-            // 블랙리스트를 확신할 수 없으면 모든 계좌 전면 차단(지침 4장 3번, 2.7 ③)
+            // 읽기 실패 포함. 블랙리스트를 확신할 수 없으면 모든 계좌 전면 차단(지침 4장 3번, 2.7 ③)
             globalBlocks.add("블랙리스트 원장 손상(" + blacklistScan.problem() + ")");
         }
 
@@ -238,23 +240,37 @@ public final class EngineStore implements AutoCloseable {
         JsonNode lastShutdown = lastShutdownBody(bootScan);
 
         // 경고만 하는 공통 원장(기동·명령)이 손상이면 그 파일을 옮겨 두고 새로 시작한다(지우지 않음, 2.7 ③)
-        LedgerFile bootLedger;
-        if (bootScan.ok()) {
-            bootLedger = LedgerFile.single(paths.bootFile(), bootScan);
-        } else {
-            Path kept = quarantine(paths.bootFile(), boot);
-            warnings.add("기동 원장 손상(" + bootScan.problem() + "), " + kept.getFileName() + "로 옮기고 새로 시작");
-            bootLedger = LedgerFile.single(paths.bootFile(), LedgerScan.single(paths.bootFile(), StorePaths.BOOT_STREAM, now));
+        // 옮기기·새로 열기도 실패하면: 기동 원장은 기동 기록을 쓸 수 없으므로 모든 계좌 전면 차단(2.5 기동 기록 행), 명령 원장은
+        // 명령 감사를 프로세스 로그에만 남기고 경고
+        LedgerFile bootLedger = null;
+        try {
+            if (bootScan.ok()) {
+                bootLedger = LedgerFile.single(paths.bootFile(), bootScan);
+            } else {
+                Path kept = quarantine(paths.bootFile(), boot);
+                warnings.add("기동 원장 손상(" + bootScan.problem() + "), " + kept.getFileName() + "로 옮기고 새로 시작");
+                bootLedger = LedgerFile.single(paths.bootFile(),
+                        LedgerScan.single(paths.bootFile(), StorePaths.BOOT_STREAM, now));
+            }
+        } catch (IOException | RuntimeException e) {
+            globalBlocks.add("기동 기록 실패(기동 원장을 열지 못함: " + e.getClass().getSimpleName() + ")");
         }
         Function<Instant, LocalDate> utcDay = at -> LocalDate.ofInstant(at, ZoneOffset.UTC);
-        LedgerFile commandsLedger;
-        if (commandScan.ok()) {
-            commandsLedger = LedgerFile.dated(paths.commandsDir(), commandScan, utcDay);
-        } else {
-            Path kept = quarantine(commandScan.file(), boot);
-            warnings.add("명령 감사 원장 손상(" + commandScan.problem() + "), " + kept.getFileName() + "로 옮기고 새로 시작");
-            commandsLedger = LedgerFile.restartedAfter(paths.commandsDir(), StorePaths.COMMANDS_STREAM,
-                    kept.getFileName().toString(), utcDay);
+        LedgerFile commandsLedger = null;
+        try {
+            if (commandScan.ok()) {
+                commandsLedger = LedgerFile.dated(paths.commandsDir(), commandScan, utcDay);
+            } else {
+                Path kept = quarantine(commandScan.file(), boot);
+                if (kept.getFileName().toString().startsWith(paths.commandsDir().getFileName().toString() + ".corrupt-")) {
+                    StorePaths.prepareDir(paths.root(), paths.commandsDir()); // 폴더째 옮겼다(읽기 실패)
+                }
+                warnings.add("명령 감사 원장 손상(" + commandScan.problem() + "), " + kept.getFileName() + "로 옮기고 새로 시작");
+                commandsLedger = LedgerFile.restartedAfter(paths.commandsDir(), StorePaths.COMMANDS_STREAM,
+                        kept.getFileName().toString(), utcDay);
+            }
+        } catch (IOException | RuntimeException e) {
+            warnings.add("명령 감사 원장을 열지 못해 명령 감사는 프로세스 로그에만 남습니다(" + e.getClass().getSimpleName() + ")");
         }
 
         lock.stamp(boot, o.pid());
@@ -326,6 +342,9 @@ public final class EngineStore implements AutoCloseable {
         body.put("warnings", report.warnings().size());
         // 계좌·거래일별 키 바닥값(keyFloor)의 사람이 보는 사본. 원본은 계좌 orders 원장의 key-floor 기록이며 B4가 채운다(2.6)
         body.putObject("keyFloors");
+        if (bootLedger == null) {
+            return; // 기동 원장을 열지 못함: 이미 모든 계좌 전면 차단
+        }
         LedgerWriter.Pending p = common.submit(bootLedger, TYPE_BOOT, body);
         try {
             p.done.get(limits.bootRecord().toMillis(), TimeUnit.MILLISECONDS);
@@ -446,6 +465,10 @@ public final class EngineStore implements AutoCloseable {
         body.put("command", command);
         body.put("target", target);
         body.put("code", code);
+        if (commandsLedger == null) {
+            LOG.log(Level.WARNING, "명령 감사 원장이 없어 프로세스 로그에만 남깁니다: " + command + " " + target + " " + code);
+            return;
+        }
         LedgerWriter.Pending p = common.submit(commandsLedger, TYPE_COMMAND, masked(body, StorePaths.COMMANDS_STREAM, TYPE_COMMAND));
         p.done.whenComplete((rseq, error) -> {
             if (error instanceof LedgerWriter.QueueFull) {
@@ -511,14 +534,18 @@ public final class EngineStore implements AutoCloseable {
         }
         body.put("storeDegraded", !degradedThisBoot.isEmpty());
         body.put("unflushed", unflushed);
-        LedgerWriter.Pending p = common.submit(bootLedger, TYPE_SHUTDOWN, body);
         closed = true;
-        try {
-            p.done.get(limits.shutdownRecord().toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException | ExecutionException e) {
-            LOG.log(Level.ERROR, "정상 종료 기록을 쓰지 못했습니다. 다음 기동은 비정상 종료로 다룹니다: " + rootMessage(e));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (bootLedger == null) {
+            LOG.log(Level.ERROR, "기동 원장이 없어 정상 종료 기록을 쓰지 못했습니다. 다음 기동은 비정상 종료로 다룹니다");
+        } else {
+            LedgerWriter.Pending p = common.submit(bootLedger, TYPE_SHUTDOWN, body);
+            try {
+                p.done.get(limits.shutdownRecord().toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException | ExecutionException e) {
+                LOG.log(Level.ERROR, "정상 종료 기록을 쓰지 못했습니다. 다음 기동은 비정상 종료로 다룹니다: " + rootMessage(e));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
         common.drainAndStop(limits.shutdownRecord());
         closeQuietly(bootLedger);
@@ -531,6 +558,9 @@ public final class EngineStore implements AutoCloseable {
     }
 
     private static void closeQuietly(LedgerFile f) {
+        if (f == null) {
+            return;
+        }
         try {
             f.close();
         } catch (IOException e) {
@@ -578,6 +608,14 @@ public final class EngineStore implements AutoCloseable {
     }
 
     /** 손상 파일을 같은 폴더의 다른 이름으로 옮긴다(지우지 않음). */
+    private static LedgerScan.Result scanCommon(String stream, Path path, boolean dated, Instant now) {
+        try {
+            return dated ? LedgerScan.dated(path, stream, now) : LedgerScan.single(path, stream, now);
+        } catch (IOException | RuntimeException e) {
+            return LedgerScan.unreadable(stream, path, e);
+        }
+    }
+
     private static Path quarantine(Path file, long boot) throws IOException {
         Path target = file.resolveSibling(file.getFileName() + ".corrupt-" + boot);
         int n = 0;

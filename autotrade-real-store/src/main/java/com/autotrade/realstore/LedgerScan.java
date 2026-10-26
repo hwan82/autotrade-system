@@ -261,6 +261,11 @@ final class LedgerScan {
         return end;
     }
 
+    /** 읽는 중 입출력 오류가 난 원장. 손상과 같이 다룬다(PR #248 risk-ops F-2·R-1). */
+    static Result unreadable(String stream, Path file, Exception e) {
+        return corrupt(stream, file, "읽기 실패(" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")", 0);
+    }
+
     private static Result corrupt(String stream, Path file, String problem, long maxBoot) {
         return new Result(stream, file, Status.CORRUPT, problem, 0, null, maxBoot, List.of(), null);
     }
