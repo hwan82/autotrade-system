@@ -53,3 +53,50 @@
 
 ## 판정
 수정 필요(F-1 같은 묶음 뒤 줄 실패 때 앞 줄이 "기록됨"으로 끝나 올림이 기록 없이 적용될 수 있음, F-2 한 계좌 원장 읽기 오류가 엔진 기동 전체를 막음(A7 실패), F-3 Windows에서 `writer.lock` 내용 대조가 자기 잠금과 충돌해 거짓 전면 차단 가능). 세 건 모두 재현 또는 실패 경우 시험을 함께 넣고 같은 검토자에게 재검토를 맡긴다. 실전 관련 PR이므로 고친 뒤에도 독립 QA와 사용자 머지가 필요하다.
+
+## 재검토 2026-10-26
+- 대상: PR #248 / 커밋 `1123e80c`(수정 커밋 `34fd5870`·`1123e80c` 포함, 검토 원문 커밋 제외) / `origin/main...1123e80c` diff 전체. 앞 검토 뒤 바뀐 코드는 `LedgerWriter.java`·`EngineStore.java`·`WriterLock.java`·`RealTradingGuard.java`(주석만)와 시험 `LedgerWriterTest`(새 파일)·`EngineStoreTest`(2건 추가), 문서 `D-146`.
+- 점검표: A
+- 직접 실행한 것:
+  - `git archive 1123e80c`로 떠 낸 별도 폴더에서 `./gradlew build --offline`: **BUILD SUCCESSFUL**. 테스트 XML 합계 2,053건, 실패 0·오류 0·건너뜀 0. `:autotrade-risk:test` 68건, `:autotrade-real-store:test` 31건(앞 검토보다 3건 늘어남), `:autotrade-architecture-test:test` 47건, `:autotrade-app-engine:test` 114건.
+  - 임시 재현 시험(커밋 안 함, 별도 폴더, 커밋 `1123e80c`): 공통 원장 자리에 같은 이름의 폴더를 만들어 읽기 오류를 낸 뒤 `EngineStore.open`. `blacklist/blacklist.jsonl`·`audit/commands/2026-10-26.jsonl`·`boot/boot.jsonl` 세 경우 모두 `java.io.IOException: Is a directory`로 저장소 열기 전체가 실패(아래 R-1).
+
+### 앞 발견의 처리
+| 발견 | 결과 | 근거 |
+|---|---|---|
+| F-1 같은 묶음 뒤 줄 실패 때 앞 줄이 "기록됨"으로 끝남 | 해결 | `LedgerWriter.write`: `append`가 실패하면 그 묶음에서 같은 원장에 먼저 붙인 `written` 항목을 빼고 실패로 끝낸다. 되돌리기 뒤에 같은 원장에 붙는 줄은 `durableSize`·`resyncFromDisk` 기준으로 다시 붙고 강제 기록된다. 다른 원장 줄은 영향 없음. `LedgerWriterTest#같은_묶음의_뒤_줄_붙이기가_실패하면_되돌려진_앞_줄도_기록됨으로_끝나지_않는다` 통과(앞 줄 실패, 파일에 없음, 다음 줄 `rseq` 2, 다시 검사 OK). Guard까지 이어지는 경로는 코드로 확인함: 실패한 `done` → `StoreGuardAuditLog.raise`의 `ExecutionException` → `IllegalStateException` → `RealTradingGuard.finishRaise`가 `RaiseNotAppliedException(AUDIT_NOT_RECORDED)`로 올리지 않음. 이 연결을 끝까지 묶은 시험은 없다(참고 R-3). |
+| F-2 한 계좌 원장 읽기 오류가 엔진 기동 전체를 막음 | **계좌 원장은 해결, 공통 원장은 남음** | 계좌 원장: `EngineStore.openLocked`의 계좌 검사와 원장 준비가 `IOException`·`RuntimeException`을 잡아 그 계좌만 "계좌 원장 읽기 실패"/"준비 실패"로 (가) 전면 차단한다. `EngineStoreTest#한_계좌_원장을_읽지_못해도_저장소는_열리고_그_계좌만_전면_차단한다` 통과(막힌 계좌 올림 거절, 다른 계좌 올림 가능, 막힌 계좌 내림 가능). 공통 원장: 앞 원문 F-2 요구의 "블랙리스트 원장 읽기 실패는 손상과 같이 모든 계좌 (가)로"는 반영되지 않았다(R-1). |
+| F-3 Windows에서 `writer.lock` 내용 대조가 자기 잠금과 충돌 | 해결(Windows 실기는 미검증, P12) | `WriterLock.check`: 존재·`fileKey` 확인 뒤 경로로 읽고, 경로 읽기가 실패하면 잠금을 쥔 채널로 위치 지정 읽기(`channel.read(buf, pos)`)를 해서 대조한다. 쓰기 위치는 바꾸지 않는다. POSIX에서는 경로 읽기가 먼저 성공하므로 `fileKey`·내용 대조가 앞과 같아 교체 감지가 약해지지 않는다(기존 `실행_중_잠금_파일_내용이_바뀌면…`·`…지워지면…` 시험 통과). [추론] Windows에서 다른 프로세스가 잠긴 파일 내용을 바꾸는 쓰기는 강제 잠금으로 막히고, 파일을 지우고 새로 만들면 새 파일은 잠기지 않아 경로 읽기가 성공해 대조에서 걸린다. `EngineStoreTest#잠금을_쥔_채널로도_잠금_파일_내용을_대조할_수_있다`는 자기 채널 읽기만 직접 시험하고, `check()`가 경로 읽기 실패 때 이 길로 넘어가는 분기는 시험하지 않는다(참고 R-4). |
+| N-1~N-5 | 기록됨 | N-1·N-2·N-4·architect 권고 2는 D-146 "위험과 한계"에 후속으로 적힘. N-5 Javadoc 중복은 하나로 합쳐짐. |
+
+### 점검표 A (다시 확인)
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 앞 검토와 같음. 수정 커밋은 Guard 초기 상태·2차 확인을 건드리지 않음(`RealTradingGuard.java` 변경은 주석만). `EngineStoreTest#원장에_OPEN_전이가_있어도_재기동하면_모든_계좌는_OFF다` 통과. |
+| A2 | 통과 | 주문 출구·ArchUnit 규칙 변경 없음(수정 커밋에 `autotrade-architecture-test` 변경 없음). `ArchitectureTest` 통과. |
+| A3 | 해당 없음 | 증권사·주문 경로 변경 없음. |
+| A4 | 해당 없음 | 주문 전송·재전송 변경 없음. |
+| A5 | 해당 없음 | 키 발급 없음(B4). 참고 R-2(부팅 번호). |
+| A6 | 통과 | 블랙리스트 원장 손상 → 모든 계좌 전면 차단(`EngineStoreTest#블랙리스트_원장이_깨지면_모든_계좌를_전면_차단한다` 통과). 블랙리스트 원장 **읽기 오류**는 차단이 아니라 기동 거부로 끝나므로 블랙리스트를 모른 채 주문하는 경로는 생기지 않는다(R-1은 A7·A14 쪽 문제). |
+| A7 | **실패** | 계좌 원장 쪽은 해결(위 F-2). 그러나 공통 원장(`blacklist`·`boot`·`audit/commands`) 읽기 오류 하나로 저장소 열기 전체가 실패해 실전 엔진이 뜨지 않는다(R-1, 재현함). 운영 PC 백신이 공통 원장 파일 하나를 잠깐 잡아도 모든 실전 계좌가 엔진 없이 남는다. |
+| A8 | 통과 | 앞 검토와 같음. 수정 커밋은 프로세스 격리 설정을 건드리지 않음. |
+| A9 | 통과 | 내림은 감사 기록을 기다리지 않음(변경 없음). 계좌 원장 읽기 실패 계좌에서도 내림이 되는 것을 새 시험이 확인. 보호 시세·서버 측 손절 경로 변경 없음. R-1은 주문 경로가 생긴 뒤 A9에도 영향을 주므로 A7과 함께 고친다. |
+| A10 | 통과 | 새 차단 사유 문구는 예외 클래스 이름과 메시지만 싣는다. `IOException` 메시지는 경로·OS 오류 문구이고 비밀값을 담지 않는다. 새 시험 값은 자리표시자. |
+| A11 | 통과 | 지운 시험·약한 단언 없음. 보호 테스트·고정 값 변경 없음. 새 동작(F-1·F-2·F-3)에 실패 경우 시험이 생김(분기 범위는 참고 R-3·R-4). |
+| A12 | 통과 | 앞 검토와 같음. 3-R·P12 전제를 약하게 하지 않음. |
+| A13 | 통과 | 앞 검토와 같음(`rules::tradingDate`는 계좌 원장 준비 `try` 안으로 옮겨졌을 뿐). |
+| A14 | **실패** | D-146 "위험과 한계"에 계좌 원장 읽기 실패 처리가 적혔다. 그러나 ADR-015 2.7 ③("`boot`·`audit/commands` 손상은 활성화를 막지 않고 경고", "`blacklist` 손상이면 모든 계좌 전면 차단")과 달리 이 원장들의 읽기 오류는 기동 거부로 끝나고, D-146에도 그 차이가 적혀 있지 않다(R-1). |
+
+### 재검토 발견
+#### R-1. [수정 필요] 공통 원장 읽기 오류가 엔진 기동 전체를 막는다 (F-2의 남은 부분, A7·A14)
+- [사실] `EngineStore.openLocked`의 공통 원장 검사 `LedgerScan.single(paths.bootFile())`·`LedgerScan.dated(paths.commandsDir())`·`LedgerScan.single(paths.blacklistFile())`는 `try` 밖에 있어 `IOException`이 그대로 `EngineStore.open`을 실패시킨다. `quarantine(...)`(`Files.move`) 실패도 같다.
+- [사실] 재현(커밋 `1123e80c`): 세 공통 원장 자리에 같은 이름의 폴더를 하나씩 두면 세 경우 모두 `IOException: Is a directory`로 저장소가 열리지 않는다.
+- 요구: ADR-015 2.7 ③대로 맞춘다. `blacklist` 읽기 실패는 손상과 같이 **모든 계좌 (가) 전면 차단**(기동은 함), `boot`·`audit/commands` 읽기 실패는 그 파일을 옮기지 못하면 새 이름으로 시작하는 등 **경고만** 하고 기동한다. 옮기기(`quarantine`)가 실패하는 경우도 같은 방향으로 처리한다. 세 경우의 시험을 남긴다. ADR과 다르게 기동 거부를 고르려면 D-146에 이유와 함께 적고 사용자 확인 항목으로 올린다.
+
+#### 참고(수정 요구 아님)
+- R-2. 계좌 원장을 읽지 못한 계좌의 `boot` 값은 부팅 번호 계산(최댓값 + 1)에 들어가지 않는다. 그 계좌에는 쓰지 않으므로 지금은 "쓰기 주체 둘" 오판이나 겹침이 없지만, B4에서 `keyFloor`·부팅 번호를 계좌 원장에 기대게 되면 "읽지 못한 계좌가 있으면 부팅 번호를 어떻게 정하나"를 architect 권고 2와 함께 정한다.
+- R-3. F-1 수정은 `LedgerWriter` 단위로 시험했다. "같은 묶음 뒤 줄 실패 → Guard 올림 `RaiseNotAppliedException(AUDIT_NOT_RECORDED)`, 상태 그대로"를 저장소·Guard를 함께 묶은 시험으로도 남기기를 권한다(R-1을 고칠 때 함께).
+- R-4. `WriterLock.check()`가 경로 읽기 실패 때 잠금 채널로 넘어가는 분기 자체는 시험이 없다. 경로 읽기를 실패시키는 시험 훅(예: 패키지 전용 읽기 함수 주입)으로 그 분기와 "그 분기에서도 내용이 다르면 차단"을 시험하기를 권한다. Windows 실기 확인은 P12에 그대로 둔다.
+
+### 판정
+수정 필요(R-1: 공통 원장 `blacklist`·`boot`·`audit/commands` 읽기 오류가 엔진 기동 전체를 막음. ADR-015 2.7 ③과 어긋남, A7·A14 실패). F-1·F-3은 해결, F-2는 계좌 원장 부분만 해결. R-1을 고치고 시험을 넣은 뒤 같은 검토자에게 재검토를 맡긴다. 실전 관련 PR이므로 그 뒤에도 독립 QA와 사용자 머지가 필요하다.
