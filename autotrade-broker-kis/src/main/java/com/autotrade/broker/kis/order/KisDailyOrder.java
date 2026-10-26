@@ -56,9 +56,14 @@ public record KisDailyOrder(
         }
     }
 
-    /** 원주문번호가 있으면 취소·정정 주문 행이다. 앞자리 0만 있는 값도 없음으로 본다 `[가정]`. */
+    /** 원주문번호가 있으면 취소·정정 주문 행이다. 앞자리 0만 있는 값과 자기 번호는 없음으로 본다 `[가정]`. */
     public boolean isCancelOrModify() {
-        return !originalOdno.isEmpty() && !KisOrderNo.normalize(originalOdno).equals("0");
+        if (originalOdno.isEmpty() || !originalOdno.chars().allMatch(Character::isDigit)) {
+            return !originalOdno.isEmpty();
+        }
+        String orig = KisOrderNo.normalize(originalOdno);
+        // 원주문번호 칸에 자기 번호가 들어 오는 형식도 원주문으로 본다 `[가정]`(risk-ops PR #247 R2)
+        return !orig.equals("0") && !orig.equals(KisOrderNo.normalize(odno));
     }
 
     public KisOrderNo orderNo() {

@@ -85,20 +85,16 @@ public final class KisSession {
         URI uri = BASE.resolve(path + query(params));
         Map<String, String> headers = headers(trId, token);
         headers.put("tr_cont", trCont);
-        synchronized (this) {
-            pace();
-            return http.get(uri, headers);
-        }
+        pace();
+        return http.get(uri, headers);
     }
 
     HttpPort.Response post(String path, String trId, String jsonBody, String token)
             throws IOException, InterruptedException {
         URI uri = BASE.resolve(path);
         Map<String, String> headers = headers(trId, token);
-        synchronized (this) {
-            pace();
-            return http.post(uri, headers, jsonBody);
-        }
+        pace();
+        return http.post(uri, headers, jsonBody);
     }
 
     private Map<String, String> headers(String trId, String token) {
@@ -122,7 +118,8 @@ public final class KisSession {
         return q.toString();
     }
 
-    private void pace() throws InterruptedException {
+    /** 보내기 시작 간격만 맞춘다. 잠금은 간격 계산에만 쓰고 HTTP 응답을 기다리는 동안 쥐지 않는다(risk-ops PR #247 G3). */
+    private synchronized void pace() throws InterruptedException {
         Instant now = clock.instant();
         if (lastCall != null) {
             Duration wait = Duration.between(now, lastCall.plus(interval));

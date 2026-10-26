@@ -121,6 +121,16 @@ class KisOrderClientTest {
     }
 
     @Test
+    void 그_밖의_오류_코드가_HTTP_200이_아닌_응답에_실리면_모름이다() {
+        OrderFakes.Http http = new OrderFakes.Http().respond(200, OrderFakes.TOKEN_OK)
+                .respond(502, "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00203\"}");
+        KisOrderResult r = client(http).submit(limitBuy(10, "70000"));
+        assertThat(r).isInstanceOf(KisOrderResult.Unknown.class);
+        assertThat(((KisOrderResult.Unknown) r).reason()).contains("EGW00203", "502");
+        assertThat(http.count("order-cash")).isEqualTo(1);
+    }
+
+    @Test
     void 한도_초과는_HTTP_500이어도_결과_코드로_판단하고_다시_보내지_않는다() {
         OrderFakes.Http http = new OrderFakes.Http().respond(200, OrderFakes.TOKEN_OK)
                 .respond(500, "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00201\",\"msg1\":\"초당 거래건수를 초과하였습니다.\"}");

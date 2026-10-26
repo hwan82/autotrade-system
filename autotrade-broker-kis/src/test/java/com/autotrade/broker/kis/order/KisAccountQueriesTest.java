@@ -100,6 +100,21 @@ class KisAccountQueriesTest {
     }
 
     @Test
+    void 응답에_행_칸이_없으면_0행_완전으로_읽지_않는다() throws Exception {
+        OrderFakes.Http http = new OrderFakes.Http().respond(200, OrderFakes.TOKEN_OK)
+                .respond(200, "{\"rt_cd\":\"0\",\"output\":[]}")
+                .respond(200, "{\"rt_cd\":\"0\",\"output2\":[{\"dnca_tot_amt\":\"1\",\"prvs_rcdl_excc_amt\":\"1\","
+                        + "\"tot_evlu_amt\":\"1\"}]}");
+        KisAccountQueries q = queries(http);
+        KisDailyOrders day = q.dailyOrders(DAY);
+        assertThat(day.complete()).isFalse();
+        assertThat(day.unreadableRows()).isEqualTo(1);
+        KisBalance b = q.balance();
+        assertThat(b.complete()).isFalse();
+        assertThat(b.holdings()).isEmpty();
+    }
+
+    @Test
     void 토큰_만료면_한_번만_다시_부르고_새_토큰은_60초_하한을_지킨다() throws Exception {
         String expired = "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00123\"}";
         OrderFakes.Http http = new OrderFakes.Http().respond(200, OrderFakes.TOKEN_OK).respond(200, page())

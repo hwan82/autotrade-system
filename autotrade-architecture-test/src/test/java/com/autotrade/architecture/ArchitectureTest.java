@@ -172,13 +172,23 @@ class ArchitectureTest {
     /**
      * 증권사 플러그인의 주문·계좌 코드는 {@code com.autotrade.broker.<플러그인>.order} 패키지에 두고, 그 플러그인 밖의 어떤 클래스도
      * 이 패키지에 의존하지 않는다. 플러그인 밖 코드가 주문 클라이언트를 직접 만들면 RealTradingGuard와 출구 팩토리를 건너뛰므로
-     * (위 규칙은 {@code orderGateway} 호출만 본다), 플러그인에 주문 코드를 넣는 첫 PR(D-143, 한국투자)에서 더한다
+     * (위 규칙은 {@code orderGateway} 호출만 본다), 플러그인에 주문 코드를 넣는 첫 PR(D-145, 한국투자)에서 더한다
      * (ADR-002 6장, ADR-003 6장 risk-ops 7단계 요구 사항). 패키지를 빌린 다른 모듈 클래스는 {@code ModuleOwnershipTest}가 막는다.
      */
     static final ArchRule PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN = CompositeArchRule
             .of(orderPackageStaysIn("kis"))
             .and(orderPackageStaysIn("kiwoom"))
             .and(orderPackageStaysIn("toss"));
+
+    /**
+     * 한국투자 접근토큰 발급기({@code KisTokenClient})는 플러그인 밖에서 쓰지 않는다. 플러그인 밖 프로세스가 같은 실전 앱키로
+     * 토큰을 따로 받으면 재발급 1분 1회 제한과 발급 알림이 실전 엔진 세션(60초 하한, D-054 R2)과 겹친다(D-145, risk-ops
+     * PR #247 G1·architect R1).
+     */
+    static final ArchRule KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN = noClasses()
+            .that().resideOutsideOfPackage("com.autotrade.broker.kis..")
+            .should().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.broker.kis.KisTokenClient")
+            .because("한국투자 토큰 발급은 플러그인 안 세션만 한다(D-054 R2, D-145)");
 
     static ArchRule orderPackageStaysIn(String plugin) {
         String root = "com.autotrade.broker." + plugin;
@@ -421,6 +431,7 @@ class ArchitectureTest {
     @Test
     void 증권사_주문_코드는_플러그인_밖에서_쓰지_않는다() {
         PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN.check(PRODUCTION);
+        KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN.check(PRODUCTION);
     }
 
     @Test
@@ -528,6 +539,9 @@ class ArchitectureTest {
         assertThat(orderBypass.hasViolation()).isTrue();
         assertThat(String.join("\n", orderBypass.getFailureReport().getDetails()))
                 .contains("KisOrderClient.<init>", "KisOrderClient.submit", "KisSession", "KisAccountNumber");
+        assertThat(String.join("\n", KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN.evaluate(new ClassFileImporter()
+                .importClasses(BypassPluginOrderClient.class)).getFailureReport().getDetails()))
+                .contains("KisTokenClient.fetcher");
         // 플러그인 안(주문 패키지 자신)과 주문 패키지를 모르는 플러그인 밖 클래스는 위반이 아니다
         assertThat(PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN.evaluate(new ClassFileImporter().importClasses(
                 com.autotrade.broker.kis.order.KisOrderClient.class, RiskChain.class)).hasViolation()).isFalse();

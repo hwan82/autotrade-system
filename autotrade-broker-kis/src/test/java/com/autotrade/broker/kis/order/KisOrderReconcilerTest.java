@@ -15,7 +15,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * 타임아웃 뒤 접수 여부 확인(D-143, 장애표 4번). "없음"은 모든 조건이 맞을 때만 나온다. 틀리면 중복 주문이므로
+ * 타임아웃 뒤 접수 여부 확인(D-145, 장애표 4번). "없음"은 모든 조건이 맞을 때만 나온다. 틀리면 중복 주문이므로
  * 각 조건을 하나씩 깨서 "모름"이 되는지 본다.
  */
 class KisOrderReconcilerTest {
@@ -42,18 +42,48 @@ class KisOrderReconcilerTest {
             order("0000117057", "", Side.BUY, "005930", "00", 10, "70000", LocalTime.of(9, 30, 1));
 
     @Test
-    void 같은_특징의_새_주문_하나면_찾음이다() {
-        assertThat(KisOrderReconciler.find(day(SENT.plusSeconds(5), true, OURS), LIMIT_BUY, Set.of()))
+    void 반영_대기_뒤_완전한_조회에_같은_특징의_새_주문_하나뿐이면_찾음이다() {
+        assertThat(KisOrderReconciler.find(day(SETTLED, true, OURS), LIMIT_BUY, Set.of()))
                 .isEqualTo(new KisOrderReconciler.Found(OURS, false));
     }
 
     @Test
-    void 반영_대기_뒤_완전한_조회에_같은_종목_방향의_새_주문이_없을_때만_없음이다() {
+    void 반영_대기_전이거나_불완전한_조회에서는_후보가_하나여도_찾음을_내지_않는다() {
+        assertThat(KisOrderReconciler.find(day(SENT.plusSeconds(1), true, OURS), LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        assertThat(KisOrderReconciler.find(day(SETTLED, false, OURS), LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+    }
+
+    @Test
+    void 반영_대기_뒤_완전한_조회의_창_안에_묶이지_않은_행이_없을_때만_없음이다() {
         KisDailyOrder before = order("1", "", Side.BUY, "005930", "00", 10, "70000", LocalTime.of(9, 28, 59));
         KisDailyOrder otherSymbol = order("2", "", Side.BUY, "000660", "00", 10, "70000", LocalTime.of(9, 30, 1));
         KisDailyOrder otherSide = order("3", "", Side.SELL, "005930", "00", 10, "70000", LocalTime.of(9, 30, 1));
-        assertThat(KisOrderReconciler.find(day(SETTLED, true, before, otherSymbol, otherSide), LIMIT_BUY, Set.of()))
+        Set<KisOrderNo> ours = Set.of(new KisOrderNo("91252", "2"), new KisOrderNo("91252", "3"));
+        assertThat(KisOrderReconciler.find(day(SETTLED, true, before, otherSymbol, otherSide), LIMIT_BUY, ours))
                 .isSameAs(KisOrderReconciler.NotFound.INSTANCE);
+        // 종목·방향이 달라도 묶이지 않은 행이 창 안에 있으면 확정하지 않는다(종목코드 형식 해석이 틀린 경우 대비)
+        for (KisDailyOrder other : List.of(otherSymbol, otherSide)) {
+            assertThat(KisOrderReconciler.find(day(SETTLED, true, before, other), LIMIT_BUY, Set.of()))
+                    .as(other.odno()).isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        }
+    }
+
+    @Test
+    void 원주문번호_칸에_자기_번호가_오거나_종목코드에_접두가_붙어도_우리_주문을_놓치지_않는다() {
+        KisDailyOrder selfOrig = order("0000117057", "0000117057", Side.BUY, "005930", "00", 10, "70000",
+                LocalTime.of(9, 30, 1));
+        assertThat(selfOrig.isCancelOrModify()).isFalse();
+        assertThat(KisOrderReconciler.find(day(SETTLED, true, selfOrig), LIMIT_BUY, Set.of()))
+                .isEqualTo(new KisOrderReconciler.Found(selfOrig, false));
+        KisDailyOrder prefixed = order("0000117057", "", Side.BUY, "A005930", "00", 10, "70000", LocalTime.of(9, 30, 1));
+        assertThat(KisOrderReconciler.find(day(SETTLED, true, prefixed), LIMIT_BUY, Set.of()))
+                .isEqualTo(new KisOrderReconciler.Found(prefixed, false));
+        // 해석할 수 없는 종목코드라도 창 안에 있으면 없음이 아니다
+        KisDailyOrder odd = order("0000117057", "", Side.BUY, "KR7005930003", "00", 10, "70000", LocalTime.of(9, 30, 1));
+        assertThat(KisOrderReconciler.find(day(SETTLED, true, odd), LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
     }
 
     @Test
@@ -91,11 +121,13 @@ class KisOrderReconcilerTest {
     }
 
     @Test
-    void 취소_주문_행은_새_주문_후보가_아니다() {
+    void 취소_주문_행은_후보가_아니고_묶이지_않았으면_확정을_막는다() {
         KisDailyOrder cancel = order("0000117060", "0000117057", Side.BUY, "005930", "00", 10, "70000",
                 LocalTime.of(9, 30, 5));
         assertThat(KisOrderReconciler.find(day(SETTLED, true, cancel), LIMIT_BUY, Set.of()))
-                .isSameAs(KisOrderReconciler.NotFound.INSTANCE);
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        assertThat(KisOrderReconciler.find(day(SETTLED, true, cancel), LIMIT_BUY,
+                Set.of(new KisOrderNo("91252", "117060")))).isSameAs(KisOrderReconciler.NotFound.INSTANCE);
     }
 
     @Test
@@ -142,6 +174,13 @@ class KisOrderReconcilerTest {
         assertThat(day(SETTLED, true, OURS).statusOf(new KisOrderNo("91252", "0000117057")))
                 .contains(OrderState.ACCEPTED);
         assertThat(d.statusOf(new KisOrderNo("91252", "1"))).isEmpty();
+    }
+
+    @Test
+    void 보낸_시각의_한국_날짜와_주문_날짜가_다르면_특징을_만들지_않는다() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new KisOrderReconciler.Fingerprint(
+                DAY.plusDays(1), "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, TIMEOUT))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static OrderState state(long ordered, long filled, long cancelled, long remaining, long rejected) {

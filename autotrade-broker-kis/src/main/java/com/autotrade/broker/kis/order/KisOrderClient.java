@@ -39,7 +39,8 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>KRX 종목만, 이 클라이언트의 계좌로만 보낸다(D-010). 정정은 하지 않는다(취소만).</li>
  *   <li>어떤 결과에서도 스스로 다시 보내지 않는다. 응답을 모르면 {@link KisOrderResult.Unknown}이다(지침 4장 2항).
- *       결과 코드가 있는 응답은 HTTP 상태와 상관없이 그 코드로 판단한다(D-136 후속 고침 1번과 같은 순서).</li>
+ *       한도 초과·토큰 오류 코드는 HTTP 상태와 상관없이 "접수 안 됨"이다(게이트웨이가 원장 앞에서 막음). 그 밖의 오류 코드는
+ *       HTTP 200일 때만 원장 거절로 확정하고, 200이 아니면 모름이다.</li>
  *   <li>요청·응답 원문, 계좌번호, 키는 결과·예외 메시지에 넣지 않는다(안전 불변식 9).</li>
  * </ul>
  */
@@ -163,7 +164,11 @@ public final class KisOrderClient {
                     yield new KisOrderResult.NotAccepted(KisOrderResult.Reason.TOKEN_EXPIRED, code.code());
                 }
                 case RATE_LIMITED -> new KisOrderResult.NotAccepted(KisOrderResult.Reason.RATE_LIMITED, code.code());
-                default -> new KisOrderResult.NotAccepted(KisOrderResult.Reason.BROKER_REJECTED, code.code());
+                // 그 밖의 오류 코드는 HTTP 200일 때만 원장 거절로 확정한다. 5xx 등에 실린 게이트웨이 오류는 원장에 닿은 뒤일 수
+                // 있어 모름이다(risk-ops PR #247 R3)
+                default -> r.status() == 200
+                        ? new KisOrderResult.NotAccepted(KisOrderResult.Reason.BROKER_REJECTED, code.code())
+                        : new KisOrderResult.Unknown(trId + " 오류 코드 " + code.code() + "(HTTP " + r.status() + ")");
             };
         }
         if (r.status() != 200) {

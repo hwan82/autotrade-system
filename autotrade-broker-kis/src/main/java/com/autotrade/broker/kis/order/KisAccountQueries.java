@@ -78,6 +78,10 @@ public final class KisAccountQueries {
         List<KisDailyOrder> rows = new ArrayList<>();
         int[] unreadable = {0};
         boolean complete = pages(DAILY_PATH, TR_DAILY, params, body -> {
+            if (!body.path("output1").isArray()) {
+                unreadable[0]++; // 칸 이름이 다르거나 빠진 응답을 "0행 완전"으로 읽지 않는다(risk-ops PR #247 R2)
+                return;
+            }
             for (JsonNode row : body.path("output1")) {
                 Optional<KisDailyOrder> r = KisDailyOrder.parse(row);
                 r.ifPresentOrElse(rows::add, () -> unreadable[0]++);
@@ -102,6 +106,10 @@ public final class KisAccountQueries {
         int[] unreadable = {0};
         JsonNode[] summary = {null};
         boolean complete = pages(BALANCE_PATH, TR_BALANCE, params, body -> {
+            if (!body.path("output1").isArray()) {
+                unreadable[0]++; // 보유 칸이 없는 응답을 "보유 없음"으로 읽지 않는다(risk-ops PR #247 R2)
+                return;
+            }
             for (JsonNode row : body.path("output1")) {
                 try {
                     long qty = KisDailyOrder.quantity(row, "hldg_qty");
