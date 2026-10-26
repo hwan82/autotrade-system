@@ -43,3 +43,32 @@
 
 ## 판정
 수정 필요(발견 1: 같은 묶음 안 뒤 줄 쓰기 실패 때 앞 줄이 지워진 채 "기록됨"으로 끝나는 결함 수정과 재현 시험 추가). 발견 2는 B4 후속 과제로 기록, 발견 3은 고치면 좋음. B7에 따라 risk-ops 검토가 따로 필요하다.
+
+## 재검토 2026-10-26
+- 대상: PR #248 / 커밋 `1123e80c` (앞 검토 `14ea305a` 뒤 수정 커밋 `34fd5870`·`1123e80c`, 검토 원문 커밋 제외) / `origin/main...HEAD` diff 전체를 다시 보고, 수정분은 `git diff 14ea305a 1123e80c`로 따로 봄
+- 점검표: B
+- 직접 실행한 것: `git archive HEAD`로 다른 폴더(새 Gradle 출력, 캐시 없음)에 풀어 `./gradlew build --offline` → BUILD SUCCESSFUL(4분 30초, UP-TO-DATE 3개뿐). JUnit XML 집계: real-store 31건(앞 28 + 새 3), risk 68건, app-engine 114건, architecture-test 47건, notification-jar 86건, 실패·오류·건너뜀 0. 수정분에서 지운 `@Test`·추가된 `@Disabled` 없음
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 새 폴더 `./gradlew build --offline` 통과(검토자가 직접 실행) |
+| B2 | 통과 | 수정분은 `autotrade-real-store`·`autotrade-risk` 안에서만 바뀜. 새 의존·패키지 없음. ArchitectureTest·ModuleOwnershipTest·RealPathReflectionTest 통과 |
+| B3 | 통과 | 공개 계약 변경 없음(`WriterLock.readByLockedChannel`은 패키지 전용). D-146 위험과 한계·검증에 F-2·F-3·발견 1·권고 2 반영 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음. `LedgerWriterTest.awaitBacklog`의 `System.nanoTime`은 시험 코드의 대기 기한이며 운영 코드는 주입 `Clock`만 씀 |
+| B5 | 해당 없음 | 금액 코드 없음 |
+| B6 | 통과 | 발견 1 재현 시험 `LedgerWriterTest.같은_묶음의_뒤_줄_붙이기가_실패하면_되돌려진_앞_줄도_기록됨으로_끝나지_않는다`(A 실패, 파일에 A 없음, 다음 줄 rseq 2, 재검사 OK)가 앞 검토의 재현과 같은 조건이고 통과. F-2·F-3 시험 2건(`EngineStoreTest`) 통과 |
+| B7 | risk-ops 검토 필요 | 수정분도 `RealTradingGuard.java`(주석만)와 실전 엔진 저장소(보호 경로 `autotrade-real-store/*`)를 바꿈. 실전 관련 PR이라 risk-ops 재검토·독립 QA·사용자 머지 필요 |
+| B8 | 통과 | 새 차단 사유 문구는 예외 종류와 메시지(파일 경로)만 실음. 경로에는 계좌 별칭만 있고 비밀값 없음. gitleaks는 CI 결과에 맡김 |
+
+### 앞 발견 처리
+- **발견 1(수정 필요) → 해결.** `LedgerWriter.java:128-139`: 붙이기가 실패하면 그 묶음에서 같은 원장에 먼저 붙인 `written` 항목을 모두 빼고 실패로 끝낸다. 되돌리기(`durableSize`까지 자르기)가 지우는 범위는 "마지막 강제 기록 뒤에 붙인 줄"이고, 강제 기록은 묶음 끝에서만 일어나므로 지워지는 줄은 이번 묶음의 같은 원장 줄로 한정된다. 그래서 이 처리로 "기록됨 = 강제 기록됨"이 지켜진다. 같은 묶음에서 실패가 두 번 나도(가운데에 붙인 줄 포함) 같은 반복으로 모두 실패 처리된다.
+  - [추론, 사소] 거래일이 바뀌는 묶음에서는 `ensureFile`이 앞 날짜 파일을 먼저 강제 기록하므로, 그 앞 줄은 실제로는 디스크에 있는데 실패로 돌려질 수 있다. 올림은 적용되지 않는 쪽(더 막는 쪽)이고 원장에 보정 기록 없는 올림 줄이 남는다. D-146에 새로 적은 "원장의 Guard 전이 줄은 적용됨의 근거가 아니다"(risk-ops N-2)의 범위 안이라 고칠 필요는 없다.
+- **권고 2 → 기록됨.** D-146 위험과 한계에 B4 후속으로 적힘.
+- **사소 3 → `PendingRaise` 중복 Javadoc 합침.** 결정 번호 간격(D-143~145)은 그대로이며 머지 때 확인할 사항으로 남김.
+
+### 수정분의 다른 변경(risk-ops F-2·F-3)
+- F-2 `EngineStore.java`: 계좌 원장 검사·준비 중 `IOException`·`RuntimeException`이 나면 그 계좌만 `accountBlocks`에 넣고 계속 진행한다. 복구 결과 생성을 쓰기 스레드 준비 뒤로 옮겨 준비 실패 차단도 결과에 들어간다. 바깥 catch는 `RuntimeException`만 남았고 컴파일·시험 통과. 저장소가 열린 채 그 계좌의 올림은 감사 어댑터에서 거절되고 다른 계좌는 정상이다(시험 확인). 절대 규칙 6(계좌끼리 영향 없음)과 맞다.
+- F-3 `WriterLock.java`: 경로로 읽기가 실패하면 잠금을 쥔 채널의 위치 지정 읽기(`read(buf, pos)`, 쓰기 위치를 바꾸지 않음)로 대조한다. 존재 확인과 `fileKey` 확인은 그 앞에서 그대로 한다. [추론] 경로 읽기가 권한 변경 같은 다른 이유로 실패해도 내용이 같으면 알림이 나지 않지만, 쓰기 주체 둘을 가리는 목적(파일 교체·내용 변경 감지)은 유지된다. Windows 실제 동작은 검증하지 못했고 절차서 P12에 남아 있다(D-146에 적힘). 실전 안전 판단은 risk-ops 몫이다.
+
+## 판정
+승인
