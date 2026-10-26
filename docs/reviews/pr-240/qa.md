@@ -76,3 +76,77 @@
 
 ## 판정
 수정 필요(A11, A12, B6: 발견 1)
+
+## 재검토 2026-10-26
+- 대상: PR #240 / 커밋 `a6492914` (브랜치 `claude/project-thread-uv9uq5`) / main 대비 diff 전체(merge-base = main `4ce2dc93` 그대로, 41파일 +3,537 −574). 1차(`f95c4d48`) 뒤 커밋 3개: `97d12d5e`(발견 1·Q1~Q5 고침, 운영 코드 4파일 `EngineCommandHandler`·`EngineSelfCheck`·`EngineMain`·`ControlServer`, 시험 3파일, 문서 ADR-006·D-142·`qa-out-status.md`·`pending.md`), risk-ops 재검토(3)·architect 재검토 원문. 1차 때 읽은 나머지 diff는 바뀌지 않았고(`git diff 1b2a7512..HEAD --stat` 13파일), 그 부분 판단은 1차 표를 그대로 다시 대조했다.
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks --no-daemon` (헤드 `a6492914`): 1회째 **BUILD SUCCESSFUL in 5m 31s, 138 작업 모두 실행**, 미러 없이. 시험 결과 XML 합계 2,003건(1차 1,996건 + 7건), 실패·오류·건너뜀 0.
+  - PR 헤드 CI(2026-10-26T01:12Z): Gradle build, Secret scan and collector boundary, DB schema (PostgreSQL 16), Lab screens (Playwright) 모두 success.
+  - QA 임시 시험 3개(`QaTmp240Test`, 커밋하지 않고 지움): S1·S2를 이번 코드의 실제 경로로 다시, S3 새로(아래).
+  - 변이 17개(1차 생존 8개를 지금 코드에 맞춰 다시 + 고침 자리 새 9개, 같은 네 모듈 시험, 끝나고 되돌림, `git status` 깨끗 확인).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 1차와 같음. 이번 고침은 Guard를 내리는 쪽만 더함(`shutdown`) |
+| A2 | 통과 | 1차와 같음. 이번 diff에 주문 출구·ArchUnit 규칙·고정 값 변경 없음 |
+| A3 | 해당 없음 | 1차와 같음 |
+| A4 | 해당 없음 | 1차와 같음 |
+| A5 | 해당 없음 | 1차와 같음 |
+| A6 | 해당 없음 | 1차와 같음 |
+| A7 | 통과 | 1차와 같음. 새 `refuseRaising`은 그 계좌 청산이 도는 동안 그 계좌 활성화만 거절(EngineCommandHandler.java:405-418), 다른 계좌는 영향 없음 |
+| A8 | 통과 | 1차와 같음 |
+| A9 | 통과 | 1차와 같음. 늦은 엔진 계좌를 OFF로 내리는 것은 응답을 멈춘 엔진에서만이고 먼저 뜬 엔진의 보호 모드·서버 측 손절은 그대로(아래 R1) |
+| A10 | 통과 | 이번 diff 추가 줄에 키·토큰·계좌번호 없음(직접 grep), 알림 문구에 값 없음. CI Secret scan success |
+| A11 | 통과 | 보호 시험·고정 값은 이번에 바뀌지 않음(1차 검토 그대로 유효). 1차 생존 M15·M21이 이제 잡힘(`EngineSelfCheckTest#늦게_뜬_엔진은_열린_계좌를_OFF로_내린다`, `ControlChannelTest#처리하는_사이_응답을_멈추면_그_요청의_결과도_쓰지_않는다`), M10도 잡힘. 새 동작(처리기 `silence`, 받은 시각 비교, 청산 중 거절)마다 실패를 잡는 시험이 있음(N2·N5·N6·N7·N8 잡힘). 남은 생존 변이는 아래 Q1·Q2 |
+| A12 | 통과 | 발견 1 해소: 처리기 `silence`(EngineCommandHandler.java:792-803)가 올리는 명령을 막고, 모든 계좌 PANIC 세대를 올린 뒤 OFF로 내린다. 확인 뒤 `beginActivation` 직전에 다시 거절 여부를 본다(262-266행). 엔진은 서버와 처리기를 함께 멈춘다(EngineMain.java:171-177). 서버는 처리 뒤 `silenced`면 응답을 쓰지 않는다(ControlServer.java:314-318). 임시 시험 S1·S3에서 OPEN 0건 |
+| A13 | 해당 없음 | 1차와 같음 |
+| A14 | 통과 | D-142 C2·C6·남은 위험, ADR-006 2.2·2.8·4장·5장 시험 표가 고친 코드와 일치(늦은 엔진 OFF, 받은 시각 비교, 청산 중 거절, Windows 한계 `[추론]`, M23 시험 없음을 남은 위험으로 적음). Q1 OFF는 "추천안 채택(자율)"으로 기록됨(아래 R1) |
+| B1 | 통과 | 위 직접 빌드 BUILD SUCCESSFUL(2,003건, 실패 0), CI Gradle build success |
+| B6 | 통과 | 새 시험 7건(`EngineCommandHandlerTest` 5, `EngineSelfCheckTest` 1, `ControlChannelTest` 1), 건너뜀·삭제 없음. 1차 B6 실패 사유(M15·M21)가 해소됨 |
+
+### 1차 발견·권고 처리
+| 1차 | 처리 | 확인 |
+|---|---|---|
+| 발견 1 | 해소 | 위 A12. S1(2초 해시 확인 중 `silence`) → `final=OFF`, 응답 `이 실전 엔진은 응답을 멈춘 엔진이라 활성화를 받지 않습니다` |
+| Q1 늦은 엔진 보호 모드 유지 | 반영(OFF로) | EngineSelfCheck.java:229 `shutdown`, 처리기 `silence`도 `shutdown`. M15b(OFF 대신 `deactivate`) 잡힘. D-142에 대가(늦은 엔진이 연 보유의 엔진 손절 없음) 기록 |
+| Q2 받은 시각 비교 | 반영 | `panicReceived`(603-604행)와 `panicked`(396-402행). S2 → `act=INVALID_STATE final=OFF`. N5·N8 잡힘 |
+| Q3 Windows 되찾기 | 문서 반영 | D-142 남은 위험, I1 3-R Windows 확인 항목 |
+| Q4 생존 변이 | 일부 반영 | M10 잡힘. M2·M3·M5·M6·M23 여전히 생존(아래 Q2). M23은 D-142에 "시험 없음"으로 적음 |
+| Q5 닫힘 창 | 반영 | 확인 뒤 `refuseRaising`이 `closing`도 봄(262행) |
+
+### 변이 (재검토)
+| # | 변이 | 결과 |
+|---|---|---|
+| M2 | PANIC 확인 제거(단계 통과 직전) | 생존(1차와 같음, PANIC 1단계 `deactivate`가 대신 막음) |
+| M3 | PANIC 확인 제거(단계 직전) | 생존(1차와 같음) |
+| M5 | 청산 시작 때 다시 고정 제거 | 생존 |
+| M6 | 청산 미완료 때 다시 고정 제거 | 생존(이제 청산 중 활성화를 거절해 겹칠 길이 더 좁음) |
+| M10 | 같은 계좌 청산 겹쳐 시작 | 잡힘 |
+| M15 | 자가 확인이 계좌를 내리지 않음 | 잡힘 |
+| M15b | 자가 확인이 OFF 대신 보호 모드로 | 잡힘 |
+| M21 | 처리 뒤 `silenced` 재확인 제거 | 잡힘 |
+| M23 | 해시 검증 직렬화 제거 | 생존(D-142에 기록) |
+| N1 | 처리기 `silence`가 PANIC 세대를 올리지 않음 | **생존** (Q2) |
+| N2 | 처리기 `silence`가 계좌를 내리지 않음 | 잡힘 |
+| N3 | `EngineMain`의 silencer가 처리기 `silence`를 부르지 않음 | **생존** (Q1) |
+| N4 | 확인 뒤 `refuseRaising` 재확인 제거 | 생존(PANIC 세대가 대신 막음) |
+| N5 | 받은 시각 비교 제거 | 잡힘 |
+| N6 | 청산 중 활성화 거절 제거 | 잡힘 |
+| N7 | 처리기 `silenced` 표시 안 함 | 잡힘 |
+| N8 | 받은 시각 비교 부등호 뒤집음 | 잡힘 |
+
+17개 중 9개 잡힘, 8개 생존.
+
+### 시나리오 (재검토)
+- **S1 (발견 1 재현, 이번 경로)**: 2,000,000회 해시로 활성화를 보내고 150ms 뒤 처리기 `silence`와 자가 확인의 `shutdown`을 했다. 확인 중이었고(`stillVerifying=true`, 약 1.8초) 끝은 **OFF**, 응답은 거절. 통과.
+- **S2 (Q2 재현)**: 받은 시각이 늦은 PANIC을 먼저 처리한 뒤 받은 시각이 앞선 활성화 → `INVALID_STATE`, **OFF**. 통과.
+- **S3 (새, 겹침 간격 무작위)**: 시드 240, 40회. 활성화(기본 해시, 단계 3개 각 0~2ms)를 보내고 0~400ms 뒤 처리기 `silence`. 끝에 OFF가 아닌 경우 **0건**.
+- **S4 (코드 읽기, `silence`와 `beginActivation` 사이)**: 확인 뒤 재확인(262행)을 통과한 직후 `silence`가 돌면, `silence`는 세대를 먼저 올리고 `shutdown`하므로 `beginActivation`이 그 앞이면 `shutdown`이 내리고, 뒤면 계좌 작업 스레드가 세대 변화로 ②에서 멈춘다. 다만 이 창을 지키는 것은 N1(세대 올림) 한 줄이고 시험이 없다(Q2) `[추론]`.
+
+### 점검표 밖 발견 (재검토)
+- **R1 (사용자 확인 권고)** 늦은 엔진 계좌를 OFF로 내리는 것(1차 Q1)은 "추천안 채택(자율)"으로 기록됐다(D-142). 장애 대응 규칙을 바꾸는 결정이라 지침 8장 2번의 멈출 조건에 가깝다. 대가는 늦게 뜬 엔진이 그 짧은 사이에 연 보유가 엔진 손절 없이 남는 것(서버 측 손절·먼저 뜬 엔진은 그대로)이다. 머지 때 이 선택을 직접 확인할 것.
+- **Q1 (권고, 시험)** N3 생존: `EngineMain`에서 `commands.silence(reason)` 한 줄(EngineMain.java:176)을 지워도 빌드가 통과한다. 그러면 운영 엔진은 1차 발견 1 그대로 돌아간다(처리기 시험은 `silence`를 직접 부르므로 배선을 보지 않음). `EngineMain`이 만든 silencer를 불렀을 때 처리기가 활성화를 거절하는지 보는 시험 하나를 권한다. 지금 코드는 맞다(코드 읽기로 확인).
+- **Q2 (권고, 시험)** N1 생존: 처리기 `silence`의 세대 올림(799행)을 빼도 시험이 잡지 못한다. S4의 좁은 창을 지키는 줄이다. M2·M3·M5·M6·N4는 다른 층이 대신 막는 중복 방어라 생존했다.
+
+## 판정 (재검토 2026-10-26)
+승인
