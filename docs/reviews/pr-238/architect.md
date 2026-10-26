@@ -159,3 +159,34 @@
 
 ## 판정
 승인(B1 검토자 직접 실행 `./gradlew build` BUILD SUCCESSFUL, 테스트 1,952개 실패 0, HEAD 0554d8cd. 독립 QA F1·F2 반영 확인, C-1·C-2는 참고. B7: 실전 관련 PR이므로 risk-ops 재검토·독립 QA 재검토와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
+
+## 재검토 5 2026-10-26
+- 대상: PR #238 / 커밋 3352de6d(GitHub `pull_request_read` get: head `3352de6d3901ecfc2a994a12661343638f4a0020` 일치, base main 085a1781, open, mergeable_state unstable — 검토 시점 CI 일부 진행 중) / main 대비 diff(`git diff origin/main...HEAD --name-status`, 8파일: `D-140` M, `docs/qa/pending.md` M, `docs/reviews/pr-238/architect.md`·`qa.md`·`risk-ops.md` A, `docs/runbooks/README.md` M, `docs/runbooks/stage-7-real-trading-tests.md` A, `docs/team/stage-7-readiness-plan.md` M). 재검토 4(0554d8cd) 이후 커밋은 266cb8a9(재검토 4 원문), 90164de0(risk-ops 재검토 2 원문), 3352de6d(절차서 +7 −3: 1장 기록 위치 문장·LIVE01 조율 문장, 3장 N3a 근거 행, 6장 0번 하위 4줄)다(`git diff 0554d8cd HEAD --stat`). D-140·계획·README·`pending.md`는 재검토 4와 같다. 현재 origin/main(4ce2dc93)과 `git merge-tree` 충돌 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --offline -q` (별도 worktree `/tmp/claude-0/arch-238-re5`, HEAD 3352de6d): 첫 시도에 **종료 코드 0(BUILD SUCCESSFUL)**, 미러·우회 설정 없음. 테스트 결과 XML 집계: **1,952개, 실패 0·오류 0·건너뜀 0**.
+  - CI(GitHub `pull_request_read` get_check_runs, head 3352de6d, run 40247899594): `DB schema (PostgreSQL 16)` success, `Secret scan and collector boundary` success, `Gradle build`·`Lab screens (Playwright)`는 검토 시점 in_progress. 판정 근거는 위 직접 실행이다.
+  - 3352de6d 문구를 코드와 대조:
+    - 6장 0번 "실험실은 설정 폴더 안의 소켓으로 엔진에 명령을 보내고 그 폴더의 잠금 파일로 실전 상태를 정한다": ADR-006 42행(`<설정 폴더>/run/engine-control.sock`, 같은 `AUTOTRADE_CONFIG_DIR`)·48행(잠금 파일 PID로 `UNKNOWN`/`NOT_RUNNING`)과 맞다. 실험실 설정 폴더는 `autotrade.config-dir` 속성 → 없으면 `ConfigPaths.defaultLocation()`(시스템 속성 → `AUTOTRADE_CONFIG_DIR` → `~/.autotrade`, `ConfigPaths.java:27-37`, `CoreConfiguration.java:31-32`)라, 실험실을 시험 폴더로 띄우는 수단이 엔진(`EngineMain.java:113-120`)과 같다.
+    - N3a 근거 `Watchdog.java:242-246`: 242행 `case ABSENT`, 244행 "종료" 알림, 246행 분기 닫힘 — C-1 해소.
+    - 1장 기록 위치 문장: 두 문장으로 나뉘어 괄호가 닫힘 — C-2 해소(risk-ops R7과 같은 곳).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 실행 `./gradlew build` 종료 코드 0(HEAD 3352de6d), 테스트 1,952개 실패·오류·건너뜀 0. diff 8파일 모두 `docs/`의 `.md`로 빌드 입력 변경 없음 |
+| B2 | 해당 없음 | 운영 코드·빌드 스크립트·ArchUnit 규칙·보호 경로 변경 없음(diff 8파일 모두 `docs/`) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음. 0번은 기존 `AUTOTRADE_CONFIG_DIR`과 ADR-006 2.2의 소켓·잠금 위치만 참조 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 코드 없음 |
+| B6 | 해당 없음 | 새 코드 동작 없음, 테스트 삭제·건너뜀 없음(diff에 테스트 파일 없음) |
+| B7 | 해당(risk-ops 검토 필요) | 장애 대응 절차(3-R) 문서를 바꾸는 실전 관련 PR. 3352de6d가 3-R 전제를 바꿨으므로 risk-ops 재검토와 독립 QA 재검토가 필요하다(재검토 요청 줄은 `docs/qa/pending.md`에 있음). 사용자 머지 대상 |
+| B8 | 통과 | diff 전체(검토 원문 포함)에 키·계좌번호·토큰 값 없음(검색). 0번 "알림 설정"도 값 없이 N1 절차만 가리킴 |
+
+## 점검표 밖 발견(재검토 5)
+- **risk-ops 재검토 2 S1 반영 확인**: 6장 0번에 (1) 실험실·감시를 같은 시험 폴더로, (2) 운영 실전 엔진은 끄고 못 끄면 시험 안 함, 단추 누르기 전 `#/real`에 시험 계좌 별칭만 보이는지 확인, (3) 시험 폴더 알림 설정을 N1 시험 보내기로 먼저 확인, (4) 시험 뒤 원래 폴더 복귀 확인이 들어갔다. 1장 LIVE01 문장에 실험실이 들어가 시험 실험실은 장 외 시간으로 묶였다. S1이 지적한 세 경로(운영 엔진으로 PANIC, 무관한 "가상" 표시, 알림 미수신)가 모두 막힌다. 원본 합격 기준을 약하게 하는 문구는 없다.
+- **C-3 (참고, 판정 근거 아님)** 0번 "되돌리기"의 "각 프로세스 기동 로그의 설정 폴더 줄"은 감시에만 있다(`WatchdogMain.java:116` "감시 시작: 설정 폴더 {6}"). 엔진(`EngineMain.java` 기동 로그 141·161·194행)과 실험실에는 설정 폴더 경로를 찍는 줄이 없다(검색: `autotrade-app-engine`·`autotrade-app-lab` main의 로그 호출에 설정 폴더 출력 없음). 지금 문구로는 엔진·실험실은 `AUTOTRADE_CONFIG_DIR` 값만 볼 수 있는데, `-Dautotrade.config-dir`가 환경 변수보다 앞서므로(`ConfigPaths.java:29-35`) 그 값만으로 실제 폴더를 확정하지 못한다. 안전 쪽 확인(시험 전 `#/real`에 시험 계좌 별칭만)은 따로 있어 막지 않는다. 시행 PR에서 "엔진·실험실은 `#/real` 계좌 별칭과 `<설정 폴더>/run` 생성 위치로 확인"으로 바꾸거나, 기동 로그에 설정 폴더 줄을 넣는 변경(엔진은 실전 관련)을 따로 제안할 것.
+- **C-4 (참고, 판정 근거 아님)** 실험실 포트 기본값은 하나(`server.port` 8480, 환경 변수 `AUTOTRADE_UI_PORT`, `config-keys.md:43`)라, 시험 폴더 실험실은 LIVE01 실험실을 멈추고 띄우거나 다른 포트로 띄워야 한다. 다른 포트로 두 실험실을 함께 띄우면 브라우저 탭을 헷갈려 운영 폴더 화면에서 단추를 누를 수 있다 `[추론]`(0번의 `#/real` 시험 계좌 별칭 확인이 이를 막는다). 시행 PR에서 어느 쪽인지 한 줄로 적을 것.
+- A-6(D-140 후속 문구는 머지하는 사용자가 직접 확인)은 그대로 남는다.
+
+## 판정
+승인(B1 검토자 직접 실행 `./gradlew build` 종료 코드 0, 테스트 1,952개 실패 0, HEAD 3352de6d. risk-ops 재검토 2 S1과 architect C-1·C-2 반영 확인, C-3·C-4는 참고. B7: 실전 관련 PR이므로 risk-ops 재검토·독립 QA 재검토와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
