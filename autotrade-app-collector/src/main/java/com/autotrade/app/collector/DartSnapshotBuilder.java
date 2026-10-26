@@ -5,6 +5,7 @@ import com.autotrade.domain.market.Symbol;
 import com.autotrade.marketdata.financial.FinancialFiling;
 import com.autotrade.marketdata.financial.SnapshotFinancials;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -45,26 +46,56 @@ public final class DartSnapshotBuilder {
 
     private DartSnapshotBuilder() {}
 
+    /** 접수번호로 저장된 계정 응답을 읽는다. 없으면 {@code null}. */
+    @FunctionalInterface
+    public interface AccountsSource {
+        JsonNode accountsOf(String receiptNo) throws IOException;
+    }
+
+    /** 이미 읽어 둔 입력으로 만든다(시험용). 큰 캐시는 {@link #build(List, AccountsSource)}를 쓴다. */
     public static Result build(List<Input> inputs) {
-        List<FinancialFiling> out = new ArrayList<>();
-        long pending = 0;
-        long separate = 0;
-        long equity = 0;
-        Map<String, Long> missing = new LinkedHashMap<>();
-        ACCOUNTS.keySet().forEach(k -> missing.put(k, 0L));
+        Builder b = new Builder();
         for (Input in : inputs) {
-            if (in.accounts() == null) {
+            b.add(in.filing(), in.accounts());
+        }
+        return b.result();
+    }
+
+    /**
+     * 계정 응답을 공시 하나씩 읽어 바로 행으로 줄이고 버린다. 응답 전체를 한꺼번에 메모리에 올리지 않아 공시 10만 건 캐시도
+     * 기본 힙(-Xmx2g)으로 만든다(2026-10-26 전체 수집 OutOfMemoryError). 결과는 {@link #build(List)}와 같다.
+     */
+    public static Result build(List<JsonNode> filings, AccountsSource accounts) throws IOException {
+        Builder b = new Builder();
+        for (JsonNode f : filings) {
+            b.add(f, accounts.accountsOf(f.path("rcept_no").asText()));
+        }
+        return b.result();
+    }
+
+    private static final class Builder {
+        private final List<FinancialFiling> out = new ArrayList<>();
+        private long pending;
+        private long separate;
+        private long equity;
+        private final Map<String, Long> missing = new LinkedHashMap<>();
+
+        Builder() {
+            ACCOUNTS.keySet().forEach(k -> missing.put(k, 0L));
+        }
+
+        void add(JsonNode f, JsonNode accounts) {
+            if (accounts == null) {
                 pending++;
-                continue;
+                return;
             }
-            JsonNode f = in.filing();
             String no = f.path("rcept_no").asText();
-            boolean known = no.equals(in.accounts().path("valuesFor").asText(""));
+            boolean known = no.equals(accounts.path("valuesFor").asText(""));
             Map<String, BigDecimal> values = new LinkedHashMap<>();
             String scope = "";
             if (known) {
                 List<JsonNode> items = new ArrayList<>();
-                in.accounts().path("response").path("list").forEach(items::add);
+                accounts.path("response").path("list").forEach(items::add);
                 scope = items.stream().anyMatch(i -> "CFS".equals(i.path("fs_div").asText())) ? "CFS" : "OFS";
                 separate += "OFS".equals(scope) ? 1 : 0;
                 for (JsonNode i : items) {
@@ -96,27 +127,30 @@ public final class DartSnapshotBuilder {
                     values.get("revenue"), values.get("operating_income"), values.get("total_assets"),
                     values.get("total_liabilities"), values.get("total_equity")));
         }
-        out.sort(SnapshotFinancials.ORDER);
-        Map<String, List<FinancialFiling>> groups = new TreeMap<>();
-        for (FinancialFiling ff : out) {
-            groups.computeIfAbsent(ff.symbol().code() + "|" + ff.businessYear() + "|" + ff.reportCode(), k -> new ArrayList<>())
-                    .add(ff);
-        }
-        long fallback = 0;
-        long noValue = 0;
-        for (List<FinancialFiling> g : groups.values()) {
-            boolean anyKnown = g.stream().anyMatch(FinancialFiling::valuesKnown);
-            if (!anyKnown) {
-                noValue++;
-            } else if (!g.get(0).valuesKnown() || g.get(0).correction()) {
-                fallback++; // 원 공시 값이 없고(또는 원 공시가 수집 범위 앞이라 목록에 없고) 뒤 정정 값만 있다: MD-10 대체 규칙
+
+        Result result() {
+            out.sort(SnapshotFinancials.ORDER);
+            Map<String, List<FinancialFiling>> groups = new TreeMap<>();
+            for (FinancialFiling ff : out) {
+                groups.computeIfAbsent(ff.symbol().code() + "|" + ff.businessYear() + "|" + ff.reportCode(), k -> new ArrayList<>())
+                        .add(ff);
             }
+            long fallback = 0;
+            long noValue = 0;
+            for (List<FinancialFiling> g : groups.values()) {
+                boolean anyKnown = g.stream().anyMatch(FinancialFiling::valuesKnown);
+                if (!anyKnown) {
+                    noValue++;
+                } else if (!g.get(0).valuesKnown() || g.get(0).correction()) {
+                    fallback++; // 원 공시 값이 없고(또는 원 공시가 수집 범위 앞이라 목록에 없고) 뒤 정정 값만 있다: MD-10 대체 규칙
+                }
+            }
+            long corrections = out.stream().filter(FinancialFiling::correction).count();
+            long unknown = out.stream().filter(ff -> !ff.valuesKnown()).count();
+            LocalDate first = out.stream().map(FinancialFiling::receiptDate).min(LocalDate::compareTo).orElse(null);
+            return new Result(List.copyOf(out), new Stats(out.size(), corrections, unknown, pending, separate, missing, equity,
+                    fallback, noValue, first));
         }
-        long corrections = out.stream().filter(FinancialFiling::correction).count();
-        long unknown = out.stream().filter(ff -> !ff.valuesKnown()).count();
-        LocalDate first = out.stream().map(FinancialFiling::receiptDate).min(LocalDate::compareTo).orElse(null);
-        return new Result(List.copyOf(out), new Stats(out.size(), corrections, unknown, pending, separate, missing, equity,
-                fallback, noValue, first));
     }
 
     /** 행 문자열(스냅샷 CSV 헤더 순서). */
