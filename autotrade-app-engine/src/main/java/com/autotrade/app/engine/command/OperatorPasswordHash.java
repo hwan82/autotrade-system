@@ -24,8 +24,11 @@ public final class OperatorPasswordHash {
     public static final int ITERATIONS = 600_000;
     /** 너무 약한 해시를 손으로 넣는 것을 막는 하한. */
     public static final int MIN_ITERATIONS = 100_000;
-    /** 손으로 넣은 값이 엔진 기동·검증을 수십 초씩 멈추게 하는 것을 막는 상한. */
-    public static final int MAX_ITERATIONS = 10_000_000;
+    /**
+     * 손으로 넣은 값이 검증을 오래 붙잡는 것을 막는 상한. 검증 한 번이 약 2초 안에 끝나 활성화 기한(요청 접수 뒤 10초) 안에 든다
+     * (D-142, 독립 QA pr-18 2: 10,000,000회 직접 시험 약 10.6초 → 상한을 그 5분의 1로). 기본 600,000회의 3배 남짓이다.
+     */
+    public static final int MAX_ITERATIONS = 2_000_000;
     /**
      * 이 비밀번호 하나로 실전 계좌를 연다(단일 인증 요소). NIST SP 800-63B-4(2025)는 단일 요소로 쓰는 비밀번호에 최소 15자를
      * 요구한다. [가정] 원문 대신 2차 자료로 확인했다(ADR-006 2.4).

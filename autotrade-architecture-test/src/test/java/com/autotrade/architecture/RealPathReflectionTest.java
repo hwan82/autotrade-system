@@ -609,7 +609,8 @@ class RealPathReflectionTest {
             DescribedPredicate.or(fromRealPathModule(), IN_REAL_PATH_PACKAGE));
 
     /**
-     * 2차 확인은 검증기({@link OperatorAuthenticator})가 만들어 Guard로 바로 넘기는 값이다. 그 밖의 클래스는 이 타입을 필드·매개변수·
+     * 2차 확인은 검증기({@link OperatorAuthenticator})가 발급기로 만들어 Guard로 바로 넘기는 값이다. 그 밖의 클래스는 이 타입과
+     * 발급기({@link SecondConfirmation.Issuer}, D-142 C12)를 필드·매개변수·
      * 반환 타입·클래스 객체·제네릭 인자로 다루지 않는다(타입 의존 자체가 없다). 데이터 바인딩(Jackson 등)이 리플렉션으로 확인을
      * 만들어 생성 규칙({@code ONLY_AUTHENTICATOR_CREATES_CONFIRMATION})을 건너뛰는 길을 막는다. 검증기의 메서드를 부르는 쪽
      * ({@link EngineCommandHandler})은 대상 클래스가 검증기·Guard라 걸리지 않는다.
@@ -618,6 +619,7 @@ class RealPathReflectionTest {
             .that().resideOutsideOfPackage("com.autotrade.risk.guard..")
             .and().doNotHaveFullyQualifiedName(OperatorAuthenticator.class.getName())
             .should().dependOnClassesThat().areAssignableTo(SecondConfirmation.class)
+            .orShould().dependOnClassesThat().areAssignableTo(SecondConfirmation.Issuer.class)
             .because("2차 확인은 비밀번호 검증기만 만들고 데이터 바인딩으로 만들어지면 안 된다(D-086, RSK-01)");
 
     static final String GUARD_PACKAGE = "com.autotrade.risk.guard";
@@ -680,16 +682,15 @@ class RealPathReflectionTest {
 
     /** Jackson이 만들 수 있는 모양(레코드)으로 둔 Guard 패키지 타입. 바꾸면 risk-ops 검토. */
     static final Set<String> GUARD_RECORDS = Set.of(
-            "com.autotrade.risk.guard.SecondConfirmation", "com.autotrade.risk.guard.GuardTransition",
-            "com.autotrade.risk.guard.RealTradingGuard$Snapshot");
+            "com.autotrade.risk.guard.GuardTransition", "com.autotrade.risk.guard.RealTradingGuard$Snapshot");
 
     /**
      * {@code Object}로 넘겨받은 Guard 객체의 {@code getClass()}는 규칙이 보지 못한다. 그 클래스 객체로 Jackson이 새 객체를
      * 만들려면 Jackson 주석, 인자 없는 생성자, 레코드 정규 생성자 중 하나가 필요하므로, Guard 패키지 타입이 그런 모양이 아니라는
      * 전제를 고정한다(architect PR #108 재검토 AR-5). javac는 {@code getClass()}를 늘 {@code Object.getClass}로 부르므로 받는 쪽
-     * 정적 타입으로도 잡을 수 없다. 레코드 세 개는 예외로 적어 둔다: 2차 확인은 검증기 밖 의존이 금지돼 있고
-     * (SECOND_CONFIRMATION_IS_NOT_DATA), 전이 기록은 감사 기록 값이며, Guard 안 private 스냅숏은 만들어도 Guard에 넣을 길이 없다
-     * (살아 있는 객체 덮어쓰기는 실전 경로에서 금지).
+     * 정적 타입으로도 잡을 수 없다. 레코드 두 개는 예외로 적어 둔다: 전이 기록은 감사 기록 값이며, Guard 안 private 스냅숏은 만들어도
+     * Guard에 넣을 길이 없다(살아 있는 객체 덮어쓰기는 실전 경로에서 금지). 2차 확인은 레코드가 아닌 private 생성자 클래스이고 발급기로만
+     * 만든다(D-142 C12). 발급기도 인자 없는 생성자가 없다.
      */
     @Test
     void Guard_타입은_Jackson이_만들_수_있는_모양이_아니다() {

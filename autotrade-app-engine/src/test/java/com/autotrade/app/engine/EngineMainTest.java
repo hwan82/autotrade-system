@@ -196,7 +196,7 @@ class EngineMainTest {
     }
 
     @Test
-    void 소켓_파일을_지워도_두_번째_엔진은_잠금_때문에_뜨지_않는다() throws Exception {
+    void 소켓_파일을_지워도_두_번째_엔진은_뜨지_않고_첫_엔진이_소켓을_다시_만든다() throws Exception {
         ConfigPaths paths = ConfigPaths.in(dir);
         Path socket = ControlSocket.path(paths);
 
@@ -204,11 +204,133 @@ class EngineMainTest {
             Files.delete(socket);
 
             assertThat(EngineMain.run(paths, FIXED)).isEqualTo(1);
-            assertThat(socket).doesNotExist();
             assertThat(engine.server().socket()).isEqualTo(socket);
+            // 첫 엔진이 지워진 소켓을 다시 만들어 화면 명령이 다시 닿는다(D-142 C6)
+            awaitStatus(socket);
+            awaitAccepted(engine, EventRoutes.CONTROL_CHANNEL);
         }
         // 첫 엔진이 끝나면 잠금이 풀려 다시 뜬다
         assertThat(EngineMain.run(paths, FIXED)).isZero();
+    }
+
+    @Test
+    void 실행_중_run_폴더를_지워도_두_번째_엔진은_뜨지_않고_화면_명령은_첫_엔진에_닿는다() throws Exception {
+        // 장애 테스트 3-R(D-140 Q-018 ①): 잠금 파일·소켓이 든 run 폴더를 통째로 지운다
+        ConfigPaths paths = ConfigPaths.in(dir);
+        writeOneAccount(paths);
+        Path socket = ControlSocket.path(paths);
+
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED)) {
+            deleteTree(socket.getParent());
+
+            // 첫 엔진이 폴더·잠금 파일·소켓을 다시 만든 뒤에는 두 번째 엔진이 잠금 때문에 뜨지 않는다
+            awaitStatus(socket);
+            assertThat(EngineMain.run(paths, FIXED)).isEqualTo(1);
+            try (ControlClient client = new ControlClient(socket, Duration.ofSeconds(5))) {
+                ControlResponse status = client.send(ControlRequest.status());
+                // 실험실 화면은 엔진을 그대로 보고(가상 표시로 바뀌지 않음) 계좌는 OFF다
+                assertThat(status.ok()).isTrue();
+                assertThat(status.status().accounts()).singleElement().satisfies(a -> assertThat(a.state()).isEqualTo("OFF"));
+            }
+            assertThat(engine.server().silenced()).isFalse();
+            awaitAccepted(engine, EventRoutes.CONTROL_CHANNEL);
+        }
+    }
+
+    @Test
+    void 다른_살아_있는_엔진이_방금_쓴_하트비트가_있으면_잠금_파일이_없어도_뜨지_않는다() throws Exception {
+        // run 폴더를 지운 직후(첫 엔진이 다시 만들기 전) 뜬 두 번째 엔진을 하트비트로 막는다(3-R)
+        ConfigPaths paths = ConfigPaths.in(dir);
+        long otherPid = ProcessHandle.current().parent().orElseThrow().pid();
+        writeHeartbeat(otherPid, FIXED.instant());
+
+        List<Integer> exits = new ArrayList<>();
+        String err = captureErr(() -> assertThat(EngineMain.launch(() -> paths, FIXED, EngineMain::setup, exits::add)).isNull());
+
+        assertThat(exits).containsExactly(EngineMain.EXIT_START_FAILED);
+        assertThat(err).contains(EngineMain.StartFailure.CHANNEL_HEADLINE).contains("다른 실전 엔진(PID " + otherPid + ")");
+        assertThat(ControlSocket.path(paths)).doesNotExist();
+    }
+
+    @Test
+    void 하트비트가_오래됐거나_쓴_프로세스가_없으면_기동을_막지_않는다() throws Exception {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        long otherPid = ProcessHandle.current().parent().orElseThrow().pid();
+        writeHeartbeat(otherPid, FIXED.instant().minus(EngineSelfCheck.FRESH).minusSeconds(1));
+        assertThat(EngineMain.run(paths, FIXED)).isZero();
+
+        writeHeartbeat(Long.MAX_VALUE, FIXED.instant());
+        assertThat(EngineMain.run(paths, FIXED)).isZero();
+    }
+
+    @Test
+    void 실전_계좌가_있으면_시작을_긴급으로_없으면_정보로_알린다() throws Exception {
+        ConfigPaths paths = ConfigPaths.in(dir);
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED)) {
+            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED)).isEqualTo(1);
+            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED_REAL)).isZero();
+        }
+        writeOneAccount(paths);
+        try (EngineMain.Engine engine = EngineMain.start(paths, FIXED)) {
+            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED_REAL)).isEqualTo(1);
+            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED)).isZero();
+        }
+    }
+
+    @Test
+    void 명령_채널_알림_제목은_모든_종류에_있다() {
+        for (com.autotrade.control.ControlServer.Event event : com.autotrade.control.ControlServer.Event.values()) {
+            assertThat(EngineMain.controlChannelTitle(event)).as(event.name()).isNotBlank();
+        }
+    }
+
+    private void writeOneAccount(ConfigPaths paths) throws IOException {
+        Files.writeString(paths.runtimeFile(), """
+                { "real-trading": { "accounts": [ { "id": "KIS-US-1", "broker": "KIS", "market": "US" } ] } }
+                """);
+    }
+
+    private void writeHeartbeat(long pid, Instant writtenAt) throws IOException {
+        Path file = com.autotrade.monitor.Heartbeat.file(dir, "engine");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, new com.autotrade.monitor.Heartbeat("engine", pid, writtenAt, writtenAt, 1).format());
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        try (var walk = Files.walk(root)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
+    }
+
+    private static void awaitStatus(Path socket) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (true) {
+            if (Files.exists(socket)) {
+                try (ControlClient client = new ControlClient(socket, Duration.ofSeconds(2))) {
+                    if (client.send(ControlRequest.status()).ok()) {
+                        return;
+                    }
+                } catch (Exception e) {
+                    // 다시 만드는 중
+                }
+            }
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("첫 엔진이 소켓을 다시 만들지 않았습니다");
+            }
+            Thread.sleep(50);
+        }
+    }
+
+    private static void awaitAccepted(EngineMain.Engine engine, String kind) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (engine.notifications().acceptedCount(kind) == 0) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError(kind + " 알림이 없습니다");
+            }
+            Thread.sleep(20);
+        }
     }
 
     @Test
@@ -237,7 +359,7 @@ class EngineMainTest {
             });
             assertThat(engine.guard().state(new AccountId("KIS-US-1"))).isEqualTo(GuardState.OFF);
             // 운영 배선: 시작 알림과 실전 제어 명령 알림이 엔진의 알림 큐에 들어간다(PR #128 QA Q1, 변이 M10)
-            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED)).isEqualTo(1);
+            assertThat(engine.notifications().acceptedCount(EventRoutes.ENGINE_STARTED_REAL)).isEqualTo(1);
             assertThat(engine.notifications().acceptedCount(EventRoutes.REAL_TRADING_COMMAND)).isPositive();
         }
     }

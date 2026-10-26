@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 규칙 검증용 위반 코드: Guard를 거치지 않고 증권사 주문 출구를 얻는 흔한 방법들과, 명령 채널 밖에서 Guard를 올리는 코드.
@@ -41,9 +42,9 @@ public final class BypassRealTradingGuard {
         return plugin::orderGateway;
     }
 
-    /** 명령 채널 밖에서 2차 확인을 만들어 Guard를 올린다. */
+    /** 명령 채널 밖에서 Guard의 발급기를 가져와 2차 확인을 만들고 Guard를 올린다. */
     public static void raiseWithoutCommandChannel(RealTradingGuard guard) {
-        guard.beginActivation(new SecondConfirmation(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
+        guard.beginActivation(guard.confirmationIssuer().issue(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
     }
 
     /** 명령 채널 밖에서 참조로 Guard를 올린다. */
@@ -51,7 +52,8 @@ public final class BypassRealTradingGuard {
         Consumer<SecondConfirmation> begin = guard::beginActivation;
         Consumer<SecondConfirmation> protect = guard::enterProtective;
         BiConsumer<AccountId, ActivationStep> step = guard::completeStep;
-        TriFunction<AccountId, String, Instant, SecondConfirmation> confirm = SecondConfirmation::new;
+        Supplier<SecondConfirmation.Issuer> take = guard::confirmationIssuer;
+        TriFunction<AccountId, String, Instant, SecondConfirmation> confirm = take.get()::issue;
         begin.accept(confirm.apply(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
         protect.accept(null);
         step.accept(null, ActivationStep.AUTHENTICATED);

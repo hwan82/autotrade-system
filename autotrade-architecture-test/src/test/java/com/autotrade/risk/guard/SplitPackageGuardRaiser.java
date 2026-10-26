@@ -14,7 +14,7 @@ public final class SplitPackageGuardRaiser {
 
     public static void raise(RealTradingGuard guard) {
         AccountId account = new AccountId("KIS-1");
-        guard.beginActivation(new SecondConfirmation(account, "nobody", Instant.EPOCH));
+        guard.beginActivation(guard.confirmationIssuer().issue(account, "nobody", Instant.EPOCH));
         guard.completeStep(account, ActivationStep.AUTHENTICATED);
     }
 }

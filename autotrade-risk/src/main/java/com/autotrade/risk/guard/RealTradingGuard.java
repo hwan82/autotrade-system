@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 실전 주문 차단 장치(RSK-01, D-016, D-023). 실전 계좌마다 독립된 {@link GuardState}를 둔다.
@@ -53,6 +54,9 @@ public final class RealTradingGuard {
     private final Clock clock;
     private final GuardAuditLog audit;
     private final Map<AccountId, AccountGuard> accounts;
+    /** 이 Guard가 받는 2차 확인의 발급기. {@link #confirmationIssuer()}가 한 번만 내준다(D-142). */
+    private final SecondConfirmation.Issuer issuer = new SecondConfirmation.Issuer(this);
+    private final AtomicBoolean issuerTaken = new AtomicBoolean();
 
     /**
      * 실전 계좌 목록으로 Guard를 만든다. 모든 계좌는 OFF로 시작한다.
@@ -70,6 +74,20 @@ public final class RealTradingGuard {
             }
         }
         this.accounts = Collections.unmodifiableMap(map);
+    }
+
+    /**
+     * 이 Guard가 받는 2차 확인의 발급기를 내준다. Guard마다 **한 번만** 내주고, 두 번째부터는 거절한다(ADR-002 3장 되돌릴 조건, D-142).
+     * 실전 엔진은 기동할 때 비밀번호 검증기가 이 메서드를 부른다. 그래서 다른 코드가 발급기를 먼저 가져가면 검증기 생성이 실패해 엔진이
+     * 뜨지 않는다(조용히 우회되지 않음). 이 Guard는 다른 발급기로 만든 확인을 받지 않는다.
+     *
+     * @throws IllegalStateException 이미 내줬을 때
+     */
+    public SecondConfirmation.Issuer confirmationIssuer() {
+        if (!issuerTaken.compareAndSet(false, true)) {
+            throw new IllegalStateException("2차 확인 발급기는 Guard마다 한 번만 내줍니다");
+        }
+        return issuer;
     }
 
     /** 관리 대상 실전 계좌(별칭 순). */
@@ -160,7 +178,7 @@ public final class RealTradingGuard {
      * 활성화를 시작한다(OFF 또는 PROTECTIVE → ACTIVATING).
      *
      * @throws GuardClosedException 이미 ACTIVATING·OPEN일 때
-     * @throws IllegalArgumentException 2차 확인이 다른 계좌 것이거나, 만료됐거나, 이미 쓴 것일 때
+     * @throws IllegalArgumentException 2차 확인이 이 Guard의 발급기로 만든 것이 아니거나, 다른 계좌 것이거나, 만료됐거나, 이미 쓴 것일 때
      */
     public void beginActivation(SecondConfirmation confirmation) {
         AccountGuard g = guard(confirmation.account());
@@ -284,6 +302,9 @@ public final class RealTradingGuard {
     }
 
     private void accept(AccountGuard g, SecondConfirmation c) {
+        if (c.issuer() != issuer) {
+            throw new IllegalArgumentException(g.ref.id() + " 이 Guard가 내준 발급기로 만든 2차 확인이 아닙니다");
+        }
         Instant now = clock.instant();
         if (c.confirmedAt().isAfter(now) || c.confirmedAt().plus(CONFIRMATION_TTL).isBefore(now)) {
             throw new IllegalArgumentException(g.ref.id() + " 2차 확인이 유효 시간을 벗어났습니다");

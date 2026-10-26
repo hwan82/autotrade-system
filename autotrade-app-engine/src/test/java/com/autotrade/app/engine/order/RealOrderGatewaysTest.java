@@ -25,7 +25,6 @@ import com.autotrade.risk.guard.ActivationStep;
 import com.autotrade.risk.guard.GuardClosedException;
 import com.autotrade.risk.guard.GuardedOrderGateway;
 import com.autotrade.risk.guard.RealTradingGuard;
-import com.autotrade.risk.guard.SecondConfirmation;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -54,7 +53,7 @@ class RealOrderGatewaysTest {
     }
 
     private void open() {
-        guard.beginActivation(new SecondConfirmation(KIS_KR.id(), "BAE", T0));
+        guard.beginActivation(guard.confirmationIssuer().issue(KIS_KR.id(), "BAE", T0));
         for (ActivationStep step : ActivationStep.values()) {
             guard.completeStep(KIS_KR.id(), step);
         }
