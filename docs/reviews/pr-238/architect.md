@@ -128,3 +128,34 @@
 
 ## 판정
 승인(사용자 hwan82의 PR #238 댓글 6383937322 "CI 결과를 B1 근거로 인정"에 따라 B1을 같은 head CI `Gradle build` success(6721d52b, run 40089610202)로 판단함. 그 댓글이 사용자 본인 것이 아니면 이 승인은 무효. B7: 실전 관련 PR이므로 독립 QA와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
+
+## 재검토 4 2026-10-25
+- 대상: PR #238 / 커밋 0554d8cd(GitHub `pull_request_read` get: head `0554d8cdd3b1ea6e71a73e91ed4dd8069264f01a` 일치, base main 085a1781, open, mergeable_state unstable — 검토 시점 CI 일부 진행 중) / main 대비 diff(`git diff origin/main...HEAD --name-status`, 8파일: `D-140` M, `docs/qa/pending.md` M, `docs/reviews/pr-238/architect.md`·`qa.md`·`risk-ops.md` A, `docs/runbooks/README.md` M, `docs/runbooks/stage-7-real-trading-tests.md` A, `docs/team/stage-7-readiness-plan.md` M). 재검토 3(6721d52b) 이후 커밋은 1534cc90(재검토 3 원문), fdd32083(독립 QA 원문 `qa.md`), 0554d8cd(QA 반영: 절차서 +20 −13, `pending.md` +1)다. D-140·계획·README는 재검토 3과 같다.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon` (별도 worktree `/tmp/claude-0/arch-238-re4`, HEAD 0554d8cd): 첫 시도(`--offline`)는 `:build-logic:compilePluginsBlocks` `kotlin-scripting-jvm-2.0.21.jar` 해석 실패, 온라인 재시도 1회째 `archunit-junit5-engine:1.4.1` 해석 실패, 20초 뒤 2회째 **BUILD SUCCESSFUL**(종료 코드 0, 미러·우회 설정 없음). 테스트 결과 XML 집계: **1,952개, 실패 0·오류 0·건너뜀 0**.
+  - CI(GitHub `pull_request_read` get_check_runs, head 0554d8cd, run 40247192015): `DB schema (PostgreSQL 16)` success, `Secret scan and collector boundary` success, `Gradle build`·`Lab screens (Playwright)`는 검토 시점 in_progress. 판정 근거는 위 직접 실행이다.
+  - PR 댓글(get_comments): 6383937322(`hwan82`, OWNER) 하나뿐, 변경 없음. 이번 B1은 직접 실행 결과라 이 댓글에 기대지 않는다.
+  - 0554d8cd 변경 대조: 독립 QA F1·F2·Q1~Q4 반영 위치와 인용 근거 직접 대조 — `Watchdog.java:237-246`, `WatchdogSettings.java:58-59`(점검 5초·멈춤 15초), ADR-006 48행(잠금 파일이 없을 때만 `NOT_RUNNING`, Windows 잠금 읽기 막힘 `[추론]`), 실험실 `#/real` 경로 존재(`autotrade-ui/src/main/resources/static/index.html`), 1장 공통 전제 23행(별도 설정 폴더).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 실행 `./gradlew build` BUILD SUCCESSFUL(HEAD 0554d8cd), 테스트 1,952개 실패·오류·건너뜀 0. diff 8파일 모두 `docs/`의 `.md`로 빌드 입력 변경 없음 |
+| B2 | 해당 없음 | 운영 코드·빌드 스크립트·ArchUnit 규칙·보호 경로 변경 없음(diff 8파일 모두 `docs/`) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음. 0번 전제는 기존 `AUTOTRADE_CONFIG_DIR`만 참조 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 코드 없음 |
+| B6 | 해당 없음 | 새 코드 동작 없음, 테스트 삭제·건너뜀 없음(diff에 테스트 파일 없음) |
+| B7 | 해당(risk-ops 검토 필요) | 장애 대응 절차(3-R)를 바꾸는 실전 관련 PR. 0554d8cd가 3-R 절차를 바꿨으므로 risk-ops 재검토와 독립 QA 재검토가 필요하다(QA 재검토 요청 줄은 `docs/qa/pending.md` 80행에 있음). 사용자 머지 대상 |
+| B8 | 통과 | diff 전체(검토 원문 포함)에 키·계좌번호·토큰 없음(검색). 계좌는 별칭만, 0번 전제도 "시험 계좌"로만 적음 |
+
+## 점검표 밖 발견(재검토 4)
+- **QA F1 반영 확인**: 6장 3번 거부 분기가 "4번으로 간다"로 바뀌어 원본(장애 설계 190행) 순서 "두 번째 엔진 기동 시도 → 화면 내리기·PANIC → 첫 엔진 Guard 확인"과 맞다. 4번 (b) "두 번째 엔진이 **없거나** 응답하지 않고"로 거부 분기도 덮는다. 2번에 잠금·소켓 각각 지워졌는지 기록하게 해 Windows 부분 삭제 경우를 관측한다.
+- **QA F2 반영 확인**: 6번 정리가 "어느 분기든 반드시"이고, 5번을 안 거친 (a)·거부 분기도 6-1에서 5-1·5-2(두 번째 엔진 먼저, 조회 0줄)·5-3을 하고 6-2에서 한 개만 재기동해 `run`·`engine.lock`·소켓 재생성과 `#/real` 실전 상태를 본다. 7번이 "6번 정리 뒤 엔진 1개·잠금·소켓 있음"까지 확인해야 시험 끝으로 둔다. (a)에서 계좌가 안 내려가면 불합격 후 5번 조치(F2 시나리오 3). 분기마다 경로를 따라가 보면 (a) 정상→6, (a) 미하강→5→6, (b)→5→6, 거부→4→(a)/(b) 로 모두 6번 정리를 거친다.
+- **Q1~Q4 반영 확인**: 0번 전제(시험 전용 설정 폴더, 시험 계좌 외 실전 계좌가 같은 엔진에 있으면 시행 안 함, 미체결 확인은 한국투자 모의투자 화면), 5-1 두 번째 엔진 먼저 종료, 1장 기록 위치 재결정 메모, N3b 15~20초·설정값 기록·25초 대기. 원본 합격 기준을 약하게 하는 문구는 없다.
+- **C-1 (참고, 판정 근거 아님)** 3장 N3a 근거가 `Watchdog.java:242-245`에서 `241-245`로 바뀌었는데(risk-ops R6 반영), 이 커밋 기준 241행은 ALIVE 분기의 닫는 괄호이고 ABSENT 분기는 242~246행이다(`case ABSENT` 242행, "종료" 알림 244행). 고치기 전 `242-245`가 더 정확했다. 내용 판단에는 영향 없음. 시행 PR에서 `242-246`으로 맞출 것.
+- **C-2 (참고, 판정 근거 아님)** 1장 11행은 Q3 메모를 괄호 밖 문장으로 넣으면서 "…시행 PR에서 위치를 다시 정한다(독립 QA PR #238 Q3)에 남긴다."가 되어 문장 구조가 깨졌다. 뜻은 읽히지만 시행 PR에서 문장을 나눌 것.
+- A-6(D-140 후속 문구는 머지하는 사용자가 직접 확인)은 그대로 남는다.
+
+## 판정
+승인(B1 검토자 직접 실행 `./gradlew build` BUILD SUCCESSFUL, 테스트 1,952개 실패 0, HEAD 0554d8cd. 독립 QA F1·F2 반영 확인, C-1·C-2는 참고. B7: 실전 관련 PR이므로 risk-ops 재검토·독립 QA 재검토와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
