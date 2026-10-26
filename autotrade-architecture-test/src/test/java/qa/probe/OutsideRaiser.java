@@ -3,7 +3,6 @@ package qa.probe;
 import com.autotrade.domain.account.AccountId;
 import com.autotrade.risk.guard.ActivationStep;
 import com.autotrade.risk.guard.RealTradingGuard;
-import com.autotrade.risk.guard.SecondConfirmation;
 import java.time.Instant;
 
 /**
@@ -17,7 +16,7 @@ public final class OutsideRaiser {
 
     public static void raise(RealTradingGuard guard) {
         AccountId account = new AccountId("KIS-1");
-        guard.beginActivation(new SecondConfirmation(account, "nobody", Instant.EPOCH));
+        guard.beginActivation(guard.confirmationIssuer().issue(account, "nobody", Instant.EPOCH));
         guard.completeStep(account, ActivationStep.AUTHENTICATED);
     }
 }
