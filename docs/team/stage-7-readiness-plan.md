@@ -91,8 +91,8 @@
 | D8 | 토스 R1(token-revoked 역할별 정책: 엔진 즉시 재발급+긴급 알림), R2(5xx 연속 DEGRADED), R3(429 지수 백오프), R7(짧은 토큰 수명 하한·경보), R8(보호 폴링 몫), R9(폴링 실패에도 손절 감시 공백 0), R10(쉼 뒤 회복), QA N1·N2 | ADR-003, 메모 pr41 | 부분/안 됨 | `TossRestClient.REVOKED_COOLDOWN` 10분 단일 정책, `withRefreshAtHalfLife`만 | data-engineer, risk-ops | 없음 | 예 | D-T |
 | D9 | 엔진 밖 모든 프로세스 토스 호출기 생성 금지를 설정 검사·ArchUnit으로 강제(1-0, D-059, R0a) | broker-and-fault-design.md 7.1, D-059 | 부분 | 게이트웨이 `reservedForRealTrading`·`plugin(TOSS)` 빈 값은 있음. gateway·lab·watchdog·collector의 금지 의존 목록에 broker-toss 없음 [추론] | risk-ops, architect | 토스 연결 PR | 예 | D-T |
 | D10 | 보호 시세 경로: 키움·KIS `pollingQuotes` 추가(R4), `PollingQuoteSource` 신선도·폐기 계약(R5), 캘린더 범위 밖 예외가 손절을 막지 않음(R6) | ADR-003 | 부분/안 됨 | `pollingQuotes`는 토스뿐, 엔진 미연결 | data-engineer, risk-ops | 없음 | 예 | D, E |
-| D11 | 게이트웨이 `unservedHeld` 알림, 구독 거절 재배분·경보 | ADR-003 | 안 됨 | ERROR 로그·건수만 | data-engineer, risk-ops | 알림 수준 결정 | 예 | G |
-| D12 | 게이트웨이 → 실전 엔진 시세 전달(무손실·지연, 엔진의 `marketdata.feed` 금지, 수신 꼬리 지연, ADR-010 QA R1·R3) | ADR-010 | 안 됨 | 엔진에 feed 참조 없음 | data-engineer, architect, risk-ops | 없음(설계 지금 가능) | 예 | G |
+| D11 | 게이트웨이 `unservedHeld` 알림, 구독 거절 재배분·경보 | ADR-003 | 설계 [ADR-016](../adr/ADR-016-real-engine-market-feed.md) 2.8(D-143, 2026-10-26), 구현 G3·G4 안 됨 | ERROR 로그·건수만 | data-engineer, risk-ops | 알림 수준 결정 | 예 | G |
+| D12 | 게이트웨이 → 실전 엔진 시세 전달(무손실·지연, 엔진의 `marketdata.feed` 금지, 수신 꼬리 지연, ADR-010 QA R1·R3) | ADR-010 | 설계 [ADR-016](../adr/ADR-016-real-engine-market-feed.md)(D-143, 2026-10-26), 구현 G1·G2·G4 안 됨 | 엔진에 feed 참조 없음 | data-engineer, architect, risk-ops | 없음(설계 지금 가능) | 예 | G |
 | D13 | watchlist 구독 상한(실전 보유 종목 몫 남김, ADR-012 F4) | ADR-012 0번·F4, D-122 | 안 됨 | 임시값 100종목(D-122), 게이트웨이에 상한 키 없음 | risk-ops | **Q-060**, Q-061 | 예 | G |
 | D14 | 키움 후속: WS 경로 확정, LOGIN 실패 분류, 토큰 8031·8103 반복 ERROR, 재시도 시험 | 메모 pr40 | 부분 | 경로 둘 다 보관, `KiwoomReturnCode.TOKEN_CODES` | data-engineer | Q-015 첫 실접속 로그 | 예 | D-K |
 | D15 | Q-015 키움·KIS 실제 접속 확인(필드, PING, 무응답 시간, VI 메시지, KIS wss·접속키 1분 제한, 키움 토큰 무효화) | 결정 로그 Q-015 | 안 됨(미확정) | 실측 전. kis-news 토큰 403은 PR #234에서 결과 코드 표시 중 | data-engineer, risk-ops | **사용자 PC 실측** | 예 | 사용자 |

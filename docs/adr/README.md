@@ -18,3 +18,4 @@
 | [ADR-012](ADR-012-intraday-selection.md) | 단타 종목 선정: 장전 일봉·공시 선정과 실시간·녹화 실험 연결, 뉴스 신호 앞으로 전용 수집, 장중 순위 선정(2차) | 채택(D-121) |
 | [ADR-013](ADR-013-strategy-entry-admission.md) | 전략 문맥으로 신규 진입 허용 여부를 미리 알림(선정 계좌의 막힌 신호가 한도를 쓰지 않게, F7) | 제안(D-130, 사용자 머지) |
 | [ADR-014](ADR-014-live02-judgement-roles-precheck.md) | LIVE02 등록 전 판정 계약: 참고 계좌 역할 `references`, 대조군 시드 수 `group-null-seeds`, 녹화 사전 검사 명령, 공시 입력 키 | 채택(D-131) |
+| [ADR-016](ADR-016-real-engine-market-feed.md) | 실전 엔진 시세 전달(게이트웨이 → 엔진 전용 소켓): 관심 종목 전체 교체·상태·생존 줄, 구독 순위, 보호 폴링으로 넘기는 조건, `unservedHeld` 알림·구독 거절 | 제안(D-143, 사용자 머지) |
