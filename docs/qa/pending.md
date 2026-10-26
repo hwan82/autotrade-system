@@ -80,3 +80,4 @@
 | 2026-10-24 | PR #238 검토해줘 | docs/reviews/pr-238/qa.md | 실전 관련 PR(장애 대응 절차: 7단계 실행·시험 절차서 뼈대 I1, 3-R 상세 절차, 사용자 결정 D-140 후속 문구 고침, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-25 | PR #238 재검토해줘 | docs/reviews/pr-238/qa.md(재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A12 F1·F2와 권고 Q1~Q4를 절차서 6장·1장·3장에 반영, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-26 | PR #240 재검토해줘 | docs/reviews/pr-240/qa.md | 실전 관련 PR: QA 1차 발견 1(늦게 뜬 엔진 응답 멈춤 뒤 진행 중 활성화 OPEN)과 권고 Q1~Q5 반영. 브랜치 `claude/project-thread-uv9uq5` |
+| 2026-10-26 | PR #247 검토해줘 | docs/reviews/pr-247/qa.md | 실전 관련 PR(증권사 주문 연동, 보호 테스트 ArchUnit 규칙·고정물 변경): D-145 한국투자 주문·취소·일별 체결·잔고 조회 클라이언트(미연결, KisPlugin.orderGateway 빈 값 유지), 타임아웃 뒤 미접수 확인 재조정기, 토큰 재발급 60초 관문, 규칙 PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN·KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN. 대상 커밋 9a10dd2d. 브랜치 `claude/project-thread-truegb` |
