@@ -190,3 +190,41 @@
 
 ## 판정
 승인(B1 검토자 직접 실행 `./gradlew build` 종료 코드 0, 테스트 1,952개 실패 0, HEAD 3352de6d. risk-ops 재검토 2 S1과 architect C-1·C-2 반영 확인, C-3·C-4는 참고. B7: 실전 관련 PR이므로 risk-ops 재검토·독립 QA 재검토와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
+
+## 재검토 6 2026-10-26
+- 대상: PR #238 / 커밋 a21ed329(`git ls-remote origin claude/project-thread-vodfc0` = `a21ed3295845d81e41d398d748af8f338feb287f`, base main 4ce2dc93) / main 대비 diff(`git diff origin/main...HEAD --name-status`, 8파일: `D-140` M, `docs/qa/pending.md` M, `docs/reviews/pr-238/architect.md`·`qa.md`·`risk-ops.md` A, `docs/runbooks/README.md` M, `docs/runbooks/stage-7-real-trading-tests.md` A, `docs/team/stage-7-readiness-plan.md` M). 재검토 5(3352de6d) 이후 커밋은 74cd55b6(재검토 5 원문), 1f04e1f0(risk-ops 재검토 3 원문), fb4a86cb(절차서: 6장 0번 "되돌리기" 하위 줄, "실험실 포트" 줄, 8장 추적표 R10 행), 225a9282(risk-ops 재검토 4 원문), a21ed329(절차서: 엔진 기동 로그 줄·잠금 파일 갱신 시각, 실험실 `--autotrade.config-dir`)다. `git diff 3352de6d HEAD --stat`: 절차서 +7 −1, 검토 원문 2개뿐. D-140·계획·README·`pending.md`는 재검토 5와 같다. origin/main과 `git merge-tree` 충돌 없음.
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build --offline -q` (별도 worktree `/tmp/claude-0/arch-238-re6`, HEAD a21ed329): 첫 시도에 **종료 코드 0(BUILD SUCCESSFUL)**, 미러·우회 설정 없음. 테스트 결과 XML 집계: **1,952개, 실패 0·오류 0·건너뜀 0**.
+  - CI(GitHub `pull_request_read` get_check_runs, head a21ed329, run 40248954831): 검토 시점 4개 job 모두 in_progress. 판정 근거는 위 직접 실행이다.
+  - fb4a86cb·a21ed329 문구를 코드와 대조:
+    - "`-Dautotrade.config-dir`가 `AUTOTRADE_CONFIG_DIR`보다 먼저": `ConfigPaths.java:27-37`(시스템 속성 → 환경 변수 → `~/.autotrade`) 맞음. 엔진은 `EngineMain.java:68`에서 `ConfigPaths::defaultLocation`을 쓴다.
+    - 실험실 `--autotrade.config-dir=`: `CoreConfiguration.java:31-32`(`@Value("${autotrade.config-dir:}")`, 비면 `defaultLocation()`)와 `application.yml:28-30` 맞음. Spring 속성이므로 실행 인자가 시스템 속성보다 앞선다 — 문구가 이를 덮는다.
+    - 감시 "감시 시작: 설정 폴더 …": `WatchdogMain.java:116` 맞음.
+    - 엔진 "engine 기동 …, 설정 … (설정 폴더)": `ProcessStartup.java`의 로그 호출은 23~24행이고(`processName`은 `EngineMain.java:53` `"engine"`, 폴더는 `paths.runtimeFile().getParent()`), 22행은 앞 `if`의 닫는 괄호다. 문구 인용 `22-23`은 한 줄 어긋남(C-5).
+    - 잠금 파일 "시험 뒤 시각으로 갱신": `ControlServer.java:87-107` — 잠금을 잡은 뒤에만 `truncate(0)`·PID 쓰기·`force`를 하므로 기동에 성공한 엔진만 수정 시각을 바꾸고, 잠금을 못 잡은 두 번째 엔진은 열기만 하고 닫아(`CREATE, WRITE` 열기는 내용·시각을 바꾸지 않음 `[추론]`) 갱신 신호가 오염되지 않는다. 소켓은 `removeStaleSocket` 뒤 새로 bind(113-117행)라 새 시각이 된다. 판정 방법이 성립한다.
+    - 하트비트: 실제 파일은 `<설정 폴더>/heartbeat/engine.hb`(`Heartbeat.java:24-25,41`, ADR-011 12행)이고 정상 종료 때 지워진다(`HeartbeatWriter.java` close). 문구 `heartbeat/engine`은 확장자가 빠졌다(C-6).
+    - 실험실 포트 8480·`AUTOTRADE_UI_PORT`: `application.yml:14`, `config-keys.md:43` 맞음 — C-4 반영.
+    - 8장 R10 행: risk-ops 재검토 3 R10 요구(장 외 시간, 재기동 뒤 4장 2번 보호 모드) 그대로, 상태 "남음".
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 실행 `./gradlew build` 종료 코드 0(HEAD a21ed329), 테스트 1,952개 실패·오류·건너뜀 0. diff 8파일 모두 `docs/`의 `.md`로 빌드 입력 변경 없음 |
+| B2 | 해당 없음 | 운영 코드·빌드 스크립트·ArchUnit 규칙·보호 경로 변경 없음(diff 8파일 모두 `docs/`, `scripts/`·`.github/` 변경 없음) |
+| B3 | 해당 없음 | 인터페이스·스키마·설정 키·REST API 변경 없음. 0번은 기존 `autotrade.config-dir`·`AUTOTRADE_CONFIG_DIR`·`AUTOTRADE_UI_PORT`와 ADR-006 2.2·ADR-011 파일 위치만 참조 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 계산 코드 없음 |
+| B6 | 해당 없음 | 새 코드 동작 없음, 테스트 삭제·건너뜀 없음(diff에 테스트 파일 없음) |
+| B7 | 해당(risk-ops 검토 필요) | 장애 대응 절차(3-R) 문서를 바꾸는 실전 관련 PR. fb4a86cb·a21ed329가 3-R 전제(되돌리기 확인)를 바꿨으므로 risk-ops 재검토와 독립 QA 재검토가 필요하다. 사용자 머지 대상 |
+| B8 | 통과 | diff 전체(검토 원문 포함)에 키·계좌번호·토큰 값 없음(검색). 새 문구는 경로·속성 이름만 담음 |
+
+## 점검표 밖 발견(재검토 6)
+- **C-3 반영 확인**: "되돌리기"가 환경 변수 값만으로 확정하지 않고, 명령줄 `-D`/`--` 값 → 감시 기동 로그 → 엔진 기동 로그와 운영 폴더 잠금·소켓·하트비트의 갱신 시각 → 실험실 `#/real` 상태로 확인하게 됐다. 엔진에는 실제로 설정 폴더를 찍는 기동 로그가 있다(`ProcessStartup`, 재검토 5의 내 C-3 "엔진에는 설정 폴더 줄이 없다"는 `EngineMain` 안만 본 것으로 틀렸다 — 정정). 엔진이 시험 폴더에 남은 경우는 운영 폴더 소켓·하트비트가 시험 뒤 시각으로 갱신되지 않아 잡힌다. 원본 합격 기준을 약하게 하는 문구는 없다.
+- **C-4 반영 확인**: "실험실 포트" 줄이 기본 포트 하나임을 적고 선택을 시행 PR로 넘겼다.
+- **C-5 (참고, 판정 근거 아님)** 엔진 기동 로그 인용 `ProcessStartup.java:22-23`은 실제 23~24행이다. 확인 결과를 바꾸지 않음. 시행 PR에서 맞출 것.
+- **C-6 (참고, 판정 근거 아님)** `heartbeat/engine` → 실제 파일 이름은 `heartbeat/engine.hb`(`Heartbeat.java:41`). 사용자가 확장자 없는 파일을 찾다 "없음"으로 잘못 읽을 수 있으나, 같은 줄의 기동 로그·잠금·소켓 확인이 함께 있어 결과를 바꾸지 않는다. 시행 PR에서 `.hb`를 붙일 것.
+- **C-7 (참고, 판정 근거 아님)** "모든 프로세스: … 5-1의 `Get-CimInstance … CommandLine`으로 본다"의 5-1 명령은 `EngineMain`만 거른다. 실험실(`bootRun`이 띄운 자식 JVM, `AutotradeLabApplication`)·감시(`WatchdogMain`)는 거름 조건을 바꿔야 한다. 명령은 5-1에서 이미 `[가정]`·"시행 때 채운다"로 남겨 두었으므로 시행 PR에서 프로세스별 거름 조건을 함께 적을 것.
+- A-6(D-140 후속 문구는 머지하는 사용자가 직접 확인)은 그대로 남는다.
+
+## 판정
+승인(B1 검토자 직접 실행 `./gradlew build` 종료 코드 0, 테스트 1,952개 실패 0, HEAD a21ed329. architect C-3·C-4와 risk-ops 재검토 3 T1·재검토 4 R11·R12 반영 문구를 코드와 대조해 확인, C-3의 내 사실 오류 정정. C-5·C-6·C-7은 참고. B7: 실전 관련 PR이므로 risk-ops 재검토·독립 QA 재검토와 사용자 머지를 거쳐야 하며 이 판정만으로 Claude가 머지하지 않는다. 이 원문 커밋으로 head가 바뀌므로 바뀐 head의 CI도 머지 전에 확인할 것)
