@@ -80,3 +80,4 @@
 | 2026-10-24 | PR #238 검토해줘 | docs/reviews/pr-238/qa.md | 실전 관련 PR(장애 대응 절차: 7단계 실행·시험 절차서 뼈대 I1, 3-R 상세 절차, 사용자 결정 D-140 후속 문구 고침, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-25 | PR #238 재검토해줘 | docs/reviews/pr-238/qa.md(재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A12 F1·F2와 권고 Q1~Q4를 절차서 6장·1장·3장에 반영, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-26 | PR #240 재검토해줘 | docs/reviews/pr-240/qa.md | 실전 관련 PR: QA 1차 발견 1(늦게 뜬 엔진 응답 멈춤 뒤 진행 중 활성화 OPEN)과 권고 Q1~Q5 반영. 브랜치 `claude/project-thread-uv9uq5` |
+| 2026-10-26 | PR #<번호> 검토해줘 | docs/reviews/pr-<번호>/qa.md | 실전 관련 PR(장애 대응 절차, 문서만): 7단계 절차서 I1 보완, D-142가 넘긴 3-R 하트비트 폴더 변형·늦게 뜬 엔진 확인·해시 다시 만들기 안내, C6·C10 현재형. 브랜치 `claude/project-thread-wqsuqu` |
