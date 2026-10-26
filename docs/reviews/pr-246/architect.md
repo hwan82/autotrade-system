@@ -36,3 +36,36 @@
 승인
 
 - architect 범위(B1~B6·B8)에서 수정할 것은 없다. B7은 risk-ops 검토 대상이며, 이 PR이 지침 10장 실전 관련 PR(사용자 머지)인지는 risk-ops 판정을 따른다.
+
+## 재검토 (2026-10-26)
+- 대상: PR #246 / 커밋 `22123a6d`(앞 검토 `67585eac` 뒤 추가된 `4958c489` architect 원문, `3d34b906` risk-ops 원문, `22123a6d` risk-ops 수정 필요 반영) / `git diff origin/main...HEAD` 전체(11개 파일, 모두 `docs/`)
+- 점검표: B
+- 직접 실행한 것:
+  - `./gradlew build` (HEAD `22123a6d`를 별도 worktree `/tmp/wt-arch-246`에 꺼내 실행): **BUILD SUCCESSFUL in 4m 42s**, 138 tasks, 테스트 결과 XML 합계 2,005건 실패 0·오류 0·건너뜀 0.
+  - `git diff --stat origin/main...HEAD`: 앞 검토의 8개 파일 + `docs/qa/pending.md`(1줄 추가), `docs/reviews/pr-246/{architect,risk-ops}.md`(원문). 코드·설정·스키마·테스트 변경 없음. 보호 경로(`scripts/ci/protected-paths.txt`) 해당 파일 없음.
+  - `git show 22123a6d` 단어 단위 비교로 바뀐 내용 전부 확인: D-144 상태 줄·③·⑥, README D-144 행, 기획서 v14.60 이력·RSK-13 인수 조건·TST-06 행, 대응표 1장 3·4번·I-8·S-2·S-4·S-5·W-21·6장 대안 A, K10 인용 줄, pending.md 줄.
+  - `origin/main`과 시험 병합(`git merge-tree`): 충돌 없음(main에 새 커밋 없음).
+  - 대응표 3·4장 행을 스크립트로 다시 셈: 장중 16(부분 12·미충족 4, 채택 11·대체 5), 스크리너 18(충족 1·부분 15·미충족 2, 채택 6·대체 12) → 합 34(충족 1·부분 27·미충족 6). 충족은 S-15 하나(경고 "아니오"), 부분·미충족 33행은 모두 W-ID 또는 B-01이 있음(경고 빠짐 0).
+  - 인용 대조: `RealPathReflectionTest.java:100`(`EXTERNAL_ALLOWLIST`, 외부 jar 허용 목록)·`:111`(`ALLOWED_PROCESS_LAUNCHERS = Set.of()`), `OrderState.java:4-5`(주석 원문 일치), `autotrade-app-engine/build.gradle.kts:19-28`(`autotrade-selection` 의존 없음, 대응표 S-4·S-5 [사실] 맞음).
+  - 기획서 RSK-13 인수 조건 새 문구: "2차 확인 실패·잠금·비밀번호 미설정이면 모든 계좌(OPEN·ACTIVATING·PROTECTIVE·OFF)에서 청산(②~⑥) 미수행 테스트, 같은 조건에서 OPEN·ACTIVATING 계좌는 ① 고정 … PROTECTIVE 계좌는 PROTECTIVE 유지 테스트". 같은 행 본문(① 고정은 OPEN·ACTIVATING에만, OFF는 OFF 그대로)과 D-140 ①과 모순 없음. risk-ops 발견 1의 빈칸(PROTECTIVE 청산 미수행)이 채워짐.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | HEAD `22123a6d` `./gradlew build` BUILD SUCCESSFUL, 테스트 2,005건 실패 0(위 실행 기록) |
+| B2 | 해당 없음 | 빌드 스크립트·모듈·ArchUnit 규칙 변경 없음(diff 11개 파일 모두 `docs/`) |
+| B3 | 실패 | 인터페이스·스키마·설정 키·REST 변경은 없고 기획서 변경은 v14.60 이력(`autotrade-spec.md:20`)과 D-144가 함께 있다. 그러나 이 PR이 새로 만든 대응표의 **4장 합계 표가 고친 행과 맞지 않는다**: `docs/team/tst-06-checklist-map.md:96-98`이 아직 "스크리너 18 \| 4 \| 12 \| 2", "합 34 \| 4 \| 24 \| 6"이다. 행(S-2·S-4·S-5를 부분으로 바꿈)·1장 3번(`:12` 충족 1·부분 27)·D-144 ③·6장 대안 A(`:155` 33개)는 1·27·6인데 합계 표만 앞 판 그대로다(아래 발견 1) |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 변경 없음 |
+| B6 | 해당 없음 | 새 동작 코드 없음, 테스트 삭제·건너뜀 없음. RSK-13 인수 조건은 이번 고침으로 앞 판보다 넓어짐(PROTECTIVE 청산 미수행·PROTECTIVE 유지 추가) |
+| B7 | risk-ops 검토 필요 | 장애표 #13 문구, RSK-13 PANIC 인수 조건, TST-06 이행 방식을 바꾼다. risk-ops 1차 판정이 "실전 관련 PR(사용자 머지)"이고 D-144 상태 줄·`docs/qa/pending.md:84`도 그렇게 고쳤다. 수정 반영분(발견 1·2)의 재검토는 risk-ops 몫 |
+| B8 | 통과 | 바뀐 문서에 키·계좌번호·토큰 값 없음(pending.md 줄 포함 눈으로 확인) |
+
+## 점검표 밖 발견
+
+1. **(수정 필요) `docs/team/tst-06-checklist-map.md` 4장 합계 표가 갱신되지 않았다.** `:96-98`을 "장중 16 \| 0 \| 12 \| 4 \| 0 \| 11 \| 5 \| 0", "스크리너 18 \| 1 \| 15 \| 2 \| 0 \| 6 \| 12 \| 0", "합 34 \| 1 \| 27 \| 6 \| 0 \| 17 \| 17 \| 0"으로 맞춘다(행을 직접 센 값). 앞 architect 검토가 "문서 합계 표·D-144 ③과 일치"로 확인한 표라, 이번 수정으로 같은 문서 안에서 두 숫자(1장 3번 1·27·6, 4장 합계 4·24·6)가 엇갈리게 됐다. 이 표는 묶음 H 화면과 7단계 독립 QA의 입력이고 risk-ops 발견 2도 "합계를 맞춘다"를 요구했다.
+2. (참고) 앞 검토 참고 1·2(K10 `RealPathReflectionTest` 인용 줄, 대응표 `OrderState` 인용)는 고쳐졌고 새 인용이 코드와 맞다.
+3. (참고) 앞 검토 참고 4(PR 제목·본문의 D-143)는 저장소 밖이라 이 검토에서 확인하지 않았다. 머지 전 PR 본문 결정 링크가 `D-144-…`인지 확인하기를 권한다.
+4. (참고) 기획서 v14.60 이력 행을 새 판 번호 없이 고쳐 썼다. 아직 머지 전 같은 PR 안의 판이라 문제 삼지 않는다.
+
+## 판정
+수정 필요(1. TST-06 대응표 4장 합계 표 `tst-06-checklist-map.md:96-98`이 충족 4·부분 24로 남아 행·1장·D-144의 충족 1·부분 27과 어긋남)
