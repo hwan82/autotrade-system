@@ -80,3 +80,4 @@
 | 2026-10-24 | PR #238 검토해줘 | docs/reviews/pr-238/qa.md | 실전 관련 PR(장애 대응 절차: 7단계 실행·시험 절차서 뼈대 I1, 3-R 상세 절차, 사용자 결정 D-140 후속 문구 고침, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-25 | PR #238 재검토해줘 | docs/reviews/pr-238/qa.md(재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A12 F1·F2와 권고 Q1~Q4를 절차서 6장·1장·3장에 반영, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-26 | PR #240 재검토해줘 | docs/reviews/pr-240/qa.md | 실전 관련 PR: QA 1차 발견 1(늦게 뜬 엔진 응답 멈춤 뒤 진행 중 활성화 OPEN)과 권고 Q1~Q5 반영. 브랜치 `claude/project-thread-uv9uq5` |
+| 2026-10-26 | PR #246 검토해줘 | docs/reviews/pr-246/qa.md | 실전 관련 PR(문서만, 코드 무변경): D-144 7단계 묶음 0 — 장애표 #13 VI 행(PANIC 매도는 RSK-13), 기획서 v14.60 RSK-13 인수 조건 계좌 상태별 분리, TST-06 원본 34항목 대응표와 경고 묶음(차단은 TST-01뿐), K10 OS 자격 증명 저장소 재검토(파일 유지 + 권한 경고), D-037 근거 보충, Q-047 닫기. 대응표·K10 문서는 risk-ops가 쓰고 risk-ops가 검토해 작성자·검토자가 분리되지 않음. 브랜치 `claude/project-thread-npk3vh` |

@@ -54,7 +54,7 @@
 **B·C를 버린 핵심 이유**
 
 1. 가장 큰 위협 T2를 어느 쪽도 막지 못한다. [사실] DPAPI 문서: "Typically, only a user with logon credentials that match those of the user who encrypted the data can decrypt the data." 같은 사용자로 도는 악성 프로세스는 이 조건을 만족한다 `[추론]`. Credential Manager 일반 자격 증명도 같은 사용자 세션에 보인다.
-2. 실전 경로에 네이티브 호출이 들어온다. [사실] D-086은 실전 엔진·감시·증권사 플러그인 런타임의 리플렉션과 외부 jar를 허용 목록으로 묶고, 프로세스 실행 허용 목록(`ALLOWED_PROCESS_LAUNCHERS`)은 빈 집합이다(`RealPathReflectionTest.java:111,114`, 준비 계획 K8). JNA는 네이티브 라이브러리를 불러오고 리플렉션을 쓴다 `[가정: JNA 문서로 확인 필요]`. PowerShell `ConvertFrom-SecureString` 같은 보조 프로세스 실행은 실행 허용 목록을 연다. 둘 다 보호 테스트 고정 값 변경이다.
+2. 실전 경로에 네이티브 호출이 들어온다. [사실] D-086은 실전 엔진·감시·증권사 플러그인 런타임의 리플렉션과 외부 jar를 허용 목록으로 묶고, 프로세스 실행 허용 목록(`ALLOWED_PROCESS_LAUNCHERS`)은 빈 집합이다(`RealPathReflectionTest.java:100,111`, 준비 계획 K8). JNA는 네이티브 라이브러리를 불러오고 리플렉션을 쓴다 `[가정: JNA 문서로 확인 필요]`. PowerShell `ConvertFrom-SecureString` 같은 보조 프로세스 실행은 실행 허용 목록을 연다. 둘 다 보호 테스트 고정 값 변경이다.
 3. Java FFM API는 Java 21에서 미리보기이고 정식판은 그 뒤 판이다 `[가정: JEP 454 원문을 이 환경에서 읽지 못함. 확인 방법: openjdk.org/jeps/454의 Release 칸]`. 실전 엔진에 `--enable-preview`를 켜는 것은 받아들이지 않는다. 정식판을 쓰려면 D-002(Java 21) 변경이라 사용자 결정이다.
 4. 이득(T3·T4)은 A'의 위치 경고와 디스크 암호화 절차로 대부분 얻는다 `[추론]`.
 
