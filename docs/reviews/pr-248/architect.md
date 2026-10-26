@@ -72,3 +72,31 @@
 
 ## 판정
 승인
+
+## 재검토 2 2026-10-26
+- 대상: PR #248 / 커밋 `e2d237d0` (앞 재검토 `13b60780` 뒤 코드 변경은 `e2d237d0` 하나, `b5cc9a80`은 risk-ops 원문) / `origin/main...HEAD` diff 전체를 다시 보고, 변경분은 `git diff 13b60780 e2d237d0`로 따로 봄
+- 점검표: B
+- 직접 실행한 것: `git archive HEAD`로 새 폴더에 풀어 `./gradlew build --offline` → BUILD SUCCESSFUL(4분 29초, UP-TO-DATE 3개뿐). JUnit XML 집계: real-store 34건(앞 31 + 새 3), risk 68건, app-engine 114건, architecture-test 47건, notification-jar 86건, 실패·오류·건너뜀 0. 변경분에서 지운 `@Test`·추가된 `@Disabled` 없음
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 새 폴더 빌드 통과(검토자가 직접 실행) |
+| B2 | 통과 | 변경은 `autotrade-real-store` 안(`EngineStore`·`LedgerScan`)뿐. 새 의존 없음, ArchUnit 3종 통과 |
+| B3 | 통과 | 공개 계약 변경 없음(`LedgerScan.unreadable`는 패키지 전용). 기동 거부 조건이 "`writer.lock` 못 잡음·폴더 심볼릭 링크"로 좁혀진 것은 D-146 위험과 한계에 적힘. ADR-015 2.7 ③("손상이면 차단·경고, 기동은 함")과 맞음 |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음, 시계·난수 새 사용 없음 |
+| B5 | 해당 없음 | 금액 코드 없음 |
+| B6 | 통과 | 새 시험 3건(`블랙리스트_원장을_읽지_못하면_기동은_하고_모든_계좌를_전면_차단한다`, `기동_원장을_읽지_못하면_옮겨_두고_경고만_하고_기동한다`, `명령_원장을_읽지_못하면_폴더째_옮겨_두고_경고만_하고_기동한다`) 통과. 명령 원장 시험은 다시 열 때 경고 0건까지 확인. R-3·R-4 시험을 넣지 못한 이유는 D-146 검증에 적힘. R-3 연결은 앞 검토에서 확인한 `LedgerWriterTest`와 Guard의 감사 실패 시 전이 미적용 시험이 나눠 맡는 것이 맞다 |
+| B7 | risk-ops 검토 필요 | 실전 엔진 저장소(보호 경로)의 차단 조건을 바꿈. risk-ops 재검토·독립 QA·사용자 머지 필요 |
+| B8 | 통과 | 새 경고·차단 문구는 예외 종류와 메시지(경로)만 실음. 비밀값 없음 |
+
+### 변경분 확인
+- 공통 원장 읽기 오류(`scanCommon`, `EngineStore.java:611-617`)를 손상(`LedgerScan.unreadable`)으로 바꾼다. 블랙리스트는 모든 계좌 전면 차단, 기동·명령은 옮기고 경고. 앞 코드에서는 이 `IOException`이 `open` 밖으로 나가 기동 거부가 됐으므로, 블랙리스트 읽기 실패에서도 기동은 하되 올림을 모두 막는 쪽이 ADR-015 2.7 (가)와 맞다.
+- 기동 원장을 옮기거나 새로 열지 못하면 `bootLedger`가 null이고 "기동 기록 실패"로 모든 계좌 전면 차단한다. `writeBootRecord`·`close`·`closeQuietly`가 null을 모두 처리한다. 명령 원장은 null이면 `recordCommand`가 프로세스 로그로만 남긴다. null 처리 빠진 곳을 찾지 못했다.
+- 명령 원장 읽기 실패 때 `commandScan.file()`은 폴더이므로 폴더째 `commands.corrupt-<부팅>`으로 옮기고 `prepareDir`로 다시 만든다. 이름 접두로 폴더째 옮긴 경우를 가리는 방식은 날짜 파일 이름(`YYYY-MM-DD.jsonl.corrupt-…`)과 겹치지 않는다. 새 원장 첫 체크포인트의 `restartAfter`로 다음 기동 검사가 통과한다(시험 확인).
+- [추론] 기동 원장을 읽지 못하면 그 원장의 `boot` 값이 빠져 부팅 번호가 겹칠 수 있다. 앞 권고 2·risk-ops R-2와 같은 문제로, D-146에 B4 후속으로 적혀 있어 이 PR에서 막을 일은 아니다.
+
+### 사소(고치면 좋음, 판정에 영향 없음)
+- `EngineStore.java:610`: `quarantine`의 Javadoc("손상 파일을 같은 폴더의 다른 이름으로 옮긴다")이 새로 끼운 `scanCommon` 위에 남아 `scanCommon`의 설명처럼 보인다. `scanCommon`에 맞는 주석을 달고 원래 주석은 `quarantine`(`:619`) 위로 옮긴다.
+
+## 판정
+승인
