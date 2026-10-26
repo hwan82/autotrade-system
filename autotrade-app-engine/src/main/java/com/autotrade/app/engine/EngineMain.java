@@ -168,7 +168,14 @@ public final class EngineMain {
             Instant startedAt = clock.instant();
             // 하트비트 쓰기 실패는 로그만 남기고 엔진을 멈추지 않는다(HeartbeatWriter)
             heartbeat = HeartbeatWriter.start(configDir, PROCESS, clock, HeartbeatWriter.DEFAULT_INTERVAL);
-            selfCheck = new EngineSelfCheck(configDir, pid, startedAt, clock, guard, server::silence,
+            ControlServer channel = server;
+            EngineCommandHandler commands = handler;
+            // 늦게 뜬 엔진: 명령 채널이 응답을 멈추고 자리를 내주며, 처리기는 진행 중 활성화를 멈추고 계좌를 OFF로(PR #240 QA 발견 1)
+            Consumer<String> silencer = reason -> {
+                channel.silence(reason);
+                commands.silence(reason);
+            };
+            selfCheck = new EngineSelfCheck(configDir, pid, startedAt, clock, guard, silencer,
                     config.realTrading(), () -> new ConfigLoader().load(paths).config().realTrading(),
                     (kind, title, body) -> notifications.offer(kind, PROCESS, title, body));
             selfCheck.start(EngineSelfCheck.INTERVAL);

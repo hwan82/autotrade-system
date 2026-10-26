@@ -517,6 +517,22 @@ class ControlChannelTest {
     }
 
     @Test
+    void 처리하는_사이_응답을_멈추면_그_요청의_결과도_쓰지_않는다() throws Exception {
+        ControlServer[] holder = new ControlServer[1];
+        try (ControlServer server = watched(request -> {
+                    holder[0].silence("처리 중 두 번째 엔진으로 판단");
+                    return echo(request);
+                });
+                ControlClient client = new ControlClient(socket(), Duration.ofSeconds(2))) {
+            holder[0] = server;
+
+            assertThatThrownBy(() -> client.send(ControlRequest.status()))
+                    .isInstanceOf(ControlClient.EngineUnreachableException.class);
+            assertThat(received).hasSize(1);
+        }
+    }
+
+    @Test
     void 늦게_뜬_서버가_응답을_멈추면_먼저_뜬_서버가_잠금과_소켓을_되찾아_명령이_먼저_뜬_서버에_닿는다() throws Exception {
         Path run = socket().getParent();
         try (ControlServer first = watched(this::echo);

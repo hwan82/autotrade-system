@@ -545,6 +545,8 @@ class EngineCommandHandlerTest {
         assertThat(panic.steps()).filteredOn(s -> PanicSteps.PROTECTIVE_LOCK.equals(s.step()))
                 .singleElement().satisfies(s -> assertThat(s.outcome()).isEqualTo(PanicSteps.DONE));
         assertThat(r.message()).contains("중단");
+        // PANIC 뒤에는 다음 단계의 증권사 작업을 하지 않는다
+        assertThat(performed).containsExactly(ActivationStep.values()[0]);
         await(() -> commandAudit.contains("ACTIVATE KIS-US-1 ACTIVATION_FAILED"));
         assertThat(guard.state(KIS.id())).isNotEqualTo(GuardState.OPEN).isNotEqualTo(GuardState.ACTIVATING);
         assertThat(guardAudit).extracting(t -> t.to()).doesNotContain(GuardState.OPEN);
@@ -586,6 +588,114 @@ class EngineCommandHandlerTest {
             }
             guard.shutdown(KIS.id(), "test", "다음 회차");
         }
+    }
+
+    @Test
+    void 처리기에_먼저_들어온_PANIC이라도_이_활성화보다_늦게_받았으면_활성화를_열지_않는다() {
+        // QA S2: 요청 읽기 동안 순서가 뒤바뀐 경우. 활성화를 t=0에, PANIC을 t=1에 받았는데 PANIC이 먼저 처리됐다
+        EngineCommandHandler h = handler();
+        nanos.set(5);
+
+        ControlResponse panic = h.handle(ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", PASSWORD), 1);
+        ControlResponse r = h.handle(ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD), 0);
+
+        assertThat(panic.ok()).isTrue();
+        assertThat(r.code()).isEqualTo(ControlCodes.INVALID_STATE);
+        assertThat(r.message()).contains("PANIC SELL");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+        assertThat(performed).isEmpty();
+        // PANIC보다 뒤에 받은 활성화는 연다
+        assertThat(h.handle(ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD), 2).ok()).isTrue();
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OPEN);
+    }
+
+    @Test
+    void 그_계좌_청산이_도는_동안에는_활성화를_받지_않는다() throws Exception {
+        limits = new EngineCommandHandler.Limits(Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofMillis(200), 2, 6);
+        EngineCommandHandler h = handler();
+        send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+        CountDownLatch release = new CountDownLatch(1);
+        liquidator = account -> {
+            awaitQuietly(release);
+            return List.of(PanicSteps.result(account, PanicSteps.CANCEL_OPEN_ORDERS, PanicSteps.FAILED, "x"));
+        };
+        send(h, ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", PASSWORD));
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+        performed.clear();
+
+        ControlResponse r = send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        assertThat(r.code()).isEqualTo(ControlCodes.INVALID_STATE);
+        assertThat(r.message()).contains("청산이 도는 중");
+        assertThat(performed).isEmpty();
+        release.countDown();
+        await(() -> commandAudit.contains("PANIC_ACCOUNT KIS-US-1 PANIC_INCOMPLETE"));
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
+    }
+
+    // ---- 응답을 멈춘 엔진(PR #240 QA 발견 1) ----
+
+    @Test
+    void 응답을_멈추면_열린_계좌를_OFF로_내리고_활성화를_받지_않는다() {
+        EngineCommandHandler h = handler();
+        send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OPEN);
+
+        h.silence("먼저 뜬 엔진이 돈다");
+
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+        assertThat(guard.state(KIWOOM.id())).isEqualTo(GuardState.OFF);
+        ControlResponse r = send(h, ControlRequest.activate("KIWOOM-KR-1", "KIWOOM-KR-1", PASSWORD));
+        assertThat(r.code()).isEqualTo(ControlCodes.INVALID_STATE);
+        assertThat(r.message()).contains("응답을 멈춘");
+        assertThat(guard.state(KIWOOM.id())).isEqualTo(GuardState.OFF);
+    }
+
+    @Test
+    void 응답을_멈추는_순간_2차_확인_중이던_활성화는_열리지_않는다() {
+        // QA S1: 확인 뒤 시계를 읽는 순간 자가 확인이 이 엔진을 늦게 뜬 엔진으로 판단했다
+        EngineCommandHandler[] holder = new EngineCommandHandler[1];
+        AtomicInteger reads = new AtomicInteger();
+        ticker = () -> {
+            if (reads.incrementAndGet() == 3) {
+                holder[0].silence("먼저 뜬 엔진이 돈다");
+            }
+            return nanos.get();
+        };
+        holder[0] = handler();
+
+        ControlResponse r = holder[0].apply(ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        assertThat(r.ok()).isFalse();
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+        assertThat(performed).isEmpty();
+    }
+
+    @Test
+    void 응답을_멈추면_단계_중인_활성화도_다음_확인_지점에서_멈춘다() throws Exception {
+        CountDownLatch inStep = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        steps = (account, step) -> {
+            if (step == ActivationStep.values()[0]) {
+                inStep.countDown();
+                awaitQuietly(release);
+            }
+            performed.add(step);
+            return Optional.empty();
+        };
+        EngineCommandHandler h = handler();
+        CompletableFuture<ControlResponse> activation = CompletableFuture.supplyAsync(
+                () -> h.apply(ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD)));
+        awaitQuietly(inStep);
+
+        h.silence("먼저 뜬 엔진이 돈다");
+        release.countDown();
+        activation.get(30, TimeUnit.SECONDS);
+
+        await(() -> commandAudit.contains("ACTIVATE KIS-US-1 ACTIVATION_FAILED"));
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+        assertThat(performed).containsExactly(ActivationStep.values()[0]);
+        assertThat(guardAudit).extracting(t -> t.to()).doesNotContain(GuardState.OPEN);
     }
 
     // ---- C1: 비동기 활성화 ----
@@ -768,10 +878,11 @@ class EngineCommandHandlerTest {
         EngineCommandHandler h = handler();
         send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
         CountDownLatch release = new CountDownLatch(1);
-        PanicLiquidator done = liquidator;
+        // 청산이 끝나지 않는 경우: 계좌가 보호 모드에 남아도 겹친 둘째 PANIC은 증권사 단계를 다시 돌지 않는다
         liquidator = account -> {
             awaitQuietly(release);
-            return done.liquidate(account);
+            liquidated.add(account.id().value());
+            return List.of(PanicSteps.result(account, PanicSteps.CANCEL_OPEN_ORDERS, PanicSteps.FAILED, "x"));
         };
 
         ControlResponse first = send(h, ControlRequest.panicAccount("KIS-US-1", "KIS-US-1", PASSWORD));
@@ -780,9 +891,10 @@ class EngineCommandHandlerTest {
         assertThat(List.of(first, second)).allSatisfy(r -> assertThat(r.steps()).extracting(PanicStepResult::outcome)
                 .contains(PanicSteps.PENDING));
         release.countDown();
-        await(() -> guard.state(KIS.id()) == GuardState.OFF);
-        Thread.sleep(100);
+        await(() -> commandAudit.contains("PANIC_ACCOUNT KIS-US-1 PANIC_INCOMPLETE"));
+        Thread.sleep(200);
         assertThat(liquidated).containsExactly("KIS-US-1");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.PROTECTIVE);
     }
 
     // ---- C7: 닫기 ----

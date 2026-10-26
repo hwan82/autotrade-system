@@ -39,7 +39,7 @@ import java.util.function.Supplier;
  *       확인할 때마다 쓰고, 다른 살아 있는 엔진의 존재 파일이 {@link #FRESH} 안에 쓰였으면 두 엔진이 같이 돈다. 공용 하트비트
  *       ({@code engine.hb})는 두 엔진이 같은 파일을 덮어써 서로를 놓칠 수 있어(architect·risk-ops PR #240 R2) 존재 파일을 따로 둔다.
  *       잠금 파일과 run 폴더를 지워도 하트비트 폴더는 남으므로 두 번째 증거가 된다. 늦게 뜬 쪽이 명령 응답을 멈추고 소켓·잠금
- *       자리를 내주며({@code silence}) 자기 계좌를 모두 내린다(OPEN → 보호 모드, ACTIVATING → 출발 상태). 먼저 뜬 쪽은 그대로
+ *       자리를 내주며({@code silence}, 명령 처리기도 활성화를 받지 않고 진행 중 활성화를 멈춤) 자기 계좌를 모두 OFF로 내린다. 먼저 뜬 쪽은 그대로
  *       돌고 알리기만 한다. 시작 시각이 같으면 PID가 큰 쪽을 늦게 뜬 것으로 본다.</li>
  *   <li>실전 설정이 바뀌었는지: 계좌 목록·계좌번호·운영자 비밀번호 해시를 다시 읽어 마지막으로 본 값과 다르면 알린다. 엔진은 다시
  *       시작하기 전에는 새 값을 쓰지 않는다. 알림에 값은 싣지 않는다.</li>
@@ -225,11 +225,12 @@ final class EngineSelfCheck implements AutoCloseable {
                 silenced = true;
                 silencer.accept("먼저 뜬 실전 엔진(PID " + hb.pid() + ")이 돌고 있습니다");
                 for (AccountRef account : guard.accounts()) {
-                    guard.deactivate(account.id(), GuardTransition.SYSTEM, "두 실전 엔진이 같이 돎(늦게 뜬 엔진)");
+                    // 응답을 멈춘 엔진은 명령으로 멈출 수 없어 보호 모드에도 두지 않는다(PR #240 QA Q1)
+                    guard.shutdown(account.id(), GuardTransition.SYSTEM, "두 실전 엔진이 같이 돎(늦게 뜬 엔진)");
                 }
             }
             send(EventRoutes.CONTROL_CHANNEL, "실전 엔진이 두 개 돕니다",
-                    "먼저 뜬 엔진(PID " + hb.pid() + ")이 있어 이 엔진(PID " + myPid + ")은 명령 응답을 멈추고 계좌를 모두 내렸습니다."
+                    "먼저 뜬 엔진(PID " + hb.pid() + ")이 있어 이 엔진(PID " + myPid + ")은 명령 응답을 멈추고 활성화를 받지 않으며 계좌를 모두 OFF로 내렸습니다."
                             + " 이 엔진을 끄세요");
         } else {
             send(EventRoutes.CONTROL_CHANNEL, "실전 엔진이 두 개 돕니다",

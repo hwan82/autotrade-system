@@ -13,6 +13,7 @@ import com.autotrade.domain.account.AccountRef;
 import com.autotrade.risk.guard.ActivationStep;
 import com.autotrade.risk.guard.GuardClosedException;
 import com.autotrade.risk.guard.GuardState;
+import com.autotrade.risk.guard.GuardTransition;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -82,6 +83,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
     public static final Duration CLOSE_WAIT = Duration.ofSeconds(5);
 
     private static final int MAX_RESULT_LENGTH = 300;
+    private static final long NO_PANIC = Long.MIN_VALUE;
     private static final Logger LOG = System.getLogger(EngineCommandHandler.class.getName());
 
     /**
@@ -130,6 +132,10 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
     /** 계좌별 PANIC 세대(받을 때마다 1 올림). 활성화가 자기가 받은 뒤 PANIC이 들어왔는지 본다. */
     private final Map<AccountId, AtomicLong> panicGenerations;
     private volatile boolean closing;
+    /** 두 번째(늦게 뜬) 엔진이라 올리는 명령을 받지 않는 이유. null이면 정상(PR #240 QA 발견 1). */
+    private volatile String silenced;
+    /** 계좌별 마지막 PANIC을 받은 시각(단조 시계). 그보다 먼저 받은 활성화는 열지 않는다(QA Q2). */
+    private final Map<AccountId, AtomicLong> panicReceived;
 
     public EngineCommandHandler(
             RealTradingGuard guard, OperatorAuthenticator authenticator, Predicate<String> accountNumberConfigured,
@@ -162,13 +168,16 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         this.waiters = new Semaphore(limits.maxWaiting());
         Map<AccountId, ExecutorService> map = new LinkedHashMap<>();
         Map<AccountId, AtomicLong> generations = new LinkedHashMap<>();
+        Map<AccountId, AtomicLong> received = new LinkedHashMap<>();
         for (AccountRef ref : guard.accounts()) {
             map.put(ref.id(), Executors.newSingleThreadExecutor(
                     Thread.ofPlatform().name("engine-account-" + ref.id().value()).daemon(true).factory()));
             generations.put(ref.id(), new AtomicLong());
+            received.put(ref.id(), new AtomicLong(NO_PANIC));
         }
         this.lanes = Map.copyOf(map);
         this.panicGenerations = Map.copyOf(generations);
+        this.panicReceived = Map.copyOf(received);
     }
 
     /** 지금 시각을 받은 시각으로 보고 처리한다(시험·내부 호출용). */
@@ -221,8 +230,9 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         AccountRef account = found.get();
         // 상태를 보기 전에 PANIC 세대를 적는다. 이 뒤에 들어온 PANIC은 이 활성화를 멈춘다
         long generation = panicGeneration(account);
-        if (closing) {
-            return reject(ControlCodes.INVALID_STATE, "실전 엔진이 종료 중이라 활성화를 받지 않습니다");
+        Optional<ControlResponse> refused = refuseRaising(account);
+        if (refused.isPresent()) {
+            return refused.get();
         }
         GuardState state = guard.state(account.id());
         if (state != GuardState.OFF && state != GuardState.PROTECTIVE) {
@@ -248,7 +258,13 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             if (expired(receivedAt, limits.beginWithin())) {
                 return stale(account, "2차 확인이 활성화 기한 뒤에 끝나 활성화를 시작하지 않았습니다");
             }
-            if (panicked(account, generation)) {
+            // 확인하는 사이 닫기·응답 멈춤·청산이 시작됐을 수 있다(QA Q5·발견 1)
+            refused = refuseRaising(account);
+            if (refused.isPresent()) {
+                recordOutcome(ControlCommand.ACTIVATE, account, OUTCOME_ACTIVATION_FAILED);
+                return refused.get();
+            }
+            if (panicked(account, generation, receivedAt)) {
                 return panicStopped(account, "활성화를 시작하지 않았습니다");
             }
             try {
@@ -315,7 +331,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             if (expired(receivedAt, limits.activationWithin())) {
                 return activationStale(account, step);
             }
-            if (panicked(account, generation)) {
+            if (panicked(account, generation, receivedAt)) {
                 return activationPanicked(account, step);
             }
             Optional<String> failure;
@@ -334,7 +350,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             if (expired(receivedAt, limits.activationWithin())) {
                 return activationStale(account, step);
             }
-            if (panicked(account, generation)) {
+            if (panicked(account, generation, receivedAt)) {
                 return activationPanicked(account, step);
             }
             try {
@@ -356,7 +372,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
     }
 
     private ControlResponse activationPanicked(AccountRef account, ActivationStep step) {
-        String reason = "PANIC SELL이 들어와 활성화 중단(" + step + " 단계)";
+        String reason = (silenced != null ? "응답을 멈춘 엔진이라" : "PANIC SELL이 들어와") + " 활성화 중단(" + step + " 단계)";
         if (guard.state(account.id()) == GuardState.ACTIVATING) {
             guard.failActivation(account.id(), reason);
         }
@@ -365,7 +381,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
 
     private ControlResponse panicStopped(AccountRef account, String what) {
         recordOutcome(ControlCommand.ACTIVATE, account, OUTCOME_ACTIVATION_FAILED);
-        return reject(ControlCodes.INVALID_STATE, "2차 확인 중에 PANIC SELL이 들어와 " + what + ". 현재 "
+        return reject(ControlCodes.INVALID_STATE, "이 요청을 받은 뒤 PANIC SELL이 들어와 " + what + ". 현재 "
                 + guard.state(account.id()) + " 상태입니다");
     }
 
@@ -373,8 +389,32 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         return panicGenerations.get(account.id()).get();
     }
 
-    private boolean panicked(AccountRef account, long generation) {
-        return panicGeneration(account) != generation;
+    /**
+     * 이 활성화를 받은 뒤 PANIC이 들어왔는지. 처리기에 들어온 뒤 처리된 PANIC은 세대 값으로, 처리기에 먼저 들어왔지만 이 요청보다
+     * 늦게 받은 PANIC은 받은 시각으로 본다(요청 읽기 동안의 순서 뒤바뀜, QA S2).
+     */
+    private boolean panicked(AccountRef account, long generation, long receivedAt) {
+        if (panicGeneration(account) != generation) {
+            return true;
+        }
+        long panic = panicReceived.get(account.id()).get();
+        return panic != NO_PANIC && panic - receivedAt >= 0;
+    }
+
+    /** 올리는 명령을 받지 않는 경우: 닫는 중, 응답을 멈춘 엔진, 그 계좌 청산이 도는 중. */
+    private Optional<ControlResponse> refuseRaising(AccountRef account) {
+        if (closing) {
+            return Optional.of(reject(ControlCodes.INVALID_STATE, "실전 엔진이 종료 중이라 활성화를 받지 않습니다"));
+        }
+        if (silenced != null) {
+            return Optional.of(reject(ControlCodes.INVALID_STATE, "이 실전 엔진은 응답을 멈춘 엔진이라 활성화를 받지 않습니다"));
+        }
+        CompletableFuture<List<PanicStepResult>> running = liquidations.get(account.id());
+        if (running != null && !running.isDone()) {
+            return Optional.of(reject(ControlCodes.INVALID_STATE,
+                    account.id() + "는 PANIC 청산이 도는 중이라 활성화할 수 없습니다. 청산 결과를 확인한 뒤 다시 시도하세요"));
+        }
+        return Optional.empty();
     }
 
     private ControlResponse stale(AccountRef account, String why) {
@@ -409,7 +449,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         AccountRef account = found.get();
         // 1단계(보호 모드 고정)는 내려가는 전이라 2차 확인 전에 한다. 잠금·비밀번호 미설정·확인 실패여도 신규 주문은 막힌다
         List<PanicStepResult> results = new ArrayList<>();
-        results.add(lock(account));
+        results.add(lock(account, receivedAt));
         Optional<ControlResponse> denied = denied(authenticator.verify(password(request), request.typedConfirmation(),
                 account.id().value()));
         if (denied.isPresent()) {
@@ -426,7 +466,7 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
         // 1단계(보호 모드 고정)를 모든 계좌에 먼저 해서 신규 주문을 한꺼번에 막은 뒤 2차 확인과 계좌별 증권사 단계를 한다
         List<PanicStepResult> results = new ArrayList<>();
         for (AccountRef account : guard.accounts()) {
-            results.add(lock(account));
+            results.add(lock(account, receivedAt));
         }
         Optional<ControlResponse> denied = denied(authenticator.verify(password(request), request.typedConfirmation(),
                 ControlRequest.PANIC_ALL_PHRASE));
@@ -558,8 +598,10 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
     // ---- PANIC 단계 ----
 
     /** 1단계: 보호 모드 고정(신규 주문 즉시 차단). 내려가는 전이만 쓴다. */
-    private PanicStepResult lock(AccountRef account) {
-        // 세대를 먼저 올린다: 이 뒤로는 진행 중인 활성화가 다음 확인 지점에서 멈춘다(그 사이 OPEN이 됐으면 아래에서 내린다)
+    private PanicStepResult lock(AccountRef account, long receivedAt) {
+        // 받은 시각과 세대를 먼저 적는다: 이 뒤로는 진행 중인 활성화가 다음 확인 지점에서 멈춘다(그 사이 OPEN이 됐으면 아래에서 내린다)
+        panicReceived.get(account.id()).accumulateAndGet(receivedAt,
+                (prev, next) -> prev == NO_PANIC || next - prev > 0 ? next : prev);
         panicGenerations.get(account.id()).incrementAndGet();
         return relock(account);
     }
@@ -739,6 +781,24 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
 
     private ControlResponse reject(String code, String message) {
         return ControlResponse.rejected(code, message, status());
+    }
+
+    /**
+     * 이 엔진이 같은 설정 폴더의 두 번째(늦게 뜬) 엔진으로 판단됐다(D-142 C6, PR #240 QA 발견 1). 명령 채널이 응답을 멈추는 것과 함께
+     * 부른다. 그 뒤로는 활성화를 받지 않고, 모든 계좌의 PANIC 세대를 올려 2차 확인·단계 중인 활성화가 다음 확인 지점에서 멈추게 하며,
+     * 모든 계좌를 OFF로 내린다. 응답을 멈춘 엔진은 명령으로 멈출 수 없으므로 보호 모드(손절·익절 매도)에도 두지 않는다: 같은 계좌를
+     * 먼저 뜬 엔진이 보호하고, 두 엔진이 같은 보유에 매도를 겹쳐 내지 않게 한다(QA Q1). 되돌릴 수 없다.
+     */
+    public void silence(String reason) {
+        Objects.requireNonNull(reason, "reason");
+        if (silenced != null) {
+            return;
+        }
+        silenced = reason;
+        for (AccountRef account : guard.accounts()) {
+            panicGenerations.get(account.id()).incrementAndGet();
+            guard.shutdown(account.id(), GuardTransition.SYSTEM, "응답을 멈춘 실전 엔진: " + reason);
+        }
     }
 
     /**

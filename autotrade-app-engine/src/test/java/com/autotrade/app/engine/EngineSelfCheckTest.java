@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -66,7 +67,7 @@ class EngineSelfCheckTest {
         c.check();
 
         assertThat(silenced).singleElement().asString().contains("PID " + OTHER);
-        assertThat(alerts).singleElement().asString().startsWith(EventRoutes.CONTROL_CHANNEL).contains("계좌를 모두 내렸습니다");
+        assertThat(alerts).singleElement().asString().startsWith(EventRoutes.CONTROL_CHANNEL).contains("계좌를 모두 OFF로 내렸습니다");
         assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
     }
 
@@ -203,5 +204,27 @@ class EngineSelfCheckTest {
         late.check();
 
         assertThat(silenced).hasSize(1);
+    }
+
+    @Test
+    void 늦게_뜬_엔진은_열린_계좌를_OFF로_내린다() throws IOException {
+        // PR #240 QA M15: 처음부터 OFF인 계좌만 보면 "계좌를 내림"을 확인하지 못한다
+        String password = "correct horse battery staple";
+        var hash = com.autotrade.app.engine.command.OperatorPasswordHash.parse(
+                com.autotrade.app.engine.command.OperatorPasswordHash.create(password.toCharArray(), new java.security.SecureRandom()));
+        var auth = new com.autotrade.app.engine.command.OperatorAuthenticator(hash, CLOCK, guard);
+        try (var commands = new com.autotrade.app.engine.command.EngineCommandHandler(guard, auth, id -> true,
+                (account, step) -> Optional.empty(), account -> List.of(), (command, target, code) -> { }, CLOCK)) {
+            assertThat(commands.apply(com.autotrade.control.ControlRequest.activate(KIS.id().value(), KIS.id().value(), password))
+                    .ok()).isTrue();
+            assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OPEN);
+            heartbeat(OTHER, NOW.minusSeconds(600), NOW);
+
+            check(NOW.minusSeconds(10)).check();
+
+            assertThat(silenced).hasSize(1);
+            assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+            assertThat(alerts).singleElement().asString().contains("OFF로 내렸습니다");
+        }
     }
 }

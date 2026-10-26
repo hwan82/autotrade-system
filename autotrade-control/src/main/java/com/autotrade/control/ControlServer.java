@@ -311,7 +311,12 @@ public final class ControlServer implements AutoCloseable {
             if (silenced != null) {
                 return;
             }
-            ControlCodec.write(channel, handle(request, receivedAt));
+            ControlResponse response = handle(request, receivedAt);
+            if (silenced != null) {
+                // 처리하는 사이 응답을 멈췄다. 응답을 멈춘 엔진의 결과를 화면에 보이지 않는다(PR #240 QA 발견 1 (b))
+                return;
+            }
+            ControlCodec.write(channel, response);
         } catch (Exception e) {
             // 읽기 시간 초과로 닫힌 연결 등. 요청 내용은 기록하지 않는다
             LOG.log(Level.DEBUG, "명령 채널 연결 처리 중단: {0}", e.getClass().getSimpleName());
