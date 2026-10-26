@@ -99,3 +99,37 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-26
+- 대상: PR #240 / 커밋 97d12d5e(독립 QA 1차 `docs/reviews/pr-240/qa.md` 반영) / `git diff origin/main...HEAD` 전체, 추가분은 `git diff f95c4d48 97d12d5e`(12개 파일 +338 −30: 운영 코드 4, 시험 3, 문서 5)
+- 점검표: B
+- 직접 실행한 것:
+  - 별도 `git worktree`(97d12d5e)에서 `./gradlew build --continue`: **BUILD SUCCESSFUL**. 시험 결과 XML 합계 2,003건, 실패·오류·건너뜀 0.
+  - 1차 R1 재현 시험(`ArchProbeR1bTest`, 커밋하지 않고 실행 뒤 지움): 최종 상태 `PROTECTIVE`. 청산이 도는 중이라 활성화가 2차 확인 뒤 거절된다(새 `refuseRaising`).
+  - QA 원문(발견 1, Q1~Q5, 변이 M15·M21)은 확인할 주장으로 보고 아래처럼 코드로 따졌다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 97d12d5e 직접 빌드 성공, 2,003건 실패 0 |
+| B2 | 통과 | 모듈 의존·ArchUnit 변화 없음(EngineCommandHandler가 `GuardTransition.SYSTEM`을 쓰는 것은 같은 risk 모듈 공개 상수), 빌드 통과 |
+| B3 | 통과 | 공개 계약 변경: `EngineCommandHandler.silence(String)` 추가, 늦은 엔진 계좌를 PROTECTIVE가 아니라 OFF로(동작 계약). ADR-006 2.2·2.8·4·5장, D-142 C2·C6·남은 위험(Q1 "추천안 채택(자율)", Q3 Windows 한계, M23 시험 없음 사유)에 반영됨 |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음. 받은 시각 비교는 주입된 단조 시계 기준(`panicReceived`, `panic - receivedAt >= 0`으로 넘침 안전) |
+| B5 | 해당 없음 | 금액 변경 없음 |
+| B6 | 통과 | 새 시험 7건: EngineCommandHandlerTest 5건(응답을 멈추면 열린 계좌 OFF·활성화 거절, 멈추는 순간 2차 확인 중인 활성화 안 열림, 단계 중 활성화도 다음 확인에서 멈춤, 먼저 처리된 PANIC이라도 늦게 받았으면 안 열림(S2), 청산 중 활성화 거절), EngineSelfCheckTest 1건(늦은 엔진은 열린 계좌 OFF, M15), ControlChannelTest 1건(처리 중 응답을 멈추면 결과를 쓰지 않음, M21). 지운·건너뛴 시험 없음 |
+| B7 | risk-ops 검토 필요 | 실전 명령 처리기·늦은 엔진의 Guard 전이(OFF로) 변경. Q1 결정은 risk-ops 재검토 대상(D-142에 그렇게 적힘) |
+| B8 | 통과 | 비밀값 없음 |
+
+### QA 발견 처리 확인
+- **발견 1 해결**: 늦은 엔진 판정 때 명령 채널 `silence`와 함께 처리기 `silence`를 부른다(EngineMain `silencer`). 처리기는 (1) 이후 활성화를 받지 않고(`refuseRaising`: 받을 때와 2차 확인 뒤 `beginActivation` 직전 두 번), (2) 모든 계좌 PANIC 세대를 올려 진행 중 활성화가 다음 확인 지점(단계 직전·통과 직전)에서 멈추고, (3) 모든 계좌를 `shutdown`(OFF)한다. 겹치는 순서를 따져 봤다: 확인 통과 뒤 `silence`면 활성화 작업이 첫 확인에서 멈추고 출발 상태(이미 OFF)로, `beginActivation` 뒤 `silence`면 `shutdown`이 ACTIVATING을 OFF로 내려 `completeStep`이 실패, 마지막 통과 직전 확인 뒤 `silence`면 OPEN이 됐더라도 바로 `shutdown`. 어느 순서에서도 응답을 멈춘 엔진에 OPEN이 남는 길을 찾지 못했다. 서버는 처리 뒤에도 `silenced`를 다시 봐 결과를 쓰지 않는다(ControlServer `serve`).
+- **Q1**: OFF로 내리는 쪽을 고르고 대가(그 사이 연 보유의 엔진 손절 없음)를 D-142에 적었다. 설계상 일관적이다(명령을 받지 않는 엔진이 매도를 내지 않음). 실전 영향 결정이라 risk-ops 판단에 맡긴다.
+- **Q2**: 계좌별 마지막 PANIC의 받은 시각을 두고 활성화의 받은 시각과 견준다. 늦게 받은 활성화(사람이 PANIC 뒤 다시 보낸 것)는 막지 않고, 먼저 받은 활성화는 처리 순서와 상관없이 막는다. 맞다.
+- **Q3**: 문서 한정으로 처리(D-142 남은 위험, I1 확인 항목). 받아들인다.
+- **Q4**: M15·M21은 시험 추가로 잡힌다. 청산 중 활성화 거절이 생겨 M5·M6 경로는 대부분 막는 쪽이 두 겹이 됐다. M23은 사유를 문서에 적고 시험을 두지 않았다(시간 측정 시험이 흔들림). 받아들인다.
+- **Q5 일부 남음(참고)**: `closing`은 2차 확인 뒤 `beginActivation` 직전에도 보도록 바뀌었다. 그래도 그 확인과 `lanes.get(...).execute` 사이에 `close()`의 ACTIVATING 정리가 먼저 돌고 계좌 작업 스레드 `shutdown`이 `execute` 뒤에 오면, 그 활성화 작업은 `awaitTermination`(최대 5초) 동안 돌고 단계 확인 지점은 `closing`을 보지 않는다(EngineCommandHandler `close`·`runActivationSteps`). 창이 마이크로초 단위이고 프로세스가 끝나면 Guard도 사라지며(재기동 OFF), 운영 빌드는 단계가 `BROKER_NOT_CONNECTED`다. `close()`가 `silence`처럼 모든 계좌 PANIC 세대를 올리면 한 줄로 닫힌다. 묶음 E 전에 넣기를 권장한다(판정에 넣지 않음, N9).
+
+### 점검표 밖 발견(참고, 판정에 넣지 않음)
+- N9: 위 Q5 남은 창.
+- N10: 청산 중 활성화 거절(`refuseRaising`의 `liquidations` 확인)은 이전 동작(청산 중에도 사람이 다시 활성화할 수 있었음)을 좁힌 것이다. 안전한 쪽이고 ADR-006 5장 시험 표에 적혀 있지만, 2.8 본문의 "올리는 명령을 받지 않는 경우" 목록에도 한 줄 있으면 찾기 쉽다.
+
+## 판정
+승인
