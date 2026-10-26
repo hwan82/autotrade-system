@@ -447,8 +447,10 @@ public final class RealTradingGuard {
         static final Snapshot INITIAL = new Snapshot(GuardState.OFF, GuardState.OFF, 0, 0);
     }
 
-    /** ①에서 잡은 올림. ③이 {@code before.transitions()}로 끼어든 전이가 있었는지 본다. */
-    /** 잠금 밖 감사를 기다리는 올림 하나(레코드가 아닌 클래스: Guard 레코드는 정해진 셋뿐, D-086 고정 값). */
+    /**
+     * ①에서 잡은 올림. ③이 {@code before.transitions()}로 끼어든 전이가 있었는지 본다. 레코드가 아닌 클래스다(Guard 패키지 레코드는
+     * 정해진 셋뿐, D-086 고정 값).
+     */
     private static final class PendingRaise {
         final Snapshot before;
         final GuardState to;

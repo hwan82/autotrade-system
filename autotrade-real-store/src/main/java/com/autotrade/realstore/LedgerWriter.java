@@ -127,6 +127,16 @@ final class LedgerWriter implements AutoCloseable {
                 written.add(p);
             } catch (IOException | RuntimeException e) {
                 p.done.completeExceptionally(e);
+                // 붙이기 실패는 그 원장을 마지막 강제 기록 길이로 되돌린다. 이 묶음에서 같은 원장에 먼저 붙인 줄도 함께 지워졌으므로
+                // "기록됨"으로 끝내지 않고 실패로 돌려준다(PR #248 architect 발견 1: 지워진 올림 감사로 Guard가 올라가지 않게)
+                for (int i = written.size() - 1; i >= 0; i--) {
+                    Pending earlier = written.get(i);
+                    if (earlier.ledger == p.ledger) {
+                        written.remove(i);
+                        earlier.done.completeExceptionally(new IOException("같은 묶음의 뒤 줄 기록 실패로 되돌려짐: "
+                                + p.ledger.stream(), e));
+                    }
+                }
                 onFailure.failed(p.ledger, e instanceof IOException io ? io : new IOException(e.getMessage(), e));
             }
         }
