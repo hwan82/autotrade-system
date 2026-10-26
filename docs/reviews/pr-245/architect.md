@@ -45,3 +45,37 @@
 
 ## 판정
 수정 필요(R1 ADR-003 IPC 행 갱신, R2 `enginefeed`/`enginefeed.server` 분리와 ArchUnit 범위 클래스 단위로, R3 연결 사이 `rev`·상태 줄 대응과 시험 추가)
+
+## 재검토 (2) 2026-10-26
+- 대상: PR #245 / 커밋 `99699be3`(검토 반영) / main(`53482a56`) 대비 diff 전체와 직전 검토 커밋 `0d2b4329` 대비 변경
+- 점검표: B
+- 직접 실행한 것:
+  - `git diff 0d2b4329 99699be3`: `docs/adr/ADR-003-market-data.md`, `docs/adr/ADR-016-real-engine-market-feed.md`, `docs/decisions/D-143-real-engine-market-feed.md`, `docs/decisions/README.md`만. `docs/` 밖 변경 없음.
+  - `./gradlew build`(HEAD `99699be3`): `BUILD SUCCESSFUL in 33s`, 138 tasks.
+  - `market-data.symbol-gap` 출처 확인: `docs/spec/autotrade-spec.md:244`(RSK-08 #15), `docs/team/broker-and-fault-design.md:174`(#15, 기본 30초 `[가정]`). `docs/config/config-keys.md`와 운영 코드에는 아직 없음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 빌드 성공. 코드 변경 없음 |
+| B2 | 해당 없음 | ArchUnit·모듈 의존 변경 없음. 계획 규칙은 R2 반영으로 클래스 단위로 정해짐(ADR-016 2.2, 5장 ArchUnit 행) |
+| B3 | 통과 | R1 반영: `ADR-003-market-data.md:169` IPC 행에 ADR-016 링크, 구독 거절 행에도 2.8 링크, ADR-016 "닫는 것"에 두 행 추가. R3 반영: 2.3에 같은 연결 안에서만 `rev` 비교, 상태 줄 `rev`는 이 연결에서 적용한 관심의 `rev`(없으면 0), 엔진은 `status.rev ≥ 보낸 rev`일 때만 확인으로 사용, 5장 시험 16번. D-143·결정 로그 README 행도 바뀐 알림 수준·T_quiet 기본값과 맞음 |
+| B4 | 해당 없음 | 시뮬레이션·녹화 형식 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 없음 |
+| B6 | 해당 없음 | 문서만. 실패 시험 계획이 15개에서 20개로 늘었고(16~20번) 지운 항목 없음 |
+| B7 | risk-ops 검토 필요 | 이번 반영에 장애 테스트 1번의 단일 소스 구성 시행 기준(ADR-016 2.11)과 알림 수준 변경(2.8)이 새로 들어감. 장애 테스트 기준은 보호 대상이라 risk-ops 재검토와 사용자 머지 대상 |
+| B8 | 통과 | 추가 줄에 비밀값 없음 |
+
+### 앞 지적 처리
+- R1: 해소(위 B3).
+- R2: 해소. `enginefeed`(받는 쪽·줄 형식)와 `enginefeed.server`(게이트웨이만)로 나눔. 엔진 금지 범위가 `feed`·`live`·`enginefeed.server`·`recording`의 `RecordingCodec` 밖 클래스로 클래스 단위가 됨. 실험실·수집기·실험 명령은 둘 다 금지(ADR-016 2.2, 5장 ArchUnit 행).
+- R3: 해소(위 B3, 5장 16번).
+- N1: 반영(2.5에 허브 공백 `MarketHub.recordGap`도 엔진 전달에 넣음).
+- N2: 반영(머리말 참고 줄).
+- N3: 반영(5장 18번).
+
+### 새 발견(판정에 영향 없음)
+- **N4 (참고, G4) `market-data.symbol-gap` 키 등재.** T_quiet 기본값을 기획서 RSK-08·장애표 #15의 `market-data.symbol-gap`으로 둔 것은 새 기준을 만들지 않는다는 점에서 맞다. 다만 이 키는 `config-keys.md`와 코드에 아직 없다. ADR-016 6장 3번 "이 ADR은 새 설정 키를 만들지 않는다"는 그대로 참이지만(키는 기획서에 이미 있음), 엔진이 이 키를 처음 읽게 되는 G4 PR에서 `config-keys.md`에 등재(실전 엔진 기동 때 읽음, 실행 중 변경 여부 포함)해야 한다.
+- **N5 (참고, 문서 정확성) 2.11 예시.** "게이트웨이 소스가 둘 이상인 구성(예: 키움 실전 계좌 없이 한국투자 외 증권사 둘)"은 지금 결정과 맞지 않는다. 게이트웨이 시세 소스 후보는 D-059로 토스를 빼면 키움·한국투자 둘뿐이라, 둘 다 쓰려면 둘 다 실전 계좌가 없어야 한다(실전 계좌가 토스에만 있는 구성). 예시를 "실전 계좌가 게이트웨이 소스 증권사(키움·한국투자)에 없는 구성"으로 고치길 권한다. 판정 조건은 아니다.
+
+## 판정
+승인
