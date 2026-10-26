@@ -97,3 +97,37 @@
 
 ## 판정 (재검토 (2))
 승인
+
+## 재검토 (3) 2026-10-26
+- 대상: PR #240 / 커밋 97d12d5e(독립 QA 1차 [qa.md](qa.md) 발견 1·Q1~Q5 반영, 앞 커밋 모두 포함) / `git diff origin/main...HEAD` 전체
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --continue` (97d12d5e): BUILD SUCCESSFUL
+  - 출력 재사용을 피하려 `:autotrade-risk`·`:autotrade-architecture-test`·`:autotrade-app-engine`·`:autotrade-control`을 `cleanTest test --no-build-cache`로 다시 돌림: BUILD SUCCESSFUL. 실패·오류·건너뜀 0: risk 57, architecture-test 46, app-engine 109, control 31 (notification-jar 86, app-lab 269는 전체 빌드 결과)
+  - 임시 재현 시험(커밋 안 하고 지움): QA S1 모양 — 성공하는 활성화 단계를 넣고, 활성화가 2차 확인 중일 때 `EngineCommandHandler.silence`를 부름. 결과 `INVALID_STATE "이 실전 엔진은 응답을 멈춘 엔진이라 활성화를 받지 않습니다"`, 최종 OFF. QA 발견 1 재현 안 됨
+  - QA 원문의 변이 결과는 QA의 주장으로 보고 다시 돌리지 않았다. 생존 변이 중 M15·M21·M3·M10은 새 시험이 붙은 것을 시험 이름과 내용으로 확인했다(아래 A11)
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard 기본값·재기동 OFF 변경 없음. 수정은 내리는 전이(`shutdown`)와 올리는 명령 거절만 더함 |
+| A2 | 통과 | ArchUnit 규칙·고정 예제 변경 없음, `ArchitectureTest`·`RealPathReflectionTest` 통과. `EngineCommandHandler.silence`는 Guard를 내리기만 하고 발급기·`beginActivation`을 부르지 않음 |
+| A3 | 해당 없음 | 증권사 주문 연동·라우팅 변경 없음 |
+| A4 | 해당 없음 | 주문 전송·타임아웃 처리 변경 없음 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음, 청산은 미연동 스텁 |
+| A7 | 통과 | 계좌별 작업 줄·세대 값·PANIC 받은 시각이 계좌마다 따로(`panicReceived`). 청산 중 활성화 거절도 그 계좌만(`refuseRaising` 405행). 계좌끼리 기다리지 않음 시험 통과 |
+| A8 | 통과 | 프로세스 분리 변경 없음(`verifyProcessIsolation` 통과). 응답 멈춤 연결(`EngineMain` 174행 `silencer`)은 같은 프로세스 안 두 객체 호출 |
+| A9 | 통과 | QA 발견 1 고쳐짐: `EngineCommandHandler.silence`(792행~)가 올리는 명령을 막고, 모든 계좌의 세대를 올리고, `guard.shutdown`으로 OFF로 내림. `refuseRaising`을 확인 앞뒤 두 번 보고(`beginActivation` 직전 재확인으로 QA Q5 닫힘 창도 막음), `panicked`(396행)는 단계 직전·통과 직전에도 봄. `shutdown`은 Guard 잠금 안 원자 전이라 `completeStep`과 어떤 순서로 겹쳐도 OPEN이 남지 않는다. 서버는 처리 중 멈췄으면 응답을 쓰지 않음(`ControlServer` 316행). 시험 `응답을_멈추면_열린_계좌를_OFF로_내리고_활성화를_받지_않는다`, `응답을_멈추는_순간_2차_확인_중이던_활성화는_열리지_않는다`, `응답을_멈추면_단계_중인_활성화도_다음_확인_지점에서_멈춘다`, `처리하는_사이_응답을_멈추면_그_요청의_결과도_쓰지_않는다` 통과, 위 재현 시험 통과. QA Q2(먼저 받은 활성화가 늦게 처리)도 받은 시각 비교로 막힘(`lock` 601행 `accumulateAndGet`, 시험 `처리기에_먼저_들어온_PANIC이라도_…`). 비교는 같은 프로세스 단조 시계끼리이고, 세대 값 비교가 먼저라 판정은 늘 안전한 쪽(멈춤)으로 기운다 |
+| A10 | 통과 | 수정 커밋에 비밀값 없음. 새 문구에 값 없음 |
+| A11 | 통과 | 보호 테스트 삭제·약화·고정 값 변경 없음. QA 생존 변이에 새 시험: M15 → `EngineSelfCheckTest#늦게_뜬_엔진은_열린_계좌를_OFF로_내린다`(OPEN 계좌를 두고 내림 확인), M21 → `ControlChannelTest#처리하는_사이_응답을_멈추면_그_요청의_결과도_쓰지_않는다`, M10 → 끝나지 않는 청산 중 겹친 PANIC이 증권사 단계를 다시 돌지 않는 시험, M3 → 세대 확인 시험 보강. M23(해시 직렬화)은 시간 측정 시험이 PC마다 흔들려 두지 않았다고 D-142에 적음: 코드가 허가 1개 공정 `Semaphore` 한 곳이고 PR 1차부터 본 것이라 받아들인다 |
+| A12 | 통과 | 3-R 전제("늦게 뜬 엔진은 응답을 멈추고 계좌를 내린다")가 진행 중 활성화까지 포함해 지켜짐(A9). Windows 되찾기 한계(QA Q3)는 D-142 남은 위험과 I1 3-R Windows 시행 확인 항목으로 적힘 `[추론, 미검증]`. 3-R 합격은 실제 시행으로 판정할 일이고 이 PR 판정의 조건은 아님 |
+| A13 | 해당 없음 | 시장별 규칙·시간대·통화 변경 없음 |
+| A14 | 통과 | ADR-006 2.2·2.8·4·5장, D-142 C2·C6·남은 위험이 바뀐 동작(처리기 응답 멈춤, OFF로 내림, 받은 시각 비교, 청산 중 활성화 거절, Windows 한계)과 맞음. QA 처리 기록(`docs/qa-out-status.md`)과 대기 목록(`docs/qa/pending.md`)에 한 줄씩 추가됨 |
+
+## 점검표 밖 발견 (재검토 (3))
+- 확인(사용자 결정 사항): QA Q1에 따라 늦게 뜬 엔진의 계좌를 보호 모드가 아니라 **OFF**로 내리도록 바꿨고, D-142에 "추천안 채택(자율)"으로 적혔다. risk-ops는 이 선택에 동의한다: 명령을 받지 않는 엔진이 보호 모드로 남아 먼저 뜬 엔진과 같은 보유에 매도를 겹쳐 내는 위험이, 그 엔진이 짧은 사이에 연 보유의 엔진 손절을 잃는 위험보다 크고, 뒤쪽은 서버 측 손절과 긴급 알림이 남는다. 다만 장애 대응 규칙을 바꾸는 결정이라(지침 8장 2) 사용자가 머지할 때 이 줄을 직접 확인해야 한다.
+- 참고(판정 영향 없음): `EngineSelfCheck.checkOtherEngine`(229행)의 `guard.shutdown` 반복은 `EngineCommandHandler.silence`와 겹치지만 이미 OFF면 아무것도 하지 않아 해가 없다.
+- 실전 관련 PR이므로 지침 10·11장대로 독립 QA 재검토 뒤 사용자가 직접 머지한다.
+
+## 판정 (재검토 (3))
+승인
