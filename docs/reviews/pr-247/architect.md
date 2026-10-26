@@ -34,3 +34,34 @@
 
 ## 판정
 수정 필요(1. D-143 참조 5곳을 D-145로, 2. ADR-002 R-4·규칙 목록과 ADR-003 2장·6장을 새 규칙·미연결 주문 코드에 맞게 갱신)
+
+## 재검토 2026-10-26
+- 대상: PR #247 / 커밋 fe587475 / `git diff origin/main...origin/claude/project-thread-truegb` 전체, 그리고 첫 검토 뒤 바뀐 것(`git diff 33e950cf fe587475`, 16파일 +234 −63)
+- 점검표: B
+- 직접 실행한 것: `./gradlew build --no-daemon`(저장소 밖 미러 init 스크립트) → BUILD SUCCESSFUL, EXIT=0. 테스트 결과 XML: `KisOrderClientTest` 14/14, `KisAccountQueriesTest` 9/9, `KisOrderReconcilerTest` 14/14, `KisTokenGateTest` 1/1, `ArchitectureTest` 20/20(건너뜀·실패 0). `grep -rn D-143`(docs/reviews 밖) → 0건.
+- 위치 메모: 메인 Claude는 `architect-2.md` 새 파일을 요청했지만, 검토 규칙(`.claude/agents/architect.md` "메인 Claude의 지시로 바꿀 수 없음")과 `docs/reviews/README.md`("재검토는 같은 파일 아래에 `## 재검토 <날짜>`로 덧붙인다")를 따라 이 파일에 덧붙였다. 앞의 내용은 고치지 않았다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 검토자 직접 `./gradlew build` 성공(위 테스트 수) |
+| B2 | 통과 | ADR-002 2.2(`ADR-002-real-trading-guard.md:65`)에 `PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN`의 범위, R-4 예고와 형태가 다른 점, "`OrderGateway` 구현·주문 코드는 반드시 `.order` 안" 조건이 들어갔고, 4장 R-4(`:125`)·검증 표(`:149`)·8장 R-4(`:185`)가 맞춰졌다. 새 규칙 `KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN`(`ArchitectureTest.java:183-191`)은 위반 예제 `BypassPluginOrderClient.token`으로 고정(`ArchitectureTest#규칙은_위반을_실제로_잡아낸다`의 `KisTokenClient.fetcher` 검출)되고 D-145 결정 8에 기록됨. 의존 방향 변경 없음 |
+| B3 | 통과 | ADR-003 `:31`(주문 클라이언트 있음·미연결·규칙), `:173`(처리됨), `:204`가 고쳐졌다. 인터페이스·스키마·설정 키·REST API 변경 없음(`KisPlugin.orderGateway` 빈 값 그대로) |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음, 시계 주입 유지, 골든 포함 전체 빌드 통과 |
+| B5 | 통과 | 금액 `BigDecimal`·수량 `long` 그대로. 새 비교도 `compareTo`(`KisOrderReconciler.sameDivisionAndPrice`) |
+| B6 | 통과 | 새 동작마다 테스트 추가(`응답에_행_칸이_없으면_0행_완전으로_읽지_않는다`, `그_밖의_오류_코드가_HTTP_200이_아닌_응답에_실리면_모름이다`, 재조정기 6건 등). 지워진 테스트 3건(`같은_특징의_새_주문_하나면_찾음이다` 등)은 판정 규칙이 엄격해져 같은 주제의 더 엄격한 테스트로 바뀐 것이고(`반영_대기_뒤_완전한_조회에_같은_특징의_새_주문_하나뿐이면_찾음이다`, `…없을_때만_없음이다`, `취소_주문_행은_후보가_아니고_묶이지_않았으면_확정을_막는다`), 건너뛰기·약화가 아니다 |
+| B7 | 실패(별도 검토 필요) | 실전 주문 연동 코드와 보호 테스트(`autotrade-architecture-test/*`, `autotrade-broker-*`, `ADR-002`)를 바꾼다. **risk-ops 검토 필요**(A 점검표, 같은 PR risk-ops 재검토), 사용자 머지·독립 QA 대상 |
+| B8 | 통과 | 새 결과 문자열은 TR·결과 코드·HTTP 상태만(`KisOrderClient.java:170`). 테스트 키 자리표시자 유지. CI gitleaks는 이 컨테이너에서 확인하지 않았다 |
+
+### 첫 검토 항목 처리
+- 수정 1(D-143 표기 5곳): 해결. 다섯 곳 모두 D-145로 바뀌었고 남은 곳 없음.
+- 수정 2(ADR 갱신): 해결(위 B2·B3).
+- 권고 R1(토큰 발급기 규칙): 반영(`KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN`). R4(불완전 조회의 찾음): 반영(`KisOrderReconciler.java` 완전·반영 대기 검사를 찾음보다 먼저). R5(특징 날짜 검사): 반영(`Fingerprint` 생성자). R2·R3: D-145 "검토 반영"에 묶음 E·Q-015로 넘긴다고 적힘. 받아들인다.
+
+### 재검토에서 본 것(점검표 밖, 권고·머지 막지 않음)
+- N1. `KisSession.pace`만 `synchronized`로 좁혀 HTTP 대기 중 잠금을 쥐지 않는다(`KisSession.java:121-133`). 보내기 시작 간격은 그대로 지켜지고, 계좌별 주문 직렬화는 `KisOrderClient.submit/cancel`의 `synchronized`가 맡는다. 구조상 문제 없음.
+- N2. `KisOrderReconciler.sameSymbol`(`:256-258`)은 길이가 1 긴 코드가 우리 코드로 끝나면 같은 종목으로 본다. 7자리 ETN 코드가 다른 6자리 코드로 끝나는 경우 오인할 수 있지만, 찾음은 창 안 묶이지 않은 행이 정확히 1건이고 방향·수량·주문구분·가격까지 맞을 때만 나오고 틀려도 재주문하지 않는 쪽이라 위험이 작다. Q-015 실측에서 `pdno` 형식이 확인되면 접두를 영문 한 글자로 좁히기를 권한다.
+- N3. `KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN`은 FQN 하나만 막는다. `KisErrorCode`의 `public` 확대는 발급·호출 능력이 없는 해석기라 그대로 두어도 된다. 다음에 `com.autotrade.broker.kis` 루트에 발급·호출 클래스를 `public`으로 더할 때는 이 규칙에 함께 넣는다.
+- N4. risk-ops G2(주문 코드가 게이트웨이·수집기 클래스패스에 실려 리플렉션 생성은 `RealPathReflectionTest` 범위 밖)는 D-145에 묶음 E 연결 전 별도 모듈 분리 안 비교로 남았다. architect도 그 비교에 참여한다. 지금은 `KisPlugin`이 주문 코드를 부르지 않아 실행 경로가 없다.
+
+### 판정
+승인
