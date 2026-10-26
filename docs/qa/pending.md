@@ -79,3 +79,4 @@
 | 2026-10-24 | PR #240 검토해줘 | docs/reviews/pr-240/qa.md | 실전 관련 PR(RealTradingGuard·SecondConfirmation 발급기, 명령 채널 서버·엔진 명령 처리, 보호 테스트 ArchUnit 규칙·고정물·RealPathReflectionTest 변경): D-142 7단계 묶음 A C1~C12·C15(장애 테스트 3-R 시험). 브랜치 `claude/project-thread-uv9uq5` |
 | 2026-10-26 | PR #240 재검토해줘 | docs/reviews/pr-240/qa.md | 실전 관련 PR: QA 1차 발견 1(늦게 뜬 엔진 응답 멈춤 뒤 진행 중 활성화 OPEN)과 권고 Q1~Q5 반영. 브랜치 `claude/project-thread-uv9uq5` |
 | 2026-10-26 | PR #239 검토해줘 | docs/reviews/pr-239/qa.md | 실전 관련 PR(문서만, 코드 무변경): ADR-015·D-141 실전 엔진 저장소 설계(7단계 묶음 B0), Q-062 사용자 결정(파일 원장). 브랜치 `claude/project-thread-e0mn61` |
+| 2026-10-26 | PR #239 재검토해줘 | docs/reviews/pr-239/qa.md | 실전 관련 PR(문서만): QA 1차 발견 1(차단 조건이 PANIC·enterProtective의 OFF → PROTECTIVE 상향도 막도록 범위 정의)·발견 2(keyFloor 원본 위치 표기)·권고 Q1~Q5 반영, main 합침. 브랜치 `claude/project-thread-e0mn61` |
