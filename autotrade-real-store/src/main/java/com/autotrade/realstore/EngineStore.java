@@ -203,10 +203,19 @@ public final class EngineStore implements AutoCloseable {
                 continue;
             }
             MarketRules rules = o.rules().apply(ref);
-            LedgerScan.Result audit = LedgerScan.dated(paths.auditDir(id), StorePaths.accountStream(id, StorePaths.AUDIT), now);
-            LedgerScan.Result orders = LedgerScan.dated(paths.ordersDir(id), StorePaths.accountStream(id, StorePaths.ORDERS), now);
-            LedgerScan.Result risk = LedgerScan.single(paths.riskFile(id), StorePaths.accountStream(id, StorePaths.RISK), now);
             Objects.requireNonNull(rules, "rules");
+            LedgerScan.Result audit;
+            LedgerScan.Result orders;
+            LedgerScan.Result risk;
+            try {
+                audit = LedgerScan.dated(paths.auditDir(id), StorePaths.accountStream(id, StorePaths.AUDIT), now);
+                orders = LedgerScan.dated(paths.ordersDir(id), StorePaths.accountStream(id, StorePaths.ORDERS), now);
+                risk = LedgerScan.single(paths.riskFile(id), StorePaths.accountStream(id, StorePaths.RISK), now);
+            } catch (IOException | RuntimeException e) {
+                // 한 계좌 원장을 읽지 못해도 저장소 전체를 거부하지 않는다: 그 계좌만 전면 차단(2.7 ③, 절대 규칙 6, PR #248 risk-ops F-2)
+                accountBlocks.put(id, "계좌 원장 읽기 실패(" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
+                continue;
+            }
             for (LedgerScan.Result r : List.of(audit, orders, risk)) {
                 maxBoot = Math.max(maxBoot, r.maxBoot());
                 if (r.cut() != null) {
@@ -248,18 +257,6 @@ public final class EngineStore implements AutoCloseable {
                     kept.getFileName().toString(), utcDay);
         }
 
-        Map<AccountId, RecoveryReport.Account> accountReports = new TreeMap<>();
-        for (AccountRef ref : o.accounts()) {
-            AccountId id = ref.id();
-            boolean marker = Files.exists(paths.degraded(id), LinkOption.NOFOLLOW_LINKS);
-            boolean missing = marker || named(lastShutdown, "degradedAccounts", id.value())
-                    || lastShutdown.path("unflushed").asLong(0) > 0
-                    || (!"clean".equals(previousShutdown) && !"none".equals(previousShutdown) && cutInAccount.get(id));
-            accountReports.put(id, new RecoveryReport.Account(accountBlocks.get(id), marker, missing, List.copyOf(notes.get(id))));
-        }
-        RecoveryReport report = new RecoveryReport(boot, previousShutdown, List.copyOf(globalBlocks), List.copyOf(warnings),
-                Collections.unmodifiableMap(accountReports));
-
         lock.stamp(boot, o.pid());
         LedgerWriter[] commonHolder = new LedgerWriter[1];
         Map<AccountId, AccountLedgers> ledgers = new TreeMap<>();
@@ -278,19 +275,38 @@ public final class EngineStore implements AutoCloseable {
                 if (accountBlocks.containsKey(id)) {
                     continue; // 손상 원장에는 이어 쓰지 않는다. 그 계좌 감사는 프로세스 로그에만 남는다
                 }
-                StorePaths.prepareDir(paths.root(), paths.auditDir(id));
-                MarketRules rules = o.rules().apply(ref);
-                LedgerFile audit = LedgerFile.dated(paths.auditDir(id), auditScans.get(id), rules::tradingDate);
+                LedgerFile audit;
+                try {
+                    StorePaths.prepareDir(paths.root(), paths.auditDir(id));
+                    MarketRules rules = o.rules().apply(ref);
+                    audit = LedgerFile.dated(paths.auditDir(id), auditScans.get(id), rules::tradingDate);
+                } catch (IOException | RuntimeException e) {
+                    // 그 계좌 원장 폴더를 준비하지 못함: 그 계좌만 전면 차단(PR #248 risk-ops F-2)
+                    accountBlocks.put(id, "계좌 원장 준비 실패(" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")");
+                    continue;
+                }
                 ledgers.put(id, new AccountLedgers(new LedgerWriter(id.value(), boot, o.clock(), o.limits().accountQueue(), failures),
                         audit));
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (RuntimeException e) {
             commonHolder[0].close();
             for (AccountLedgers a : ledgers.values()) {
                 a.writer().close();
             }
             throw e;
         }
+        Map<AccountId, RecoveryReport.Account> accountReports = new TreeMap<>();
+        for (AccountRef ref : o.accounts()) {
+            AccountId id = ref.id();
+            boolean marker = Files.exists(paths.degraded(id), LinkOption.NOFOLLOW_LINKS);
+            boolean missing = marker || named(lastShutdown, "degradedAccounts", id.value())
+                    || lastShutdown.path("unflushed").asLong(0) > 0
+                    || (!"clean".equals(previousShutdown) && !"none".equals(previousShutdown) && cutInAccount.get(id));
+            accountReports.put(id, new RecoveryReport.Account(accountBlocks.get(id), marker, missing, List.copyOf(notes.get(id))));
+        }
+        RecoveryReport report = new RecoveryReport(boot, previousShutdown, List.copyOf(globalBlocks), List.copyOf(warnings),
+                Collections.unmodifiableMap(accountReports));
+
         EngineStore store = new EngineStore(paths, o, lock, boot, report, commonHolder[0], bootLedger, commandsLedger,
                 Collections.unmodifiableMap(ledgers));
         holder[0] = store;

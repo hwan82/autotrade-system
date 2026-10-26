@@ -89,19 +89,47 @@ final class WriterLock implements AutoCloseable {
         if (key != null && !key.equals(now)) {
             return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")이 다른 파일로 바뀌었습니다");
         }
+        byte[] got;
+        try {
+            got = readByPath();
+        } catch (IOException byPath) {
+            // Windows는 자기 프로세스가 잡은 배타 잠금 구간도 다른 핸들로는 읽지 못한다 {@code [추론]}(PR #248 risk-ops F-3).
+            // 경로가 그대로 있으면(위 확인) 잠금을 쥔 채널로 읽어 대조한다. 경로의 파일이 바뀌었다면 새 파일은 잠기지 않아
+            // 위 경로 읽기가 성공하고 내용 대조에서 걸린다
+            try {
+                got = readByLockedChannel();
+            } catch (IOException e) {
+                return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")을 읽지 못했습니다");
+            }
+        }
+        if (!Arrays.equals(got, stamp)) {
+            return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")의 내용이 바뀌었습니다(다른 쓰기 주체 의심)");
+        }
+        return Optional.empty();
+    }
+
+    private byte[] readByPath() throws IOException {
         try (FileChannel read = FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
             ByteBuffer buf = ByteBuffer.allocate(stamp.length + 1);
             while (buf.hasRemaining() && read.read(buf) >= 0) {
                 // 끝까지 읽는다(최대 stamp + 1 바이트)
             }
-            byte[] got = Arrays.copyOf(buf.array(), buf.position());
-            if (!Arrays.equals(got, stamp)) {
-                return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")의 내용이 바뀌었습니다(다른 쓰기 주체 의심)");
-            }
-        } catch (IOException e) {
-            return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")을 읽지 못했습니다");
+            return Arrays.copyOf(buf.array(), buf.position());
         }
-        return Optional.empty();
+    }
+
+    /** 잠금을 쥔 채널로 처음부터 읽는다(쓰기 위치는 바꾸지 않음). 시험에서 Windows 경로를 흉내 내려고 패키지 공개. */
+    byte[] readByLockedChannel() throws IOException {
+        ByteBuffer buf = ByteBuffer.allocate(stamp.length + 1);
+        long pos = 0;
+        while (buf.hasRemaining()) {
+            int n = channel.read(buf, pos);
+            if (n < 0) {
+                break;
+            }
+            pos += n;
+        }
+        return Arrays.copyOf(buf.array(), buf.position());
     }
 
     private Object fileKey() {

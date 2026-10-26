@@ -311,6 +311,32 @@ class EngineStoreTest {
     }
 
     @Test
+    void 한_계좌_원장을_읽지_못해도_저장소는_열리고_그_계좌만_전면_차단한다() throws Exception {
+        // 날짜 원장 이름의 폴더: 읽으면 IOException(Is a directory). PR #248 risk-ops F-2 재현
+        Files.createDirectories(config.resolve("engine-store/accounts/KIS-KR-1/audit/2026-10-26.jsonl"));
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("계좌 원장 읽기 실패");
+            assertThat(e.store.fullBlock(KIWOOM)).isEmpty();
+            assertThatThrownBy(() -> e.guard.enterProtective(e.confirm(KIS))).isInstanceOf(RaiseNotAppliedException.class);
+            e.guard.enterProtective(e.confirm(KIWOOM));
+            assertThat(e.guard.state(KIWOOM)).isEqualTo(GuardState.PROTECTIVE);
+            // 막힌 계좌의 내림은 그대로 된다(프로세스 로그)
+            e.guard.shutdown(KIS, "BAE", "킬스위치");
+        }
+    }
+
+    @Test
+    void 잠금을_쥔_채널로도_잠금_파일_내용을_대조할_수_있다() throws Exception {
+        // Windows에서는 자기 배타 잠금 구간을 다른 핸들로 읽지 못해 이 길로 대조한다(PR #248 risk-ops F-3)
+        try (WriterLock lock = WriterLock.acquire(Files.createDirectories(config.resolve("engine-store")).resolve("writer.lock"))) {
+            lock.stamp(7, 4242);
+            assertThat(new String(lock.readByLockedChannel(), StandardCharsets.UTF_8)).isEqualTo("boot=7 pid=4242\n");
+            assertThat(lock.check()).isEmpty();
+            assertThat(new String(lock.readByLockedChannel(), StandardCharsets.UTF_8)).isEqualTo("boot=7 pid=4242\n");
+        }
+    }
+
+    @Test
     void 블랙리스트_원장이_깨지면_모든_계좌를_전면_차단한다() throws Exception {
         Path blacklist = config.resolve("engine-store/blacklist/blacklist.jsonl");
         Files.createDirectories(blacklist.getParent());
