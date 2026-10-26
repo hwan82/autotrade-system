@@ -14,6 +14,7 @@ import com.autotrade.risk.guard.ActivationStep;
 import com.autotrade.risk.guard.GuardClosedException;
 import com.autotrade.risk.guard.GuardState;
 import com.autotrade.risk.guard.GuardTransition;
+import com.autotrade.risk.guard.RaiseNotAppliedException;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -269,6 +270,8 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             }
             try {
                 guard.beginActivation(authenticator.confirmationFor(verification, account.id()));
+            } catch (RaiseNotAppliedException e) {
+                return reject(ControlCodes.INVALID_STATE, "활성화를 시작하지 못했습니다: " + notApplied(e));
             } catch (GuardClosedException | IllegalArgumentException | IllegalStateException e) {
                 return reject(ControlCodes.INVALID_STATE, "활성화를 시작하지 못했습니다: " + e.getMessage());
             }
@@ -355,6 +358,13 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             }
             try {
                 guard.completeStep(account.id(), step);
+            } catch (RaiseNotAppliedException e) {
+                // OPEN 올림 감사를 기록하지 못했거나(상한 초과·저장소 차단) 기록하는 사이 내림이 먼저였다(ADR-015 2.5). 사유를 구별해 보인다
+                if (guard.state(account.id()) == GuardState.ACTIVATING) {
+                    guard.failActivation(account.id(), notApplied(e));
+                }
+                return ControlResponse.accepted("활성화 실패: " + notApplied(e) + ". " + guard.state(account.id())
+                        + " 상태입니다. 2차 확인을 다시 받아야 합니다", null, List.of());
             } catch (GuardClosedException e) {
                 // 단계 수행 중 다른 경로(내리기, PANIC, 서킷 등)가 Guard를 내렸다. 내려간 상태를 그대로 둔다
                 return ControlResponse.accepted("활성화가 중단됐습니다. 현재 " + guard.state(account.id()) + " 상태입니다",
@@ -362,6 +372,14 @@ public final class EngineCommandHandler implements ControlHandler, AutoCloseable
             }
         }
         return ControlResponse.accepted(account.id() + " 실전 매매가 열렸습니다(OPEN)", null, List.of());
+    }
+
+    /**
+     * 적용하지 않은 올림의 사유 문구. Guard 문구가 "감사 기록 실패·상한 초과"와 "내림이 먼저"를 구별한다(ADR-015 2.5). 화면의 사유별
+     * 표시는 묶음 H에서 {@link RaiseNotAppliedException#reason()}으로 나눈다.
+     */
+    static String notApplied(RaiseNotAppliedException e) {
+        return e.getMessage();
     }
 
     private ControlResponse activationStale(AccountRef account, ActivationStep step) {

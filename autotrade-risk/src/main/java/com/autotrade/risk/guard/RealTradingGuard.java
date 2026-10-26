@@ -28,15 +28,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       상태가 기동 시 Guard를 열 방법이 없다(안전 불변식 1, CFG-02). 상태는 메모리에만 있고 저장하지 않는다.</li>
  *   <li>올라가는 전이는 그 계좌의 {@link SecondConfirmation}이 있어야 한다. 활성화는 {@link ActivationStep} 순서를 모두
  *       통과해야 OPEN이 된다. 자동으로 올라가는 경로는 없다.</li>
- *   <li>내려가는 전이(보호 모드, OFF)는 누구나 언제든 할 수 있고, 감사 로그 저장 실패로 막히지 않는다.</li>
+ *   <li>내려가는 전이(보호 모드, OFF)는 누구나 언제든 할 수 있고, 감사 로그 저장 실패나 같은 계좌 올림의 감사 기록 대기로
+ *       막히지 않는다.</li>
  *   <li>신규 진입은 OPEN에서만 통과한다. 청산·손절은 OPEN·PROTECTIVE(보호 모드에서 출발한 활성화 중 포함)에서 통과한다.
  *       OFF에서는 어떤 주문도 통과하지 않는다(주문 세션 자체가 없다).</li>
  *   <li>계좌끼리 상태를 공유하지 않는다. 한 계좌의 전이는 다른 계좌에 영향이 없다(지침 4장 6항).</li>
  * </ul>
  *
- * <p>스레드 안전: 전이는 계좌별 잠금으로 직렬화한다. 계좌 상태(상태, 활성화 출발 상태, 세대)는 불변 스냅샷 하나를
+ * <p>스레드 안전: 전이는 계좌별 잠금으로 직렬화한다. 계좌 상태(상태, 활성화 출발 상태, 세대, 전이 번호)는 불변 스냅샷 하나를
  * volatile로 바꿔 끼우므로, 주문마다 지나는 {@link #check}·{@link #mayCancel}·허가 유효성 검사는 잠금 없이 한 번 읽고 끝난다.
- * 감사 로그 저장이 느려도 주문 경로(손절 포함)는 기다리지 않는다. 내려가는 전이의 감사 기록은 잠금 밖에서 한다.
+ * 감사 로그 저장이 느려도 주문 경로(손절 포함)는 기다리지 않는다. 감사 기록은 올림·내림 모두 계좌 잠금 밖에서 한다
+ * (ADR-015 2.5 "올림 감사와 계좌 잠금"). 올림은 ① 잠금 안에서 검사와 출발 스냅샷 확인, ② 잠금 밖에서 감사 기록, ③ 다시 잠금
+ * 안에서 전이 번호가 ①과 같을 때만 적용한다. 그래서 올림 감사가 원장 강제 기록을 기다리는 동안에도 같은 계좌의 내림(킬스위치,
+ * PANIC 1단계, 활성화 실패)은 바로 끝나고, 그 사이 내림이 끼어들었으면 올림은 적용되지 않는다. 한 계좌에서 동시에 진행되는
+ * 올림은 하나뿐이다(두 번째는 거절).
  *
  * <p>가상 계좌는 이 Guard를 쓰지 않는다. 실험실 프로세스는 실전 주문 경로가 없고(ARC-03), Guard 판정은
  * {@link RiskDecision}으로 돌려주므로 실전 엔진의 검증 체인 맨 앞에 다른 규칙과 같은 방식으로 놓인다(D-023 공통 원칙 3).
@@ -48,6 +53,9 @@ public final class RealTradingGuard {
 
     /** 2차 확인 유효 시간. 확인 화면을 띄워 둔 채 한참 뒤에 쓰는 것을 막는다. [가정] 값은 Q-008에서 함께 정한다. */
     public static final Duration CONFIRMATION_TTL = Duration.ofSeconds(60);
+
+    /** 기록하는 사이 내림이 먼저 일어나 올림을 적용하지 않았다는 보정 기록의 사유 머리말(ADR-015 2.5). */
+    public static final String NOT_APPLIED_LOWERED_FIRST = "전이 미적용(내림이 먼저)";
 
     private static final Logger LOG = System.getLogger(RealTradingGuard.class.getName());
 
@@ -182,16 +190,21 @@ public final class RealTradingGuard {
      */
     public void beginActivation(SecondConfirmation confirmation) {
         AccountGuard g = guard(confirmation.account());
+        PendingRaise pending;
         synchronized (g) {
             GuardState from = g.snapshot.state();
             if (from != GuardState.OFF && from != GuardState.PROTECTIVE) {
                 throw new GuardClosedException(g.ref.id() + " Guard " + from + "에서는 활성화를 시작할 수 없습니다");
             }
+            refuseConcurrentRaise(g);
             accept(g, confirmation);
-            g.operator = confirmation.operator();
-            g.completed.clear();
-            raise(g, GuardState.ACTIVATING, from, confirmation.operator(), "활성화 시작");
+            String operator = confirmation.operator();
+            pending = startRaise(g, GuardState.ACTIVATING, from, operator, "활성화 시작", () -> {
+                g.operator = operator;
+                g.completed.clear();
+            });
         }
+        finishRaise(g, pending);
     }
 
     /**
@@ -202,21 +215,23 @@ public final class RealTradingGuard {
     public void completeStep(AccountId account, ActivationStep step) {
         Objects.requireNonNull(step, "step");
         AccountGuard g = guard(account);
+        PendingRaise pending;
         synchronized (g) {
             if (g.snapshot.state() != GuardState.ACTIVATING) {
                 throw new GuardClosedException(account + " Guard " + g.snapshot.state() + ": 활성화 중이 아닙니다");
             }
+            refuseConcurrentRaise(g);
             ActivationStep expected = ActivationStep.values()[g.completed.size()];
             if (step != expected) {
                 throw new GuardClosedException(account + " 활성화 순서 위반: " + expected + " 차례에 " + step);
             }
-            if (step == ActivationStep.FIRST_RECONCILIATION) {
-                raise(g, GuardState.OPEN, GuardState.OFF, g.operator, "활성화 단계 모두 통과");
-                g.completed.clear();
-            } else {
+            if (step != ActivationStep.FIRST_RECONCILIATION) {
                 g.completed.add(step);
+                return;
             }
+            pending = startRaise(g, GuardState.OPEN, GuardState.OFF, g.operator, "활성화 단계 모두 통과", () -> g.completed.clear());
         }
+        finishRaise(g, pending);
     }
 
     /**
@@ -227,14 +242,18 @@ public final class RealTradingGuard {
      */
     public void enterProtective(SecondConfirmation confirmation) {
         AccountGuard g = guard(confirmation.account());
+        PendingRaise pending;
         synchronized (g) {
             if (g.snapshot.state() != GuardState.OFF) {
                 throw new GuardClosedException(
                         g.ref.id() + " Guard " + g.snapshot.state() + ": OFF에서만 보호 모드로 올릴 수 있습니다");
             }
+            refuseConcurrentRaise(g);
             accept(g, confirmation);
-            raise(g, GuardState.PROTECTIVE, GuardState.OFF, confirmation.operator(), "재기동 후 보유 보호");
+            pending = startRaise(g, GuardState.PROTECTIVE, GuardState.OFF, confirmation.operator(), "재기동 후 보유 보호",
+                    () -> { });
         }
+        finishRaise(g, pending);
     }
 
     // ---- 내려가는 전이: 확인 없이 즉시 ----
@@ -244,6 +263,7 @@ public final class RealTradingGuard {
         AccountGuard g = guard(account);
         GuardTransition t;
         synchronized (g) {
+            interruptRaise(g);
             Snapshot snap = g.snapshot;
             t = snap.state() == GuardState.ACTIVATING
                     ? lower(g, snap.activationOrigin(), GuardTransition.SYSTEM, "활성화 실패: " + reason) : null;
@@ -259,6 +279,7 @@ public final class RealTradingGuard {
         AccountGuard g = guard(account);
         GuardTransition t;
         synchronized (g) {
+            interruptRaise(g);
             Snapshot snap = g.snapshot;
             t = switch (snap.state()) {
                 case OPEN -> lower(g, GuardState.PROTECTIVE, actor, reason);
@@ -274,6 +295,7 @@ public final class RealTradingGuard {
         AccountGuard g = guard(account);
         GuardTransition t;
         synchronized (g) {
+            interruptRaise(g);
             t = g.snapshot.state() == GuardState.PROTECTIVE
                     ? lower(g, GuardState.OFF, GuardTransition.SYSTEM, "보유·미체결 0") : null;
         }
@@ -285,6 +307,7 @@ public final class RealTradingGuard {
         AccountGuard g = guard(account);
         GuardTransition t;
         synchronized (g) {
+            interruptRaise(g);
             t = g.snapshot.state() != GuardState.OFF ? lower(g, GuardState.OFF, actor, reason) : null;
         }
         audit(t);
@@ -316,22 +339,88 @@ public final class RealTradingGuard {
     }
 
     /**
-     * 올라가는 전이: 감사 기록이 성공해야 상태를 바꾼다. 사람이 드물게 하는 조작이라 잠금 안에서 기록한다
-     * (그동안 같은 계좌의 내려가는 전이는 기다리지만 주문 경로는 스냅샷만 읽으므로 기다리지 않는다).
+     * 내리는 조작이 들어왔다. 감사 기록을 기다리는 올림이 있으면 그 올림을 적용하지 않게 표시한다(잠금 안에서 부른다). 상태가 바뀌지
+     * 않는 내림(이미 OFF인 계좌의 킬스위치 등)도 표시한다. 예전처럼 잠금 안에서 기록했다면 그 킬스위치는 올림 뒤에 적용되어 계좌를
+     * 내렸을 것이므로, 올림을 버리는 것이 같은 결과다.
+     */
+    private static void interruptRaise(AccountGuard g) {
+        if (g.raising) {
+            g.raiseInterrupted = true;
+        }
+    }
+
+    /** 같은 계좌에서 다른 올림이 감사 기록을 기다리는 중이면 거절한다(잠금 안에서 부른다, risk-ops PR #239 N-1·N-6). */
+    private static void refuseConcurrentRaise(AccountGuard g) {
+        if (g.raising) {
+            throw new GuardClosedException(g.ref.id() + " 다른 올림 전이가 감사 기록을 기다리는 중입니다. 상태를 확인하고 다시 시도하세요");
+        }
+    }
+
+    /**
+     * 올림 ①: 잠금 안에서 출발 스냅샷을 잡고 "올림 진행 중"으로 표시한다. 상태는 아직 바꾸지 않는다.
      *
      * @param origin ACTIVATING으로 갈 때의 출발 상태. 다른 전이에서는 쓰지 않는다
+     * @param onApply ③에서 상태를 바꿀 때 함께 할 잠금 안 작업(활성화 단계 초기화 등)
      */
-    private void raise(AccountGuard g, GuardState to, GuardState origin, String actor, String reason) {
+    private PendingRaise startRaise(AccountGuard g, GuardState to, GuardState origin, String actor, String reason,
+            Runnable onApply) {
         Snapshot before = g.snapshot;
-        audit.record(new GuardTransition(g.ref.id(), before.state(), to, actor, reason, clock.instant()));
-        g.snapshot = new Snapshot(to, to == GuardState.ACTIVATING ? origin : GuardState.OFF, before.epoch());
+        g.raising = true;
+        g.raiseInterrupted = false;
+        return new PendingRaise(before, to, to == GuardState.ACTIVATING ? origin : GuardState.OFF, onApply,
+                new GuardTransition(g.ref.id(), before.state(), to, actor, reason, clock.instant()));
+    }
+
+    /**
+     * 올림 ②·③: 잠금 밖에서 감사 기록(올라가는 전이는 기록이 성공해야 한다)을 한 뒤, 다시 잠금 안에서 전이 번호가 ①과 같을 때만
+     * 적용한다. 기록이 실패하거나 상한을 넘기면(어댑터가 예외를 던짐) 출발 상태 그대로다. 기록하는 사이 내림(상태가 바뀌지 않은 내리는
+     * 조작 포함)이 끼어들었으면 적용하지
+     * 않고 "전이 미적용(내림이 먼저)" 보정 기록을 남긴다. 어느 경우든 2차 확인은 ①에서 이미 썼으므로 사람이 다시 확인해야 한다.
+     *
+     * @throws RaiseNotAppliedException 적용하지 않았을 때(사유 구별)
+     */
+    private void finishRaise(AccountGuard g, PendingRaise p) {
+        boolean recorded = false;
+        try {
+            audit.record(p.transition);
+            recorded = true;
+        } catch (RuntimeException e) {
+            throw new RaiseNotAppliedException(RaiseNotAppliedException.Reason.AUDIT_NOT_RECORDED,
+                    g.ref.id() + " " + p.transition.from() + " → " + p.to + " 전이 미적용(감사 기록 실패·상한 초과: "
+                            + e.getMessage() + "). 상태는 " + p.before.state() + " 그대로입니다", e);
+        } finally {
+            if (!recorded) {
+                synchronized (g) {
+                    g.raising = false;
+                }
+            }
+        }
+        GuardTransition note;
+        synchronized (g) {
+            g.raising = false;
+            Snapshot now = g.snapshot;
+            boolean interrupted = g.raiseInterrupted;
+            g.raiseInterrupted = false;
+            if (!interrupted && now.transitions() == p.before.transitions()) {
+                p.onApply.run();
+                g.snapshot = new Snapshot(p.to, p.origin, now.epoch(), now.transitions() + 1);
+                return;
+            }
+            note = new GuardTransition(g.ref.id(), now.state(), now.state(), p.transition.actor(),
+                    NOT_APPLIED_LOWERED_FIRST + ": " + p.transition.from() + " → " + p.to, clock.instant());
+        }
+        // 보정 기록은 상태를 바꾸지 않는 기록(from = to)이라 내림 감사처럼 기다리지 않는다
+        audit(note);
+        throw new RaiseNotAppliedException(RaiseNotAppliedException.Reason.LOWERED_FIRST,
+                g.ref.id() + " " + p.transition.from() + " → " + p.to + " 전이 미적용(감사 기록 중 내림이 먼저 일어남). 현재 "
+                        + note.to() + " 상태입니다", null);
     }
 
     /** 내려가는 전이: 잠금 안에서 상태만 바꾸고, 감사 기록할 전이를 돌려준다(기록은 잠금 밖에서 {@link #audit}). */
     private GuardTransition lower(AccountGuard g, GuardState to, String actor, String reason) {
         Snapshot before = g.snapshot;
         long epoch = to == GuardState.OFF ? before.epoch() + 1 : before.epoch();
-        g.snapshot = new Snapshot(to, GuardState.OFF, epoch);
+        g.snapshot = new Snapshot(to, GuardState.OFF, epoch, before.transitions() + 1);
         g.completed.clear();
         return new GuardTransition(g.ref.id(), before.state(), to, actor, reason, clock.instant());
     }
@@ -348,9 +437,32 @@ public final class RealTradingGuard {
         }
     }
 
-    /** 계좌 상태의 불변 스냅샷. 주문 경로는 이 참조 하나만 읽는다. */
-    private record Snapshot(GuardState state, GuardState activationOrigin, long epoch) {
-        static final Snapshot INITIAL = new Snapshot(GuardState.OFF, GuardState.OFF, 0);
+    /**
+     * 계좌 상태의 불변 스냅샷. 주문 경로는 이 참조 하나만 읽는다.
+     *
+     * @param transitions 이 계좌에서 적용된 전이 수. 모든 전이(올림·내림)마다 하나씩 오른다. 올림 ③은 상태가 아니라 이 값으로 ①과
+     *     비교하므로, 기록하는 사이 내렸다가 같은 상태로 되돌아온 경우(ABA)에도 속지 않는다(risk-ops PR #239 N-1)
+     */
+    private record Snapshot(GuardState state, GuardState activationOrigin, long epoch, long transitions) {
+        static final Snapshot INITIAL = new Snapshot(GuardState.OFF, GuardState.OFF, 0, 0);
+    }
+
+    /** ①에서 잡은 올림. ③이 {@code before.transitions()}로 끼어든 전이가 있었는지 본다. */
+    /** 잠금 밖 감사를 기다리는 올림 하나(레코드가 아닌 클래스: Guard 레코드는 정해진 셋뿐, D-086 고정 값). */
+    private static final class PendingRaise {
+        final Snapshot before;
+        final GuardState to;
+        final GuardState origin;
+        final Runnable onApply;
+        final GuardTransition transition;
+
+        PendingRaise(Snapshot before, GuardState to, GuardState origin, Runnable onApply, GuardTransition transition) {
+            this.before = before;
+            this.to = to;
+            this.origin = origin;
+            this.onApply = onApply;
+            this.transition = transition;
+        }
     }
 
     private static final class AccountGuard {
@@ -360,6 +472,10 @@ public final class RealTradingGuard {
         final EnumSet<ActivationStep> completed = EnumSet.noneOf(ActivationStep.class);
         String operator = GuardTransition.SYSTEM;
         Instant lastConfirmation;
+        /** 올림 ①과 ③ 사이(감사 기록을 기다리는 중). 이 동안 같은 계좌의 다른 올림은 거절한다. */
+        boolean raising;
+        /** 올림을 기다리는 동안 같은 계좌에 내리는 조작이 들어옴(상태가 바뀌지 않았어도). ③은 적용하지 않는다. */
+        boolean raiseInterrupted;
 
         AccountGuard(AccountRef ref) {
             this.ref = ref;

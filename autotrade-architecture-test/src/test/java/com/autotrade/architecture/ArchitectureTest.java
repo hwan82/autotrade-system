@@ -21,6 +21,7 @@ import com.autotrade.archfixture.ApproveAllRiskPolicy;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.archfixture.MisplacedControlChannel;
+import com.autotrade.archfixture.MisplacedRealStoreUse;
 import com.autotrade.broker.BrokerPlugin;
 import com.autotrade.broker.fixturea.PluginA;
 import com.autotrade.broker.fixtureb.PluginB;
@@ -28,6 +29,9 @@ import com.autotrade.control.ControlClient;
 import com.autotrade.control.ControlServer;
 import com.autotrade.domain.market.Market;
 import com.autotrade.domain.market.Symbol;
+import com.autotrade.realstore.EngineStore;
+import com.autotrade.realstore.StoreGuardAuditLog;
+import com.autotrade.realstore.archfixture.GuardRestorer;
 import com.autotrade.risk.RiskChain;
 import com.autotrade.risk.RiskPolicy;
 import com.autotrade.risk.archfixture.SplitPackageApproveAll;
@@ -183,6 +187,27 @@ class ArchitectureTest {
                     .and(target(name("<init>"))))
             .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.Issuer.class))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
+
+    /**
+     * 실전 엔진 저장소(원장·쓰기 잠금)는 실전 엔진만 쓴다(ADR-015 2.1·4장, D-146). 실험실·게이트웨이·감시·수집·실험 명령이 원장을
+     * 쓰거나 읽으면 쓰기 주체가 둘이 되거나 실전 상태가 다른 프로세스에 묶인다(절대 규칙 6).
+     */
+    static final ArchRule ONLY_ENGINE_USES_REAL_STORE = noClasses()
+            .that().resideOutsideOfPackages("com.autotrade.app.engine..", "com.autotrade.realstore..")
+            .should().dependOnClassesThat().resideInAPackage("com.autotrade.realstore..")
+            .because("실전 엔진 저장소의 쓰기 주체는 실전 엔진 하나다(ADR-015)");
+
+    /**
+     * 저장소는 Guard를 모른다: 감사 인터페이스({@code GuardAuditLog})와 전이 값({@code GuardTransition}·{@code GuardState})만 받고
+     * {@link RealTradingGuard}에는 의존하지 않는다. 원장 내용으로 Guard 상태를 되살리는 코드를 빌드로 막는다(ADR-015 2.7 ①, 시험 1).
+     */
+    static final ArchRule REAL_STORE_DOES_NOT_DRIVE_GUARD = noClasses()
+            .that().resideInAPackage("com.autotrade.realstore..")
+            .should().dependOnClassesThat().areAssignableTo(RealTradingGuard.class)
+            .orShould().dependOnClassesThat().areAssignableTo(SecondConfirmation.class)
+            .orShould().dependOnClassesThat().areAssignableTo(SecondConfirmation.Issuer.class)
+            .because("재기동하면 모든 계좌는 OFF이고 원장은 Guard 상태를 정하지 않는다(ADR-015 2.7 ①)")
+            .allowEmptyShould(true);
 
     /** 리스크 모듈(autotrade-risk) 산출물에서 읽은 클래스인지. 클래스 파일 위치로 판단해 다른 모듈의 같은 패키지 이름을 거른다. */
     static final DescribedPredicate<JavaClass> FROM_RISK_MODULE = new DescribedPredicate<>("come from module autotrade-risk") {
@@ -456,6 +481,12 @@ class ArchitectureTest {
     }
 
     @Test
+    void 실전_엔진_저장소는_실전_엔진만_쓰고_Guard를_조작하지_않는다() {
+        ONLY_ENGINE_USES_REAL_STORE.check(PRODUCTION);
+        REAL_STORE_DOES_NOT_DRIVE_GUARD.check(PRODUCTION);
+    }
+
+    @Test
     void 리스크_규칙은_리스크_모듈에만_있다() {
         RISK_POLICIES_LIVE_IN_RISK_MODULE.check(PRODUCTION);
     }
@@ -524,5 +555,14 @@ class ArchitectureTest {
         JavaClasses misplaced = new ClassFileImporter().importClasses(MisplacedControlChannel.class);
         assertThat(ONLY_ENGINE_OPENS_CONTROL_SERVER.evaluate(misplaced).hasViolation()).isTrue();
         assertThat(ONLY_LAB_SENDS_CONTROL_COMMANDS.evaluate(misplaced).hasViolation()).isTrue();
+
+        // 실전 엔진 밖에서 저장소를 쓰는 코드, 저장소 패키지에서 Guard를 만지는 코드(ADR-015, D-146)
+        assertThat(ONLY_ENGINE_USES_REAL_STORE.evaluate(new ClassFileImporter().importClasses(
+                MisplacedRealStoreUse.class)).hasViolation()).isTrue();
+        assertThat(REAL_STORE_DOES_NOT_DRIVE_GUARD.evaluate(new ClassFileImporter().importClasses(
+                GuardRestorer.class)).hasViolation()).isTrue();
+        // 실제 저장소 어댑터·엔진 배선은 통과한다
+        assertThat(REAL_STORE_DOES_NOT_DRIVE_GUARD.evaluate(new ClassFileImporter().importClasses(
+                StoreGuardAuditLog.class, EngineStore.class)).hasViolation()).isFalse();
     }
 }

@@ -18,6 +18,7 @@ include(
     "autotrade-strategy",
     "autotrade-selection",
     "autotrade-risk",
+    "autotrade-real-store",
     "autotrade-sim",
     "autotrade-broker-api",
     "autotrade-broker-kiwoom",

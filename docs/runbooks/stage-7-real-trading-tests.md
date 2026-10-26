@@ -39,6 +39,8 @@
 | P8 | 설정 폴더 권한(Windows) | `secrets.json`·`kakao-token.json`이 있는 설정 폴더 ACL이 사용자 본인만 읽기·쓰기(POSIX 권한은 Windows에서 안 걸림) | PR #128 risk-ops R4, D-100 위험과 한계 |
 | P9 | 프로세스 4개 설정 폴더 일치 | 엔진·게이트웨이·실험실·감시가 같은 `AUTOTRADE_CONFIG_DIR`을 봄(감시 하트비트가 ABSENT로만 보이는 오설정 방지) | PR #118 QA R1 |
 | P10 | 실험실·게이트웨이 힙 | 실전 엔진 몫을 남긴 힙 상한(6단계 실측 기준, 묶음 I 시행 때 확정 `[가정]`) | 메모 pr52 후속 |
+| P11 | 엔진 저장소 강제 기록 시간 | 엔진을 끈 채 `bin\autotrade-engine.bat store-probe` 출력의 99% 값이 1초(올림 감사 상한 2초의 절반) 이하. 넘으면 결과 줄을 개발 쪽에 넘기고 상한을 다시 정할 때까지 실전 활성화를 미룬다. 결과 줄은 시험 기록에 남긴다 | ADR-015 3장 되돌릴 조건 (1), D-146 |
+| P12 | 저장소 쓰기 잠금 교체 감지(Windows) | 엔진 실행 중 `engine-store\writer.lock`을 지우거나 내용을 바꾸면 5초 안에 "실전 엔진 저장소 전면 차단" 긴급 알림이 오고 활성화·보호 모드 상향이 거절됨. 지울 수 없으면 그 사실을 기록(3-R과 함께 시행) | ADR-015 2.9, PR #239 QA Q2, D-146 |
 
 명령(PowerShell)은 묶음 I 시행 PR에서 채운다. 예: `Get-ChildItem env: | Where-Object Name -match 'JAVA'`, `Get-Acl $cfg | Format-List`.
 

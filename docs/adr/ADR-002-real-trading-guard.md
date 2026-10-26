@@ -91,7 +91,7 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | 코드 | 모듈 | 이유 |
 |---|---|---|
 | `RealTradingGuard`, `GuardState`, `ActivationStep`, `SecondConfirmation`, `OrderSessionPermit`, `GuardedOrderGateway`, `GuardAuditLog`, `GuardTransition` | autotrade-risk (`risk.guard`) | 순수 Java, domain만 의존. 실험실·게이트웨이 런타임에는 실리지만 실험실은 `BrokerPlugin` 주문 출구를 열 수 없다(ArchUnit) |
-| `RealOrderGateways`, `LoggingGuardAuditLog` | autotrade-app-engine (`app.engine.order`) | 플러그인(broker-api)과 Guard(risk)를 함께 아는 곳은 실전 엔진뿐 |
+| `RealOrderGateways` | autotrade-app-engine (`app.engine.order`) | 플러그인(broker-api)과 Guard(risk)를 함께 아는 곳은 실전 엔진뿐 |
 | 실전 계좌 키 | autotrade-config | 4개 프로세스 공통 설정 체계(ADR-001 2.6) |
 
 ## 3. 대안 검토
@@ -156,7 +156,7 @@ secrets.json:         { "real-trading": { "account-numbers": { "KIS-US-1": "<ACC
 | 활성화 명령 채널(UI → 엔진), 2차 확인 비밀번호 해시 검증(해시만 비밀 저장소), 계좌 표시명 확인 화면 | ui-dev + risk-ops | 5·7단계 |
 | 활성화 단계 실제 수행(인증, 세션, 첫 대사, ORD-07 UNKNOWN 확정) | risk-ops + data-engineer | 7단계 |
 | 보호 모드 진입 시 미체결 매수 취소·보유 0 감지·세션 종료 실행 | risk-ops | 7단계 |
-| 영속 감사 로그 | risk-ops + architect | 7단계 |
+| 영속 감사 로그 | risk-ops + architect | 7단계. **[ADR-015](ADR-015-real-engine-store.md)·[D-146](../decisions/D-146-real-store-b1.md)로 처리(B1)**: Guard 감사 어댑터는 `autotrade-real-store`의 `StoreGuardAuditLog`(예전 `LoggingGuardAuditLog`는 지움), 올림 감사는 계좌 잠금 밖 |
 | 블랙리스트(RSK-12, 전역), 서킷브레이커(RSK-04), PANIC SELL(RSK-13), 주문 상태머신(ORD-07), 멱등 키 발급기 | risk-ops | 7단계 전 |
 | CFG-05 계좌·키 교체 절차 | risk-ops | 7단계 |
 

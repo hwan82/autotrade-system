@@ -7,7 +7,7 @@ import java.lang.System.Logger.Level;
 /**
  * 명령 채널 감사 로그(D-023 공통 원칙 2: 다시 열 때는 사람, 감사 로그). 상태 조회를 뺀 모든 명령의 시도와 결과를 남긴다.
  * 비밀번호와 확인 문구는 받지 않는다. Guard 전이 자체는 {@code GuardAuditLog}가 따로 남긴다.
- * 지금은 프로세스 로그이고, 영속 저장은 실전 엔진 저장소 작업(7단계)에서 바꾼다(ADR-002 6장).
+ * {@link #LOGGING}은 프로세스 로그다. 실전 엔진은 그 위에 알림과 엔진 저장소 원장을 겹친다({@link StoreCommandAuditLog}, ADR-015).
  */
 public interface CommandAuditLog {
 
