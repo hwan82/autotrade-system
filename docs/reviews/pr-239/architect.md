@@ -104,3 +104,41 @@
 
 ## 판정(재검토 2)
 승인
+
+## 재검토 3 2026-10-26
+- 대상: PR #239 / 커밋 `84bf9f538bf0923dff560faeac09a010d548c173` / main 대비 diff 전체(`git diff origin/main...HEAD`: ADR-015, ADR 목록, D-141, 결정 로그 README, `docs/qa/pending.md`, 검토 원문 3개). 재검토 2 이후: main 합침 `496e34af`(이 PR의 main 대비 diff에 코드 변경을 더하지 않음), 독립 QA 반영 `84bf9f53`
+- 점검표: B
+- 직접 실행한 것:
+  - PR 댓글 6407656672 다시 조회: 작성자 `hwan82`, 2026-10-26T03:37:03Z(수정 없음), "CI 결과를 B1 근거로 인정, Q-062 파일 원장 결정 확인".
+  - 이 head의 CI를 GitHub API로 직접 찾음(`commits/84bf9f53.../check-runs`): `Gradle build` job 121533018715(run 40311347103)이 처음에는 진행 중이어서 끝날 때까지 기다림 → completed / success, `head_sha` = `84bf9f538bf0923dff560faeac09a010d548c173`, 완료 2026-10-26T11:01:27Z. 단계 `Build and test`(`.github/workflows/ci.yml:27-28` `./gradlew build --no-daemon`) success, `Start each process once (ARC-03)` success. 같은 head의 `DB schema`·`Secret scan and collector boundary`도 success.
+  - 독립 QA 원문(`docs/reviews/pr-239/qa.md`) 발견 1·2와 권고 Q1~Q5를 ADR-015 11장 반영표와 본문에 하나씩 대조함. 코드 인용 확인: `RealTradingGuard.java:228`(`enterProtective`), `:324-326`(`raise`가 잠금 안에서 `audit.record`), `ControlServer.java:373-374`(`lockKey == null`이면 교체 감지 통과), `ActivationStep.FIRST_RECONCILIATION`(`RealTradingGuard.java:213`).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과(사용자 결정에 따른 근거) | 사용자 `hwan82`의 PR 댓글 6407656672 결정에 따라, 이 head `84bf9f53`의 CI `Gradle build` job 121533018715 success(`./gradlew build --no-daemon`)를 직접 확인 |
+| B2 | 해당 없음 | 코드·빌드·ArchUnit 변경 없음(main 대비 diff는 문서만) |
+| B3 | **실패** | 이번에 새로 넣은 "차단의 범위" 정의가 같은 ADR 안의 다른 규칙과 모순된다. 아래 R3-1 |
+| B4 | 해당 없음 | 시뮬레이션 변경 없음 |
+| B5 | 해당 없음 | 금액 코드 없음 |
+| B6 | 해당 없음(문서) | 5장 시험 4·5·7·11·13에 PANIC(OFF 계좌)·`enterProtective` 경우가 추가됨. 다만 시험 4·11이 R3-1의 모순을 그대로 담고 있음 |
+| B7 | 해당(risk-ops 검토 필요) | 실전 경로 설계이고 차단 조건이 PANIC(D-140 ①) 동작을 바꾼다. **risk-ops 검토 필요**, 독립 QA 재검토·사용자 머지 |
+| B8 | 통과 | 추가된 내용에 비밀값 없음 |
+
+### 독립 QA 지적 반영 확인
+- QA 발견 2(`keyFloor` 원본 위치 표기): 해결. 결정 로그 D-141 행과 4장 위험 표 모두 "계좌 `orders` 원장 `key-floor`, 기동 기록은 사본".
+- QA Q1(정상 종료로 흔적이 사라짐, 청산 의도 대기열 상한): 해결(2.7 ④ 조건에 정상 종료 기록 추가, 2.5 표에 상한 10,000줄 `[가정]`, 넘쳐도 주문 전송).
+- QA Q2(Windows `fileKey` null): 해결. 2.9 (가)를 잠금 파일 내용 대조 기본으로 바꿈. `ControlServer.java:374` 인용 맞음. Windows 실측은 B1로 넘김.
+- QA Q3(체크포인트 손상): 해결(③ 손상으로 봄, 다시 만들기는 I1 절차로만, 더 막는 쪽).
+- QA Q4(기록 못 한 블랙리스트 등록): 해결(`blacklist/unrecorded` 파일, 재기동 때 다시 적용, 그것도 못 쓰면 블랙리스트 원장 장애로 봄). 블랙리스트 쓰기 경로가 하나 더 생기지만 엔진만 쓰고 더 막는 쪽으로만 읽히므로 2.1 원칙 2·4와 맞는다.
+- QA Q5: 해결(미적용 사유 두 가지를 구별해 표시, 인용 행 번호를 main 기준으로 고침. `raise`는 지금 324-326행).
+- QA 발견 1(A4·A5·A6): 방향은 맞다. 블랙리스트 손상·계좌 원장 손상·`key-floor` 실패·기동 기록 실패·쓰기 주체 둘이면 PROTECTIVE 상향도 막는다는 것은 QA 시나리오 1·2를 닫는다. 하지만 정의를 너무 넓게 적어 아래 R3-1이 생겼다.
+
+### 재검토 3에서 새로 본 것
+- **R3-1 (수정 필요) "OPEN 불가"까지 "올리는 모든 전이 차단"에 넣어 대사 경로가 막힌다.** "차단의 범위"(`ADR-015:123`)는 "활성화를 막는다"뿐 아니라 **"OPEN 불가"**도 `beginActivation`·`enterProtective`·PANIC의 OFF → PROTECTIVE를 모두 거부한다는 뜻이라고 정의한다(예외 없음). 그런데 이 ADR에서 "OPEN 불가/OPEN 막음"은 `UNKNOWN` 미확정 주문(2.7 ⑦, 시험 4), 원장 밖 미체결 주문(2.7 ⑦, 시험 11), `keyFloor` + 9,999 도달 뒤 다음 기동(2.6, 4장 182행)에 쓰인다.
+  - (가) 자기모순: 같은 2.7 ⑦·⑧(`:120`)과 시험 4·11은 이런 계좌를 "PANIC·`enterProtective`로 보호 모드에 올려도 대사 전 주문 0건"이라고 적어 **올리는 것을 허용**한다. 정의대로라면 거부여야 한다.
+  - (나) 대사로 풀 길이 없음 `[추론, 코드 근거]`: `UNKNOWN` 확정은 활성화 중 `FIRST_RECONCILIATION` 단계에서 한다(2.7 ⑦, `RealTradingGuard.java:213`). 그러므로 `UNKNOWN`이 있는 계좌의 `beginActivation`을 거부하면 `UNKNOWN`을 확정할 수 없고, 확정 전이라 활성화도 못 한다. 비정상 종료 뒤 미종결 주문이 하나라도 있으면 그 계좌는 영구히 OFF다. 강제 종료 재기동(장애 테스트 3, 시험 4)이 흔한 경우라 구현자가 정의를 글자대로 따르면 실전 계좌를 다시 열 수 없다.
+  - 고칠 것: 두 가지를 나눠 정의한다. ① **올리는 전이 차단**(모든 상향 거부, 주문 세션 허가 0건): 계좌 원장 손상, 블랙리스트 원장 손상·`unrecorded` 기록 실패, `key-floor` 기록 실패, 기동 기록 실패, 쓰기 주체 둘. ② **대사 전 주문 0건, OPEN은 대사 통과 뒤**(`beginActivation`과 보호 모드 상향은 허용하되 `UNKNOWN`·원장 밖 주문이 확정·확인되기 전 주문 0건): `UNKNOWN`, 원장 밖 주문, 키 상한 도달 뒤 기동. 2.6·2.7 ⑦·4장·5장 시험 4·11·D-141 결정 5의 문구를 이 구분에 맞춘다.
+- **R3-2 (사용자 확인 필요, 수정 요구는 아님) D-140 ① 사용자 결정의 범위를 좁힘.** D-140 ①은 OFF 계좌 PANIC을 "2차 확인 통과 → PROTECTIVE → 대사 → 매도"로 정했고 OFF로 남기는 경우는 확인 실패·잠김·미설정뿐이다(`D-140-stage7-panic-and-first-broker.md:16`). R3-1 ① 조건(원장·블랙리스트 손상 등)에서 PANIC을 거부하고 증권사 앱 매도로 안내하는 것은 절대 규칙 3을 지키는 쪽이라 architect는 방향에 동의한다. 다만 사용자 결정의 범위를 바꾸므로 지침 8장 2·4번의 멈춤 대상이다. D-141에 "D-140 ①에 거부 조건 추가"를 적고 사용자 확인(머지 때 확인해도 됨)을 받도록 남길 것. 계좌 원장만 손상된 경우(블랙리스트는 정상)까지 PANIC을 막을지는 risk-ops가 판단할 일이다(그 계좌 보유를 원장으로 믿을 수 없으나 블랙리스트는 믿을 수 있음).
+
+## 판정(재검토 3)
+수정 필요(R3-1: "차단의 범위" 정의가 "OPEN 불가"까지 모든 상향 거부로 넓혀, 2.7 ⑦⑧·시험 4·11과 모순되고 `UNKNOWN` 계좌는 대사 단계에 들어갈 수 없게 됨. 상향 차단과 대사 전 주문 0건을 나눠 정의할 것)
