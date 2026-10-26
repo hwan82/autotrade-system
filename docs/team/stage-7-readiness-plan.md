@@ -23,21 +23,21 @@
 
 | # | 항목 | 출처 | 상태 | 근거 | 담당 | 선행 | 실전 | 묶음 |
 |---|---|---|---|---|---|---|---|---|
-| C1 | 활성화 단계 비동기 진행·진행 표시(실험실 15초 대기 상한 대응) | ADR-006 4장·6장 | 안 됨 | `C/ControlServer.java:73` 명령 처리 단일 스레드 | risk-ops, ui-dev | 없음(설계는 지금 가능) | 예 | A |
-| C2 | 계좌별 비동기 PANIC(계좌끼리 서로 기다리지 않음) | ADR-006 4장·6장(완료 조건) | 안 됨 | 같은 단일 스레드 `commands` | risk-ops | 없음 | 예 | A |
-| C3 | 늦게 끝나는 활성화 차단: 절대 기한 ①②③, `STALE` | ADR-006 6장(완료 조건), QA pr-18 1 | 부분 | `ControlServer.java:237` `enqueuedAt` 대기열 기준만 | risk-ops, architect | 기한 방식 (가)/(나) 선택(architect 추천으로 자율) | 예 | A |
-| C4 | 해시 계산을 `OperatorAuthenticator` 잠금 밖으로, `MAX_ITERATIONS` 재검토 | ADR-006 6장(완료 조건) | 안 됨 | `OperatorAuthenticator.java:60` `synchronized verify`, `OperatorPasswordHash.java:28` 10,000,000 | architect, risk-ops | 없음 | 예 | A |
-| C5 | 하향 명령(내리기·PANIC) 연결 자리 예약, 기다리는 PANIC 시간 상한, 감시 점검에 연결 포화 | ADR-006 6장(완료 조건) | 안 됨 | 모든 명령이 `Semaphore slots`(8개) 공유 | risk-ops | 없음 | 예 | A |
-| C6 | 지워진 소켓·잠금 파일 주기 확인·재생성·긴급 알림, 지울 수 없는 단일 실행 | ADR-006 2.2·6장(완료 조건) | 안 됨 | 기동 때 `tryLock`만(`ControlServer.java:87-90`) | architect, risk-ops | 없음 | 예 | A |
-| C7 | 엔진 종료 때 진행 중 명령 마치고 닫기 | ADR-006 6장 | 안 됨 | `ControlServer.java:341` `shutdownNow()` | architect | 없음 | 예 | A |
-| C8 | 잠금 파일 `NOFOLLOW_LINKS`, PID 쓰기 실패 시 빈 파일 처리, `hash-password` 안내 문구 맞춤 | ADR-006 6장, QA pr-18 4·5 | 안 됨 | `ControlServer.java:87` `FileChannel.open`에 NOFOLLOW 없음 | architect | 없음 | 예 | A |
-| C9 | `ControlServer.isListening` 프로브 연결 시간 상한 | ADR-006 6장 | 안 됨 | `ControlServer.java:298-305` | architect | 없음 | 예 | A |
-| C10 | 확인 잠금 걸리면 외부 알림, 잠긴 동안 PANIC 청산 경로 | ADR-006 4장·6장(완료 조건), QA pr-18 3 | 안 됨 | 잠금 알림 코드 없음 | risk-ops | **Q-059**(4장) | 예 | A(알림), F(경로) |
-| C11 | secrets.json·해시 변경 알림, 엔진 재기동 알림, 실전 활성화 외부 알림, 해시를 엔진 전용 파일로 분리 | ADR-006 4장(완료 조건) | 부분 | 활성화·PANIC 명령 알림은 D-100 `NotifyingCommandAuditLog`, 재기동 감지는 `HeartbeatWatch.restarts`. 파일 변경 감시·해시 분리 없음 | risk-ops | 없음 | 예 | A |
-| C12 | `SecondConfirmation`을 검증기만 만들 수 있는 타입으로 | ADR-002 3장 되돌릴 조건 | 부분 | `R/guard/SecondConfirmation.java:17` 아직 `public record`. ArchUnit `ONLY_AUTHENTICATOR_CREATES_CONFIRMATION`·D-086으로 막는 중 | risk-ops | 없음 | 예 | A |
+| C1 | 활성화 단계 비동기 진행·진행 표시(실험실 15초 대기 상한 대응) | ADR-006 4장·6장 | 부분 | D-142: 활성화 단계는 계좌 작업 스레드, 응답 기한 12초 뒤 "진행 중", `lastResult`·화면 표시. 단계별 진행 표시는 H | risk-ops, ui-dev | 없음(설계는 지금 가능) | 예 | A |
+| C2 | 계좌별 비동기 PANIC(계좌끼리 서로 기다리지 않음) | ADR-006 4장·6장(완료 조건) | 처리됨 | D-142: 계좌별 청산, 끝나지 않은 계좌 `PENDING`, 같은 계좌 겹쳐 시작 안 함 | risk-ops | 없음 | 예 | A |
+| C3 | 늦게 끝나는 활성화 차단: 절대 기한 ①②③, `STALE` | ADR-006 6장(완료 조건), QA pr-18 1 | 처리됨 | D-142: (나) 엔진 고정 기한 ① 10초 ②③ 60초, 연결 받은 시각 기준(`ControlHandler`) | risk-ops, architect | 기한 방식 (가)/(나) 선택(architect 추천으로 자율) | 예 | A |
+| C4 | 해시 계산을 `OperatorAuthenticator` 잠금 밖으로, `MAX_ITERATIONS` 재검토 | ADR-006 6장(완료 조건) | 처리됨 | D-142: 해시는 검증 잠금 안 한 번에 하나, 상태 잠금 분리, `MAX_ITERATIONS` 2,000,000 | architect, risk-ops | 없음 | 예 | A |
+| C5 | 하향 명령(내리기·PANIC) 연결 자리 예약, 기다리는 PANIC 시간 상한, 감시 점검에 연결 포화 | ADR-006 6장(완료 조건) | 처리됨 | D-142: 기다리는 연결 6개·새 연결 자리 2개, 연결 상한 알림은 엔진이 보냄(감시는 연결 수를 못 봄) | risk-ops | 없음 | 예 | A |
+| C6 | 지워진 소켓·잠금 파일 주기 확인·재생성·긴급 알림, 지울 수 없는 단일 실행 | ADR-006 2.2·6장(완료 조건) | 처리됨 | D-142: 1초 자가 확인·다시 만들기·남의 자리 안 빼앗음, 하트비트 기동 검사·두 엔진 시 늦은 쪽 응답 멈춤. OS 잠금 객체는 안 씀 | architect, risk-ops | 없음 | 예 | A |
+| C7 | 엔진 종료 때 진행 중 명령 마치고 닫기 | ADR-006 6장 | 처리됨 | D-142: 처리기·채널이 진행 중 작업을 최대 5초 기다린 뒤 닫음, 자기 소켓만 지움 | architect | 없음 | 예 | A |
+| C8 | 잠금 파일 `NOFOLLOW_LINKS`, PID 쓰기 실패 시 빈 파일 처리, `hash-password` 안내 문구 맞춤 | ADR-006 6장, QA pr-18 4·5 | 처리됨 | D-142 | architect | 없음 | 예 | A |
+| C9 | `ControlServer.isListening` 프로브 연결 시간 상한 | ADR-006 6장 | 처리됨 | D-142: 1초 상한 | architect | 없음 | 예 | A |
+| C10 | 확인 잠금 걸리면 외부 알림, 잠긴 동안 PANIC 청산 경로 | ADR-006 4장·6장(완료 조건), QA pr-18 3 | 부분 | D-142: 잠기면 `operator-locked` 긴급 알림. 경로는 Q-059 ①(D-140), F | risk-ops | **Q-059**(4장) | 예 | A(알림), F(경로) |
+| C11 | secrets.json·해시 변경 알림, 엔진 재기동 알림, 실전 활성화 외부 알림, 해시를 엔진 전용 파일로 분리 | ADR-006 4장(완료 조건) | 처리됨 | D-142: 실전 설정 변경 `real-config-changed`, 실전 계좌 엔진 기동 `engine-started-real`, 활성화·PANIC 결과는 `real-trading-command`. 해시 파일 분리는 안 함(D-142 결정 5) | risk-ops | 없음 | 예 | A |
+| C12 | `SecondConfirmation`을 검증기만 만들 수 있는 타입으로 | ADR-002 3장 되돌릴 조건 | 처리됨 | D-142: private 생성자 클래스 + Guard가 한 번 내주는 발급기, ArchUnit 규칙·고정물 갱신 | risk-ops | 없음 | 예 | A |
 | C13 | 포지션 단위 수동 청산 명령(D-047)을 `ControlRequest`에 추가 | 메모 pr35, 기획서 STR-19 | 안 됨 | `ControlCommand`는 STATUS·ACTIVATE·DEACTIVATE·PANIC_ACCOUNT·PANIC_ALL | architect, risk-ops | 묶음 E 주문 경로 | 예 | E |
 | C14 | 재기동 뒤 보유 계좌 보호 모드 진입(`enterProtective`) 명령과 화면 | ADR-006 6장 | 부분 | Guard API는 있음, 명령·화면 없음 | risk-ops, ui-dev | 보유 조회, Q-016 | 예 | E, H |
-| C15 | 장애 테스트 후보 "엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 차단, 화면 가상 표시 없음" | ADR-006 4·6장, Q-018 | 부분 | 소켓 삭제 시 두 번째 엔진 거부 시험은 있음(`EngineMainTest`, `ControlChannelTest`). run 폴더·잠금 파일 삭제 경우 없음 | risk-ops | **Q-018** | 예 | A, I |
+| C15 | 장애 테스트 후보 "엔진 실행 중 run 폴더 삭제 → 두 번째 엔진 차단, 화면 가상 표시 없음" | ADR-006 4·6장, Q-018 | 부분 | D-142: 시험 `EngineMainTest`(run 폴더 삭제 → 두 번째 엔진 거부, 첫 엔진 응답)·`ControlChannelTest`·`EngineSelfCheckTest`. 운영 PC 시행은 I | risk-ops | **Q-018** | 예 | A, I |
 
 ### 2.2 PANIC SELL 증권사 단계(RSK-13)
 

@@ -171,15 +171,17 @@ class ArchitectureTest {
     static final String GUARD_COMMAND_CHANNEL = "com.autotrade.app.engine.command..";
 
     /**
-     * Guard를 올리는 경로(2차 확인 생성, 활성화 시작·단계 통과, 보호 모드 진입)는 명령 채널에서만 부른다.
-     * 엔진 코드가 사람의 확인 없이 실전을 여는 것을 빌드로 막는다(D-023 공통 원칙 2, ADR-002 4장).
+     * Guard를 올리는 경로(2차 확인 발급기 가져오기·발급, 활성화 시작·단계 통과, 보호 모드 진입)는 명령 채널에서만 부른다.
+     * 엔진 코드가 사람의 확인 없이 실전을 여는 것을 빌드로 막는다(D-023 공통 원칙 2, ADR-002 4장). 2차 확인 생성자는 private이고
+     * 발급기({@link SecondConfirmation.Issuer})만 만든다(D-142 C12). 생성자 접근도 함께 막아 둔다.
      */
     static final ArchRule ONLY_COMMAND_CHANNEL_RAISES_GUARD = noClasses()
             .that().resideOutsideOfPackages(GUARD_COMMAND_CHANNEL, "com.autotrade.risk.guard..")
             .should().accessTargetWhere(target(owner(assignableTo(RealTradingGuard.class)))
-                    .and(target(nameMatching("beginActivation|enterProtective|completeStep"))))
+                    .and(target(nameMatching("beginActivation|enterProtective|completeStep|confirmationIssuer"))))
             .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
                     .and(target(name("<init>"))))
+            .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.Issuer.class))))
             .because("실전 활성화는 사람의 2차 확인을 받는 명령 채널로만 연다(RSK-01)");
 
     /** 리스크 모듈(autotrade-risk) 산출물에서 읽은 클래스인지. 클래스 파일 위치로 판단해 다른 모듈의 같은 패키지 이름을 거른다. */
@@ -207,13 +209,18 @@ class ArchitectureTest {
 
     /**
      * 명령 채널 안에서도 2차 확인({@link SecondConfirmation})은 비밀번호 검증기만 만든다(ADR-002 3장 되돌릴 조건, ADR-006 2.4).
-     * 검증을 거치지 않은 확인으로 Guard를 올리는 코드를 빌드로 막는다.
+     * 확인은 Guard가 한 번만 내주는 발급기로만 만들어지고({@link RealTradingGuard#confirmationIssuer()}, D-142 C12), 그 발급기를
+     * 가져오는 곳과 발급을 부르는 곳은 검증기뿐이다. 검증을 거치지 않은 확인으로 Guard를 올리는 코드를 빌드로 막는다. 검증기보다 먼저
+     * 발급기를 가져가면 검증기 생성이 실패해 엔진이 뜨지 않는다(실행 중 확인).
      */
     static final ArchRule ONLY_AUTHENTICATOR_CREATES_CONFIRMATION = noClasses()
             .that().doNotHaveFullyQualifiedName(OperatorAuthenticator.class.getName())
             .and().resideOutsideOfPackage("com.autotrade.risk.guard..")
             .should().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.class)))
                     .and(target(name("<init>"))))
+            .orShould().accessTargetWhere(target(owner(assignableTo(SecondConfirmation.Issuer.class))))
+            .orShould().accessTargetWhere(target(owner(assignableTo(RealTradingGuard.class)))
+                    .and(target(name("confirmationIssuer"))))
             .because("2차 확인은 운영자 비밀번호와 확인 문구 검증을 통과해야만 만들어진다(RSK-01)");
 
     /** 명령 채널 서버(실전 제어 명령을 받는 쪽)는 실전 엔진만 연다(ADR-006 2.1). */
@@ -489,9 +496,9 @@ class ArchitectureTest {
         // 인터페이스·구체 타입·하위 인터페이스 호출, 메서드 참조 각 1건. RealOrderGateways는 허용
         assertThat(ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(4);
-        // 2차 확인 생성·beginActivation 호출 2건, 메서드·생성자 참조 4건
+        // 발급기 가져오기·발급·beginActivation 호출 3건, 메서드 참조 5건(활성화 시작·보호 모드·단계·발급기 가져오기·발급)
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
-                .getFailureReport().getDetails()).hasSize(6);
+                .getFailureReport().getDetails()).hasSize(8);
 
         // 플러그인 A가 플러그인 B의 메서드를 부르는 1건. broker-api(BrokerCredentials) 참조는 위반이 아니다
         JavaClasses pluginFixture = new ClassFileImporter().importClasses(PluginA.class, PluginB.class);
@@ -508,10 +515,11 @@ class ArchitectureTest {
         // 리스크 모듈의 실제 구현은 통과한다(위치 판정이 모든 클래스를 거절하는 오류 방지)
         assertThat(RISK_POLICIES_LIVE_IN_RISK_MODULE.evaluate(new ClassFileImporter().importClasses(
                 RiskChain.class)).hasViolation()).isFalse();
-        // 명령 채널 패키지 안이라도 검증기가 아니면 2차 확인을 만들 수 없다: 생성 1건, 생성자 참조 1건
+        // 명령 채널 패키지 안이라도 검증기가 아니면 2차 확인을 만들 수 없다: 발급기 가져오기·발급 호출 2건, 그 메서드 참조 2건.
+        // 검증기 자신(발급기 가져오기·발급)은 허용
         JavaClasses insideChannel = new ClassFileImporter().importClasses(ForgedConfirmation.class, OperatorAuthenticator.class);
         assertThat(ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.evaluate(insideChannel)
-                .getFailureReport().getDetails()).hasSize(2);
+                .getFailureReport().getDetails()).hasSize(4);
 
         JavaClasses misplaced = new ClassFileImporter().importClasses(MisplacedControlChannel.class);
         assertThat(ONLY_ENGINE_OPENS_CONTROL_SERVER.evaluate(misplaced).hasViolation()).isTrue();

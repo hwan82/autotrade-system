@@ -18,6 +18,8 @@ public final class PanicSteps {
     public static final String SKIPPED = "SKIPPED";
     public static final String NOT_AVAILABLE = "NOT_AVAILABLE";
     public static final String FAILED = "FAILED";
+    /** 응답 기한 안에 끝나지 않아 아직 진행 중(청산은 계속, 결과는 상태표의 마지막 결과, D-142). DONE이 아니므로 Guard OFF도 없다. */
+    public static final String PENDING = "PENDING";
 
     /** 증권사 단계(2~5)가 모두 이 순서로 DONE이어야 Guard를 끈다. */
     static final List<String> BROKER_STEPS = List.of(CANCEL_OPEN_ORDERS, CANCEL_SERVER_STOPS, SELL, CONFIRM_FILLS);

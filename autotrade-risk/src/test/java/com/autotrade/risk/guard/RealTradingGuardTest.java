@@ -35,10 +35,11 @@ class RealTradingGuardTest {
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-08T00:00:00Z"));
     private final RecordingAudit audit = new RecordingAudit();
     private final RealTradingGuard guard = new RealTradingGuard(ACCOUNTS, clock, audit);
+    private final SecondConfirmation.Issuer issuer = guard.confirmationIssuer();
 
     private SecondConfirmation confirm(AccountId account) {
         clock.advance(Duration.ofSeconds(1));
-        return new SecondConfirmation(account, "BAE", clock.instant());
+        return issuer.issue(account, "BAE", clock.instant());
     }
 
     private void open(AccountId account) {
@@ -203,8 +204,28 @@ class RealTradingGuardTest {
 
     @Test
     void 미래_시각의_2차_확인은_거부한다() {
-        SecondConfirmation c = new SecondConfirmation(KIS_KR, "BAE", clock.instant().plusSeconds(5));
+        SecondConfirmation c = issuer.issue(KIS_KR, "BAE", clock.instant().plusSeconds(5));
         assertThatThrownBy(() -> guard.beginActivation(c)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 다른_Guard의_발급기로_만든_2차_확인은_거부한다() {
+        RealTradingGuard other = new RealTradingGuard(ACCOUNTS, clock, new RecordingAudit());
+        clock.advance(Duration.ofSeconds(1));
+        SecondConfirmation foreign = other.confirmationIssuer().issue(KIS_KR, "BAE", clock.instant());
+
+        assertThatThrownBy(() -> guard.beginActivation(foreign)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> guard.enterProtective(foreign)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(guard.state(KIS_KR)).isEqualTo(GuardState.OFF);
+        assertThat(audit.records).isEmpty();
+    }
+
+    @Test
+    void 발급기는_Guard마다_한_번만_내준다() {
+        assertThatThrownBy(guard::confirmationIssuer).isInstanceOf(IllegalStateException.class);
+        RealTradingGuard fresh = new RealTradingGuard(ACCOUNTS, clock, new RecordingAudit());
+        assertThat(fresh.confirmationIssuer()).isNotNull();
+        assertThatThrownBy(fresh::confirmationIssuer).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -318,10 +339,13 @@ class RealTradingGuardTest {
                 }
             }
         });
-        slow.enterProtective(confirm(KIWOOM_KR));
+        SecondConfirmation.Issuer slowIssuer = slow.confirmationIssuer();
+        clock.advance(Duration.ofSeconds(1));
+        slow.enterProtective(slowIssuer.issue(KIWOOM_KR, "BAE", clock.instant()));
         OrderSessionPermit permit = slow.issueSessionPermit(KIWOOM_KR);
         blockAudit.set(true);
-        SecondConfirmation c = confirm(KIWOOM_KR);
+        clock.advance(Duration.ofSeconds(1));
+        SecondConfirmation c = slowIssuer.issue(KIWOOM_KR, "BAE", clock.instant());
         Thread raiser = new Thread(() -> slow.beginActivation(c));
         raiser.start();
         try {

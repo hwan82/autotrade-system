@@ -28,11 +28,12 @@ class GuardedOrderGatewayTest {
 
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-08T00:00:00Z"));
     private final RealTradingGuard guard = new RealTradingGuard(ACCOUNTS, clock, new RecordingAudit());
+    private final SecondConfirmation.Issuer issuer = guard.confirmationIssuer();
     private final FakeBroker broker = new FakeBroker(KIS_KR);
 
     private void open(AccountId account) {
         clock.advance(Duration.ofSeconds(1));
-        guard.beginActivation(new SecondConfirmation(account, "BAE", clock.instant()));
+        guard.beginActivation(issuer.issue(account, "BAE", clock.instant()));
         for (ActivationStep step : ActivationStep.values()) {
             guard.completeStep(account, step);
         }
@@ -113,7 +114,7 @@ class GuardedOrderGatewayTest {
     void 다른_Guard가_발급한_허가는_쓸_수_없다() {
         RealTradingGuard other = new RealTradingGuard(ACCOUNTS, clock, new RecordingAudit());
         clock.advance(Duration.ofSeconds(1));
-        other.beginActivation(new SecondConfirmation(KIS_KR, "BAE", clock.instant()));
+        other.beginActivation(other.confirmationIssuer().issue(KIS_KR, "BAE", clock.instant()));
         for (ActivationStep step : ActivationStep.values()) {
             other.completeStep(KIS_KR, step);
         }

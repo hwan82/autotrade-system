@@ -17,7 +17,7 @@ const STEP = {
   PROTECTIVE_LOCK: '보호 모드 고정', CANCEL_OPEN_ORDERS: '미체결 취소', CANCEL_SERVER_STOPS: '서버 측 손절 취소',
   SELL: '매도', CONFIRM_FILLS: '체결 확인', GUARD_OFF: 'Guard 끄기',
 };
-const OUTCOME = { DONE: '완료', SKIPPED: '건너뜀', NOT_AVAILABLE: '수행 불가', FAILED: '실패' };
+const OUTCOME = { DONE: '완료', SKIPPED: '건너뜀', NOT_AVAILABLE: '수행 불가', FAILED: '실패', PENDING: '진행 중' };
 const PANIC_ALL_PHRASE = '전체 청산';
 // 엔진이 답하지 않을 때 보여 줄 마지막 확인 상태
 let lastUp = null;
@@ -93,7 +93,9 @@ function body(view, refresh, result) {
         table([
           { label: '계좌', render: a => h('strong', {}, a.id) },
           { label: '증권사·시장', render: a => `${BROKER[a.broker] || a.broker} · ${MARKET[a.market] || a.market}` },
-          { label: 'Guard', render: a => stateBadge(a) },
+          { label: 'Guard', render: a => h('div', {}, stateBadge(a),
+            // 응답 기한 뒤에 끝난 활성화·PANIC 결과(D-142). 진행 표시 화면은 묶음 H
+            a.lastResult ? h('div', { class: 'small' }, a.lastResult) : null) },
           { label: '계좌번호', render: a => a.accountNumberConfigured ? '설정됨' : h('span', { class: 'warn-text' }, '미설정') },
           { label: '명령', render: a => h('div', { class: 'row-actions' },
             h('button', {

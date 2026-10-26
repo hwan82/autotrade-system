@@ -27,7 +27,9 @@ class EventRoutesTest {
         EventRoutes r = EventRoutes.defaults();
         for (String urgent : new String[] {EventRoutes.PROCESS_STALE, EventRoutes.HEARTBEAT_UNREADABLE,
                 EventRoutes.PROCESS_RESTARTED, EventRoutes.STOP_REQUEST_ON, EventRoutes.READING_MISSING,
-                EventRoutes.CONFIG_WARNING, EventRoutes.REAL_TRADING_COMMAND, EventRoutes.NOTIFICATION_CHANNEL}) {
+                EventRoutes.CONFIG_WARNING, EventRoutes.REAL_TRADING_COMMAND, EventRoutes.NOTIFICATION_CHANNEL,
+                EventRoutes.CONTROL_CHANNEL, EventRoutes.REAL_CONFIG_CHANGED, EventRoutes.ENGINE_STARTED_REAL,
+                EventRoutes.OPERATOR_LOCKED}) {
             assertThat(r.known(urgent)).as(urgent).isTrue();
             assertThat(r.severityOf(urgent)).as(urgent).isEqualTo(Severity.URGENT);
         }

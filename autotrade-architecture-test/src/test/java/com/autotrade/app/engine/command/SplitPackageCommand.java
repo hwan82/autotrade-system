@@ -2,7 +2,6 @@ package com.autotrade.app.engine.command;
 
 import com.autotrade.domain.account.AccountId;
 import com.autotrade.risk.guard.RealTradingGuard;
-import com.autotrade.risk.guard.SecondConfirmation;
 import java.time.Instant;
 
 /**
@@ -14,6 +13,6 @@ public final class SplitPackageCommand {
     private SplitPackageCommand() {}
 
     public static void raise(RealTradingGuard guard) {
-        guard.beginActivation(new SecondConfirmation(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
+        guard.beginActivation(guard.confirmationIssuer().issue(new AccountId("KIS-1"), "nobody", Instant.EPOCH));
     }
 }
