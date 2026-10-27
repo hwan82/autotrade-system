@@ -23,7 +23,8 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 한국투자 플러그인(2단계: 국내 실시간 시세만). 주문·잔고 능력은 7단계 risk-ops 작업에서 더한다.
+ * 한국투자 플러그인(2단계: 국내 실시간 시세만). 주문·잔고 클라이언트는 {@code com.autotrade.broker.kis.order}에 있지만(D-145)
+ * 아직 연결하지 않았다: 능력 선언과 {@link #orderGateway}는 그대로다. 연결은 멱등 키 영속(B4) 뒤 risk-ops 작업에서 한다.
  * 키가 없으면 소스를 만들지 않고 NOT_CONFIGURED로 남는다(오류·알림 없음).
  */
 public final class KisPlugin implements BrokerPlugin {
