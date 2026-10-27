@@ -67,11 +67,16 @@ final class StoreFixtures {
     static final class RecordingAlerts implements StoreAlerts {
         final List<String> titles = Collections.synchronizedList(new ArrayList<>());
         final List<String> bodies = Collections.synchronizedList(new ArrayList<>());
+        /** 켜면 기록한 뒤 예외를 던진다(알림 경로 실패 흉내). */
+        volatile boolean fail;
 
         @Override
         public void urgent(String title, String body) {
             titles.add(title);
             bodies.add(body);
+            if (fail) {
+                throw new IllegalStateException("알림 실패(시험)");
+            }
         }
     }
 

@@ -153,31 +153,54 @@ public final class EngineStore implements AutoCloseable {
         } catch (IOException e) {
             throw new StoreRefusal(e.getMessage());
         }
-        WriterLock lock = WriterLock.acquire(paths.writerLock());
+        WriterLock lock;
+        try {
+            lock = WriterLock.acquire(paths.writerLock());
+        } catch (StoreRefusal e) {
+            throw e;
+        } catch (IOException e) {
+            throw refusal(e);
+        }
         try {
             return openLocked(paths, o, lock, commonGate);
-        } catch (IOException | RuntimeException e) {
+        } catch (StoreRefusal | RuntimeException e) {
             lock.close();
             throw e;
+        } catch (IOException e) {
+            lock.close();
+            throw refusal(e);
         }
+    }
+
+    /**
+     * 저장소를 여는 중 남은 입출력 실패는 모두 기동 거부로 보인다(명령 채널 실패 문구로 보이지 않게, PR #248 독립 QA Q1). 원장 읽기·
+     * 공통 원장 폴더 준비 실패는 여기까지 오지 않고 차단·경고로 다룬다.
+     */
+    private static StoreRefusal refusal(IOException e) {
+        return new StoreRefusal("엔진 저장소를 열지 못했습니다(" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")", e);
     }
 
     private static EngineStore openLocked(StorePaths paths, Options o, WriterLock lock,
             java.util.concurrent.CountDownLatch commonGate) throws IOException {
         Instant now = o.clock().instant();
-        for (Path dir : List.of(paths.bootFile().getParent(), paths.commandsDir(), paths.blacklistFile().getParent())) {
-            StorePaths.prepareDir(paths.root(), dir);
-        }
         List<String> globalBlocks = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         long maxBoot = 0;
 
         // ③ 공통 원장
-        // 읽기 오류는 기동 거부가 아니라 손상과 같이 다룬다: 블랙리스트면 모든 계좌 전면 차단, 기동·명령이면 옮기고 경고(2.7 ③,
-        // PR #248 risk-ops R-1)
-        LedgerScan.Result bootScan = scanCommon(StorePaths.BOOT_STREAM, paths.bootFile(), false, now);
-        LedgerScan.Result commandScan = scanCommon(StorePaths.COMMANDS_STREAM, paths.commandsDir(), true, now);
-        LedgerScan.Result blacklistScan = scanCommon(StorePaths.BLACKLIST_STREAM, paths.blacklistFile(), false, now);
+        // 폴더 준비·읽기 오류는 기동 거부가 아니라 손상과 같이 다룬다: 블랙리스트면 모든 계좌 전면 차단, 기동이면 기동 기록을 못 써
+        // 전면 차단, 명령이면 옮기고 경고(2.7 ③, PR #248 risk-ops R-1, 독립 QA Q1)
+        IOException bootDir = prepareCommon(paths, paths.bootFile().getParent());
+        IOException commandsDir = prepareCommon(paths, paths.commandsDir());
+        IOException blacklistDir = prepareCommon(paths, paths.blacklistFile().getParent());
+        LedgerScan.Result bootScan = bootDir != null ? LedgerScan.unreadable(StorePaths.BOOT_STREAM, paths.bootFile(), bootDir)
+                : scanCommon(StorePaths.BOOT_STREAM, paths.bootFile(), false, now);
+        LedgerScan.Result commandScan = commandsDir != null
+                ? LedgerScan.unreadable(StorePaths.COMMANDS_STREAM, paths.commandsDir(), commandsDir)
+                : scanCommon(StorePaths.COMMANDS_STREAM, paths.commandsDir(), true, now);
+        LedgerScan.Result blacklistScan = blacklistDir != null
+                ? LedgerScan.unreadable(StorePaths.BLACKLIST_STREAM, paths.blacklistFile(), blacklistDir)
+                : scanCommon(StorePaths.BLACKLIST_STREAM, paths.blacklistFile(), false, now);
         for (LedgerScan.Result r : List.of(bootScan, commandScan, blacklistScan)) {
             maxBoot = Math.max(maxBoot, r.maxBoot());
             noteCut(r, warnings);
@@ -244,6 +267,9 @@ public final class EngineStore implements AutoCloseable {
         // 명령 감사를 프로세스 로그에만 남기고 경고
         LedgerFile bootLedger = null;
         try {
+            if (bootDir != null) {
+                throw bootDir; // 폴더가 없으면 옮길 것도 새로 열 곳도 없다
+            }
             if (bootScan.ok()) {
                 bootLedger = LedgerFile.single(paths.bootFile(), bootScan);
             } else {
@@ -361,7 +387,29 @@ public final class EngineStore implements AutoCloseable {
 
     private void startLockCheck() {
         long every = limits.lockCheck().toMillis();
-        lockChecker.scheduleWithFixedDelay(this::checkLock, every, every, TimeUnit.MILLISECONDS);
+        lockChecker.scheduleWithFixedDelay(this::checkLockSafely, every, every, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 주기 확인. 예외가 새면 {@code ScheduledExecutorService}가 이후 실행을 조용히 멈추므로 여기서 잡는다. 확인 자체가 실패하면
+     * 잠금이 그대로인지 알 수 없으니 전면 차단 쪽으로 둔다(PR #248 독립 QA Q4).
+     */
+    void checkLockSafely() {
+        try {
+            checkLock();
+        } catch (Throwable t) {
+            LOG.log(Level.ERROR, "엔진 저장소 쓰기 잠금 확인 실패", t);
+            try {
+                block("쓰기 잠금 확인 실패(" + t.getClass().getSimpleName() + ")");
+            } catch (Throwable ignored) {
+                // 알림까지 실패해도 다음 주기 확인은 계속 돈다
+            }
+        }
+    }
+
+    /** 시험용. */
+    WriterLock writerLockForTest() {
+        return lock;
     }
 
     /** 실행 중 쓰기 잠금 파일 확인(2.9 (가)). 지워졌거나 바뀌었으면 모든 계좌의 올리는 전이를 막고 긴급 알림을 한 번 낸다. */
@@ -607,7 +655,16 @@ public final class EngineStore implements AutoCloseable {
         return false;
     }
 
-    /** 손상 파일을 같은 폴더의 다른 이름으로 옮긴다(지우지 않음). */
+    /** 공통 원장 폴더를 준비한다. 실패하면 그 예외(던지지 않음). */
+    private static IOException prepareCommon(StorePaths paths, Path dir) {
+        try {
+            StorePaths.prepareDir(paths.root(), dir);
+            return null;
+        } catch (IOException e) {
+            return e;
+        }
+    }
+
     private static LedgerScan.Result scanCommon(String stream, Path path, boolean dated, Instant now) {
         try {
             return dated ? LedgerScan.dated(path, stream, now) : LedgerScan.single(path, stream, now);
@@ -616,6 +673,7 @@ public final class EngineStore implements AutoCloseable {
         }
     }
 
+    /** 손상 파일(또는 폴더 자리의 파일·읽지 못한 폴더)을 같은 폴더의 다른 이름으로 옮긴다(지우지 않음). */
     private static Path quarantine(Path file, long boot) throws IOException {
         Path target = file.resolveSibling(file.getFileName() + ".corrupt-" + boot);
         int n = 0;

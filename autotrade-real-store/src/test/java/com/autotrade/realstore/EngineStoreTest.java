@@ -20,7 +20,13 @@ import com.autotrade.risk.guard.RaiseNotAppliedException;
 import com.autotrade.risk.guard.RealTradingGuard;
 import com.autotrade.risk.guard.SecondConfirmation;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.function.Function;
+import java.time.ZoneOffset;
+import java.time.LocalDate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -338,6 +344,53 @@ class EngineStoreTest {
     }
 
     @Test
+    void 블랙리스트_원장_폴더_자리에_파일이_있으면_기동은_하고_모든_계좌를_전면_차단한다() throws Exception {
+        // PR #248 독립 QA Q1·S4 재현: 전에는 IOException으로 기동 거부(명령 채널 문구)
+        Files.createDirectories(config.resolve("engine-store"));
+        Files.writeString(config.resolve("engine-store/blacklist"), "x", StandardCharsets.UTF_8);
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("블랙리스트 원장 손상").contains("폴더가 아닙니다");
+            assertThat(e.store.fullBlock(KIWOOM)).isPresent();
+            assertThatThrownBy(() -> e.guard.enterProtective(e.confirm(KIWOOM))).isInstanceOf(RaiseNotAppliedException.class);
+            e.guard.shutdown(KIWOOM, "BAE", "킬스위치");
+        }
+        assertThat(Files.isRegularFile(config.resolve("engine-store/blacklist"))).isTrue(); // 지우거나 옮기지 않는다
+    }
+
+    @Test
+    void 기동_원장_폴더_자리에_파일이_있으면_기동은_하고_기동_기록_실패로_전면_차단한다() throws Exception {
+        Files.createDirectories(config.resolve("engine-store"));
+        Files.writeString(config.resolve("engine-store/boot"), "x", StandardCharsets.UTF_8);
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("기동 기록 실패");
+            assertThat(e.store.fullBlock(KIWOOM)).isPresent();
+            e.store.recordCommand("STATUS", "-", "OK");
+        }
+        assertThat(Files.isRegularFile(config.resolve("engine-store/boot"))).isTrue();
+    }
+
+    @Test
+    void 명령_원장_폴더_자리에_파일이_있으면_옮겨_두고_경고만_하고_기동한다() throws Exception {
+        Files.createDirectories(config.resolve("engine-store/audit"));
+        Files.writeString(config.resolve("engine-store/audit/commands"), "x", StandardCharsets.UTF_8);
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            assertThat(e.store.report().warnings()).anyMatch(w -> w.contains("명령 감사 원장 손상") && w.contains("폴더가 아닙니다"));
+            assertThat(e.store.fullBlock(KIS)).isEmpty();
+            e.store.recordCommand("STATUS", "-", "OK");
+        }
+        assertThat(Files.readString(config.resolve("engine-store/audit/commands.corrupt-1"), StandardCharsets.UTF_8)).isEqualTo("x");
+        assertThat(Files.isDirectory(config.resolve("engine-store/audit/commands"))).isTrue();
+    }
+
+    @Test
+    void 저장소를_여는_중_남은_입출력_실패는_기동_거부로_보인다() throws Exception {
+        // 쓰기 잠금 자리에 폴더: 잡지 못하는 입출력 실패. StoreRefusal이어야 엔진이 저장소 문구로 보인다(독립 QA Q1)
+        Files.createDirectories(config.resolve("engine-store/writer.lock"));
+        assertThatThrownBy(() -> EngineStore.open(options(config, clock, alerts)))
+                .isInstanceOf(StoreRefusal.class).hasMessageContaining("엔진 저장소");
+    }
+
+    @Test
     void 기동_원장을_읽지_못하면_옮겨_두고_경고만_하고_기동한다() throws Exception {
         Files.createDirectories(config.resolve("engine-store/boot/boot.jsonl/x"));
         try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
@@ -366,13 +419,61 @@ class EngineStoreTest {
     }
 
     @Test
-    void 잠금을_쥔_채널로도_잠금_파일_내용을_대조할_수_있다() throws Exception {
-        // Windows에서는 자기 배타 잠금 구간을 다른 핸들로 읽지 못해 이 길로 대조한다(PR #248 risk-ops F-3)
-        try (WriterLock lock = WriterLock.acquire(Files.createDirectories(config.resolve("engine-store")).resolve("writer.lock"))) {
+    void 쓰기_잠금은_내용_밖_구간을_잡아_내용은_경로로_읽히고_파일_전체_잠금과는_겹친다() throws Exception {
+        // 잠금 구간이 내용과 겹치지 않아 Windows에서도 자기 내용을 경로로 읽을 수 있다(PR #248 독립 QA 발견 1)
+        Path file = Files.createDirectories(config.resolve("engine-store")).resolve("writer.lock");
+        try (WriterLock lock = WriterLock.acquire(file)) {
             lock.stamp(7, 4242);
-            assertThat(new String(lock.readByLockedChannel(), StandardCharsets.UTF_8)).isEqualTo("boot=7 pid=4242\n");
+            assertThat(lock.lockedPosition()).isEqualTo(WriterLock.LOCK_OFFSET);
             assertThat(lock.check()).isEmpty();
-            assertThat(new String(lock.readByLockedChannel(), StandardCharsets.UTF_8)).isEqualTo("boot=7 pid=4242\n");
+            // 다른 주체가 파일 전체를 잠그려 하면 이 구간과 겹친다(같은 JVM에서는 OverlappingFileLockException)
+            try (FileChannel other = FileChannel.open(file, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                assertThatThrownBy(other::tryLock).isInstanceOf(OverlappingFileLockException.class);
+            }
+        }
+    }
+
+    @Test
+    void fileKey가_없고_경로로_잠금_파일을_읽지_못하면_다른_쓰기_주체로_보고_막는다() throws Exception {
+        // Windows(fileKey null)에서 잠금 파일이 지워진 뒤 다른 프로세스가 같은 이름의 새 파일을 만들어 잠근 경우를 흉내 낸다.
+        // 경로는 있지만 경로로 읽지 못한다(여기서는 같은 이름의 폴더). 엔진이 쥔 옛 채널로 대조해 통과시키면 안 된다
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            e.store.writerLockForTest().forgetFileKeyForTest();
+            Path file = config.resolve("engine-store/writer.lock");
+            Files.delete(file);
+            Files.createDirectory(file);
+            e.store.checkLock();
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("경로로 읽지 못했습니다");
+            assertThat(e.store.fullBlock(KIWOOM)).isPresent();
+            assertThat(alerts.titles).contains("실전 엔진 저장소 전면 차단");
+            assertThatThrownBy(() -> e.guard.enterProtective(e.confirm(KIWOOM))).isInstanceOf(RaiseNotAppliedException.class);
+            Files.delete(file);
+        }
+    }
+
+    @Test
+    void fileKey가_없어도_같은_이름의_새_파일로_바뀌면_내용_대조로_막는다() throws Exception {
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            e.store.writerLockForTest().forgetFileKeyForTest();
+            Path file = config.resolve("engine-store/writer.lock");
+            Files.delete(file);
+            Files.writeString(file, "boot=99 pid=1\n", StandardCharsets.UTF_8);
+            e.store.checkLock();
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("내용이 바뀌었습니다");
+        }
+    }
+
+    @Test
+    void 잠금_확인_중_예외가_나도_주기_확인은_멈추지_않고_막는다() throws Exception {
+        // ScheduledExecutorService는 예외가 새면 이후 실행을 멈춘다(PR #248 독립 QA Q4)
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            alerts.fail = true;
+            Files.writeString(config.resolve("engine-store/writer.lock"), "boot=9 pid=1\n", StandardCharsets.UTF_8);
+            e.store.checkLockSafely(); // 예외가 밖으로 나오지 않는다
+            assertThat(e.store.fullBlock(KIS)).get().asString().contains("쓰기 잠금 교체").contains("쓰기 잠금 확인 실패");
+            e.store.checkLockSafely();
+            assertThatThrownBy(() -> e.guard.enterProtective(e.confirm(KIWOOM))).isInstanceOf(RaiseNotAppliedException.class);
+            alerts.fail = false;
         }
     }
 
@@ -386,6 +487,66 @@ class EngineStoreTest {
             assertThat(e.store.fullBlock(KIWOOM)).isPresent();
             assertThatThrownBy(() -> e.guard.enterProtective(e.confirm(KIWOOM))).isInstanceOf(RaiseNotAppliedException.class);
             assertThat(e.guard.state(KIWOOM)).isEqualTo(GuardState.OFF);
+        }
+    }
+
+    // ---- 복구 시간(ADR-015 2.7, PR #248 독립 QA Q2) ----
+
+    /** 하루치 최대 기록 수 가정 {@code [가정]}: 계좌마다 주문 원장 20,000줄·감사 원장 2,000줄·위험 원장 5,000줄(누적), 명령 2,000줄, 기동 2,000줄(누적). */
+    static final int DAY_ORDERS = 20_000;
+    static final int DAY_AUDIT = 2_000;
+    static final int RISK_TOTAL = 5_000;
+    static final int DAY_COMMANDS = 2_000;
+    static final int BOOT_TOTAL = 2_000;
+    /** 목표 1초(2.7 {@code [추론]}). CI 기계 편차를 두어 시험은 3초를 넘으면 실패한다. 운영 PC 실측은 절차서 P11. */
+    static final Duration RECOVERY_LIMIT = Duration.ofSeconds(3);
+
+    @Test
+    void 하루치_최대_기록_가정으로_다시_열어도_복구가_목표_시간_안에_끝난다() throws Exception {
+        try (Engine e = new Engine(EngineStore.Limits.DEFAULT)) {
+            e.store.recordCommand("STATUS", "-", "OK");
+        }
+        StorePaths paths = StorePaths.in(config);
+        Function<Instant, LocalDate> utcDay = at -> LocalDate.ofInstant(at, ZoneOffset.UTC);
+        for (AccountId id : List.of(KIS, KIWOOM)) {
+            fill(LedgerFile.dated(paths.ordersDir(id), LedgerScan.dated(paths.ordersDir(id),
+                    StorePaths.accountStream(id, StorePaths.ORDERS), clock.instant()), utcDay), DAY_ORDERS);
+            fill(LedgerFile.dated(paths.auditDir(id), LedgerScan.dated(paths.auditDir(id),
+                    StorePaths.accountStream(id, StorePaths.AUDIT), clock.instant()), utcDay), DAY_AUDIT);
+            Files.createDirectories(paths.riskFile(id).getParent());
+            fill(LedgerFile.single(paths.riskFile(id), LedgerScan.single(paths.riskFile(id),
+                    StorePaths.accountStream(id, StorePaths.RISK), clock.instant())), RISK_TOTAL);
+        }
+        fill(LedgerFile.dated(paths.commandsDir(), LedgerScan.dated(paths.commandsDir(), StorePaths.COMMANDS_STREAM,
+                clock.instant()), utcDay), DAY_COMMANDS);
+        fill(LedgerFile.single(paths.bootFile(), LedgerScan.single(paths.bootFile(), StorePaths.BOOT_STREAM, clock.instant())),
+                BOOT_TOTAL);
+
+        long started = System.nanoTime();
+        try (EngineStore s = EngineStore.open(options(config, clock, alerts))) {
+            Duration took = Duration.ofNanos(System.nanoTime() - started);
+            System.out.println("복구 시간(하루치 가정): " + took.toMillis() + "ms");
+            assertThat(s.fullBlock(KIS)).isEmpty();
+            assertThat(s.report().warnings()).isEmpty();
+            assertThat(took).isLessThan(RECOVERY_LIMIT);
+        }
+    }
+
+    /** 실제 원장 쓰기 길(LedgerFile)로 줄을 붙이고 한 번 강제 기록한다. 본문은 주문 이벤트 크기쯤(약 200바이트). */
+    private void fill(LedgerFile ledger, int lines) throws IOException {
+        try {
+            for (int i = 0; i < lines; i++) {
+                ObjectNode body = LedgerCodec.body();
+                body.put("order", "ORD-" + i);
+                body.put("event", "FILLED");
+                body.put("qty", 10);
+                body.put("price", "71200");
+                body.put("note", "복구 시간 시험용 본문 채움 ".repeat(4));
+                ledger.append(1, clock.instant(), "note", body);
+            }
+            ledger.force();
+        } finally {
+            ledger.close();
         }
     }
 

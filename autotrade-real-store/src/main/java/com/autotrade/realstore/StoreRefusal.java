@@ -10,4 +10,8 @@ public final class StoreRefusal extends IOException {
     public StoreRefusal(String message) {
         super(message);
     }
+
+    public StoreRefusal(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

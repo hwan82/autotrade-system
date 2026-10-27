@@ -22,6 +22,16 @@ class SecretMaskerTest {
     }
 
     @Test
+    void 짧은_비밀값이_긴_비밀값의_앞부분이어도_긴_값의_나머지가_남지_않는다() {
+        // 자리표시자 값(실제 비밀값 아님). 짧은 값을 먼저 주어도 긴 값부터 가린다(PR #248 독립 QA Q6)
+        SecretMasker masker = new SecretMasker(() -> List.of("TESTKEY", "TESTKEY-PLACEHOLDER-TAIL"));
+        ObjectNode body = LedgerCodec.body();
+        body.put("note", "응답 TESTKEY-PLACEHOLDER-TAIL 끝");
+        assertThat(masker.mask(body)).isTrue();
+        assertThat(body.get("note").textValue()).isEqualTo("응답 " + SecretMasker.MASK + " 끝").doesNotContain("TAIL");
+    }
+
+    @Test
     void 비밀값이_없으면_바꾸지_않는다() {
         SecretMasker masker = new SecretMasker(List::of);
         ObjectNode body = LedgerCodec.body();

@@ -34,6 +34,8 @@ final class SecretMasker {
                 values.add(s);
             }
         }
+        // 긴 값부터 바꾼다: 짧은 비밀값이 긴 비밀값의 앞부분이면 짧은 것을 먼저 바꿀 때 긴 값의 나머지가 남는다(PR #248 독립 QA Q6)
+        values.sort((a, b) -> Integer.compare(b.length(), a.length()));
         return !values.isEmpty() && maskObject(body, values);
     }
 

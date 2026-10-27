@@ -18,11 +18,20 @@ import java.util.Optional;
 /**
  * 원장 쓰기 주체는 한 번에 하나(ADR-015 2.9). {@code writer.lock}을 {@code FileChannel.tryLock}으로 잡지 못하면 기동을 거부한다.
  *
+ * <p>잠그는 구간은 파일 내용이 아니라 {@link #LOCK_OFFSET}의 1바이트다. 내용(부팅 번호·PID)은 잠금 구간 밖에 있어 Windows에서도
+ * 다른 핸들로 경로를 열어 읽을 수 있다 {@code [추론]}. 다른 프로세스가 파일 전체를 잠그려 하면({@code tryLock()}은 0부터
+ * {@code Long.MAX_VALUE}까지) 이 구간과 겹쳐 실패한다.
+ *
  * <p>리눅스·macOS는 잠긴 파일도 지울 수 있고, Windows도 JDK가 지우기를 허용하는 공유 모드로 열어 잠긴 파일이 지워질 수 있다
- * {@code [추론]}. 그래서 잡은 뒤 파일에 자기 부팅 번호와 PID를 적어 두고 {@link #check()}로 파일이 그대로 있는지, 내용이 같은지를
- * 본다(내용 대조가 기본, POSIX에서는 {@code fileKey}도 본다. Windows의 {@code fileKey}는 null이다).
+ * {@code [추론]}. 그래서 잡은 뒤 파일에 자기 부팅 번호와 PID를 적어 두고 {@link #check()}로 경로의 파일이 그대로 있는지, 경로로
+ * 읽은 내용이 같은지를 본다(POSIX에서는 {@code fileKey}도 본다. Windows의 {@code fileKey}는 null이다). 경로로 읽지 못하면
+ * 문제로 본다. 잠금 파일이 지워진 뒤 다른 프로세스가 같은 이름의 새 파일을 만들어 잠그면 경로 읽기가 막히거나 내용이 달라
+ * 어느 쪽이든 걸린다(PR #248 독립 QA 발견 1). 엔진이 쥔 채널로 읽어 대조하지 않는다. 그 채널은 처음 잡은 옛 파일이라 늘 같다.
  */
 final class WriterLock implements AutoCloseable {
+
+    /** 잠그는 1바이트의 위치. 내용(수십 바이트)과 겹치지 않을 만큼 멀다. */
+    static final long LOCK_OFFSET = 1L << 62;
 
     private final Path path;
     private final FileChannel channel;
@@ -49,7 +58,7 @@ final class WriterLock implements AutoCloseable {
                 StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
         FileLock lock;
         try {
-            lock = channel.tryLock();
+            lock = channel.tryLock(LOCK_OFFSET, 1, false);
         } catch (OverlappingFileLockException e) {
             lock = null; // 같은 JVM 안에서 이미 잡음(시험·잘못된 이중 기동)
         } catch (IOException | RuntimeException e) {
@@ -92,15 +101,11 @@ final class WriterLock implements AutoCloseable {
         byte[] got;
         try {
             got = readByPath();
-        } catch (IOException byPath) {
-            // Windows는 자기 프로세스가 잡은 배타 잠금 구간도 다른 핸들로는 읽지 못한다 {@code [추론]}(PR #248 risk-ops F-3).
-            // 경로가 그대로 있으면(위 확인) 잠금을 쥔 채널로 읽어 대조한다. 경로의 파일이 바뀌었다면 새 파일은 잠기지 않아
-            // 위 경로 읽기가 성공하고 내용 대조에서 걸린다
-            try {
-                got = readByLockedChannel();
-            } catch (IOException e) {
-                return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")을 읽지 못했습니다");
-            }
+        } catch (IOException e) {
+            // 자기 내용은 잠금 구간 밖이라 늘 읽혀야 한다. 못 읽으면 다른 프로세스가 같은 이름의 새 파일을 잡았거나 파일이
+            // 바뀐 것으로 본다(안전 쪽)
+            return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")을 경로로 읽지 못했습니다(다른 쓰기 주체 의심: "
+                    + e.getClass().getSimpleName() + ")");
         }
         if (!Arrays.equals(got, stamp)) {
             return Optional.of("엔진 저장소 쓰기 잠금 파일(" + path.getFileName() + ")의 내용이 바뀌었습니다(다른 쓰기 주체 의심)");
@@ -118,18 +123,14 @@ final class WriterLock implements AutoCloseable {
         }
     }
 
-    /** 잠금을 쥔 채널로 처음부터 읽는다(쓰기 위치는 바꾸지 않음). 시험에서 Windows 경로를 흉내 내려고 패키지 공개. */
-    byte[] readByLockedChannel() throws IOException {
-        ByteBuffer buf = ByteBuffer.allocate(stamp.length + 1);
-        long pos = 0;
-        while (buf.hasRemaining()) {
-            int n = channel.read(buf, pos);
-            if (n < 0) {
-                break;
-            }
-            pos += n;
-        }
-        return Arrays.copyOf(buf.array(), buf.position());
+    /** 시험용: Windows처럼 {@code fileKey}가 없는 경우를 흉내 낸다. */
+    void forgetFileKeyForTest() {
+        this.key = null;
+    }
+
+    /** 시험용: 잡은 잠금 구간의 시작 위치. */
+    long lockedPosition() {
+        return lock.position();
     }
 
     private Object fileKey() {

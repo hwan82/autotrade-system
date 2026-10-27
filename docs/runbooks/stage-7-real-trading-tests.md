@@ -40,7 +40,7 @@
 | P9 | 프로세스 4개 설정 폴더 일치 | 엔진·게이트웨이·실험실·감시가 같은 `AUTOTRADE_CONFIG_DIR`을 봄(감시 하트비트가 ABSENT로만 보이는 오설정 방지) | PR #118 QA R1 |
 | P10 | 실험실·게이트웨이 힙 | 실전 엔진 몫을 남긴 힙 상한(6단계 실측 기준, 묶음 I 시행 때 확정 `[가정]`) | 메모 pr52 후속 |
 | P11 | 엔진 저장소 강제 기록 시간 | 엔진을 끈 채 `bin\autotrade-engine.bat store-probe` 출력의 99% 값이 1초(올림 감사 상한 2초의 절반) 이하. 넘으면 결과 줄을 개발 쪽에 넘기고 상한을 다시 정할 때까지 실전 활성화를 미룬다. 결과 줄은 시험 기록에 남긴다 | ADR-015 3장 되돌릴 조건 (1), D-146 |
-| P12 | 저장소 쓰기 잠금 교체 감지(Windows) | 엔진 실행 중 `engine-store\writer.lock`을 지우거나 내용을 바꾸면 5초 안에 "실전 엔진 저장소 전면 차단" 긴급 알림이 오고 활성화·보호 모드 상향이 거절됨. 지울 수 없으면 그 사실을 기록(3-R과 함께 시행) | ADR-015 2.9, PR #239 QA Q2, D-146 |
+| P12 | 저장소 쓰기 잠금 교체 감지(Windows) | 엔진 실행 중 ① 다른 PowerShell에서 `engine-store\writer.lock` 내용(`boot=N pid=P`)이 읽히는지 확인(`Get-Content`), ② 파일 내용을 바꾸면, ③ 파일을 지우면, ④ 지운 뒤 다른 프로세스가 같은 이름의 새 파일을 만들어 쥐고 있으면(PowerShell `$f=[IO.File]::Open('<경로>\writer.lock','OpenOrCreate','ReadWrite','None')`, 끝나면 `$f.Close()`) 각각 5초 안에 "실전 엔진 저장소 전면 차단" 긴급 알림이 오고 활성화·보호 모드 상향이 거절됨. ②~④는 경우마다 엔진을 다시 띄워 시행. 지울 수 없으면 그 사실을 기록(3-R과 함께, 묶음 F 감시 긴급 경로 전에 시행) | ADR-015 2.9, PR #239 QA Q2, PR #248 독립 QA 발견 1, D-146 |
 
 명령(PowerShell)은 묶음 I 시행 PR에서 채운다. 예: `Get-ChildItem env: | Where-Object Name -match 'JAVA'`, `Get-Acl $cfg | Format-List`.
 

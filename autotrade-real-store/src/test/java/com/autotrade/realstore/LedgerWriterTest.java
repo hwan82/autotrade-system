@@ -66,6 +66,39 @@ class LedgerWriterTest {
         }
     }
 
+    @Test
+    void 거래일이_바뀌며_앞_날짜_파일에_강제_기록된_줄은_뒤_줄이_실패해도_기록됨으로_끝난다() throws Exception {
+        // PR #248 독립 QA Q5: 되돌림은 새 날짜 파일만 지운다. 앞 날짜 파일에 이미 강제 기록된 같은 원장 줄을 실패로 돌리면
+        // 원장에는 올림 줄이 남는데 Guard는 안 올라 기록과 상태가 어긋난다
+        Path audit = dir.resolve("audit");
+        StoreFixtures.MutableClock clock = new StoreFixtures.MutableClock(Instant.parse("2026-10-26T01:00:00Z"));
+        LedgerFile ledger = LedgerFile.dated(audit, LedgerScan.dated(audit, "test/audit", clock.instant()),
+                at -> java.time.LocalDate.ofInstant(at, ZoneOffset.UTC));
+        LedgerWriter writer = new LedgerWriter("test", 1, clock, 100, (l, e) -> { });
+        try {
+            CountDownLatch gate = new CountDownLatch(1);
+            writer.gateForce(gate);
+            LedgerWriter.Pending first = writer.submit(ledger, "note", body("앞선 줄"));
+            awaitBacklog(writer, 0);
+            LedgerWriter.Pending a = writer.submit(ledger, "note", body("A 올림"));
+            clock.advance(java.time.Duration.ofDays(1));
+            ObjectNode bad = body("B");
+            bad.putPOJO("explode", new Exploding());
+            LedgerWriter.Pending b = writer.submit(ledger, "note", bad);
+            writer.gateForce(null);
+            gate.countDown();
+            assertThat(first.done.get(5, TimeUnit.SECONDS)).isEqualTo(2); // 1은 첫 날 체크포인트
+            assertThat(failed(b)).isTrue();
+            assertThat(failed(a)).as("앞 날짜 파일에 강제 기록된 줄은 지워지지 않았다").isFalse();
+            assertThat(Files.readString(audit.resolve("2026-10-26.jsonl"), StandardCharsets.UTF_8)).contains("A 올림");
+            LedgerWriter.Pending next = writer.submit(ledger, "note", body("다음"));
+            next.done.get(5, TimeUnit.SECONDS);
+            assertThat(LedgerScan.dated(audit, "test/audit", clock.instant()).ok()).isTrue();
+        } finally {
+            writer.close();
+        }
+    }
+
     private static boolean failed(LedgerWriter.Pending p) throws InterruptedException {
         try {
             p.done.get(5, TimeUnit.SECONDS);
