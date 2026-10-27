@@ -210,6 +210,7 @@ class KisOrderClientTest {
         assertThat(KisOrderReconciler.find(KisOrderReconcilerTest.day(queried, true), fp, java.util.Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
         Instant settled = u.sendEndedAt().plus(KisOrderReconciler.SETTLE);
+        assertThat(u.sendStarted().monoUntil(u.sendEnded())).isEqualTo(Duration.ofSeconds(10));
         assertThat(KisOrderReconciler.find(KisOrderReconcilerTest.day(settled, true), fp, java.util.Set.of()))
                 .isSameAs(KisOrderReconciler.NotFound.INSTANCE);
     }

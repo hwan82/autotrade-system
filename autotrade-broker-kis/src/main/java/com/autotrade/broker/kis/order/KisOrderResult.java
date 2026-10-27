@@ -32,17 +32,25 @@ public sealed interface KisOrderResult
     /**
      * 보냈는지, 접수됐는지 모른다(응답 시간 초과, 연결 끊김, 결과 코드 없는 응답 등). 재주문 금지, 조회부터.
      *
-     * @param sendStartedAt 실제 POST를 시작한 시각(세션 시계, 간격 대기·토큰 발급 뒤). 접수 여부 확인 창의 기준이다
-     * @param sendEndedAt 응답·예외를 받은 시각(세션 시계). 반영 대기는 이 시각부터 센다
+     * @param sendStarted 실제 POST를 시작한 순간(세션 벽시계·단조 시계, 간격 대기·토큰 발급 뒤). 접수 여부 확인 창의 기준이다
+     * @param sendEnded 응답·예외를 받은 순간. 반영 대기는 이 순간부터 단조 시계로 센다
      */
-    record Unknown(String reason, Instant sendStartedAt, Instant sendEndedAt) implements KisOrderResult {
+    record Unknown(String reason, Stamp sendStarted, Stamp sendEnded) implements KisOrderResult {
         public Unknown {
             Objects.requireNonNull(reason, "reason");
-            Objects.requireNonNull(sendStartedAt, "sendStartedAt");
-            Objects.requireNonNull(sendEndedAt, "sendEndedAt");
-            if (sendEndedAt.isBefore(sendStartedAt)) {
-                throw new IllegalArgumentException("응답 시각이 보내기 시작 시각보다 앞섭니다");
+            Objects.requireNonNull(sendStarted, "sendStarted");
+            Objects.requireNonNull(sendEnded, "sendEnded");
+            if (sendStarted.monoUntil(sendEnded).isNegative()) {
+                throw new IllegalArgumentException("응답 순간이 보내기 시작보다 앞섭니다");
             }
+        }
+
+        public Instant sendStartedAt() {
+            return sendStarted.wall();
+        }
+
+        public Instant sendEndedAt() {
+            return sendEnded.wall();
         }
     }
 

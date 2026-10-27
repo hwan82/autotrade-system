@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -139,7 +138,7 @@ public final class KisOrderClient {
             Thread.currentThread().interrupt();
             return new KisOrderResult.NotAccepted(KisOrderResult.Reason.NOT_SENT, "");
         }
-        Instant[] started = {null};
+        Stamp[] started = {null};
         HttpPort.Response r;
         try {
             r = session.post(path, trId, json, token, at -> started[0] = at);
@@ -160,12 +159,11 @@ public final class KisOrderClient {
         return interpret(trId, r, token, started[0]);
     }
 
-    private KisOrderResult.Unknown unknown(String reason, Instant startedAt) {
-        Instant now = session.clock().instant();
-        return new KisOrderResult.Unknown(reason, startedAt, now.isBefore(startedAt) ? startedAt : now);
+    private KisOrderResult.Unknown unknown(String reason, Stamp startedAt) {
+        return new KisOrderResult.Unknown(reason, startedAt, session.stamp());
     }
 
-    KisOrderResult interpret(String trId, HttpPort.Response r, String token, Instant startedAt) {
+    KisOrderResult interpret(String trId, HttpPort.Response r, String token, Stamp startedAt) {
         JsonNode n = KisTokenClient.readOrNull(mapper, r.body());
         if (n == null || n.path("rt_cd").asText("").isBlank()) {
             return unknown(trId + " 결과 코드 없는 응답(HTTP " + r.status() + ")", startedAt);

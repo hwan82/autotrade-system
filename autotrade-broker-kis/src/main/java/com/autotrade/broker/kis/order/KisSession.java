@@ -18,6 +18,7 @@ import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 /**
  * 한국투자 앱키 하나의 주문·계좌 조회 세션. 같은 앱키를 쓰는 주문({@link KisOrderClient})과 조회({@link KisAccountQueries})가
@@ -41,16 +42,18 @@ public final class KisSession {
     private final Clock clock;
     private final KisRestClient.Sleeper sleeper;
     private final Duration interval;
+    private final LongSupplier ticks;
     private Instant lastCall;
 
     KisSession(HttpPort http, TokenCache tokens, BrokerCredentials credentials, Clock clock,
-            KisRestClient.Sleeper sleeper, Duration interval) {
+            KisRestClient.Sleeper sleeper, Duration interval, LongSupplier ticks) {
         this.http = Objects.requireNonNull(http, "http");
         this.tokens = Objects.requireNonNull(tokens, "tokens");
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
         this.interval = Objects.requireNonNull(interval, "interval");
+        this.ticks = Objects.requireNonNull(ticks, "ticks");
     }
 
     /** 실전 키로 세션을 만든다. 토큰은 처음 호출할 때 받는다(발급마다 알림톡이 가므로 미리 받지 않는다). */
@@ -60,7 +63,7 @@ public final class KisSession {
             throw new IllegalArgumentException("한국투자 키가 설정되지 않았습니다");
         }
         return new KisSession(http, tokenCache(credentials, http, clock), credentials, clock, Thread::sleep,
-                DEFAULT_INTERVAL);
+                DEFAULT_INTERVAL, System::nanoTime);
     }
 
     static TokenCache tokenCache(BrokerCredentials credentials, HttpPort http, Clock clock) {
@@ -70,6 +73,11 @@ public final class KisSession {
 
     Clock clock() {
         return clock;
+    }
+
+    /** 이 세션 시각 표시. 벽시계({@link #clock()})와 단조 시계(나노초)를 같은 순간에 읽는다. */
+    Stamp stamp() {
+        return new Stamp(clock.instant(), ticks.getAsLong());
     }
 
     /** 토큰을 받는다. 실패하면 요청을 보내지 않은 것이다. */
@@ -98,12 +106,12 @@ public final class KisSession {
      * POST한다. 간격을 맞춘 뒤 실제로 보내기 직전 세션 시계 시각을 {@code started}에 알린다. 주문 결과를 모를 때 접수 여부 확인은
      * 이 시각을 기준으로 한다(호출자가 따로 잰 시각은 잠금·토큰 발급·간격 대기만큼 앞설 수 있다, QA PR #247 발견 1 S3).
      */
-    HttpPort.Response post(String path, String trId, String jsonBody, String token, Consumer<Instant> started)
+    HttpPort.Response post(String path, String trId, String jsonBody, String token, Consumer<Stamp> started)
             throws IOException, InterruptedException {
         URI uri = BASE.resolve(path);
         Map<String, String> headers = headers(trId, token);
         pace();
-        started.accept(clock.instant());
+        started.accept(stamp());
         return http.post(uri, headers, jsonBody);
     }
 

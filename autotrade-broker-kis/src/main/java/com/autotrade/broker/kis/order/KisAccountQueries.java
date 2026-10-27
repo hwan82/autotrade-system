@@ -77,13 +77,13 @@ public final class KisAccountQueries {
         params.put("ODNO", "");
         params.put("INQR_DVSN_1", "");
         params.put("EXCG_ID_DVSN_CD", KisOrderClient.EXCHANGE);
-        Instant from = session.clock().instant();
+        Stamp from = session.stamp();
         List<KisDailyOrder> rows = new ArrayList<>();
         int[] unreadable = {0};
         KisDailyOrders.ServerClock[] serverClock = {null};
         boolean complete = pages(DAILY_PATH, TR_DAILY, params, (r, receivedAt) -> {
             if (serverClock[0] == null) {
-                serverClock[0] = serverClock(r, from, receivedAt);
+                serverClock[0] = serverClock(r, from.wall(), receivedAt);
             }
         }, body -> {
             if (!body.path("output1").isArray()) {

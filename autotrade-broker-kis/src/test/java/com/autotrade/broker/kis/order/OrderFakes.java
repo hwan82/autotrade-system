@@ -28,15 +28,22 @@ final class OrderFakes {
     private OrderFakes() {
     }
 
-    /** 앞으로만 가는 시계. */
+    /** 벽시계와 단조 시계를 함께 흉내 낸다. {@link #advance}는 둘 다, {@link #stepWall}은 벽시계만 움직인다. */
     static final class MutableClock extends Clock {
         Instant now;
+        long monoNanos;
 
         MutableClock(Instant start) {
             this.now = start;
         }
 
         void advance(Duration d) {
+            now = now.plus(d);
+            monoNanos += d.toNanos();
+        }
+
+        /** PC 시계 단계 보정(시간 동기화, 사용자가 시계를 바꿈). 실제 시간은 흐르지 않는다. */
+        void stepWall(Duration d) {
             now = now.plus(d);
         }
 
@@ -115,6 +122,6 @@ final class OrderFakes {
 
     static KisSession session(Http http, Clock clock, List<Duration> slept) {
         return new KisSession(http, KisSession.tokenCache(KEYS, http, clock), KEYS, clock, slept::add,
-                KisSession.DEFAULT_INTERVAL);
+                KisSession.DEFAULT_INTERVAL, () -> clock instanceof MutableClock m ? m.monoNanos : System.nanoTime());
     }
 }

@@ -11,19 +11,24 @@ import java.util.Optional;
 /**
  * 하루치 일별 주문체결 조회 결과.
  *
- * @param queriedFrom 첫 쪽을 요청하기 직전 시각. 이 시각 이전에 접수된 주문은 결과에 들어 있다고 본다
+ * @param queried 첫 쪽을 요청하기 직전 순간(벽시계·단조 시계). 이 순간 이전에 접수된 주문은 결과에 들어 있다고 본다
  * @param complete 모든 쪽을 받았고 읽지 못한 행이 없다. false면 "없음"을 확정하는 데 쓰지 않는다
  * @param unreadableRows 필수 칸을 읽지 못해 뺀 행 수
  * @param serverClock 첫 쪽 응답의 HTTP {@code Date}로 잰 한국투자 시계. 헤더가 없거나 읽지 못하면 null
  */
 public record KisDailyOrders(
-        LocalDate date, Instant queriedFrom, List<KisDailyOrder> rows, boolean complete, int unreadableRows,
+        LocalDate date, Stamp queried, List<KisDailyOrder> rows, boolean complete, int unreadableRows,
         ServerClock serverClock) {
 
     public KisDailyOrders {
         Objects.requireNonNull(date, "date");
-        Objects.requireNonNull(queriedFrom, "queriedFrom");
+        Objects.requireNonNull(queried, "queried");
         rows = List.copyOf(rows);
+    }
+
+    /** 첫 쪽을 요청하기 직전 벽시계 시각. */
+    public Instant queriedFrom() {
+        return queried.wall();
     }
 
     /**

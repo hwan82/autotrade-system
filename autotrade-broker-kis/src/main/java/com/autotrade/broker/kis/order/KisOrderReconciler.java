@@ -24,15 +24,16 @@ import java.util.Set;
  *   <li>보내기 시작·끝 시각: {@link KisOrderClient}가 실제 POST 직전·응답 직후 세션 시계로 잰 값만 쓴다
  *       ({@link Fingerprint#of}). 호출자가 잰 시각은 잠금·토큰 발급만큼 앞설 수 있다.</li>
  *   <li>시계 오차: 조회 응답의 HTTP {@code Date}로 한국투자 시계와의 차이 하한을 재서 창을 옮긴다. {@code Date}가 없으면
- *       모름이다. {@link #CLOCK_SKEW}는 그 위에 더하는 여유(웹 게이트웨이 시계와 주문시각을 찍는 시계의 차이, 초 단위 절사)다.</li>
+ *       모름이다. 이 차이는 조회 때 잰 값이라, 보낸 뒤 PC 시계가 단계로 바뀌었으면(단조 시계와 견줘 감지) 모름이다. {@link #CLOCK_SKEW}는 그 위에 더하는 여유(웹 게이트웨이 시계와 주문시각을 찍는 시계의 차이, 초 단위 절사)다.</li>
  *   <li>반영 대기 {@link #SETTLE}: 공식 자료가 없는 `[가정]`이다. 실제 반영이 더 늦으면 "없음"이 틀린다. 그래서 연결 PR(묶음 E)은
  *       Q-015 실측으로 이 값을 확인하기 전에는 {@link NotFound}로 재발주하지 않는다(D-145 위험 1, 연결 조건).</li>
  * </ul>
  *
  * <p>판정
  * <ul>
- *   <li>먼저 조회가 완전하고(모든 쪽, 응답 칸 있음, 읽지 못한 행 0) 같은 날이며, 서버 시각을 읽었고, 조회 시작이 "응답 받은 시각 +
- *       반영 대기"보다 뒤여야 한다. 아니면 {@link Indeterminate}(찾음도 내지 않는다).</li>
+ *   <li>먼저 조회가 완전하고(모든 쪽, 응답 칸 있음, 읽지 못한 행 0) 같은 날이며, 서버 시각을 읽었고, 보내기 시작부터 조회까지
+ *       PC 시계가 단계로 바뀌지 않았고({@link #MAX_CLOCK_STEP}, 벽시계 경과와 단조 경과 비교), 응답 받은 뒤 단조 시계로
+ *       반영 대기가 지나야 한다. 아니면 {@link Indeterminate}(찾음도 내지 않는다).</li>
  *   <li>창(보내기 시작 + 잰 시계 차이 하한 − 여유 이후, 한국투자 시각)에 다른 키에 묶이지 않은 행이 하나도 없으면
  *       {@link NotFound}. 종목·방향·취소 여부를 가리지 않고 센다: 종목코드 형식이나 원주문번호 칸 해석이 틀려 우리 주문을 놓쳐도
  *       없음이 나오지 않게 한다.</li>
@@ -53,6 +54,11 @@ public final class KisOrderReconciler {
      * 시계의 차이, 초 단위 절사. 창을 앞으로 넓혀 후보를 놓치지 않게 한다.
      */
     public static final Duration CLOCK_SKEW = Duration.ofSeconds(60);
+    /**
+     * 보내기 시작부터 조회까지 벽시계 경과와 단조 경과가 이보다 크게 다르면 그 사이 PC 시계가 바뀐 것으로 보고 모름이다. 시간 동기화의
+     * 점진 보정(수 ms/초)은 넘지 않고, 단계 보정·수동 변경은 잡는 값 `[추론]`.
+     */
+    public static final Duration MAX_CLOCK_STEP = Duration.ofSeconds(2);
 
     private KisOrderReconciler() {
     }
@@ -67,28 +73,28 @@ public final class KisOrderReconciler {
         private final OrderType type;
         private final long quantity;
         private final BigDecimal limitPrice;
-        private final Instant sendStartedAt;
-        private final Instant sendEndedAt;
+        private final Stamp sendStarted;
+        private final Stamp sendEnded;
 
         Fingerprint(String symbolCode, Side side, OrderType type, long quantity, BigDecimal limitPrice,
-                Instant sendStartedAt, Instant sendEndedAt) {
+                Stamp sendStarted, Stamp sendEnded) {
             this.symbolCode = Objects.requireNonNull(symbolCode, "symbolCode");
             this.side = Objects.requireNonNull(side, "side");
             this.type = Objects.requireNonNull(type, "type");
-            this.sendStartedAt = Objects.requireNonNull(sendStartedAt, "sendStartedAt");
-            this.sendEndedAt = Objects.requireNonNull(sendEndedAt, "sendEndedAt");
+            this.sendStarted = Objects.requireNonNull(sendStarted, "sendStarted");
+            this.sendEnded = Objects.requireNonNull(sendEnded, "sendEnded");
             if (quantity <= 0) {
                 throw new IllegalArgumentException("수량은 0보다 커야 합니다");
             }
             if ((type == OrderType.LIMIT) != (limitPrice != null)) {
                 throw new IllegalArgumentException("지정가에만 가격이 있습니다");
             }
-            if (sendEndedAt.isBefore(sendStartedAt)) {
-                throw new IllegalArgumentException("응답 시각이 보내기 시작 시각보다 앞섭니다");
+            if (sendStarted.monoUntil(sendEnded).isNegative()) {
+                throw new IllegalArgumentException("응답 순간이 보내기 시작보다 앞섭니다");
             }
             this.quantity = quantity;
             this.limitPrice = limitPrice;
-            this.tradingDate = sendStartedAt.atZone(SEOUL).toLocalDate();
+            this.tradingDate = sendStarted.wall().atZone(SEOUL).toLocalDate();
         }
 
         /** 보낸 주문과 그 "모름" 결과로 특징을 만든다. 시각은 클라이언트가 POST 직전·응답 직후 잰 값이다. */
@@ -96,8 +102,8 @@ public final class KisOrderReconciler {
             Objects.requireNonNull(request, "request");
             Objects.requireNonNull(unknown, "unknown");
             return new Fingerprint(KisOrderClient.krxCode(request), request.side(), request.type(), request.quantity(),
-                    request.type() == OrderType.LIMIT ? request.limitPrice() : null, unknown.sendStartedAt(),
-                    unknown.sendEndedAt());
+                    request.type() == OrderType.LIMIT ? request.limitPrice() : null, unknown.sendStarted(),
+                    unknown.sendEnded());
         }
 
         /** 보내기 시작 시각의 한국 날짜. */
@@ -126,11 +132,19 @@ public final class KisOrderReconciler {
         }
 
         public Instant sendStartedAt() {
-            return sendStartedAt;
+            return sendStarted.wall();
         }
 
         public Instant sendEndedAt() {
-            return sendEndedAt;
+            return sendEnded.wall();
+        }
+
+        public Stamp sendStarted() {
+            return sendStarted;
+        }
+
+        public Stamp sendEnded() {
+            return sendEnded;
         }
     }
 
@@ -175,8 +189,14 @@ public final class KisOrderReconciler {
         if (!day.complete()) {
             return new Indeterminate("조회가 불완전함(쪽 상한, 응답 칸 없음 또는 읽지 못한 행)");
         }
-        Instant settled = fp.sendEndedAt().plus(SETTLE);
-        if (day.queriedFrom().isBefore(settled)) {
+        // 보낸 뒤 조회까지 PC 시계가 단계로 바뀌었으면(시간 동기화 보정 등) 보낼 때 시각을 조회 때 잰 시계 차이로 옮길 수 없다
+        // (risk-ops PR #247 재검토 N1). 경과는 단조 시계로 재서 벽시계 경과와 견준다
+        Duration step = fp.sendStarted().wallMinusMonoUntil(day.queried());
+        if (step.abs().compareTo(MAX_CLOCK_STEP) > 0) {
+            return new Indeterminate("보낸 뒤 조회 전 PC 시계가 " + step.toSeconds() + "초 바뀜");
+        }
+        // 반영 대기는 단조 시계로 센다(벽시계가 앞으로 뛰면 실제 대기가 짧아진다)
+        if (fp.sendEnded().monoUntil(day.queried()).compareTo(SETTLE) < 0) {
             return new Indeterminate("반영 대기 시간 전 조회");
         }
         // 시계 오차는 가정하지 않고 잰다. 우리 시계가 빠르면(차이 음수) 창이 그만큼 앞으로 간다(QA PR #247 발견 1 S1)

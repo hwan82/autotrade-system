@@ -26,7 +26,12 @@ class KisOrderReconcilerTest {
     private static final Instant ENDED = SENT.plus(Duration.ofSeconds(10));
     private static final Instant SETTLED = ENDED.plus(KisOrderReconciler.SETTLE);
     private static final KisOrderReconciler.Fingerprint LIMIT_BUY = new KisOrderReconciler.Fingerprint(
-            "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, ENDED);
+            "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), at(SENT), at(ENDED));
+
+    /** 시계 단계 변화가 없는 순간(단조 값 = SENT부터 벽시계 경과). */
+    static Stamp at(Instant wall) {
+        return new Stamp(wall, Duration.between(SENT, wall).toNanos());
+    }
 
     static KisDailyOrder order(String odno, String original, Side side, String code, String division, long qty,
             String price, LocalTime time) {
@@ -44,7 +49,7 @@ class KisOrderReconcilerTest {
             KisDailyOrder... rows) {
         Instant received = queriedFrom.plusSeconds(1);
         Instant serverDate = received.plus(serverMinusLocal).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
-        return new KisDailyOrders(DAY, queriedFrom, List.of(rows), complete, 0,
+        return new KisDailyOrders(DAY, at(queriedFrom), List.of(rows), complete, 0,
                 new KisDailyOrders.ServerClock(serverDate, queriedFrom, received));
     }
 
@@ -102,7 +107,7 @@ class KisOrderReconcilerTest {
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
         assertThat(KisOrderReconciler.find(day(SETTLED, false), LIMIT_BUY, Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
-        KisDailyOrders yesterday = new KisDailyOrders(DAY.minusDays(1), SETTLED, List.of(), true, 0,
+        KisDailyOrders yesterday = new KisDailyOrders(DAY.minusDays(1), at(SETTLED), List.of(), true, 0,
                 new KisDailyOrders.ServerClock(SETTLED, SETTLED, SETTLED));
         assertThat(KisOrderReconciler.find(yesterday, LIMIT_BUY, Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
@@ -151,7 +156,7 @@ class KisOrderReconcilerTest {
     @Test
     void 시장가는_주문구분_01이면_단가와_상관없이_찾는다() {
         KisOrderReconciler.Fingerprint marketSell = new KisOrderReconciler.Fingerprint(
-                "005930", Side.SELL, OrderType.MARKET, 3, null, SENT, ENDED);
+                "005930", Side.SELL, OrderType.MARKET, 3, null, at(SENT), at(ENDED));
         KisDailyOrder upperLimit = order("8", "", Side.SELL, "005930", "01", 3, "91000", LocalTime.of(9, 30, 1));
         assertThat(KisOrderReconciler.find(day(SETTLED, true, upperLimit), marketSell, Set.of()))
                 .isEqualTo(new KisOrderReconciler.Found(upperLimit, false));
@@ -190,7 +195,7 @@ class KisOrderReconcilerTest {
     @Test
     void 응답_시각이_보내기_시작보다_앞서면_특징을_만들지_않는다() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new KisOrderReconciler.Fingerprint(
-                "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, SENT.minusSeconds(1)))
+                "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), at(SENT), at(SENT.minusSeconds(1))))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -211,11 +216,38 @@ class KisOrderReconcilerTest {
     }
 
     @Test
+    void 보낸_뒤_조회_전에_PC_시계가_단계로_바뀌면_찾음도_없음도_내지_않는다() {
+        // risk-ops PR #247 재검토 N1: 61초 빠른 시계로 09:30:00에 보냈고 실제 주문시각은 09:28:59. 조회 전 시간 동기화로 시계가
+        // 61초 뒤로 바로잡혀 조회 때 잰 차이는 0이다
+        KisDailyOrder accepted = order("0000117057", "", Side.BUY, "005930", "00", 10, "70000", LocalTime.of(9, 28, 59));
+        Instant queriedWall = SETTLED.minusSeconds(61);
+        Stamp queried = new Stamp(queriedWall, Duration.between(SENT, SETTLED).toNanos());
+        KisDailyOrders corrected = new KisDailyOrders(DAY, queried, List.of(accepted), true, 0,
+                new KisDailyOrders.ServerClock(queriedWall.plusSeconds(1), queriedWall, queriedWall.plusSeconds(1)));
+        assertThat(KisOrderReconciler.find(corrected, LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        KisDailyOrders correctedEmpty = new KisDailyOrders(DAY, queried, List.of(), true, 0, corrected.serverClock());
+        assertThat(KisOrderReconciler.find(correctedEmpty, LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        // 앞으로 뛴 경우: 벽시계로는 반영 대기가 지났지만 실제(단조)로는 5초뿐이다
+        Stamp jumped = new Stamp(SETTLED, Duration.between(SENT, ENDED.plusSeconds(5)).toNanos());
+        KisDailyOrders early = new KisDailyOrders(DAY, jumped, List.of(), true, 0,
+                new KisDailyOrders.ServerClock(SETTLED, SETTLED, SETTLED));
+        assertThat(KisOrderReconciler.find(early, LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        // 허용 범위(2초) 안의 차이는 단계 변화로 보지 않는다
+        Stamp drift = new Stamp(SETTLED.plusSeconds(2), Duration.between(SENT, SETTLED).toNanos());
+        KisDailyOrders drifted = new KisDailyOrders(DAY, drift, List.of(), true, 0,
+                new KisDailyOrders.ServerClock(SETTLED.plusSeconds(2), SETTLED.plusSeconds(2), SETTLED.plusSeconds(2)));
+        assertThat(KisOrderReconciler.find(drifted, LIMIT_BUY, Set.of())).isSameAs(KisOrderReconciler.NotFound.INSTANCE);
+    }
+
+    @Test
     void 서버_시각을_읽지_못한_조회로는_찾음도_없음도_내지_않는다() {
-        KisDailyOrders noDate = new KisDailyOrders(DAY, SETTLED, List.of(), true, 0, null);
+        KisDailyOrders noDate = new KisDailyOrders(DAY, at(SETTLED), List.of(), true, 0, null);
         assertThat(KisOrderReconciler.find(noDate, LIMIT_BUY, Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
-        KisDailyOrders noDateOurs = new KisDailyOrders(DAY, SETTLED, List.of(OURS), true, 0, null);
+        KisDailyOrders noDateOurs = new KisDailyOrders(DAY, at(SETTLED), List.of(OURS), true, 0, null);
         assertThat(KisOrderReconciler.find(noDateOurs, LIMIT_BUY, Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
     }
