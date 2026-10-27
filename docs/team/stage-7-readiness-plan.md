@@ -74,7 +74,7 @@
 | K6 | CFG-06 ③ 실전 한도 변경 2차 확인 거부 시험 | D-081 ① | 안 됨 | 한도 키 없음(`RuntimeConfig.java:24`) | risk-ops | Q-008 | 예 | C |
 | K7 | 실전 경로 리플렉션 금지·외부 jar 허용 목록(TST-07 (9)) | D-086 | **처리됨** | `RealPathReflectionTest`(PR #108·#109·#110·#112) | architect | — | 예 | — |
 | K8 | 플러그인 로딩용 `ALLOWED_SERVICE_LOADERS`, 감시 자동 재기동용 `ALLOWED_PROCESS_LAUNCHERS` 채우기 | D-086, D-092 | 안 됨(의도) | `RealPathReflectionTest.java:111,114` 빈 집합 | architect, risk-ops | 플러그인 로딩 PR, 감시 재기동 PR | 예(보호 테스트) | D, F |
-| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 부분 | 대응표 [tst-06-checklist-map.md](tst-06-checklist-map.md)([D-144](../decisions/D-144-stage7-bundle0-docs.md) ③, 경고 W-01~W-11·W-20~W-24, 차단 B-01뿐). 화면 경고는 H | risk-ops, ui-dev | 없음 | 예 | 0, H |
+| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 부분 | 대응표 [tst-06-checklist-map.md](tst-06-checklist-map.md)([D-144](../decisions/D-144-stage7-bundle0-docs.md) ③, 경고 W-01~W-12·W-20~W-24(W-12는 2026-10-27 QA Q3로 추가), 차단 B-01뿐). 화면 경고는 H | risk-ops, ui-dev | 없음 | 예 | 0, H |
 | K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 부분 | 검토 끝([D-144](../decisions/D-144-stage7-bundle0-docs.md) ④, [k10-os-credential-store-review.md](../research/k10-os-credential-store-review.md)): 파일 방식 유지 + 권한·위치 경고. 남은 것: 경고 코드 K10-a(보호 경로, 실전 관련 PR, 실전 활성화 결정 전. 머지 전까지 활성화 화면 정적 경고 W-12로 보임, [대응표](tst-06-checklist-map.md) 5.2), 운영 절차는 I | risk-ops | 없음 | 예 | 0, K10-a, I |
 
 ### 2.4 증권사 연동(ADR-003, broker-and-fault-design.md)
