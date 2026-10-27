@@ -107,3 +107,54 @@
 
 ## 판정
 수정 필요(N1 보내기~조회 사이 PC 시계 단계 보정 시 "없음"이 틀림 — 점검표 A4·A12·A14 실패)
+
+## 재검토 2026-10-27 (2)
+- 대상: PR #247 / 브랜치 `claude/project-thread-truegb` 헤드 `7c94601e`(N1 수정) / main 대비 diff 전체. 앞 원문(위 두 절, [risk-ops.md](risk-ops.md))과 독립 QA 원문 [qa.md](qa.md)를 보고 다시 봄
+- 점검표: A
+- 직접 실행한 것
+  - `./gradlew build --no-daemon`(공개 미러 init 스크립트, 사용자 결정 2026-10-16): **BUILD SUCCESSFUL in 5m 13s**. 결과 XML: `:autotrade-broker-kis:test` 75건(직전 74 + 1), `:autotrade-risk:test` 57건, `:autotrade-architecture-test:test` 47건, `:autotrade-app-engine:test` 109건, `:autotrade-marketdata:test` 164건 모두 이번에 실행. 실패·오류·건너뜀 0.
+  - `git diff 4283eb6f 7c94601e`: 코드 7파일(`Stamp` 새 파일, `KisSession`·`KisOrderClient`·`KisOrderResult`·`KisOrderReconciler`·`KisDailyOrders`·`KisAccountQueries`), 시험 3파일, D-145, 검토 원문 2(architect 복구·risk-ops 재검토). 검토 원문 `architect.md`·`qa.md`·`risk-ops.md`는 `fb4c245c` 대비 0줄, `risk-ops-2.md`는 `c7b34a1e` 대비 0줄(지워진 내용 없음). `git diff --stat origin/main...HEAD -- autotrade-risk autotrade-app-engine autotrade-app-gateway autotrade-domain autotrade-app-lab autotrade-app-collector`: 0줄.
+  - 임시 탐침 `RiskOpsProbe2Test`(커밋하지 않고 지움, `git status` 깨끗): 단위 시험이 `Stamp`를 직접 만드는 것과 달리, 같은 `KisSession`을 쓰는 `KisOrderClient.submit`(시간 초과) → `MutableClock.stepWall` → `KisAccountQueries.dailyOrders`(응답 `Date` = 한국투자 시각) → `find`를 실제 경로로 돌림. 우리 시계 61초 빠름, 09:30:00(우리) 보냄, 실제 접수 09:28:59.
+    - E0 시계 그대로 → `Found`(대조)
+    - E1 보낸 뒤 조회 전 뒤로 61초 보정(직전 N1 탐침 P1과 같은 입력) → **`Indeterminate(PC 시계가 -61초 바뀜)`**(직전: `NotFound`)
+    - E2 보낸 뒤 앞으로 30초, 실제 경과 5초, 0행 조회 → **`Indeterminate`**(직전: 반영 대기 통과 뒤 `NotFound`)
+    - E3 첫 쪽 요청 **도중** 뒤로 61초 보정 → `Found`(`ServerClock`이 `receivedAt < requestedAt`을 `requestedAt`으로 맞춰 하한 −60초)
+    - E4 첫 쪽 요청 20초 도중 뒤로 15초 보정 → `Found`, 그러나 하한이 −46초로 실제(−61초)보다 15초 크게 잡힘 → 아래 G8
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard·`RealOrderGateways`·명령 채널 무변경(위 `--stat` 0줄). `KisPlugin.orderGateway` 빈 값 유지. `:autotrade-risk:test`·`:autotrade-app-engine:test` 실행 통과 |
+| A2 | 통과 | `ArchitectureTest`·위반 예제 이번 커밋 무변경, 실행 통과. 새 `Stamp`는 `com.autotrade.broker.kis.order` 안이라 `PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN` 범위. 운영 코드에서 `Stamp`·`Unknown` 생성은 `KisSession.stamp`(KisSession.java:80)·`KisOrderClient.unknown`(KisOrderClient.java:163)뿐(grep). 리플렉션 한계는 D-145 연결 조건 4(G2 이월 유지) |
+| A3 | 통과 | 앞과 같음(생성 때 받은 계좌 하나, KRX만) |
+| A4 | 통과 | 클라이언트는 어떤 결과에도 다시 보내지 않음(POST 1회 시험 유지). N1 고쳐짐: `find`가 보내기 시작부터 조회 시작까지 벽시계 경과 − 단조 경과가 `MAX_CLOCK_STEP` 2초를 넘으면 `Indeterminate`(KisOrderReconciler.java `find`, `Stamp.wallMinusMonoUntil`), 반영 대기는 응답 받은 순간부터 단조 경과로 셈(`sendEnded().monoUntil(day.queried())`). `KisOrderClient.unknown`의 조용한 시각 맞춤이 없어지고 `Unknown`·`Fingerprint`는 단조 순서만 검사. 시험 `KisOrderReconcilerTest#보낸_뒤_조회_전에_PC_시계가_단계로_바뀌면_찾음도_없음도_내지_않는다` 통과, 실제 경로 탐침 E1·E2 모두 모름. 2초 허용치는 틀려도 모름이 늘 뿐이고, 허용 안 차이(≤2초)는 60초 여유 안. 남은 경계(첫 쪽 요청 도중의 보정)는 탐침 E3·E4로 오차가 요청 시간 이하로 묶임을 확인(아래 G8, 판정에 넣지 않음) |
+| A5 | 해당 없음 | 멱등 키 발급·영속·연결은 묶음 E. `Stamp` 단조 값의 영속·재기동 뒤 사용은 아래 G9 |
+| A6 | 통과(이 PR 범위) | 블랙리스트·수동 보유 경로 무변경, 연결 없음. 특징 대조의 남의 주문 묶기 위험은 `byOrderNo=false`·D-145 위험 2(앞과 같음) |
+| A7 | 통과(이 PR 범위) | `KisSession.stamp`는 잠금 없이 시계 두 개를 읽을 뿐, 세션 잠금은 여전히 `pace()`에만. `invalidateIfCurrent` 등 앞 재검토 내용 그대로 |
+| A8 | 통과 | 엔진·게이트웨이·실험실 코드 무변경, 연결 없음 |
+| A9 | 통과(이 PR 범위) | 보호 시세·서버 측 손절 무변경 |
+| A10 | 통과 | 새 시험도 자리 표시자만. 새 `Indeterminate` 사유는 바뀐 초 수만 담음 |
+| A11 | 통과 | 보호 시험 무변경, 고정 값 변경 없음. N1 두 방향(뒤로·앞으로)과 허용치 안 경우를 고정하는 시험이 생김. 다만 `OrderFakes.MutableClock.stepWall`을 만들고 쓰는 시험이 없어 실제 경로(세션 → 클라이언트 → 조회) 시험은 없다(탐침 E1·E2로 대신 확인, 아래 G10) |
+| A12 | 통과 | 장애표 4번(broker-and-fault-design.md:163 "미접수일 때만 재발주")의 전제("없음"이면 정말 없음)가 N1 입력(보내기~조회 사이 PC 시계 단계 보정)에서 지켜짐(탐침 E1·E2). 남은 전제(반영 지연 30초, 게이트웨이 `Date`↔주문시각 시계 차이)는 D-145 연결 조건 1·2로 실측 전 `NotFound` 재발주 금지 그대로 |
+| A13 | 통과 | 국내 전용, 날짜 `Asia/Seoul`(`Fingerprint.tradingDate` = POST 시작 벽시계의 한국 날짜), 가격 원 정수 |
+| A14 | 통과 | D-145 위험 1이 "PC 시계가 보낸 때와 조회한 때 같은 만큼 어긋나 있으면 창이 따라 옮겨지고, 그 사이 단계로 바뀌면 단조 시계와 견줘 모름"으로, 클래스 주석·`MAX_CLOCK_STEP` 주석도 같은 뜻으로 고쳐져 코드와 일치. "검토 반영" 절에 N1과 고친 방법·시험·2초 `[추론]`이 적힘. 첫 쪽 요청 도중 보정의 한계(G8)는 문서에 없으나 오차가 60초 여유 안에 묶여 안전 성질 서술을 뒤집지 않음 |
+
+## 앞 지적 처리 확인
+| 항목 | 처리 | 확인 |
+|---|---|---|
+| N1 보내기~조회 사이 PC 시계 단계 보정 | 고침 | 코드, 시험, 실제 경로 탐침 E1(뒤로)·E2(앞으로) |
+| G6 | 기록만(변경 필요 없음) | — |
+| G7 `KisDailyOrders` 공개 생성 | 이월 | 이번에 `Stamp`·`KisOrderResult.Unknown`도 공개 생성자라 연결 코드가 임의 시각을 넣을 수 있다. 연결 PR에서 `find`·`Fingerprint.of`에 넘기는 값이 `KisAccountQueries`·`KisOrderClient`가 만든 것뿐인지 다시 본다 |
+| G2·QA Q3·Q4 | D-145 연결 조건 3·4 | 연결 PR 승인 조건으로 다시 본다 |
+
+## 점검표 밖 발견
+
+### 수정 필요
+- 없음.
+
+### 권고(판정에 넣지 않음)
+- **G8. 첫 쪽 요청 도중의 시계 보정.** 단계 검사는 `sendStarted`~`day.queried()`(첫 쪽 요청 직전)만 본다. 시계 차이 하한은 첫 쪽 응답 받은 벽시계(`receivedAt`, KisAccountQueries.java `pages`의 `session.clock().instant()`)로 재므로, 그 사이(토큰 발급·만료 재호출 포함, HTTP 시간 상한 10초 × 몇 번) 뒤로 보정되면 하한이 min(보정 폭, 요청 시간)만큼 크게 잡혀 창 시작이 그만큼 늦어진다(탐침 E4: 15초). 지금은 `ServerClock`의 `requestedAt` 맞춤과 요청 시간 상한 덕에 60초 여유 안이지만, 그 여유는 게이트웨이↔주문시각 시계 차이용 `[가정]`이라 둘이 겹치면 모자랄 수 있다. 연결 전에 `receivedAt`도 `Stamp`로 남겨 `sendStarted`~`receivedAt` 단계도 같은 2초로 검사하기를 권한다(한 줄 수준).
+- **G9. 단조 값은 한 JVM 안에서만 뜻이 있다**(`System.nanoTime` 명세, `Stamp` 주석에도 적힘). 묶음 E가 `Unknown`·`Fingerprint`를 저장소에 남겨 재기동 뒤 PANIC 대사에 쓰면 단조 경과가 무의미해진다. 재부팅 뒤라면 대개 큰 차이로 모름이 되지만(안전 쪽), 같은 부팅 안 재기동은 OS 구현에 따라 우연히 맞을 수도 있다 `[추론]`. 연결 PR에서 "다른 프로세스에서 만든 `Stamp`로는 `NotFound`를 내지 않음"(예: 프로세스 식별값을 함께 남기고 다르면 모름)을 정하고 시험한다.
+- **G10.** `OrderFakes.MutableClock.stepWall`을 쓰는 실제 경로 시험(탐침 E1·E2와 같은 입력)을 더하면 `KisSession.stamp`·`KisAccountQueries`의 `Stamp` 전달이 바뀌어도 잡힌다.
+
+## 판정
+승인
