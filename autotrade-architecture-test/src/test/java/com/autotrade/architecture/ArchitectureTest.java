@@ -18,6 +18,7 @@ import com.autotrade.app.engine.command.ForgedConfirmation;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.order.RealOrderGateways;
 import com.autotrade.archfixture.ApproveAllRiskPolicy;
+import com.autotrade.archfixture.BypassPluginOrderClient;
 import com.autotrade.archfixture.BypassRealTradingGuard;
 import com.autotrade.archfixture.ForbiddenTimeAndRandom;
 import com.autotrade.archfixture.MisplacedControlChannel;
@@ -46,6 +47,7 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.CompositeArchRule;
 import com.tngtech.archunit.lang.EvaluationResult;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -158,14 +160,43 @@ class ArchitectureTest {
     /**
      * 실전 주문 출구는 RealTradingGuard 허가를 받는 한 곳에서만 연다(RSK-01, ADR-002, 안전 불변식 2).
      * BrokerPlugin을 구현·상속한 어떤 타입의 {@code orderGateway}든, 호출이든 메서드 참조든 막는다.
-     * 플러그인이 출구 구현을 직접 생성하는 우회 규칙은 플러그인에 주문 코드를 넣는 첫 PR보다 먼저 더한다(ADR-002 6장,
-     * ADR-003 6장). 2단계 플러그인에는 주문 코드가 없다.
+     * 플러그인 밖 코드가 플러그인의 주문 클라이언트를 직접 만드는 우회는 {@link #PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN}이 막는다
+     * (ADR-002 6장, ADR-003 6장, 플러그인 주문 코드 첫 PR D-145에서 더함).
      */
     static final ArchRule ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY = noClasses()
             .that().doNotHaveFullyQualifiedName(RealOrderGateways.class.getName())
             .should().accessTargetWhere(target(name("orderGateway"))
                     .and(target(owner(assignableTo(BrokerPlugin.class)))))
             .because("실전 주문은 RealTradingGuard를 거친 출구로만 나가야 한다(RSK-01)");
+
+    /**
+     * 증권사 플러그인의 주문·계좌 코드는 {@code com.autotrade.broker.<플러그인>.order} 패키지에 두고, 그 플러그인 밖의 어떤 클래스도
+     * 이 패키지에 의존하지 않는다. 플러그인 밖 코드가 주문 클라이언트를 직접 만들면 RealTradingGuard와 출구 팩토리를 건너뛰므로
+     * (위 규칙은 {@code orderGateway} 호출만 본다), 플러그인에 주문 코드를 넣는 첫 PR(D-145, 한국투자)에서 더한다
+     * (ADR-002 6장, ADR-003 6장 risk-ops 7단계 요구 사항). 패키지를 빌린 다른 모듈 클래스는 {@code ModuleOwnershipTest}가 막는다.
+     */
+    static final ArchRule PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN = CompositeArchRule
+            .of(orderPackageStaysIn("kis"))
+            .and(orderPackageStaysIn("kiwoom"))
+            .and(orderPackageStaysIn("toss"));
+
+    /**
+     * 한국투자 접근토큰 발급기({@code KisTokenClient})는 플러그인 밖에서 쓰지 않는다. 플러그인 밖 프로세스가 같은 실전 앱키로
+     * 토큰을 따로 받으면 재발급 1분 1회 제한과 발급 알림이 실전 엔진 세션(60초 하한, D-054 R2)과 겹친다(D-145, risk-ops
+     * PR #247 G1·architect R1).
+     */
+    static final ArchRule KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN = noClasses()
+            .that().resideOutsideOfPackage("com.autotrade.broker.kis..")
+            .should().dependOnClassesThat().haveFullyQualifiedName("com.autotrade.broker.kis.KisTokenClient")
+            .because("한국투자 토큰 발급은 플러그인 안 세션만 한다(D-054 R2, D-145)");
+
+    static ArchRule orderPackageStaysIn(String plugin) {
+        String root = "com.autotrade.broker." + plugin;
+        return noClasses()
+                .that().resideOutsideOfPackage(root + "..")
+                .should().dependOnClassesThat().resideInAPackage(root + ".order..")
+                .because("실전 주문은 RealTradingGuard를 거친 출구로만 나가야 한다(RSK-01). 증권사 주문 코드는 플러그인 안에만 둔다");
+    }
 
     /** Guard를 올리는 조작이 허용되는 곳: 실전 제어 명령 채널 패키지(ADR-006). */
     static final String GUARD_COMMAND_CHANNEL = "com.autotrade.app.engine.command..";
@@ -398,6 +429,12 @@ class ArchitectureTest {
     }
 
     @Test
+    void 증권사_주문_코드는_플러그인_밖에서_쓰지_않는다() {
+        PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN.check(PRODUCTION);
+        KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN.check(PRODUCTION);
+    }
+
+    @Test
     void Guard를_올리는_조작은_명령_채널에서만_한다() {
         ONLY_COMMAND_CHANNEL_RAISES_GUARD.check(PRODUCTION);
         ONLY_AUTHENTICATOR_CREATES_CONFIRMATION.check(PRODUCTION);
@@ -496,6 +533,18 @@ class ArchitectureTest {
         // 인터페이스·구체 타입·하위 인터페이스 호출, 메서드 참조 각 1건. RealOrderGateways는 허용
         assertThat(ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(4);
+        // 플러그인 밖에서 한국투자 주문 클라이언트를 만들어 보내는 예제: 세 가지 타입 의존이 모두 잡힌다
+        EvaluationResult orderBypass = PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN.evaluate(
+                new ClassFileImporter().importClasses(BypassPluginOrderClient.class));
+        assertThat(orderBypass.hasViolation()).isTrue();
+        assertThat(String.join("\n", orderBypass.getFailureReport().getDetails()))
+                .contains("KisOrderClient.<init>", "KisOrderClient.submit", "KisSession", "KisAccountNumber");
+        assertThat(String.join("\n", KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN.evaluate(new ClassFileImporter()
+                .importClasses(BypassPluginOrderClient.class)).getFailureReport().getDetails()))
+                .contains("KisTokenClient.fetcher");
+        // 플러그인 안(주문 패키지 자신)과 주문 패키지를 모르는 플러그인 밖 클래스는 위반이 아니다
+        assertThat(PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN.evaluate(new ClassFileImporter().importClasses(
+                com.autotrade.broker.kis.order.KisOrderClient.class, RiskChain.class)).hasViolation()).isFalse();
         // 발급기 가져오기·발급·beginActivation 호출 3건, 메서드 참조 5건(활성화 시작·보호 모드·단계·발급기 가져오기·발급)
         assertThat(ONLY_COMMAND_CHANNEL_RAISES_GUARD.evaluate(bypassFixture)
                 .getFailureReport().getDetails()).hasSize(8);

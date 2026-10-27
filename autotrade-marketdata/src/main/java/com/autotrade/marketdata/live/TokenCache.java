@@ -55,4 +55,16 @@ public final class TokenCache {
     public synchronized void invalidate() {
         cached = null;
     }
+
+    /**
+     * 실패한 요청에 쓴 토큰이 지금 캐시의 토큰일 때만 버린다. 늦게 온 옛 토큰의 만료 응답이 그 사이 새로 받은 토큰까지 버려
+     * 재발급 제한(한국투자 1분당 1회)에 걸리는 일을 막는다. 버렸으면 true.
+     */
+    public synchronized boolean invalidateIfCurrent(String used) {
+        if (cached != null && cached.value().equals(used)) {
+            cached = null;
+            return true;
+        }
+        return false;
+    }
 }
