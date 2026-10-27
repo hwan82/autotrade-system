@@ -140,7 +140,7 @@
 | S4 | 중기 보유 실전 위험: 액면분할·권리락 때 손절 기준가·서버 측 손절 재설정, 당일 유효 조건주문 매일 재설정, 장기 거래정지 | D-041 | 안 됨 | — | risk-ops | Q-002, Q-058 | 예 | E |
 | S5 | 재무 신선도 상한·장전 가정값 확정, 활성화 점검에 "OS 예약 작업·최근 상태 파일 OK" | ADR-007 | 안 됨 | 값 `[가정]` | risk-ops, data-engineer | 없음 | 예 | I |
 | S6 | 엔진의 캘린더 판정에서 보호용·거래용 분리(손절은 막히지 않게) | 메모 pr53 | 안 됨 | 엔진에 `ExchangeCalendar` 참조 없음 | risk-ops | 없음 | 예 | E |
-| I1 | **7단계 실행·시험 절차서**(runbook): 설치본 대조(`-javaagent`·`-D`·`-XX:+DisableAttachMechanism`, 감시 JDK 고정), 장 시간 보호 해제값 확인, 카카오 재동의 수신 확인, 재기동 뒤 보호 모드 절차, Windows 값 대조, 7.1 합격 기준값 | D-086, D-095, D-100, 메모 pr52·pr105·pr135·run-manual | 부분 | 뼈대 [stage-7-real-trading-tests.md](../runbooks/stage-7-real-trading-tests.md)(2026-10-24, 2026-10-26 D-142 후속 반영: 3-R 하트비트 폴더 변형 6.1, 해시 반복 P11, 엔진 긴급 알림 N4): 후속 추적표 8장, 명령·기준값·시행 전 결정 E1~E5 남음 | risk-ops | 없음 | 예 | I |
+| I1 | **7단계 실행·시험 절차서**(runbook): 설치본 대조(`-javaagent`·`-D`·`-XX:+DisableAttachMechanism`, 감시 JDK 고정), 장 시간 보호 해제값 확인, 카카오 재동의 수신 확인, 재기동 뒤 보호 모드 절차, Windows 값 대조, 7.1 합격 기준값 | D-086, D-095, D-100, 메모 pr52·pr105·pr135·run-manual | 부분 | 뼈대 [stage-7-real-trading-tests.md](../runbooks/stage-7-real-trading-tests.md)(2026-10-24, 2026-10-26 D-142 후속 반영: 3-R 하트비트 폴더 변형 6.1, 해시 반복 P11, 엔진 긴급 알림 N4): 후속 추적표 8장, 명령·기준값·시행 전 결정 E1~E6 남음 | risk-ops | 없음 | 예 | I |
 | I2 | TST-07 대응표(항목마다 실패 테스트 이름) | 기획서 TST-07 | 안 됨 | — | risk-ops | 각 묶음 | 예 | I |
 | I3 | 실전 계좌 잔고·거래 내역·대사 상태 화면(UI-05·UI-08), 서버 측 손절 미지원 경고 | stage-5-readiness, D-079 | 안 됨 | 엔진 스냅샷에 필드 없음 | ui-dev, risk-ops | 묶음 E | 예 | H |
 | I4 | Q-010 해외 장애 O1~O8을 해외 실전 조건으로, 미국 실전 | 결정 로그 Q-010 | 안 됨(미확정) | — | risk-ops → 사용자 | 국내 실전 뒤 | 예 | 범위 밖 |
