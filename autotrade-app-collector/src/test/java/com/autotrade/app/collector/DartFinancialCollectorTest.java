@@ -262,6 +262,53 @@ class DartFinancialCollectorTest {
     }
 
     @Test
+    void 사업보고서와_그_정정만_받고_분기_반기_보고서와_기한연장신고서는_뺀다() {
+        assertThat(DartFinancialCollector.annualReport("사업보고서 (2025.12)")).isTrue();
+        assertThat(DartFinancialCollector.annualReport("[기재정정]사업보고서 (2025.12)")).isTrue();
+        assertThat(DartFinancialCollector.annualReport("[첨부추가]사업보고서 (2024.03)")).isTrue();
+        assertThat(DartFinancialCollector.annualReport("분기보고서 (2025.03)")).isFalse();
+        assertThat(DartFinancialCollector.annualReport("[기재정정]반기보고서 (2025.06)")).isFalse();
+        assertThat(DartFinancialCollector.annualReport("사업보고서제출기한연장신고서 (2025.12)")).isFalse();
+        assertThat(DartFinancialCollector.annualReport("사업보고서")).isFalse();
+    }
+
+    @Test
+    void 공시검색이_분기_반기_보고서를_섞어_줘도_계정은_사업보고서에만_부르고_캐시의_옛_분기_항목도_뺀다() throws IOException {
+        String annual = "20260310000001";
+        String quarter = "20260311000002";
+        String half = "20260312000003";
+        String extension = "20260313000004";
+        FakeHttp http = new FakeHttp((u, n) -> {
+            if (u.getPath().endsWith("list.json")) {
+                return FakeHttp.ok(DartFixtures.list(1, 1,
+                        "Y;00000001;111111;사업보고서 (2025.12);" + annual + ";20260310",
+                        "Y;00000001;111111;분기보고서 (2025.09);" + quarter + ";20260311",
+                        "K;00000002;222222;반기보고서 (2025.06);" + half + ";20260312",
+                        "K;00000002;222222;사업보고서제출기한연장신고서 (2025.12);" + extension + ";20260313"));
+            }
+            return FakeHttp.ok(DartFixtures.accounts(annual, true, 10, 1, 10, 5, 5));
+        });
+        DartFinancialCollector c = collector(http, seoulNoon("2026-03-20"), 1000);
+        var r = c.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        assertThat(r.newFilings()).isEqualTo(1);
+        assertThat(r.fetchedAccounts()).isEqualTo(1);
+        assertThat(http.calls).filteredOn(u -> u.getPath().endsWith("fnlttSinglAcnt.json")).hasSize(1);
+
+        // 거르기 전에 받아 둔 분기보고서가 캐시에 남아 있어도 목록·스냅샷·계정 호출에서 빠진다
+        java.nio.file.Files.writeString(cache.resolve("dart").resolve("filings").resolve(quarter + ".json"),
+                "{\"corp_cls\":\"Y\",\"corp_code\":\"00000001\",\"stock_code\":\"111111\","
+                        + "\"report_nm\":\"분기보고서 (2025.09)\",\"rcept_no\":\"" + quarter + "\",\"rcept_dt\":\"20260311\"}");
+        assertThat(c.filings()).extracting(f -> f.path("rcept_no").asText()).containsExactly(annual);
+        int before = http.calls.size();
+        var again = c.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        assertThat(again.fetchedAccounts()).isZero();
+        assertThat(http.calls).hasSize(before);
+        DartSnapshotBuilder.Result built = DartSnapshotBuilder.build(c.filings(), c::accountsOf);
+        assertThat(built.filings()).extracting(FinancialFiling::receiptNo).containsExactly(annual);
+        assertThat(built.stats().valuesUnknown()).isZero();
+    }
+
+    @Test
     void 사업연도는_보고서명_괄호에서_읽는다() {
         assertThat(DartFinancialCollector.businessYear("[기재정정]사업보고서 (2024.03)")).isEqualTo(2024);
         assertThat(DartFinancialCollector.businessYear("사업보고서")).isZero();

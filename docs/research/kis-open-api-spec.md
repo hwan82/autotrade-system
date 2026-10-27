@@ -152,12 +152,13 @@ H0STCNT0는 KRX 체결만 보낸다. NXT 단독 시간대(08:00~08:50, 15:30~20:
 
 포털 확인은 사용자 브라우저가 필요하다(이 개발 환경에서 포털 접속 불가). 키 등록 뒤 첫 녹화([runbook](../runbooks/stage-2-real-recording.md))에서 로그로 확인하는 것이 추천안이다.
 
-## 9. 주문·계좌 API(이번 범위 밖, 7단계 risk-ops 입력)
-- 국내 현금 주문 `POST /uapi/domestic-stock/v1/trading/order-cash`, 매수 TTTC0802U·매도 TTTC0801U, 정정·취소 `order-rvsecncl` TTTC0803U, 잔고 `inquire-balance` TTTC8434R, 일별 체결 `inquire-daily-ccld` TTTC8001R `[사실]` S6 `constants.py`. 계좌번호는 `CANO`(8자리)와 `ACNT_PRDT_CD`(2자리)로 나눠 보낸다 `[사실]` S4.
-- 주문 본문 해시(`/uapi/hashkey`)는 "현재 필수 아님, 변조 우려 시 사용" `[사실]` S2 주석.
-- 주문 응답에 멱등 키 칸이 없다 `[추론]`(예제 입력값에 없음). 타임아웃 뒤 재주문 금지·조회 우선(절대 규칙 2)은 일별 체결 조회로 미접수를 확인하는 방식이 되어야 한다. risk-ops가 7단계에서 장애표 2·3번과 함께 설계한다.
-- 체결통보 H0STCNI0는 암호화 프레임(AES-256-CBC)이고 `tr_key`가 HTS ID다. HTS ID는 계좌 식별 정보라 비밀값으로 다룬다(`secrets.json`).
-- 지금 저장소에는 한국투자 주문 코드가 없고 `KisPlugin.orderGateway`는 빈 값이다(MD-01 유지).
+## 9. 주문·계좌 API(7단계 risk-ops 입력 → D-145로 구현, 미연결)
+- (처음 기록, 2026-10-10, S6 `constants.py` 기준) 국내 현금 주문 `POST /uapi/domestic-stock/v1/trading/order-cash`, 매수 TTTC0802U·매도 TTTC0801U, 정정·취소 `order-rvsecncl` TTTC0803U, 잔고 `inquire-balance` TTTC8434R, 일별 체결 `inquire-daily-ccld` TTTC8001R `[사실]`. 계좌번호는 `CANO`(8자리)와 `ACNT_PRDT_CD`(2자리)로 나눠 보낸다 `[사실]` S4.
+- (2026-10-26 갱신, [D-145](../decisions/D-145-kis-order-client.md)) 같은 저장소 커밋 `cd63cae`(2026-10-23)의 examples_llm은 새 TR을 쓴다: 매수 `TTTC0012U`, 매도 `TTTC0011U`, 정정·취소 `TTTC0013U`, 일별 체결(3개월 이내) `TTTC0081R`(이전 `CTSC9215R`), 잔고 `TTTC8434R`(같음) `[사실]`. 우리 코드(`com.autotrade.broker.kis.order`)는 새 TR을 쓴다. 주문 응답 `output.KRX_FWDG_ORD_ORGNO`·`ODNO`·`ORD_TMD`, 일별 체결 행 `odno`·`orgn_odno`·`ord_qty`·`tot_ccld_qty`·`cnc_cfrm_qty`·`rmn_qty`·`rjct_qty`·`ord_tmd`, 연속 조회 헤더 `tr_cont` M·F → 다음 요청 N과 `ctx_area_fk100`·`nk100` `[사실]`.
+- 주문 본문 해시(`/uapi/hashkey`)는 "현재 필수 아님, 변조 우려 시 사용" `[사실]` S2 주석. 쓰지 않는다.
+- 주문 입력에 멱등 키 칸이 없다 `[사실]`(order_cash 입력값). 타임아웃 뒤 재주문 금지·조회 우선(절대 규칙 2)은 일별 체결 조회로 특징을 대조해 판정한다(D-145 결정 5, `KisOrderReconciler`).
+- 체결통보 H0STCNI0는 암호화 프레임(AES-256-CBC)이고 `tr_key`가 HTS ID다. 공식 실시간 주소는 평문 ws뿐이라(wss 없음, S9 `kis_devlp.yaml`) **받지 않는다**(D-145 결정 1, ADR-003 6장). HTS ID는 계좌 식별 정보라 비밀값으로 다룬다.
+- `KisPlugin.orderGateway`는 여전히 빈 값이다. `OrderGateway` 실전 구현과 연결은 멱등 키 영속(B4, ADR-015) 뒤 묶음 E에서 한다.
 
 ## 10. 후속(이 PR 범위 밖)
 - 열린 PR #39·#40·#41과 같은 파일이라 미룬 반영: 결정 로그 목록(`docs/decisions/README.md`)에 D-054 한 줄, Q-015에 8장 항목, ADR-003 4장 한국투자 줄(PONG 프레임, 재발급 제한 해석), `market-data-limits.md` 출처 표에 S1 커밋. 세 PR이 머지된 뒤 한 번에 반영한다. (2026-10-11: 결정 로그 목록과 ADR-003(위 "4장"은 실제로는 2.1절 공통 엔진·토큰 단락과 5장 확인 항목)은 PR #42 안에서, Q-015 항목과 `market-data-limits.md` 출처(H7·H8)는 #39·#40·#41·#42 머지 뒤 후속 문서 PR에서 반영했다.)
