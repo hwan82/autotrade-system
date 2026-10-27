@@ -250,3 +250,7 @@
 
 - 이 PR은 문서만이다. 1장의 [사실]은 main `53482a5` 코드를 직접 읽은 결과다(파일·라인 표기). 줄 형식과 순위 규칙은 G1·G2 시험(5장)으로 검증하고, 지연 기준은 G1 시험과 사용자 PC 측정 전에는 **검증하지 못했다**.
 - 숫자 `[가정]`(큐 20,000, 상한 64·128, 3초·10초·60초, T_fail 10초, 지연 기준)은 측정·시험 뒤 바꿀 수 있고, 바꾸면 이 ADR에 날짜와 함께 적는다.
+
+## 8. 구현 기록
+
+- **G1(2026-10-27, [D-148](../decisions/D-148-engine-feed-g1.md))**: `marketdata.enginefeed`(`EngineFeedProtocol`·`EngineFeedClient`·`EngineFeedSocket`), `marketdata.enginefeed.server`(`EngineFeedServer`), 보호 테스트 `EngineFeedBoundaryTest`. 게이트웨이·엔진 실행부 연결은 G2·G4. 2.3·2.5와 다르게 정한 것: 상태·생존 줄 `sources`는 같은 객체 모양(architect N6), 큐가 차면 생존 줄은 버리고 상태 줄은 다음 차례에 다시(N7), 수신 스레드 → 쓰기 스레드 넘김은 깨우지 않는 큐(쓰기 스레드가 0.5ms마다 봄). 5장 시험 1~5·6(컨테이너)·10·16(게이트웨이 쪽)·17(서버 쪽)·21(`lastRx`)·24를 G1 시험으로 넣었다. 9번과 17번의 게이트웨이 콜백 부분은 G2.
