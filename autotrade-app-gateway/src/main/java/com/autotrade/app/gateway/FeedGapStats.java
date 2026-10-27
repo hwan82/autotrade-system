@@ -197,8 +197,8 @@ public final class FeedGapStats {
             } else if (in.matches("\\d{4}-\\d{2}-\\d{2}")) {
                 dates.add(LocalDate.parse(in));
             } else {
-                Path dir = Path.of(in);
-                if (!Files.isDirectory(dir)) {
+                Path dir = Path.of(in).toAbsolutePath().normalize();
+                if (!Files.isDirectory(dir) || dir.getParent() == null) {
                     throw new IllegalArgumentException("녹화일 폴더가 아닙니다: " + in);
                 }
                 dirs.put(dir.getParent().getFileName() + "/" + dir.getFileName(), dir);
@@ -298,14 +298,14 @@ public final class FeedGapStats {
             Long boundary = boundaries.isEmpty() ? null : boundaries.first();
             if (boundary != null && line.seq() >= boundary) {
                 boundaries.headSet(line.seq(), true).clear();
-                day.resetAll(line.event().receivedAt(), rules);
+                day.resetAll(day.lastLineRx == null ? line.event().receivedAt() : day.lastLineRx, line.event().receivedAt());
             }
             day.accept(line, rules);
         });
         day.finish(summary.lastReceivedAt());
         return new DayInfo(date, summary.meta(), summary.truncated(), summary.eventCount(), summary.gapCount(),
                 meta.map(m -> m.segments().size()).orElse(0), day.firstRx, summary.lastReceivedAt(), session.zone(),
-                new TreeMap<>(day.sourceLines));
+                new TreeMap<>(day.sourceLines), day.statusLines);
     }
 
     /** 하루 읽기 상태. 종목·소스별 이어 보기(Chain)를 들고 있다가 하루 끝에 닫는다. 날을 넘겨 잇지 않는다. */
@@ -316,9 +316,11 @@ public final class FeedGapStats {
         final Map<Symbol, Chain> symbols = new LinkedHashMap<>();
         final Map<String, Chain> sources = new LinkedHashMap<>();
         final Map<String, Long> sourceLines = new LinkedHashMap<>();
-        /** 단계 안에서 녹화 재기동 경계가 있었는지(그 단계 시작 → 첫 이벤트를 세지 않는다). */
+        /** 녹화 재기동으로 빈 시간이 그 단계와 겹쳤는지(그 단계 시작 → 첫 이벤트·단계 내내 없음을 세지 않는다). */
         final boolean[] globalResetIn = new boolean[W];
         Instant firstRx;
+        Instant lastLineRx;
+        long statusLines;
 
         Day(LocalDate date, Windows win, Totals totals) {
             this.date = date;
@@ -334,13 +336,22 @@ public final class FeedGapStats {
             return rx.isBefore(win.start[0]) ? BEFORE : AFTER;
         }
 
-        void resetAll(Instant rx, KrxMarketRules rules) {
-            int w = window(rx, rules);
-            if (w >= 0 && w < W) {
-                globalResetIn[w] = true;
+        /** 끊긴 시간 {@code [from, to]}와 겹치는 단계에 표시한다. */
+        void markOverlap(boolean[] marks, long from, long to) {
+            for (int w = 0; w < W; w++) {
+                if (toMicros(win.start[w]) <= to && toMicros(win.end[w]) > from) {
+                    marks[w] = true;
+                }
             }
-            symbols.values().forEach(c -> c.reset(w));
-            sources.values().forEach(c -> c.reset(w));
+        }
+
+        /** 녹화 재기동: 앞 구간 마지막 줄 수신 시각부터 새 구간 첫 줄까지 모든 이어 보기를 끊는다. */
+        void resetAll(Instant from, Instant to) {
+            long f = toMicros(from);
+            long t = toMicros(to);
+            markOverlap(globalResetIn, f, t);
+            symbols.values().forEach(c -> c.reset(f, t));
+            sources.values().forEach(c -> c.reset(f, t));
         }
 
         void accept(RecordingCodec.Line line, KrxMarketRules rules) {
@@ -349,13 +360,19 @@ public final class FeedGapStats {
                 firstRx = rx;
             }
             int w = window(rx, rules);
+            lastLineRx = rx;
             sourceLines.merge(line.sourceId(), 1L, Long::sum);
-            if (line.event() instanceof DataGap) {
-                // 끊김 표시만 낸 출처(녹화기 재기동 표시 "RECORDER" 등)는 소스 분포를 만들지 않는다
-                symbols.computeIfAbsent(line.event().symbol(), s -> new Chain(this, totals.symbolSink(s))).reset(w);
+            if (line.event() instanceof DataGap g) {
+                long from = Math.min(toMicros(g.gapStart()), toMicros(rx));
+                long to = toMicros(rx);
+                symbols.computeIfAbsent(line.event().symbol(), s -> new Chain(this, totals.symbolSink(s))).reset(from, to);
                 Chain src = sources.get(line.sourceId());
                 if (src != null) {
-                    src.reset(w);
+                    src.reset(from, to);
+                } else {
+                    // 시세 소스가 아닌 출처(녹화기 "RECORDER"의 큐 넘침·재기동 표시)는 어느 소스 이벤트를 버렸는지 모르므로
+                    // 모든 소스 이어 보기를 끊는다(strategy-researcher PR #256 R1). 이 출처로 소스 분포를 만들지 않는다.
+                    sources.values().forEach(c -> c.reset(from, to));
                 }
                 return;
             }
@@ -363,6 +380,7 @@ public final class FeedGapStats {
             Chain src = sources.computeIfAbsent(line.sourceId(), s -> new Chain(this, totals.sourceSink(s, date)));
             boolean vi = sym.inVi;
             if (line.event() instanceof InstrumentStatusChanged st) {
+                statusLines++;
                 vi = st.status() == InstrumentStatus.VOLATILITY_INTERRUPTION || st.status() == InstrumentStatus.HALTED;
             }
             sym.event(toMicros(rx), w, rx);
@@ -390,26 +408,44 @@ public final class FeedGapStats {
         /** 마지막 이벤트 때 VI 상태였는지(종목만). */
         boolean inVi;
         final long[] eventsIn = new long[W];
+        /** 끊긴 시간이 겹쳤거나, 끊긴 채(마지막 이벤트 뒤 끊김) 시작한 단계. 시작 → 첫 이벤트·단계 내내 없음을 세지 않는다. */
         final boolean[] resetIn = new boolean[W];
+        /** 마지막 끊김의 끝(수신 시각)이 든 단계 순서. */
+        int resetW = BEFORE;
 
         Chain(Day day, Sink sink) {
             this.day = day;
             this.sink = sink;
         }
 
-        void reset(int w) {
+        void reset(long from, long to) {
             if (valid && lastW >= 0 && lastW < W) {
                 sink.excluded(lastW);
             }
             valid = false;
             inVi = false;
-            if (w >= 0 && w < W) {
-                resetIn[w] = true;
+            day.markOverlap(resetIn, from, to);
+            resetW = BEFORE;
+            for (int w = 0; w < W; w++) {
+                if (toMicros(day.win.start[w]) <= to) {
+                    resetW = w;
+                }
+            }
+            if (to >= toMicros(day.win.end[W - 1])) {
+                resetW = AFTER;
+            }
+        }
+
+        /** 끊긴 채로 시작한 단계(마지막 끊김 단계 뒤 ~ {@code upTo})를 표시한다(architect PR #256 R1). */
+        private void markInvalidUpTo(int upTo) {
+            for (int k = Math.max(0, resetW + 1); k <= Math.min(upTo, W - 1); k++) {
+                resetIn[k] = true;
             }
         }
 
         void event(long t, int w, Instant at) {
-            if (firstT == Long.MIN_VALUE) {
+            boolean first = firstT == Long.MIN_VALUE;
+            if (first) {
                 firstT = t;
             }
             if (lastT != Long.MIN_VALUE && t < lastT) {
@@ -420,6 +456,13 @@ public final class FeedGapStats {
             } else {
                 if (valid && lastW >= 0 && lastW < W && w > lastW) {
                     trailing(lastW);
+                }
+                if (!valid && !first) {
+                    markInvalidUpTo(w);
+                }
+                if (valid && w >= 0 && w < W && w > lastW && eventsIn[w] == 0) {
+                    // 단계 경계를 지난 엔진 쪽 나이: 앞 단계(또는 장전) 마지막 이벤트 → 이 단계 첫 이벤트(strategy-researcher R2)
+                    sink.cross(w, Math.max(0, t - lastT), fromMicros(lastT));
                 }
                 if (w >= 0 && w < W && eventsIn[w] == 0) {
                     long start = toMicros(day.win.start[w]);
@@ -445,6 +488,9 @@ public final class FeedGapStats {
         }
 
         void finish(long dayFirst, long dayLast) {
+            if (!valid && firstT != Long.MIN_VALUE) {
+                markInvalidUpTo(W - 1);
+            }
             if (valid && lastW >= 0 && lastW < W) {
                 if (dayLast >= toMicros(day.win.end[lastW])) {
                     trailing(lastW);
@@ -460,7 +506,7 @@ public final class FeedGapStats {
                     sink.silent(w, day.win.micros(w), day.win.start[w]);
                 }
             }
-            sink.dayDone();
+            sink.dayDone(firstT != Long.MIN_VALUE);
         }
     }
 
@@ -476,7 +522,10 @@ public final class FeedGapStats {
 
         void excluded(int w);
 
-        void dayDone();
+        void cross(int w, long micros, Instant from);
+
+        /** @param hadEvents 그날 이벤트가 하나라도 있었는지(끊김 표시만 있으면 종목·일로 세지 않음) */
+        void dayDone(boolean hadEvents);
     }
 
     /** 단계별 묶음 하나(분포·시작 → 첫 이벤트·VI 중·뺀 간격·단계 내내 없음). */
@@ -484,6 +533,8 @@ public final class FeedGapStats {
         final Hist[] main = new Hist[W];
         final Hist[] leading = new Hist[W];
         final Hist[] vi = new Hist[W];
+        /** 단계 경계를 지난 나이(앞 단계 마지막 이벤트 → 이 단계 첫 이벤트). */
+        final Hist[] cross = new Hist[W];
         final long[] excluded = new long[W];
         final long[] leadingSkipped = new long[W];
         final long[] silent = new long[W];
@@ -493,6 +544,7 @@ public final class FeedGapStats {
                 main[w] = new Hist();
                 leading[w] = new Hist();
                 vi[w] = new Hist();
+                cross[w] = new Hist();
             }
         }
     }
@@ -554,11 +606,19 @@ public final class FeedGapStats {
                 }
 
                 @Override
-                public void dayDone() {
-                    symbolDays.merge(s, 1L, Long::sum);
-                    symbolDayCount++;
+                public void cross(int w, long micros, Instant from) {
+                    st.cross[w].add(micros, from);
+                    allSymbols.cross[w].add(micros, from);
+                }
+
+                @Override
+                public void dayDone(boolean hadEvents) {
+                    if (hadEvents) {
+                        symbolDays.merge(s, 1L, Long::sum);
+                        symbolDayCount++;
+                    }
                     for (int i = 0; i < dayOver.length; i++) {
-                        if (dayOver[i] > 0) {
+                        if (hadEvents && dayOver[i] > 0) {
                             symbolDaysOver[i]++;
                         }
                         dayOver[i] = 0;
@@ -601,7 +661,12 @@ public final class FeedGapStats {
                 }
 
                 @Override
-                public void dayDone() {}
+                public void cross(int w, long micros, Instant from) {
+                    st.cross[w].add(micros, from);
+                }
+
+                @Override
+                public void dayDone(boolean hadEvents) {}
             };
         }
 
@@ -707,7 +772,7 @@ public final class FeedGapStats {
     // ---------------------------------------------------------------- 보고서
 
     record DayInfo(LocalDate date, Optional<RecordingMeta> meta, boolean truncated, long eventCount, long gapCount,
-            int segments, Instant firstRx, Instant lastRx, ZoneId zone, Map<String, Long> sourceLines) {
+            int segments, Instant firstRx, Instant lastRx, ZoneId zone, Map<String, Long> sourceLines, long statusLines) {
         boolean complete() {
             return meta.map(RecordingMeta::complete).orElse(false) && !truncated;
         }
@@ -732,20 +797,28 @@ public final class FeedGapStats {
                     .append("측정 방법과 한계는 맨 아래 절에 있다. 시각은 거래소 현지 시각이다.\n\n");
 
             b.append("## 입력 녹화\n\n");
-            b.append("| 날짜 | 정상 종료 | 마지막 줄 잘림 | 줄 수 | 끊김 표시 | 녹화 구간 | 첫 수신 | 마지막 수신 | 소스별 줄 수 |\n");
-            b.append("|---|---|---|---|---|---|---|---|---|\n");
+            b.append("| 날짜 | 정상 종료 | 마지막 줄 잘림 | 줄 수 | 끊김 표시 | 상태 줄 | 녹화 구간 | 첫 수신 | 마지막 수신 | 소스별 줄 수 | eventsSha256 앞 12자 |\n");
+            b.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
             for (DayInfo d : days) {
                 b.append("| ").append(d.date()).append(" | ").append(d.meta().map(m -> m.complete() ? "예" : "아니오").orElse("메타 없음"))
                         .append(" | ").append(d.truncated() ? "예" : "아니오").append(" | ").append(d.eventCount())
-                        .append(" | ").append(d.gapCount()).append(" | ").append(d.segments()).append(" | ")
+                        .append(" | ").append(d.gapCount()).append(" | ").append(d.statusLines()).append(" | ")
+                        .append(d.segments()).append(" | ")
                         .append(clock(d.firstRx(), d.zone())).append(" | ").append(clock(d.lastRx(), d.zone())).append(" | ")
-                        .append(d.sourceLines()).append(" |\n");
+                        .append(d.sourceLines()).append(" | ")
+                        .append(d.meta().map(RecordingMeta::eventsSha256).filter(h -> h.length() >= 12).map(h -> h.substring(0, 12))
+                                .orElse("-"))
+                        .append(" |\n");
             }
             if (!missing.isEmpty()) {
                 b.append("\n녹화 폴더가 없는 거래일: ").append(String.join(", ", missing)).append('\n');
             }
             if (!allComplete()) {
                 b.append("\n정상 종료되지 않았거나 잘린 녹화일이 있다. 그날 값은 녹화가 끝난 곳까지만 들어갔다.\n");
+            }
+            if (days.stream().mapToLong(DayInfo::statusLines).sum() == 0) {
+                b.append("\n**VI 분리 안 됨**: 녹화에 종목 상태(`STATUS`) 줄이 하나도 없다(지금 키움·한국투자 수신은 상태 줄을 만들지 않음). ")
+                        .append("VI·정지 중 간격이 접속 매매 분포에 섞여 있으므로 긴 간격 일부는 VI일 수 있다.\n");
             }
             if (totals.backwards > 0) {
                 b.append("\n수신 시각이 앞 줄보다 이른 줄: ").append(totals.backwards).append("건(간격 0으로 셈)\n");
@@ -771,7 +844,8 @@ public final class FeedGapStats {
                     .append(h.over(5)).append(" |\n")));
 
             b.append("\n## 종목 단위 전체 (T_quiet, 장애표 #15·RSK-08 `market-data.symbol-gap`)\n\n");
-            b.append("모든 종목의 간격을 합친 분포. VI 중 시작한 간격은 \"VI 중\" 칸에만 넣었다.\n\n");
+            b.append("모든 종목의 간격을 합친 분포. VI 중 시작한 간격은 \"VI 중\" 칸에만 넣었다. 간격 수로 가중한 값이라 거래가 많은 종목이 ")
+                    .append("대부분을 차지하고 거래가 드문 종목은 거의 반영되지 않는다. T_quiet은 아래 후보별 표와 종목별 표로 판단한다.\n\n");
             b.append(statsHeader());
             for (int w = 0; w < W; w++) {
                 b.append(statsRow("전체 종목", Window.values()[w], totals.allSymbols, w));
@@ -802,6 +876,15 @@ public final class FeedGapStats {
                                 .orElse("-"))
                         .append(" |\n");
             }
+
+            b.append("\n### 단계 경계 (분포에 넣지 않은 것)\n\n");
+            b.append("\"시작→첫\"은 단계 시작 → 첫 이벤트, \"경계 걸침\"은 앞 단계(또는 장전) 마지막 이벤트 → 이 단계 첫 이벤트다. ")
+                    .append("엔진이 단계 경계에서 마지막 이벤트 시각을 지우지 않으면 \"경계 걸침\"이 엔진이 보는 나이다. ")
+                    .append("시가 단일가 접수 마감이 임의로 늦춰져(최대 30초 `[가정]`) 접속 매매 행에서 매일 생길 수 있다.\n\n");
+            b.append("| 대상 | 단계 | 종류 | 건수 | p99 | 최대 | 최대 시작 | >3s | >10s | >30s | >60s |\n");
+            b.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+            totals.sources.forEach((src, st) -> boundaryRows(b, src, st));
+            boundaryRows(b, "전체 종목", totals.allSymbols);
 
             b.append("\n## 종목별 (접속 매매)\n\n");
             b.append("종목마다 T_quiet을 다르게 둘지 판단할 근거. \"개장→첫\"은 접속 매매 시작 → 그 종목 첫 이벤트 최대(분포에 넣지 않음).\n\n");
@@ -835,14 +918,34 @@ public final class FeedGapStats {
             b.append("- 분포에 넣은 것: 단계 안 이어진 두 이벤트 사이, 마지막 이벤트 → 단계 끝(녹화가 단계 끝까지 이어진 날), ")
                     .append("단계 전에 이벤트가 있었는데 단계 내내 없으면 단계 길이 전체(\"단계 내내 없음\").\n");
             b.append("- 분포에서 뺀 것: 끊김 표시(`GAP`, 이유 무관)·녹화 재기동 경계를 지나는 간격(\"뺀 간격\"), 단계 시작 → 첫 이벤트(\"개장→첫\"·")
-                    .append("\"시작→첫\"), 종목이 VI·정지 상태일 때 시작한 간격(\"VI 중\").\n");
+                    .append("\"시작→첫\")와 단계 경계를 지난 간격(\"경계 걸침\", 단계 경계 표), 종목이 VI·정지 상태일 때 시작한 간격(\"VI 중\", ")
+                    .append("상태 줄이 있는 녹화만).\n");
             b.append("- 백분위는 히스토그램 칸의 위 경계(≤, 1초 미만 10ms·10초 미만 100ms·600초 미만 1초 단위)이고, 최대와 \">Ns\" 횟수는 정확한 값이다.\n");
             b.append("- 녹화는 게이트웨이가 받은 것 전부를 담는다고 본다 `[가정]`(녹화 큐 넘침은 `GAP(RECORDER_OVERFLOW)`로 남아 뺀 간격에 든다). ")
                     .append("엔진 전달은 관심 종목만 보내므로 소스 단위 간격은 엔진이 받는 종목이 적을수록 이 표보다 길어진다 `[추론]`. ")
                     .append("소스 3초 판단은 생존 줄의 소스별 `lastRx`(게이트웨이가 받은 모든 종목)로 하므로 이 표가 그 값에 해당한다(ADR-016 2.3 생존 줄).\n");
+            b.append("- 끊긴 시간(`GAP`의 시작~수신, 재기동 앞 구간 마지막 줄~새 구간 첫 줄)이 겹친 단계와 끊긴 채 시작한 단계는 ")
+                    .append("\"단계 내내 없음\"·\"시작→첫\"으로 세지 않는다. 녹화기 큐 넘침·재기동 표시(`RECORDER`)는 어느 소스 이벤트를 ")
+                    .append("버렸는지 몰라 모든 소스 이어 보기를 끊는다.\n");
+            b.append("- 그날 이벤트가 하나도 없는 감시 종목은 녹화에 나타나지 않아 표와 종목·일 수에서 빠진다(감시 목록은 읽지 않음). ")
+                    .append("소스 전환(`SOURCE_SWITCH`)은 새 소스 이어 보기만 끊고, 옛 소스는 마지막 이벤트 → 단계 끝을 조용함으로 센다 `[추론]`.\n");
+            b.append("- 끊김 뒤에는 VI 상태를 모르는 것으로 보고 지운다(다음 상태 줄까지).\n");
             b.append("- 감시 종목 구성(거래가 많은 종목 위주인지)에 따라 값이 달라진다. 실전 보호 대상(보유 종목)이 이 녹화 종목과 다르면 ")
                     .append("그 종목 녹화로 다시 잰다.\n");
             return b.toString();
+        }
+
+        private void boundaryRows(StringBuilder b, String target, Stats st) {
+            for (int w = 0; w < W; w++) {
+                for (int k = 0; k < 2; k++) {
+                    Hist h = k == 0 ? st.leading[w] : st.cross[w];
+                    b.append("| ").append(target).append(" | ").append(Window.values()[w].label).append(" | ")
+                            .append(k == 0 ? "시작→첫" : "경계 걸침").append(" | ").append(h.count).append(" | ")
+                            .append(le(h.percentile(0.99))).append(" | ").append(dur(h.max)).append(" | ").append(at(h.maxFrom))
+                            .append(" | ").append(h.over(3)).append(" | ").append(h.over(10)).append(" | ").append(h.over(30))
+                            .append(" | ").append(h.over(60)).append(" |\n");
+                }
+            }
         }
 
         private String name(Symbol s) {

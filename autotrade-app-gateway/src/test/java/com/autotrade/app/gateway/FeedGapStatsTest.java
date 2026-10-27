@@ -310,4 +310,98 @@ class FeedGapStatsTest {
         assertThat(FeedGapStats.run(new String[] {}, weekend, config(), sink, sink)).isEqualTo(2);
         assertThat(FeedGapStats.run(new String[] {"2026-10-12..2026-10-08"}, weekend, config(), sink, sink)).isEqualTo(2);
     }
+
+    @Test
+    void 끊김이_단계_하나를_통째로_덮으면_그_단계를_단계_내내_없음으로_세지_않는다() {
+        // architect PR #256 R1: 15:18 끊김 → 15:35 다시 붙음. 종가 단일가(15:20~15:30) 전체가 끊긴 시간
+        Instant back = at(6 * H + 2100);
+        Path day = record(OPEN, List.of(
+                trade(A, -60), trade(B, -60),
+                trade(B, 6 * H + 1000),
+                new DataGap(B, 0, back, back, at(6 * H + 1080), back, DataGap.GapReason.DISCONNECTED),
+                trade(B, 6 * H + 2400), trade(A, 6 * H + 2400)));
+
+        FeedGapStats.Report r = measure(day);
+        FeedGapStats.Stats b = r.totals().symbols.get(B);
+
+        assertThat(b.silent[CA]).isZero();
+        assertThat(b.main[CA].count).isZero();
+        assertThat(b.excluded[CONT]).isEqualTo(1);
+        assertThat(r.totals().sources.get(SRC).silent[CA]).isZero(); // 그 소스가 낸 끊김이라 소스도 끊김
+    }
+
+    @Test
+    void 녹화_재기동이_단계를_덮으면_종목과_소스_모두_단계_내내_없음으로_세지_않는다() {
+        record(OPEN, List.of(trade(A, -60), trade(A, 6 * H + 1080))); // 15:18에 녹화 멈춤
+        Path day = record(at(6 * H + 2100), List.of(trade(A, 6 * H + 2110))); // 15:35 재기동
+
+        FeedGapStats.Report r = measure(day);
+
+        assertThat(r.totals().symbols.get(A).silent[CA]).isZero();
+        assertThat(r.totals().sources.get(SRC).silent[CA]).isZero();
+        assertThat(r.totals().allSymbols.main[CA].count).isZero();
+    }
+
+    @Test
+    void 녹화기_큐_넘침_표시는_모든_소스_이어보기를_끊는다() {
+        // strategy-researcher PR #256 R1: 녹화기는 넘침 표시를 출처 RECORDER로 쓴다
+        Instant rx = at(1806);
+        MarketEventRecorder rec = new MarketEventRecorder(layout(), Market.KRX, ZoneId.of("Asia/Seoul"),
+                Clock.fixed(OPEN, ZoneOffset.UTC), Map.of(SRC, "KRX_REALTIME"), "본인 연구용, 외부 공유 금지", 1_000,
+                Duration.ofMillis(50));
+        rec.offer(SRC, trade(A, -60));
+        rec.offer(SRC, trade(A, 1800));
+        rec.offer("RECORDER", new DataGap(A, 0, rx, rx, at(1801), rx, DataGap.GapReason.RECORDER_OVERFLOW));
+        rec.offer(SRC, trade(B, 1806));
+        rec.offer(SRC, trade(A, 6 * H + 2400));
+        rec.close();
+
+        FeedGapStats.Report r = measure(layout().dayDir(Market.KRX, DAY));
+        FeedGapStats.Stats src = r.totals().sources.get(SRC);
+
+        assertThat(r.totals().sources).containsOnlyKeys(SRC);
+        assertThat(src.excluded[CONT]).isEqualTo(1);
+        assertThat(src.main[CONT].over(5)).isEqualTo(1); // 09:30:00 → 09:30:06은 빠지고 09:30:06 → 15:20만
+    }
+
+    @Test
+    void 단계_경계를_지난_나이를_따로_세고_보고서에_초과_횟수로_낸다() {
+        // strategy-researcher PR #256 R2: 08:59:50 → 09:00:20, 엔진이 보는 나이 30초
+        Path day = record(at(-1800), List.of(trade(A, -1800), trade(A, -10), trade(A, 20), trade(A, 6 * H + 2400)));
+
+        FeedGapStats.Report r = measure(day);
+        FeedGapStats.Stats a = r.totals().symbols.get(A);
+
+        assertThat(a.cross[CONT].count).isEqualTo(1);
+        assertThat(a.cross[CONT].max).isEqualTo(30 * S);
+        assertThat(a.leading[CONT].max).isEqualTo(20 * S);
+        assertThat(r.totals().sources.get(SRC).cross[CONT].over(10)).isEqualTo(1);
+        assertThat(r.toMarkdown()).contains("### 단계 경계")
+                .contains("| 전체 종목 | 접속 매매 | 경계 걸침 | 1 | ≤30.0s | 30.0s |");
+    }
+
+    @Test
+    void 상태_줄이_없으면_VI_분리_안_됨을_적고_있으면_적지_않는다() {
+        Path plain = record(OPEN, List.of(trade(A, 5), trade(A, 6 * H + 2400)));
+        assertThat(measure(plain).toMarkdown()).contains("**VI 분리 안 됨**").contains("| 2026-10-08 | 예 | 아니오 | 2 | 0 | 0 |");
+    }
+
+    @Test
+    void 상태_줄이_있으면_VI_분리_안_됨을_적지_않는다() {
+        Path withStatus = record(OPEN, List.of(trade(A, 5),
+                new InstrumentStatusChanged(A, 0, at(6), at(6), InstrumentStatus.TRADING), trade(A, 6 * H + 2400)));
+        assertThat(measure(withStatus).toMarkdown()).doesNotContain("VI 분리 안 됨");
+    }
+
+    @Test
+    void 끊김_표시만_있는_종목은_종목_일로_세지_않는다() {
+        Instant rx = at(100);
+        Path day = record(OPEN, List.of(trade(A, -60),
+                new DataGap(C, 0, rx, rx, at(90), rx, DataGap.GapReason.DISCONNECTED), trade(A, 6 * H + 2400)));
+
+        FeedGapStats.Report r = measure(day);
+
+        assertThat(r.totals().symbolDayCount).isEqualTo(1);
+        assertThat(r.totals().symbolDays).doesNotContainKey(C);
+    }
 }
