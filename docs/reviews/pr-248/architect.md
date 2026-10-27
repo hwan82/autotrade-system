@@ -100,3 +100,37 @@
 
 ## 판정
 승인
+
+## 재검토 3 2026-10-27
+- 대상: PR #248 / 커밋 `baf23da2` (앞 재검토 2 `b07350bf` 뒤: 독립 QA 원문 `f566b668`, main 병합 `54fc1a8c`, 반영 `baf23da2`) / `origin/main...HEAD` diff 전체를 다시 보고, 반영분은 `git show baf23da2`로 따로 봄. 병합 `54fc1a8c`는 main 쪽 변경(#245·#246·#252 등)을 가져온 것이며, 충돌 해소한 `docs/decisions/README.md`·`docs/qa/pending.md`는 main 줄을 지우지 않고 D-146·PR #248 줄만 더했음을 `git diff df22830b HEAD`로 확인
+- 점검표: B
+- 직접 실행한 것: `git archive HEAD`로 새 폴더에 풀어 `./gradlew build --offline` → BUILD SUCCESSFUL(4분 49초, UP-TO-DATE 3개뿐). JUnit XML 집계: real-store 44건, risk 68건, app-engine 115건, architecture-test 48건(main #247 규칙 포함), notification-jar 86건, 실패·오류·건너뜀 0. `git merge-tree --write-tree origin/main HEAD`(main 헤드 `de766487`): **`docs/qa/pending.md`·`docs/runbooks/stage-7-real-trading-tests.md` 충돌**(#243·#255가 병합 `54fc1a8c` 뒤에 main에 들어감). 코드 파일 충돌 없음
+
+### 앞 검토의 잘못 인정
+- 재검토 1에서 risk-ops F-3 반영(경로로 못 읽으면 잠금을 쥔 채널로 대조)을 "쓰기 주체 둘을 가리는 목적은 유지된다"고 판단했다. 이 판단은 틀렸다. 쥔 채널은 처음 잡은 옛 파일이라 늘 자기 도장과 같고, 다른 프로세스가 새 파일을 잠근 바로 그 경우를 놓친다. 독립 QA 발견 1이 맞다.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 새 폴더 빌드 통과(검토자가 직접 실행) |
+| B2 | 통과 | 반영분은 `autotrade-real-store`·app-engine 시험 안에서만 바뀜. 새 의존 없음. `ArchitectureTest`·`ModuleOwnershipTest`·`RealPathReflectionTest` 통과(main 병합 뒤 48건) |
+| B3 | 통과 | 공개 계약 추가는 `StoreRefusal(String, Throwable)` 생성자 하나. `writer.lock` 잠금 구간(2^62 위치 1바이트)은 ADR-015 2.9 "쓰기 주체 하나"를 지키는 구현 선택으로 D-146 결정 7에 적힘. 묶음 F 감시 긴급 경로는 같은 `WriterLock`을 써야 같은 구간으로 서로 막힌다(같은 모듈이라 자연히 그렇게 됨, 아래 권고) |
+| B4 | 해당 없음 | 시뮬레이션 코드 변경 없음. 복구 시간 시험의 `System.nanoTime`은 시험 코드의 측정 |
+| B5 | 해당 없음 | 금액 코드 없음 |
+| B6 | 통과 | 새 시험: 잠금 구간 위치·파일 전체 잠금과 겹침, `fileKey` 없음 + 경로 읽기 실패 → 차단(발견 1 재현과 같은 조건), 주기 확인 예외에도 계속·차단(Q4), 공통 원장 폴더 자리에 파일(Q1), 하루치 복구 시간(Q2), 처리기 OPEN 미적용 분기(Q3, `EngineCommandHandlerTest`), 앞 날짜 파일에 강제 기록된 줄 유지(Q5, `LedgerWriterTest`), 긴 비밀값부터(Q6). 지운 시험은 `잠금을_쥔_채널로도_잠금_파일_내용을_대조할_수_있다` 하나이며, 결함이던 분기(`readByLockedChannel`)를 지우면서 함께 지운 것이라 통과시키려 지운 것이 아니다(D-146 검증에 적힘) |
+| B7 | risk-ops 검토 필요 | 보호 경로(`autotrade-real-store/*`)의 쓰기 잠금·차단 조건과 실전 엔진 처리기 시험을 바꿈. risk-ops 재검토·독립 QA 재검토·사용자 머지 필요 |
+| B8 | 통과 | 새 차단·거부 문구는 예외 종류·메시지(경로)만 실음. 절차서 P12 예시 경로는 `<경로>` 자리표시자 |
+
+### 반영분 확인
+- **발견 1**: `WriterLock.acquire`가 `tryLock(LOCK_OFFSET, 1, false)`로 내용 밖 구간만 잡고, `check`는 경로 읽기 실패를 곧 문제로 본다(쥔 채널 대조 분기 삭제). 엔진끼리는 같은 구간을 잡으려 해서 서로 막히고, 다른 프로세스의 전체 잠금(`tryLock()`)도 겹쳐 실패한다(시험 확인). 지운 뒤 같은 이름 새 파일은 ① 잠금·공유 없이 열면 경로 읽기 실패 → 차단, ② 읽히면 내용 대조 → 차단. [추론] Windows `LockFileEx`가 파일 끝 너머 큰 위치 잠금을 허용하고 그 구간 밖 읽기를 막지 않는다는 점은 운영 PC 미검증이며 절차서 P12 ①·④로 확인하게 적혔다.
+- **Q1**: 공통 원장 폴더 준비 실패를 손상으로 다룬다(블랙리스트 → 모든 계좌 차단, 기동 → 기동 기록 실패로 차단, 명령 → 옮기고 경고). 그 밖의 입출력 실패는 `StoreRefusal`로 감싸 "실전 엔진 저장소를 열지 못해" 문구로 보인다. `open`의 catch 순서(`StoreRefusal`을 먼저 다시 던짐)도 맞다.
+- **Q4**: `checkLockSafely`가 `Throwable`을 잡고 차단 쪽으로 둔다. `block` 안 알림 실패까지 삼켜 다음 주기가 이어진다.
+- **Q5**: 되돌린 뒤 원장의 `lastRseq`(디스크 기준, `resyncFromDisk`)보다 큰 줄만 실패로 돌린다. `rseq`는 날짜 파일 사이에 체크포인트로 이어지므로 비교가 성립하고, 거래일 전환 중 새 파일을 열지 못해 `channel == null`로 되돌리기를 건너뛴 경우에도 `lastRseq`는 앞 파일에 강제 기록된 마지막 줄이라 맞다. 되돌리기 실패(`broken`)면 모두 실패(안전 쪽). 재검토 1에서 사소로 적은 경우가 해소됐다.
+- **Q2·Q3·Q6**: 시험·코드 확인, 문제 없음.
+
+### 권고(판정 영향 없음)
+- **main 다시 병합 필요**: 지금 main(`de766487`)과 `docs/qa/pending.md`·`docs/runbooks/stage-7-real-trading-tests.md`가 충돌한다. 절차서는 이 PR의 P11·P12와 #243의 I1 보완이 같은 문서를 고친 것이라, 병합 때 양쪽 줄을 모두 살렸는지 확인해야 한다. 병합 커밋은 문서만 바뀌어야 하며, 코드가 바뀌면 다시 검토를 받는다.
+- 복구 시간 시험(`하루치_최대_기록_가정으로…`)은 벽시계 3초 상한이다. 이 환경 0.7~0.8초라 여유는 있으나 CI가 느릴 때 흔들리면 상한을 늘리거나 측정만 출력하는 쪽으로 바꾼다.
+- 묶음 F에서 감시가 저장소를 잡을 때 `WriterLock`을 그대로 써서 같은 잠금 구간을 쓰도록 묶음 F ADR에 적는다(다른 구간을 잡으면 서로 막히지 않는다).
+
+## 판정
+승인
