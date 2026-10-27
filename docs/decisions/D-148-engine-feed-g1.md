@@ -1,4 +1,4 @@
-# D-147 실전 엔진 시세 통로 G1 구현(엔진 전달 서버·받는 쪽·줄 형식·ArchUnit)
+# D-148 실전 엔진 시세 통로 G1 구현(엔진 전달 서버·받는 쪽·줄 형식·ArchUnit)
 
 - 날짜: 2026-10-27
 - 상태: 제안. 아래 결정 1~9는 **추천안 채택(자율)**(지침 8장, architect 추천안). `autotrade-marketdata`(보호 경로)와 보호 테스트(`autotrade-architecture-test`)를 바꾸므로 실전 관련 PR이다: architect·risk-ops 검토 → 독립 QA → **사용자 직접 머지**(지침 10·11장). 머지가 이 기록의 최종 확인이다

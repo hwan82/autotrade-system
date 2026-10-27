@@ -253,4 +253,4 @@
 
 ## 8. 구현 기록
 
-- **G1(2026-10-27, [D-147](../decisions/D-147-engine-feed-g1.md))**: `marketdata.enginefeed`(`EngineFeedProtocol`·`EngineFeedClient`·`EngineFeedSocket`), `marketdata.enginefeed.server`(`EngineFeedServer`), 보호 테스트 `EngineFeedBoundaryTest`. 게이트웨이·엔진 실행부 연결은 G2·G4. 2.3·2.5와 다르게 정한 것: 상태·생존 줄 `sources`는 같은 객체 모양(architect N6), 큐가 차면 생존 줄은 버리고 상태 줄은 다음 차례에 다시(N7), 수신 스레드 → 쓰기 스레드 넘김은 깨우지 않는 큐(쓰기 스레드가 0.5ms마다 봄). 5장 시험 1~5·6(컨테이너)·10·16(게이트웨이 쪽)·17(서버 쪽)·21(`lastRx`)·24를 G1 시험으로 넣었다. 9번과 17번의 게이트웨이 콜백 부분은 G2.
+- **G1(2026-10-27, [D-148](../decisions/D-148-engine-feed-g1.md))**: `marketdata.enginefeed`(`EngineFeedProtocol`·`EngineFeedClient`·`EngineFeedSocket`), `marketdata.enginefeed.server`(`EngineFeedServer`), 보호 테스트 `EngineFeedBoundaryTest`. 게이트웨이·엔진 실행부 연결은 G2·G4. 2.3·2.5와 다르게 정한 것: 상태·생존 줄 `sources`는 같은 객체 모양(architect N6), 큐가 차면 생존 줄은 버리고 상태 줄은 다음 차례에 다시(N7), 수신 스레드 → 쓰기 스레드 넘김은 깨우지 않는 큐(쓰기 스레드가 0.5ms마다 봄). 5장 시험 1~5·6(컨테이너)·10·16(게이트웨이 쪽)·17(서버 쪽)·21(`lastRx`)·24를 G1 시험으로 넣었다. 9번과 17번의 게이트웨이 콜백 부분은 G2.
