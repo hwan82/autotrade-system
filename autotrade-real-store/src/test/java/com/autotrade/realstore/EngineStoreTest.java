@@ -498,7 +498,7 @@ class EngineStoreTest {
     static final int RISK_TOTAL = 5_000;
     static final int DAY_COMMANDS = 2_000;
     static final int BOOT_TOTAL = 2_000;
-    /** 목표 1초(2.7 {@code [추론]}). CI 기계 편차를 두어 시험은 3초를 넘으면 실패한다. 운영 PC 실측은 절차서 P11. */
+    /** 목표 1초(2.7 {@code [추론]}). CI 기계 편차를 두어 시험은 3초를 넘으면 실패한다. 운영 PC 실측은 절차서 P12. */
     static final Duration RECOVERY_LIMIT = Duration.ofSeconds(3);
 
     @Test
