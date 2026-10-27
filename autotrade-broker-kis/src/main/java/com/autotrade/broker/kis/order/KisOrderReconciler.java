@@ -1,5 +1,6 @@
 package com.autotrade.broker.kis.order;
 
+import com.autotrade.domain.order.OrderRequest;
 import com.autotrade.domain.order.OrderType;
 import com.autotrade.domain.order.Side;
 import java.math.BigDecimal;
@@ -17,61 +18,119 @@ import java.util.Set;
  * <p>한국투자 주문에는 멱등 키 칸이 없다 `[사실]`(order_cash 입력값). 그래서 "보내기 시작한 시각 이후에 들어온 같은 종목·방향·
  * 수량·주문구분(지정가면 가격까지)의 새 주문"을 찾는다. 이미 다른 키에 묶인 주문번호({@code claimed})는 뺀다.
  *
- * <p>판정(안전한 쪽으로 기운다: "없음"이 틀리면 중복 주문, "찾음"이 틀리면 남의 주문을 우리 것으로 묶는다)
+ * <p>틀릴 때의 방향: "없음"이 틀리면 중복 주문, "찾음"이 틀리면 남의 주문을 우리 것으로 묶는다. 아래 세 값이 틀리면 "없음"이
+ * 틀린다(QA PR #247 발견 1). 그래서 셋 다 호출자 입력이나 고정 가정에 맡기지 않는다.
  * <ul>
- *   <li>먼저 조회가 완전하고(모든 쪽, 응답 칸 있음, 읽지 못한 행 0) 같은 날이며, 조회 시작이 "보내기 시작 + 요청 시간 상한 +
+ *   <li>보내기 시작·끝 시각: {@link KisOrderClient}가 실제 POST 직전·응답 직후 세션 시계로 잰 값만 쓴다
+ *       ({@link Fingerprint#of}). 호출자가 잰 시각은 잠금·토큰 발급만큼 앞설 수 있다.</li>
+ *   <li>시계 오차: 조회 응답의 HTTP {@code Date}로 한국투자 시계와의 차이 하한을 재서 창을 옮긴다. {@code Date}가 없으면
+ *       모름이다. {@link #CLOCK_SKEW}는 그 위에 더하는 여유(웹 게이트웨이 시계와 주문시각을 찍는 시계의 차이, 초 단위 절사)다.</li>
+ *   <li>반영 대기 {@link #SETTLE}: 공식 자료가 없는 `[가정]`이다. 실제 반영이 더 늦으면 "없음"이 틀린다. 그래서 연결 PR(묶음 E)은
+ *       Q-015 실측으로 이 값을 확인하기 전에는 {@link NotFound}로 재발주하지 않는다(D-145 위험 1, 연결 조건).</li>
+ * </ul>
+ *
+ * <p>판정
+ * <ul>
+ *   <li>먼저 조회가 완전하고(모든 쪽, 응답 칸 있음, 읽지 못한 행 0) 같은 날이며, 서버 시각을 읽었고, 조회 시작이 "응답 받은 시각 +
  *       반영 대기"보다 뒤여야 한다. 아니면 {@link Indeterminate}(찾음도 내지 않는다).</li>
- *   <li>창(보내기 시작 − 시계 오차 이후)에 다른 키에 묶이지 않은 행이 하나도 없으면 {@link NotFound}. 종목·방향·취소 여부를
- *       가리지 않고 센다: 종목코드 형식이나 원주문번호 칸 해석이 틀려 우리 주문을 놓쳐도 없음이 나오지 않게 한다.</li>
+ *   <li>창(보내기 시작 + 잰 시계 차이 하한 − 여유 이후, 한국투자 시각)에 다른 키에 묶이지 않은 행이 하나도 없으면
+ *       {@link NotFound}. 종목·방향·취소 여부를 가리지 않고 센다: 종목코드 형식이나 원주문번호 칸 해석이 틀려 우리 주문을 놓쳐도
+ *       없음이 나오지 않게 한다.</li>
  *   <li>창 안의 묶이지 않은 행이 정확히 하나이고 그것이 같은 특징이면 {@link Found}. 그 밖에는 {@link Indeterminate}.</li>
  *   <li>그래서 호출자는 {@code claimed}에 이 계좌에서 우리가 받은 모든 주문번호(취소 주문 번호 포함)를 넣는다. 빠뜨리면
  *       모름이 늘어날 뿐 잘못된 확정은 나오지 않는다.</li>
  *   <li>사용자가 HTS에서 같은 종목·수량으로 직접 낸 주문만 창 안에 있고 우리 주문이 실제로 없으면 우리 것으로 잡을 수 있다
  *       ({@code byOrderNo=false}로 표시, 묶음 E에서 사람 확인 조건을 정한다).</li>
  * </ul>
- * 반영 대기 30초와 시계 오차 60초는 `[가정]`이다(공식 자료 없음, Q-015 실측 항목).
  */
 public final class KisOrderReconciler {
 
     static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
-    /** 접수된 주문이 일별 체결 조회에 보이기까지 기다리는 시간 `[가정]`. */
+    /** 응답(또는 시간 초과)을 받은 뒤 접수된 주문이 일별 체결 조회에 보이기까지 기다리는 시간 `[가정]`(Q-015 실측 전 재발주 금지). */
     public static final Duration SETTLE = Duration.ofSeconds(30);
-    /** 우리 시계와 한국투자 주문시각의 오차 여유 `[가정]`. 창을 앞으로 넓혀 후보를 놓치지 않게 한다. */
+    /**
+     * 잰 시계 차이 위에 더하는 여유 `[가정]`: 응답 {@code Date}를 찍는 웹 게이트웨이 시계와 주문시각({@code ord_tmd})을 찍는
+     * 시계의 차이, 초 단위 절사. 창을 앞으로 넓혀 후보를 놓치지 않게 한다.
+     */
     public static final Duration CLOCK_SKEW = Duration.ofSeconds(60);
 
     private KisOrderReconciler() {
     }
 
-    /** 결과를 모르는 주문의 특징. */
-    public record Fingerprint(
-            LocalDate tradingDate,
-            String symbolCode,
-            Side side,
-            OrderType type,
-            long quantity,
-            BigDecimal limitPrice,
-            Instant sendStartedAt,
-            Duration requestTimeout) {
+    /**
+     * 결과를 모르는 주문의 특징. 보내기 시작·끝 시각은 {@link KisOrderResult.Unknown}에서만 가져온다({@link #of}).
+     */
+    public static final class Fingerprint {
+        private final LocalDate tradingDate;
+        private final String symbolCode;
+        private final Side side;
+        private final OrderType type;
+        private final long quantity;
+        private final BigDecimal limitPrice;
+        private final Instant sendStartedAt;
+        private final Instant sendEndedAt;
 
-        public Fingerprint {
-            Objects.requireNonNull(tradingDate, "tradingDate");
-            Objects.requireNonNull(symbolCode, "symbolCode");
-            Objects.requireNonNull(side, "side");
-            Objects.requireNonNull(type, "type");
-            Objects.requireNonNull(sendStartedAt, "sendStartedAt");
-            Objects.requireNonNull(requestTimeout, "requestTimeout");
+        Fingerprint(String symbolCode, Side side, OrderType type, long quantity, BigDecimal limitPrice,
+                Instant sendStartedAt, Instant sendEndedAt) {
+            this.symbolCode = Objects.requireNonNull(symbolCode, "symbolCode");
+            this.side = Objects.requireNonNull(side, "side");
+            this.type = Objects.requireNonNull(type, "type");
+            this.sendStartedAt = Objects.requireNonNull(sendStartedAt, "sendStartedAt");
+            this.sendEndedAt = Objects.requireNonNull(sendEndedAt, "sendEndedAt");
             if (quantity <= 0) {
                 throw new IllegalArgumentException("수량은 0보다 커야 합니다");
             }
             if ((type == OrderType.LIMIT) != (limitPrice != null)) {
                 throw new IllegalArgumentException("지정가에만 가격이 있습니다");
             }
-            if (requestTimeout.isNegative()) {
-                throw new IllegalArgumentException("요청 시간 상한이 음수입니다");
+            if (sendEndedAt.isBefore(sendStartedAt)) {
+                throw new IllegalArgumentException("응답 시각이 보내기 시작 시각보다 앞섭니다");
             }
-            if (!sendStartedAt.atZone(SEOUL).toLocalDate().equals(tradingDate)) {
-                throw new IllegalArgumentException("보내기 시작한 시각의 한국 날짜가 주문 날짜와 다릅니다");
-            }
+            this.quantity = quantity;
+            this.limitPrice = limitPrice;
+            this.tradingDate = sendStartedAt.atZone(SEOUL).toLocalDate();
+        }
+
+        /** 보낸 주문과 그 "모름" 결과로 특징을 만든다. 시각은 클라이언트가 POST 직전·응답 직후 잰 값이다. */
+        public static Fingerprint of(OrderRequest request, KisOrderResult.Unknown unknown) {
+            Objects.requireNonNull(request, "request");
+            Objects.requireNonNull(unknown, "unknown");
+            return new Fingerprint(KisOrderClient.krxCode(request), request.side(), request.type(), request.quantity(),
+                    request.type() == OrderType.LIMIT ? request.limitPrice() : null, unknown.sendStartedAt(),
+                    unknown.sendEndedAt());
+        }
+
+        /** 보내기 시작 시각의 한국 날짜. */
+        public LocalDate tradingDate() {
+            return tradingDate;
+        }
+
+        public String symbolCode() {
+            return symbolCode;
+        }
+
+        public Side side() {
+            return side;
+        }
+
+        public OrderType type() {
+            return type;
+        }
+
+        public long quantity() {
+            return quantity;
+        }
+
+        public BigDecimal limitPrice() {
+            return limitPrice;
+        }
+
+        public Instant sendStartedAt() {
+            return sendStartedAt;
+        }
+
+        public Instant sendEndedAt() {
+            return sendEndedAt;
         }
     }
 
@@ -116,11 +175,15 @@ public final class KisOrderReconciler {
         if (!day.complete()) {
             return new Indeterminate("조회가 불완전함(쪽 상한, 응답 칸 없음 또는 읽지 못한 행)");
         }
-        Instant settled = fp.sendStartedAt().plus(fp.requestTimeout()).plus(SETTLE);
+        Instant settled = fp.sendEndedAt().plus(SETTLE);
         if (day.queriedFrom().isBefore(settled)) {
             return new Indeterminate("반영 대기 시간 전 조회");
         }
-        Instant windowStart = fp.sendStartedAt().minus(CLOCK_SKEW);
+        // 시계 오차는 가정하지 않고 잰다. 우리 시계가 빠르면(차이 음수) 창이 그만큼 앞으로 간다(QA PR #247 발견 1 S1)
+        if (day.serverClock() == null) {
+            return new Indeterminate("조회 응답에 서버 시각(Date)이 없어 시계 차이를 잴 수 없음");
+        }
+        Instant windowStart = fp.sendStartedAt().plus(day.serverClock().offsetLowerBound()).minus(CLOCK_SKEW);
         // 창 안의 묶이지 않은 행 전부(종목·방향·취소 여부를 가리지 않음). 가정 칸(pdno 형식, orgn_odno)에 기대지 않는다
         List<KisDailyOrder> inWindow = day.rows().stream()
                 .filter(r -> !r.orderDate().atTime(r.orderTime()).atZone(SEOUL).toInstant().isBefore(windowStart))

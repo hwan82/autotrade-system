@@ -21,12 +21,12 @@ import org.junit.jupiter.api.Test;
 class KisOrderReconcilerTest {
 
     private static final LocalDate DAY = LocalDate.of(2026, 11, 2);
-    /** 09:30:00 KST에 보내기 시작, 요청 시간 상한 10초. 없음 확정은 09:30:40 이후 조회부터. */
+    /** 09:30:00 KST에 보내기 시작, 10초 뒤 시간 초과. 없음 확정은 09:30:40 이후 조회부터. */
     private static final Instant SENT = Instant.parse("2026-11-02T00:30:00Z");
-    private static final Duration TIMEOUT = Duration.ofSeconds(10);
-    private static final Instant SETTLED = SENT.plus(TIMEOUT).plus(KisOrderReconciler.SETTLE);
+    private static final Instant ENDED = SENT.plus(Duration.ofSeconds(10));
+    private static final Instant SETTLED = ENDED.plus(KisOrderReconciler.SETTLE);
     private static final KisOrderReconciler.Fingerprint LIMIT_BUY = new KisOrderReconciler.Fingerprint(
-            DAY, "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, TIMEOUT);
+            "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, ENDED);
 
     static KisDailyOrder order(String odno, String original, Side side, String code, String division, long qty,
             String price, LocalTime time) {
@@ -34,8 +34,18 @@ class KisOrderReconcilerTest {
                 0, null, 0, qty, 0);
     }
 
+    /** 우리 시계와 한국투자 시계가 같은 조회(응답 Date = 조회 시각). */
     static KisDailyOrders day(Instant queriedFrom, boolean complete, KisDailyOrder... rows) {
-        return new KisDailyOrders(DAY, queriedFrom, List.of(rows), complete, 0);
+        return dayWithServerClock(queriedFrom, Duration.ZERO, complete, rows);
+    }
+
+    /** 한국투자 시계가 우리보다 {@code serverMinusLocal}만큼 앞선(음수면 늦은) 조회. 응답은 1초 뒤 받음. */
+    static KisDailyOrders dayWithServerClock(Instant queriedFrom, Duration serverMinusLocal, boolean complete,
+            KisDailyOrder... rows) {
+        Instant received = queriedFrom.plusSeconds(1);
+        Instant serverDate = received.plus(serverMinusLocal).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        return new KisDailyOrders(DAY, queriedFrom, List.of(rows), complete, 0,
+                new KisDailyOrders.ServerClock(serverDate, queriedFrom, received));
     }
 
     private static final KisDailyOrder OURS =
@@ -92,7 +102,8 @@ class KisOrderReconcilerTest {
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
         assertThat(KisOrderReconciler.find(day(SETTLED, false), LIMIT_BUY, Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
-        KisDailyOrders yesterday = new KisDailyOrders(DAY.minusDays(1), SETTLED, List.of(), true, 0);
+        KisDailyOrders yesterday = new KisDailyOrders(DAY.minusDays(1), SETTLED, List.of(), true, 0,
+                new KisDailyOrders.ServerClock(SETTLED, SETTLED, SETTLED));
         assertThat(KisOrderReconciler.find(yesterday, LIMIT_BUY, Set.of()))
                 .isInstanceOf(KisOrderReconciler.Indeterminate.class);
     }
@@ -140,7 +151,7 @@ class KisOrderReconcilerTest {
     @Test
     void 시장가는_주문구분_01이면_단가와_상관없이_찾는다() {
         KisOrderReconciler.Fingerprint marketSell = new KisOrderReconciler.Fingerprint(
-                DAY, "005930", Side.SELL, OrderType.MARKET, 3, null, SENT, TIMEOUT);
+                "005930", Side.SELL, OrderType.MARKET, 3, null, SENT, ENDED);
         KisDailyOrder upperLimit = order("8", "", Side.SELL, "005930", "01", 3, "91000", LocalTime.of(9, 30, 1));
         assertThat(KisOrderReconciler.find(day(SETTLED, true, upperLimit), marketSell, Set.of()))
                 .isEqualTo(new KisOrderReconciler.Found(upperLimit, false));
@@ -177,10 +188,44 @@ class KisOrderReconcilerTest {
     }
 
     @Test
-    void 보낸_시각의_한국_날짜와_주문_날짜가_다르면_특징을_만들지_않는다() {
+    void 응답_시각이_보내기_시작보다_앞서면_특징을_만들지_않는다() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new KisOrderReconciler.Fingerprint(
-                DAY.plusDays(1), "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, TIMEOUT))
+                "005930", Side.BUY, OrderType.LIMIT, 10, new BigDecimal("70000"), SENT, SENT.minusSeconds(1)))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 우리_시계가_61초_빠르면_잰_시계_차이만큼_창을_옮겨_접수된_주문을_놓치지_않는다() {
+        // QA PR #247 발견 1 S1: 우리 09:30:00에 보낸 주문의 한국투자 주문시각은 09:28:59
+        KisDailyOrder accepted = order("0000117057", "", Side.BUY, "005930", "00", 10, "70000", LocalTime.of(9, 28, 59));
+        assertThat(KisOrderReconciler.find(dayWithServerClock(SETTLED, Duration.ofSeconds(-61), true, accepted),
+                LIMIT_BUY, Set.of())).isEqualTo(new KisOrderReconciler.Found(accepted, false));
+        // 3분 빨라도 마찬가지(여유 60초를 넘는 차이도 재서 옮긴다)
+        KisDailyOrder far = order("0000117057", "", Side.BUY, "005930", "00", 10, "70000", LocalTime.of(9, 27, 0));
+        assertThat(KisOrderReconciler.find(dayWithServerClock(SETTLED, Duration.ofMinutes(-3), true, far),
+                LIMIT_BUY, Set.of())).isEqualTo(new KisOrderReconciler.Found(far, false));
+        // 창이 옮겨진 만큼 그보다 앞선 행은 여전히 창 밖
+        KisDailyOrder older = order("1", "", Side.BUY, "005930", "00", 10, "70000", LocalTime.of(9, 26, 58));
+        assertThat(KisOrderReconciler.find(dayWithServerClock(SETTLED, Duration.ofSeconds(-61), true, older),
+                LIMIT_BUY, Set.of())).isSameAs(KisOrderReconciler.NotFound.INSTANCE);
+    }
+
+    @Test
+    void 서버_시각을_읽지_못한_조회로는_찾음도_없음도_내지_않는다() {
+        KisDailyOrders noDate = new KisDailyOrders(DAY, SETTLED, List.of(), true, 0, null);
+        assertThat(KisOrderReconciler.find(noDate, LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        KisDailyOrders noDateOurs = new KisDailyOrders(DAY, SETTLED, List.of(OURS), true, 0, null);
+        assertThat(KisOrderReconciler.find(noDateOurs, LIMIT_BUY, Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+    }
+
+    @Test
+    void 시계_차이_하한은_응답_받은_시각_기준이라_차이를_작게_재지_않는다() {
+        // Date 10:00:00(잘림), 우리 요청 09:59:58, 응답 10:00:03 → 하한 −3초(실제 차이는 −3초 이상)
+        KisDailyOrders.ServerClock c = new KisDailyOrders.ServerClock(Instant.parse("2026-11-02T01:00:00Z"),
+                Instant.parse("2026-11-02T00:59:58Z"), Instant.parse("2026-11-02T01:00:03Z"));
+        assertThat(c.offsetLowerBound()).isEqualTo(Duration.ofSeconds(-3));
     }
 
     private static OrderState state(long ordered, long filled, long cancelled, long remaining, long rejected) {

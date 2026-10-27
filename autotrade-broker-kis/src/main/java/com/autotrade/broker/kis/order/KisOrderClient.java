@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -138,29 +139,42 @@ public final class KisOrderClient {
             Thread.currentThread().interrupt();
             return new KisOrderResult.NotAccepted(KisOrderResult.Reason.NOT_SENT, "");
         }
+        Instant[] started = {null};
         HttpPort.Response r;
         try {
-            r = session.post(path, trId, json, token);
+            r = session.post(path, trId, json, token, at -> started[0] = at);
         } catch (IOException e) {
+            if (started[0] == null) {
+                // 간격 대기 중에 실패해 보내지 않았다
+                return new KisOrderResult.NotAccepted(KisOrderResult.Reason.NOT_SENT, "");
+            }
             // 시간 초과, 연결 끊김. 요청이 한국투자에 닿았는지 모른다. 원인 메시지에는 주소가 실릴 수 있어 종류만 남긴다
-            return new KisOrderResult.Unknown(trId + " 응답 없음(" + e.getClass().getSimpleName() + ")");
+            return unknown(trId + " 응답 없음(" + e.getClass().getSimpleName() + ")", started[0]);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new KisOrderResult.Unknown(trId + " 응답 기다리다 중단됨");
+            if (started[0] == null) {
+                return new KisOrderResult.NotAccepted(KisOrderResult.Reason.NOT_SENT, "");
+            }
+            return unknown(trId + " 응답 기다리다 중단됨", started[0]);
         }
-        return interpret(trId, r);
+        return interpret(trId, r, token, started[0]);
     }
 
-    KisOrderResult interpret(String trId, HttpPort.Response r) {
+    private KisOrderResult.Unknown unknown(String reason, Instant startedAt) {
+        Instant now = session.clock().instant();
+        return new KisOrderResult.Unknown(reason, startedAt, now.isBefore(startedAt) ? startedAt : now);
+    }
+
+    KisOrderResult interpret(String trId, HttpPort.Response r, String token, Instant startedAt) {
         JsonNode n = KisTokenClient.readOrNull(mapper, r.body());
         if (n == null || n.path("rt_cd").asText("").isBlank()) {
-            return new KisOrderResult.Unknown(trId + " 결과 코드 없는 응답(HTTP " + r.status() + ")");
+            return unknown(trId + " 결과 코드 없는 응답(HTTP " + r.status() + ")", startedAt);
         }
         KisErrorCode code = KisErrorCode.of(n);
         if (!code.ok()) {
             return switch (code.kind()) {
                 case TOKEN_EXPIRED -> {
-                    session.invalidateToken();
+                    session.invalidateToken(token);
                     yield new KisOrderResult.NotAccepted(KisOrderResult.Reason.TOKEN_EXPIRED, code.code());
                 }
                 case RATE_LIMITED -> new KisOrderResult.NotAccepted(KisOrderResult.Reason.RATE_LIMITED, code.code());
@@ -168,11 +182,11 @@ public final class KisOrderClient {
                 // 있어 모름이다(risk-ops PR #247 R3)
                 default -> r.status() == 200
                         ? new KisOrderResult.NotAccepted(KisOrderResult.Reason.BROKER_REJECTED, code.code())
-                        : new KisOrderResult.Unknown(trId + " 오류 코드 " + code.code() + "(HTTP " + r.status() + ")");
+                        : unknown(trId + " 오류 코드 " + code.code() + "(HTTP " + r.status() + ")", startedAt);
             };
         }
         if (r.status() != 200) {
-            return new KisOrderResult.Unknown(trId + " 성공 코드인데 HTTP " + r.status());
+            return unknown(trId + " 성공 코드인데 HTTP " + r.status(), startedAt);
         }
         JsonNode out = n.path("output");
         String odno = field(out, "ODNO");
@@ -181,7 +195,7 @@ public final class KisOrderClient {
         try {
             no = new KisOrderNo(org, odno);
         } catch (IllegalArgumentException e) {
-            return new KisOrderResult.Unknown(trId + " 접수 응답에 주문번호 없음");
+            return unknown(trId + " 접수 응답에 주문번호 없음", startedAt);
         }
         return new KisOrderResult.Accepted(no, time(field(out, "ORD_TMD")));
     }

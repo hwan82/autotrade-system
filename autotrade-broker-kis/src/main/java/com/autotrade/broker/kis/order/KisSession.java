@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 
 /**
  * 한국투자 앱키 하나의 주문·계좌 조회 세션. 같은 앱키를 쓰는 주문({@link KisOrderClient})과 조회({@link KisAccountQueries})가
@@ -76,8 +77,12 @@ public final class KisSession {
         return tokens.get();
     }
 
-    void invalidateToken() {
-        tokens.invalidate();
+    /**
+     * 만료 응답을 받은 요청에 쓴 토큰이 지금 토큰일 때만 버린다. 다른 스레드가 이미 새 토큰을 받았으면 그대로 둔다(QA PR #247 Q1:
+     * 옛 토큰의 늦은 만료 응답이 새 토큰을 버리면 60초 재발급 하한 동안 손절 매도도 보내지 못한다).
+     */
+    void invalidateToken(String used) {
+        tokens.invalidateIfCurrent(used);
     }
 
     HttpPort.Response get(String path, String trId, String trCont, Map<String, String> params, String token)
@@ -89,11 +94,16 @@ public final class KisSession {
         return http.get(uri, headers);
     }
 
-    HttpPort.Response post(String path, String trId, String jsonBody, String token)
+    /**
+     * POST한다. 간격을 맞춘 뒤 실제로 보내기 직전 세션 시계 시각을 {@code started}에 알린다. 주문 결과를 모를 때 접수 여부 확인은
+     * 이 시각을 기준으로 한다(호출자가 따로 잰 시각은 잠금·토큰 발급·간격 대기만큼 앞설 수 있다, QA PR #247 발견 1 S3).
+     */
+    HttpPort.Response post(String path, String trId, String jsonBody, String token, Consumer<Instant> started)
             throws IOException, InterruptedException {
         URI uri = BASE.resolve(path);
         Map<String, String> headers = headers(trId, token);
         pace();
+        started.accept(clock.instant());
         return http.post(uri, headers, jsonBody);
     }
 

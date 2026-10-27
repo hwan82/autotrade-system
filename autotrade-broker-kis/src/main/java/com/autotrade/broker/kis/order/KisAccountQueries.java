@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -77,7 +80,12 @@ public final class KisAccountQueries {
         Instant from = session.clock().instant();
         List<KisDailyOrder> rows = new ArrayList<>();
         int[] unreadable = {0};
-        boolean complete = pages(DAILY_PATH, TR_DAILY, params, body -> {
+        KisDailyOrders.ServerClock[] serverClock = {null};
+        boolean complete = pages(DAILY_PATH, TR_DAILY, params, (r, receivedAt) -> {
+            if (serverClock[0] == null) {
+                serverClock[0] = serverClock(r, from, receivedAt);
+            }
+        }, body -> {
             if (!body.path("output1").isArray()) {
                 unreadable[0]++; // 칸 이름이 다르거나 빠진 응답을 "0행 완전"으로 읽지 않는다(risk-ops PR #247 R2)
                 return;
@@ -87,7 +95,22 @@ public final class KisAccountQueries {
                 r.ifPresentOrElse(rows::add, () -> unreadable[0]++);
             }
         });
-        return new KisDailyOrders(date, from, rows, complete && unreadable[0] == 0, unreadable[0]);
+        return new KisDailyOrders(date, from, rows, complete && unreadable[0] == 0, unreadable[0], serverClock[0]);
+    }
+
+    /** 첫 쪽 응답의 {@code Date} 헤더(RFC 1123). 없거나 읽지 못하면 null(접수 여부 확인이 "모름"이 된다). */
+    static KisDailyOrders.ServerClock serverClock(HttpPort.Response r, Instant requestedAt, Instant receivedAt) {
+        String date = r.headers().getOrDefault("date", "").strip();
+        if (date.isEmpty()) {
+            return null;
+        }
+        try {
+            Instant server = ZonedDateTime.parse(date, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+            return new KisDailyOrders.ServerClock(server, requestedAt,
+                    receivedAt.isBefore(requestedAt) ? requestedAt : receivedAt);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     /** 주식잔고. 보유 0인 행은 뺀다. 금액 칸은 마지막 쪽의 output2를 쓴다. */
@@ -105,7 +128,7 @@ public final class KisAccountQueries {
         List<KisBalance.Holding> holdings = new ArrayList<>();
         int[] unreadable = {0};
         JsonNode[] summary = {null};
-        boolean complete = pages(BALANCE_PATH, TR_BALANCE, params, body -> {
+        boolean complete = pages(BALANCE_PATH, TR_BALANCE, params, (r, receivedAt) -> { }, body -> {
             if (!body.path("output1").isArray()) {
                 unreadable[0]++; // 보유 칸이 없는 응답을 "보유 없음"으로 읽지 않는다(risk-ops PR #247 R2)
                 return;
@@ -145,7 +168,8 @@ public final class KisAccountQueries {
     }
 
     /** 쪽을 차례로 받는다. 상한 안에서 마지막 쪽까지 받았으면 true. */
-    private boolean pages(String path, String trId, Map<String, String> base, Consumer<JsonNode> sink)
+    private boolean pages(String path, String trId, Map<String, String> base,
+            BiConsumer<HttpPort.Response, Instant> onResponse, Consumer<JsonNode> sink)
             throws IOException, InterruptedException {
         String fk = "";
         String nk = "";
@@ -155,6 +179,7 @@ public final class KisAccountQueries {
             params.put("CTX_AREA_FK100", fk);
             params.put("CTX_AREA_NK100", nk);
             HttpPort.Response r = call(path, trId, trCont, params);
+            onResponse.accept(r, session.clock().instant());
             JsonNode body = KisTokenClient.readOrNull(mapper, r.body());
             sink.accept(body);
             if (!MORE.contains(r.headers().getOrDefault("tr_cont", "").strip())) {
@@ -170,11 +195,12 @@ public final class KisAccountQueries {
     /** 한 쪽을 부르고 결과 코드를 확인한다. 성공이면 본문이 있는 응답을 돌려준다. */
     private HttpPort.Response call(String path, String trId, String trCont, Map<String, String> params)
             throws IOException, InterruptedException {
-        HttpPort.Response r = session.get(path, trId, trCont, params, session.token());
+        String token = session.token();
+        HttpPort.Response r = session.get(path, trId, trCont, params, token);
         JsonNode n = KisTokenClient.readOrNull(mapper, r.body());
         KisErrorCode code = n == null ? null : KisErrorCode.of(n);
         if (code != null && code.kind() == KisErrorCode.Kind.TOKEN_EXPIRED) {
-            session.invalidateToken();
+            session.invalidateToken(token);
             r = session.get(path, trId, trCont, params, session.token());
             n = KisTokenClient.readOrNull(mapper, r.body());
             code = n == null ? null : KisErrorCode.of(n);

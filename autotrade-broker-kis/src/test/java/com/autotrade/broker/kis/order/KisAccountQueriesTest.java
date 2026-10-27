@@ -58,11 +58,28 @@ class KisAccountQueriesTest {
         assertThat(call.headers()).containsEntry("tr_id", "TTTC0081R").containsEntry("tr_cont", "");
         assertThat(day.complete()).isTrue();
         assertThat(day.queriedFrom()).isEqualTo(NOW);
+        assertThat(day.serverClock()).as("Date 헤더 없음").isNull();
         KisDailyOrder r = day.rows().get(0);
         assertThat(r.side()).isEqualTo(Side.BUY);
         assertThat(r.orderTime()).isEqualTo(LocalTime.of(9, 30, 1));
         assertThat(r.state()).isEqualTo(OrderState.PARTIALLY_FILLED);
         assertThat(r.averagePrice()).isEqualByComparingTo("70000");
+    }
+
+    @Test
+    void 첫_쪽_응답의_Date_헤더로_서버_시계를_잰다() throws Exception {
+        // 한국투자 시계가 우리보다 61초 늦다
+        OrderFakes.Http http = new OrderFakes.Http().respond(200, OrderFakes.TOKEN_OK)
+                .then(() -> clock.advance(Duration.ofSeconds(2)))
+                .respond(200, page(), Map.of("tr_cont", "D", "date", "Mon, 02 Nov 2026 00:59:01 GMT"));
+        KisDailyOrders day = queries(http).dailyOrders(DAY);
+        assertThat(day.serverClock()).isEqualTo(new KisDailyOrders.ServerClock(
+                Instant.parse("2026-11-02T00:59:01Z"), NOW, NOW.plusSeconds(2)));
+        assertThat(day.serverClock().offsetLowerBound()).isEqualTo(Duration.ofSeconds(-61));
+
+        OrderFakes.Http bad = new OrderFakes.Http().respond(200, OrderFakes.TOKEN_OK)
+                .respond(200, page(), Map.of("tr_cont", "D", "date", "어제쯤"));
+        assertThat(queries(bad).dailyOrders(DAY).serverClock()).isNull();
     }
 
     @Test

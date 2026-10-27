@@ -78,6 +78,12 @@ final class OrderFakes {
             return this;
         }
 
+        /** 다음 호출이 여기 닿으면 {@code effect}를 실행한 뒤 그다음 응답으로 답한다(시계 진행, 다른 스레드 흉내). */
+        Http then(Runnable effect) {
+            answers.add(effect);
+            return this;
+        }
+
         @Override
         public Response post(URI uri, Map<String, String> headers, String body) throws IOException {
             calls.add(new Call("POST", uri, headers, body));
@@ -92,6 +98,10 @@ final class OrderFakes {
 
         private Response next() throws IOException {
             Object a = answers.removeFirst();
+            while (a instanceof Runnable effect) {
+                effect.run();
+                a = answers.removeFirst();
+            }
             if (a instanceof IOException e) {
                 throw e;
             }

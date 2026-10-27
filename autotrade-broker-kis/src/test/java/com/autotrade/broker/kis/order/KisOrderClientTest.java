@@ -163,6 +163,58 @@ class KisOrderClientTest {
     }
 
     @Test
+    void 옛_토큰의_늦은_만료_응답은_그_사이_받은_새_토큰을_버리지_않아_손절_매도가_막히지_않는다() {
+        // QA PR #247 Q1(S2): 조회가 새 토큰 T2를 받은 뒤, T1으로 보낸 주문의 만료 응답이 늦게 온다
+        OrderFakes.Http http = new OrderFakes.Http();
+        KisSession session = OrderFakes.session(http, clock, slept);
+        KisOrderClient c = new KisOrderClient(session, OrderFakes.ACCOUNT);
+        http.respond(200, OrderFakes.TOKEN_OK)
+                .then(() -> {
+                    clock.advance(Duration.ofSeconds(61));
+                    session.invalidateToken("TOKEN-ONE");
+                    try {
+                        assertThat(session.token()).isEqualTo("TOKEN-TWO");
+                    } catch (Exception e) {
+                        throw new AssertionError(e);
+                    }
+                })
+                .respond(200, OrderFakes.TOKEN_TWO)
+                .respond(200, "{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00123\"}")
+                .respond(200, ORDER_OK);
+        assertThat(c.submit(limitBuy(10, "70000")))
+                .isEqualTo(new KisOrderResult.NotAccepted(KisOrderResult.Reason.TOKEN_EXPIRED, "EGW00123"));
+
+        clock.advance(Duration.ofSeconds(5));
+        assertThat(c.submit(marketSell(3))).isInstanceOf(KisOrderResult.Accepted.class);
+        assertThat(http.count("tokenP")).isEqualTo(2);
+        assertThat(http.calls.get(http.calls.size() - 1).headers()).containsEntry("authorization", "Bearer TOKEN-TWO");
+    }
+
+    @Test
+    void 모름_결과의_보내기_시작_시각은_토큰_발급_뒤_실제_POST_직전이다() {
+        // QA PR #247 발견 1 S3: 호출자가 submit 직전(NOW)에 시각을 적어도 토큰 발급이 40초 걸리면 실제 POST는 NOW+40초다
+        OrderFakes.Http http = new OrderFakes.Http()
+                .then(() -> clock.advance(Duration.ofSeconds(40))).respond(200, OrderFakes.TOKEN_OK)
+                .then(() -> clock.advance(Duration.ofSeconds(10))).fail(new HttpTimeoutException("request timed out"));
+        OrderRequest req = limitBuy(10, "70000");
+        KisOrderResult.Unknown u = (KisOrderResult.Unknown) client(http).submit(req);
+        assertThat(u.sendStartedAt()).isEqualTo(NOW.plusSeconds(40));
+        assertThat(u.sendEndedAt()).isEqualTo(NOW.plusSeconds(50));
+
+        KisOrderReconciler.Fingerprint fp = KisOrderReconciler.Fingerprint.of(req, u);
+        assertThat(fp.tradingDate()).isEqualTo(DAY);
+        // 호출자 기준으로는 "NOW + 10초 + 반영 대기 30초"가 지났지만 실제 POST 기준으로는 반영 대기 전이다
+        Instant callerSettled = NOW.plusSeconds(10).plus(KisOrderReconciler.SETTLE);
+        Instant queried = NOW.plusSeconds(50);
+        assertThat(queried).isAfter(callerSettled);
+        assertThat(KisOrderReconciler.find(KisOrderReconcilerTest.day(queried, true), fp, java.util.Set.of()))
+                .isInstanceOf(KisOrderReconciler.Indeterminate.class);
+        Instant settled = u.sendEndedAt().plus(KisOrderReconciler.SETTLE);
+        assertThat(KisOrderReconciler.find(KisOrderReconcilerTest.day(settled, true), fp, java.util.Set.of()))
+                .isSameAs(KisOrderReconciler.NotFound.INSTANCE);
+    }
+
+    @Test
     void 토큰을_못_받으면_주문을_보내지_않는다() {
         OrderFakes.Http http = new OrderFakes.Http().respond(500, "{}");
         assertThat(client(http).submit(limitBuy(10, "70000")))
