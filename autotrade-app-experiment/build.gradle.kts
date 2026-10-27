@@ -15,7 +15,7 @@ processIsolation {
     forbiddenProjects.set(listOf(
         ":autotrade-app-lab", ":autotrade-ui", ":autotrade-control", ":autotrade-broker-api", ":autotrade-broker-kiwoom",
         ":autotrade-broker-kis", ":autotrade-broker-toss", ":autotrade-app-engine", ":autotrade-app-gateway",
-        ":autotrade-app-watchdog", ":autotrade-app-collector"))
+        ":autotrade-app-watchdog", ":autotrade-app-collector", ":autotrade-real-store"))
     forbiddenGroups.set(listOf("org.springframework"))
 }
 

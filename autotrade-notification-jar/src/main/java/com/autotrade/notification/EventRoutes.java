@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * <p>운영 이벤트(감시·엔진 연결, D-100): 긴급 = {@value #PROCESS_STALE}·{@value #HEARTBEAT_UNREADABLE}·{@value #PROCESS_RESTARTED}·
  * {@value #STOP_REQUEST_ON}·{@value #READING_MISSING}·{@value #CONFIG_WARNING}·{@value #REAL_TRADING_COMMAND}·
  * {@value #NOTIFICATION_CHANNEL}·{@value #CONTROL_CHANNEL}·{@value #REAL_CONFIG_CHANGED}·{@value #ENGINE_STARTED_REAL}·
- * {@value #OPERATOR_LOCKED}(D-142), 정보 = {@value #PROCESS_RECOVERED}·{@value #PROCESS_STOPPED}·{@value #STOP_REQUEST_OFF}·
+ * {@value #OPERATOR_LOCKED}(D-142)·{@value #ENGINE_STORE}(D-146), 정보 = {@value #PROCESS_RECOVERED}·{@value #PROCESS_STOPPED}·{@value #STOP_REQUEST_OFF}·
  * {@value #READING_RECOVERED}·{@value #WATCHDOG_STARTED}·{@value #ENGINE_STARTED}.
  *
  * <p>표에 없는 종류는 긴급으로 보낸다. 새 종류를 표에 넣기 전에 보낸 알림이 조용히 묻히지 않게 하는 안전한 쪽 기본값이다.
@@ -75,6 +75,8 @@ public final class EventRoutes {
     public static final String ENGINE_STARTED_REAL = "engine-started-real";
     /** 2차 확인이 연속 실패로 잠김(D-142 C10). */
     public static final String OPERATOR_LOCKED = "operator-locked";
+    /** 실전 엔진 저장소 문제: 원장 손상·쓰기 실패·쓰기 잠금 교체로 인한 전면 차단, 감사 기록 실패(ADR-015, D-146). */
+    public static final String ENGINE_STORE = "engine-store";
 
     private static final Pattern KIND = Pattern.compile("[a-z0-9][a-z0-9-]{0,39}");
 
@@ -98,6 +100,7 @@ public final class EventRoutes {
             .with(REAL_CONFIG_CHANGED, Severity.URGENT)
             .with(ENGINE_STARTED_REAL, Severity.URGENT)
             .with(OPERATOR_LOCKED, Severity.URGENT)
+            .with(ENGINE_STORE, Severity.URGENT)
             .with(PROCESS_RECOVERED, Severity.INFO)
             .with(PROCESS_STOPPED, Severity.INFO)
             .with(STOP_REQUEST_OFF, Severity.INFO)

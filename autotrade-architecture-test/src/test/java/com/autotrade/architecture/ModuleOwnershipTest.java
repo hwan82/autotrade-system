@@ -107,6 +107,7 @@ class ModuleOwnershipTest {
             Map.entry("com.autotrade.strategy", "autotrade-strategy"),
             Map.entry("com.autotrade.selection", "autotrade-selection"),
             Map.entry("com.autotrade.risk", "autotrade-risk"),
+            Map.entry("com.autotrade.realstore", "autotrade-real-store"),
             Map.entry("com.autotrade.sim", "autotrade-sim"),
             Map.entry("com.autotrade.broker", "autotrade-broker-api"),
             Map.entry("com.autotrade.broker.kiwoom", "autotrade-broker-kiwoom"),

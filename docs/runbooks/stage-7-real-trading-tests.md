@@ -40,6 +40,8 @@
 | P9 | 프로세스 4개 설정 폴더 일치 | 엔진·게이트웨이·실험실·감시가 같은 `AUTOTRADE_CONFIG_DIR`을 봄(감시 하트비트가 ABSENT로만 보이는 오설정 방지) | PR #118 QA R1 |
 | P10 | 실험실·게이트웨이 힙 | 실전 엔진 몫을 남긴 힙 상한(6단계 실측 기준, 묶음 I 시행 때 확정 `[가정]`) | 메모 pr52 후속 |
 | P11 | 운영자 비밀번호 해시 반복 횟수 | `secrets.json`의 `real-trading.operator-password-hash`(`pbkdf2-sha256$<반복>$<salt>$<해시>`) 반복이 100,000~2,000,000 안. D-142가 상한을 10,000,000에서 2,000,000으로 낮춰(`OperatorPasswordHash.java:26·31`) 그보다 큰 반복으로 만든 해시는 **비밀번호 미설정**으로 읽힌다: 실전 활성화와 PANIC 2단계 이후(청산 확인)가 거절되고 PANIC 1단계 보호 모드 고정만 된다. 기본 600,000으로 만든 해시는 영향 없다. 범위 밖이거나 `#/real`이 "운영자 비밀번호가 설정되지 않아 …" 경고(`real.js:76-78`)를 보이면 **`hash-password`로 다시 만들고**(실행 매뉴얼의 설치본 명령, 15자 이상) 실전 엔진과 실험실을 모두 다시 시작한다(`EngineMain.java:312`, config-keys). 확인할 때 해시 전체를 화면·기록에 남기지 않고 반복 숫자만 본다(예: `$h = (Get-Content $cfg\secrets.json -Raw | ConvertFrom-Json).'real-trading'.'operator-password-hash'; $h.Split('$')[1]` `[가정]` 시행 때 확인) | D-142 결정 2·남은 위험, PR #240 risk-ops R-3 |
+| P12 | 엔진 저장소 강제 기록 시간 | 엔진을 끈 채 `bin\autotrade-engine.bat store-probe` 출력의 99% 값이 1초(올림 감사 상한 2초의 절반) 이하. 넘으면 결과 줄을 개발 쪽에 넘기고 상한을 다시 정할 때까지 실전 활성화를 미룬다. 결과 줄은 시험 기록에 남긴다 | ADR-015 3장 되돌릴 조건 (1), D-146 |
+| P13 | 저장소 쓰기 잠금 교체 감지(Windows) | 엔진 실행 중 ① 다른 PowerShell에서 `engine-store\writer.lock` 내용(`boot=N pid=P`)이 읽히는지 확인(`Get-Content`), ② 파일 내용을 바꾸면, ③ 파일을 지우면, ④ 지운 뒤 다른 프로세스가 같은 이름의 새 파일을 만들어 쥐고 있으면(PowerShell `$f=[IO.File]::Open('<경로>\writer.lock','OpenOrCreate','ReadWrite','None')`, 끝나면 `$f.Close()`) 각각 5초 안에 "실전 엔진 저장소 전면 차단" 긴급 알림이 오고 활성화·보호 모드 상향이 거절됨. ②~④는 경우마다 엔진을 다시 띄워 시행. 지울 수 없으면 그 사실을 기록(3-R과 함께, 묶음 F 감시 긴급 경로 전에 시행) | ADR-015 2.9, PR #239 QA Q2, PR #248 독립 QA 발견 1, D-146 |
 
 명령(PowerShell)은 묶음 I 시행 PR에서 채운다. 예: `Get-ChildItem env: | Where-Object Name -match 'JAVA'`, `Get-Acl $cfg | Format-List`.
 

@@ -89,7 +89,8 @@ class RealPathReflectionTest {
             ":autotrade-app-engine", ":autotrade-app-watchdog",
             ":autotrade-domain", ":autotrade-marketdata", ":autotrade-strategy", ":autotrade-risk",
             ":autotrade-broker-api", ":autotrade-broker-kis", ":autotrade-broker-kiwoom", ":autotrade-broker-toss",
-            ":autotrade-config", ":autotrade-control", ":autotrade-notification-jar", ":autotrade-monitor-agent-jar");
+            ":autotrade-config", ":autotrade-control", ":autotrade-notification-jar", ":autotrade-monitor-agent-jar",
+            ":autotrade-real-store");
 
     /** 실전 프로세스에 들어오면 안 되는 프로젝트(프로세스 격리 검사와 같은 판단을 범위 계산에서도 확인). */
     static final Set<String> FORBIDDEN_PROJECTS = Set.of(
@@ -136,7 +137,7 @@ class RealPathReflectionTest {
         "com.autotrade.app.engine..", "com.autotrade.app.watchdog..",
         "com.autotrade.domain..", "com.autotrade.marketdata..", "com.autotrade.strategy..", "com.autotrade.risk..",
         "com.autotrade.broker..", "com.autotrade.config..", "com.autotrade.control..",
-        "com.autotrade.notification..", "com.autotrade.monitor..",
+        "com.autotrade.notification..", "com.autotrade.monitor..", "com.autotrade.realstore..",
     };
 
     record Components(Set<String> projects, Set<String> modules, Set<String> others) {}
