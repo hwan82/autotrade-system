@@ -33,7 +33,7 @@ import java.util.TreeMap;
  * <p>안전 경계(안전 불변식 8, MD-01): 아래 허용 목록의 (경로, TR) 쌍만 GET으로 부른다. 주문({@code /trading/order-*}),
  * 잔고·체결 조회({@code /trading/inquire-*}), 휴장일 조회({@code chk-holiday}, 공식 안내 "1일 1회") 같은 경로와
  * 실전 거래 TR({@code TTTC…}, {@code CTSC…})은 부르기 전에 거절한다. 목록을 넓히는 변경은 risk-ops 검토 대상이다.
- * 이 호출기는 POST·계좌번호 헤더 코드를 갖지 않는다.
+ * 이 호출기는 POST·계좌번호 헤더 코드를 갖지 않는다. 실전 주문·계좌 조회는 별도 패키지 {@code com.autotrade.broker.kis.order}(D-145)다.
  *
  * <p>헤더에 앱 시크릿이 실리므로 요청 헤더·응답 본문을 로그나 예외 메시지에 넣지 않는다(안전 불변식 9).
  */
