@@ -33,7 +33,7 @@ import java.util.Objects;
  * </ul>
  * 그래서 필요할 때만 받고 만료 1시간 전까지 다시 쓴다. `[가정]` 만료 일시는 한국 시간이다.
  */
-final class KisTokenClient implements TokenCache.Fetcher {
+public final class KisTokenClient implements TokenCache.Fetcher {
 
     static final URI TOKEN_URI = URI.create("https://openapi.koreainvestment.com:9443/oauth2/tokenP");
     /** 응답에 만료 정보가 없을 때 쓰는 유효기간(공식 주석 "유효기간 1일"). */
@@ -50,6 +50,11 @@ final class KisTokenClient implements TokenCache.Fetcher {
         this.http = Objects.requireNonNull(http, "http");
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /** 접근토큰 발급기. 주문·계좌 조회 세션({@code com.autotrade.broker.kis.order})이 재발급 하한을 씌워 쓴다. */
+    public static TokenCache.Fetcher fetcher(HttpPort http, BrokerCredentials credentials, Clock clock) {
+        return new KisTokenClient(http, credentials, clock);
     }
 
     @Override
@@ -110,7 +115,7 @@ final class KisTokenClient implements TokenCache.Fetcher {
         return new IOException(what + " 실패: " + detail);
     }
 
-    static JsonNode readOrNull(ObjectMapper mapper, String body) {
+    public static JsonNode readOrNull(ObjectMapper mapper, String body) {
         try {
             JsonNode n = mapper.readTree(body);
             return n != null && n.isObject() ? n : null;
