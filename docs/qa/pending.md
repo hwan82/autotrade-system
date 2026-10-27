@@ -89,3 +89,4 @@
 | 2026-10-27 | PR #245 재검토해줘 | docs/reviews/pr-245/qa.md | 실전 관련 PR(문서만) 재검토: QA 1차 발견 1(소스가 연결된 채 시세만 멈출 때 3초 감지: 생존 줄 소스별 lastRx, 정규장 접속매매 3초, 2.11 연결 닫힘·무응답 두 주입)과 권고 Q1~Q5·R1 반영, main(#239) 병합(69e37c9c). architect·risk-ops 재검토 (3) 승인. 브랜치 `claude/project-thread-3fzv07` |
 | 2026-10-26 | PR #243 검토해줘 | docs/reviews/pr-243/qa.md | 실전 관련 PR(장애 대응 절차, 문서만): 7단계 절차서 I1 보완, D-142가 넘긴 3-R 하트비트 폴더 변형·늦게 뜬 엔진 확인·해시 다시 만들기 안내, C6·C10 현재형. 브랜치 `claude/project-thread-wqsuqu` |
 | 2026-10-27 | PR #243 재검토해줘 | docs/reviews/pr-243/qa.md(재검토 절) | 실전 관련 PR 재검토(문서만): QA 1차 발견 1(Windows "확인 불가" 종료 순서)과 권고 Q1~Q3 반영. 브랜치 `claude/project-thread-wqsuqu` |
+| 2026-10-27 | PR #253 검토해줘 | docs/reviews/pr-253/qa.md | 실전 관련 PR(문서만, 코드 무변경): PR #246 독립 QA 권고 Q1~Q3 반영 — 장애표 #13에 VI 마감 시각 초과 시 매도 불가, TST-06 대응표 I-8·W-04 근거 ADR-015 뒤로, 정적 경고 W-12(K10-a) 추가, PR #246 QA 처리 기록. 브랜치 `claude/project-thread-npk3vh` |
