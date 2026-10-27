@@ -188,3 +188,15 @@
 
 ### 판정
 승인. 조건 1(main 충돌 해소 때 절차서 P11·P12 보존)은 머지 직전 확인한다. 실전 관련 PR이므로 독립 QA 재검토와 사용자의 직접 확인·머지가 필요하다.
+
+### 재검토 3 추가: main 재병합 `3e96509c` 포함
+- 대상: 위 판정은 `baf23da2` 기준이었다. 그 뒤 head가 `3e96509c`(main `de766487` 재병합, #243·#255)로 바뀌었다. 이 원문은 그 위에 올라간다.
+- `baf23da2` → `3e96509c`의 코드 변경은 `EngineStoreTest` 주석 한 줄(절차서 번호 P11 → P12)뿐이다. 나머지는 문서다(`stage-7-real-trading-tests.md`, D-146, `pending.md`, `qa-out-status.md`, `stage-7-readiness-plan.md`).
+- 직접 실행: `git archive 3e96509c` 별도 폴더에서 `:autotrade-risk:test :autotrade-real-store:test :autotrade-architecture-test:test :autotrade-app-engine:test --offline` → 성공. 275건(68·44·48·115), 실패·오류·건너뜀 0.
+- `git merge-tree --write-tree origin/main 3e96509c`: 충돌 없음. **조건 1은 해소됐다.**
+- 절차서 확인: main 대비 이 PR의 절차서 변경은 행 2개 추가뿐이다. P12(엔진 저장소 강제 기록 시간)와 P13(저장소 쓰기 잠금 교체 감지 ①~④, 다른 프로세스가 새 파일을 쥔 경우 포함)이다. #243이 넣은 P11(운영자 비밀번호 해시 반복 횟수)과 I1 보완은 그대로 남았다. D-146 위험과 한계의 번호도 P12(복구 시간)·P13 ④(Windows 잠금)로 맞춰졌다.
+- 위 표와 참고의 "P11"(강제 기록 실측)은 **P12**로, "P12"(잠금 교체 감지)는 **P13**으로 읽는다. 내용은 같다.
+- 점검표 A 결과는 바뀌지 않는다(A1·A2·A6~A14 통과, A3~A5 해당 없음).
+
+#### 판정(최종, head `3e96509c`)
+승인. 실전 관련 PR이므로 독립 QA 재검토와 사용자의 직접 확인·머지가 필요하다.
