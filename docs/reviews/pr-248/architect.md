@@ -134,3 +134,11 @@
 
 ## 판정
 승인
+
+## 재검토 3 추기 2026-10-27
+- 대상: 병합 커밋 `3e96509c`(부모 `46cf6deb`, main `de766487`). `git diff 46cf6deb 3e96509c`와 `origin/main` 대비 diff를 봄
+- 직접 실행한 것: `git archive 3e96509c`로 새 폴더에서 `./gradlew build --offline` → BUILD SUCCESSFUL(4분 38초). real-store 44건, architecture-test 48건, app-engine 115건, risk 68건 실패·오류·건너뜀 0. `git merge-tree --write-tree origin/main HEAD` 충돌 없음
+- 확인: main 쪽 `df22830b..de766487`에는 코드 변경이 없다(문서만). 병합으로 바뀐 코드는 `EngineStoreTest.java:501` 주석 한 줄(P11 → P12)뿐이다. `origin/main` 대비 `docs/qa/pending.md`·절차서는 더하는 줄만 있고 main 줄(#243 두 줄, P11 해시 반복)을 지우지 않았다. 저장소 항목 번호는 절차서 P12(강제 기록 시간)·P13(쓰기 잠금 교체 감지)이고, 그 번호를 가리키는 D-146 52·56행과 시험 주석이 맞게 바뀌었다. 다른 문서에서 옛 번호로 저장소 항목을 가리키는 곳은 찾지 못했다. 점검표 B 판단은 재검토 3과 같고, B7(risk-ops 검토 필요)도 그대로다
+
+## 판정
+승인
