@@ -52,7 +52,7 @@
 | P7 | 재기동 직후 보유 남은 OFF 계좌의 PANIC | ADR-006 7장 | 안 됨(미확정) | 결정 로그 미확정 Q-016 | risk-ops → 사용자 | **Q-016** | 예 | E |
 | P8 | 장 외 시간 PANIC 때 Guard OFF 여부 | ADR-006 7장 | 안 됨(미확정) | Q-017. 구현은 이미 추천안(매도 미완이면 OFF 안 함) | risk-ops → 사용자 | **Q-017** | 예 | E(기획서 문구) |
 | P9 | PANIC과 실전 출구의 블랙리스트·수동 보유 제외(TST-07 (1) F-2) | ADR-006 2.5, TST-07 (1) | 안 됨 | `R/guard/GuardedOrderGateway.java` `submit`은 Guard 검사만. `BlacklistSnapshot`·`RiskChain`은 가상 엔진에서만 사용 | risk-ops | B5 블랙리스트 영속화 | 예 | C |
-| P10 | D-037 근거 정리(PR #25 매도 불가 규칙, "미체결 매수만 취소"로 좁힌 사실을 보충 행으로) | ADR-006 6장, QA pr-25 4 | 안 됨 | README D-037 행 그대로 | pm-lead | 다음 결정 기록(4장 결정 기록 PR) | 아니오 | 0 |
+| P10 | D-037 근거 정리(PR #25 매도 불가 규칙, "미체결 매수만 취소"로 좁힌 사실을 보충 행으로) | ADR-006 6장, QA pr-25 4 | 처리됨 | [D-144](../decisions/D-144-stage7-bundle0-docs.md) ①: PR #18·#25 근거 분리, D-023 문구를 좁힌 사실, VI 예시는 D-140 ④로 대체 | pm-lead | 없음 | 아니오 | 0 |
 
 ### 2.3 실전 엔진 상태·주문 원장·리스크(ADR-002, TST-07)
 
@@ -74,8 +74,8 @@
 | K6 | CFG-06 ③ 실전 한도 변경 2차 확인 거부 시험 | D-081 ① | 안 됨 | 한도 키 없음(`RuntimeConfig.java:24`) | risk-ops | Q-008 | 예 | C |
 | K7 | 실전 경로 리플렉션 금지·외부 jar 허용 목록(TST-07 (9)) | D-086 | **처리됨** | `RealPathReflectionTest`(PR #108·#109·#110·#112) | architect | — | 예 | — |
 | K8 | 플러그인 로딩용 `ALLOWED_SERVICE_LOADERS`, 감시 자동 재기동용 `ALLOWED_PROCESS_LAUNCHERS` 채우기 | D-086, D-092 | 안 됨(의도) | `RealPathReflectionTest.java:111,114` 빈 집합 | architect, risk-ops | 플러그인 로딩 PR, 감시 재기동 PR | 예(보호 테스트) | D, F |
-| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 안 됨 | 대응표·화면 경고 없음 [추론] | risk-ops, ui-dev | 없음 | 예 | 0, H |
-| K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 안 됨 | `RuntimeConfigStore.java:77` 주석 "7단계 전 risk-ops 검토" | risk-ops | 없음 | 예 | 0 |
+| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 부분 | 대응표 [tst-06-checklist-map.md](tst-06-checklist-map.md)([D-144](../decisions/D-144-stage7-bundle0-docs.md) ③, 경고 W-01~W-11·W-20~W-24, 차단 B-01뿐). 화면 경고는 H | risk-ops, ui-dev | 없음 | 예 | 0, H |
+| K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 부분 | 검토 끝([D-144](../decisions/D-144-stage7-bundle0-docs.md) ④, [k10-os-credential-store-review.md](../research/k10-os-credential-store-review.md)): 파일 방식 유지 + 권한·위치 경고. 남은 것: 경고 코드 K10-a(보호 경로, 실전 관련 PR, 실전 활성화 결정 전), 운영 절차는 I | risk-ops | 없음 | 예 | 0, K10-a, I |
 
 ### 2.4 증권사 연동(ADR-003, broker-and-fault-design.md)
 
@@ -97,7 +97,7 @@
 | D14 | 키움 후속: WS 경로 확정, LOGIN 실패 분류, 토큰 8031·8103 반복 ERROR, 재시도 시험 | 메모 pr40 | 부분 | 경로 둘 다 보관, `KiwoomReturnCode.TOKEN_CODES` | data-engineer | Q-015 첫 실접속 로그 | 예 | D-K |
 | D15 | Q-015 키움·KIS 실제 접속 확인(필드, PING, 무응답 시간, VI 메시지, KIS wss·접속키 1분 제한, 키움 토큰 무효화) | 결정 로그 Q-015 | 안 됨(미확정) | 실측 전. kis-news 토큰 403은 PR #234에서 결과 코드 표시 중 | data-engineer, risk-ops | **사용자 PC 실측** | 예 | 사용자 |
 | D16 | Q-011 위탁수수료·SEC fee·TAF 공식 확인, 실전 체결 대사로 D-021 갱신 | 결정 로그 Q-011 | 안 됨 | — | data-engineer, risk-ops | 실전 체결 내역 | 예 | 7단계 뒤 |
-| D17 | Q-047 정리: PR #47 머지로 확정됐는데 결정 로그 "미확정" 표에 남아 있음 | 결정 로그 | 부분 | README 미확정 표의 Q-047 행 | pm-lead | 없음 | 아니오 | 0 |
+| D17 | Q-047 정리: PR #47 머지로 확정됐는데 결정 로그 "미확정" 표에 남아 있음 | 결정 로그 | 처리됨 | [D-144](../decisions/D-144-stage7-bundle0-docs.md) ②: 닫힌 미확정 표로 옮김 | pm-lead | 없음 | 아니오 | 0 |
 
 ### 2.5 감시 프로세스·알림
 
