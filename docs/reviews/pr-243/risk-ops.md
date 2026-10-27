@@ -71,3 +71,37 @@
 
 ## 판정
 승인
+
+## 재검토 2 2026-10-27
+- 대상: PR #243 / 브랜치 `claude/project-thread-wqsuqu` / 헤드 46b90149 / `git diff origin/main...HEAD` 전체(병합 기준점 94ab11de, 7개 파일 모두 `docs/`). 1차 재검토(599e9d71) 뒤 바뀐 것은 46b90149(독립 QA 발견 1·Q1~Q3 반영: `docs/runbooks/stage-7-real-trading-tests.md` 6장 5-1·6.1 3·5·7번·8장 ②줄·R-1 줄, `docs/team/stage-7-readiness-plan.md` I1 행, `docs/qa/pending.md`, `docs/qa-out-status.md`). 코드 변경 없음. 기준점 뒤 main(f80f4caa)의 코드 변경은 수집기·`live.js`·LiveJudgementTest뿐이라 절차서가 인용한 `autotrade-control`·`autotrade-app-engine`·`real.js`는 같다.
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build` (46b90149): BUILD SUCCESSFUL(종료 코드 0, 138 tasks).
+  - `./gradlew :autotrade-risk:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-control:test --rerun-tasks`: 종료 코드 0. 결과 XML: autotrade-risk 57, autotrade-architecture-test 46, autotrade-app-engine 109, autotrade-control 31, 실패·오류·건너뜀 0. 문서만 바뀐 PR이라 회귀 없음만 뜻한다.
+  - 새 문구의 코드 근거를 직접 대조: `ControlServer.java:203-219`(`silence`: 211행 `checker.shutdownNow()`, 잠금 해제·`lock`/`lockChannel` null, 파일 안 지움), `:350-353`(`checkIntegrity`가 `silenced != null`이면 바로 돌아감 → 응답을 멈춘 엔진은 잠금·소켓을 다시 잡는 경로가 없음), `:373-374`·`:425`(Windows 파일 키 null이면 "있으면 같음"), `:626-657`(`close`: 649-652행 Windows 분기 소켓 파일 삭제, 잠금 파일은 남김), `ControlClient.java:91-107`(잠금 파일 PID 살아 있으면 UNKNOWN, 죽었으면 NOT_RUNNING, 읽기 실패도 UNKNOWN), `EngineSelfCheck.java:213-238`(늦은 엔진 `silenced`는 되돌리지 않음, 먼저 뜬 엔진이 사라지면 `otherEngine` 빈 값으로 아무것도 안 함). 모두 맞음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 코드·설정 변경 없음. 새 종료 순서는 Guard를 켜는 경로를 만들지 않는다. 늦은 엔진은 `silence` 뒤 계좌가 모두 OFF(`EngineSelfCheck.java:227-230`)이고 명령 채널이 닫혀(`ControlServer.java:211`·`:352`) 활성화를 받을 길이 없으므로, 첫 엔진을 먼저 끈 뒤 늦은 엔진이 살아 있는 구간에도 OPEN 계좌가 생기지 않는다 |
+| A2 | 해당 없음 | 주문 출구·ArchUnit 규칙 변경 없음(문서만) |
+| A3 | 해당 없음 | 증권사 라우팅 변경 없음 |
+| A4 | 해당 없음 | 타임아웃·재주문 변경 없음. 5장 4번 행 그대로 |
+| A5 | 해당 없음 | 멱등 키 변경 없음 |
+| A6 | 해당 없음 | 블랙리스트·수동 보유 경로 변경 없음 |
+| A7 | 해당 없음 | 큐·토큰 버킷·킬스위치 변경 없음 |
+| A8 | 해당 없음 | 프로세스 분리 변경 없음. 6.1 6번 감시 알림 비판정 문구 그대로 |
+| A9 | 해당 없음 | 보호 시세·서버 측 손절 변경 없음. 6.1 5번이 6장 5-2·5-3(미체결 일반 주문 취소, 서버 측 손절 조건주문은 남김)으로 이어짐 |
+| A10 | 통과 | 새 문구에 키·계좌번호·토큰·해시 값 없음. PID·시각 기록은 비밀값 아님 |
+| A11 | 해당 없음 | 테스트·보호 경로·고정 값 변경 없음 |
+| A12 | 통과 | 독립 QA 발견 1 해소: 6.1 5번 Windows "확인 불가" 분기가 첫 엔진 먼저(또는 `Stop-Process -Id <첫>,<늦은>` 한 명령)로 바뀌었고, 6장 5-1에 "두 번째 먼저"는 기동이 끝나지 않았거나 응답을 멈추지 않은 두 번째 엔진에만 적용된다는 범위가 붙었으며, 6.1 7번 정리도 같은 순서를 따른다. 코드로 따라가면 첫 엔진을 끈 뒤 잠금 파일 PID는 늦은 엔진(살아 있음)이라 실험실은 UNKNOWN("확인 불가")을 유지하고(`ControlClient.java:103-105`), 첫 엔진을 Ctrl+C로 끄더라도 `close`는 잠금 파일을 남기므로 같다(`ControlServer.java:622-623` 주석·649-653행). 늦은 엔진까지 끄면 엔진이 없으므로 "가상"이 맞다. 절차가 "OPEN 계좌가 있는데 가상" 상태를 만들지 않는다 `[추론, 코드 근거]`(Windows에서 직접 실행하지 못함). 두 종료 사이·뒤 화면 기록도 넣었다. Q1: 공존 재현 못 함이면 8장 ②줄을 처리로 바꾸지 않고 9장 하네스로 Windows에서 다시 보게 했고, 거부 때 기동 로그 시각을 남기게 했다 |
+| A13 | 해당 없음 | 해외 경로 변경 없음 |
+| A14 | 통과 | 결정 로그 변경 없음. D-142 남은 위험의 "늦게 뜬 엔진을 끄면 풀린다"가 강제 종료일 때 코드와 맞지 않고 Ctrl+C 뒤에도 죽은 잠금 PID가 남는다는 점(Q3)을 6.1 5번과 8장 R-1 줄에 좁혀 적고 다음 엔진 PR(실전 관련) 몫으로 남겼다. 준비 계획 I1 행 E1~E6(Q2) 반영. 정정 자체는 후속에서 확인한다 |
+
+## 점검표 밖 발견 (재검토 2)
+- 독립 QA 발견 1, 권고 Q1·Q2·Q3 반영 확인. Q4(architect A-2)는 다음 I1 PR 몫 그대로.
+- R-5 (권고, 판정에 넣지 않음) 6장 5-1 끝의 명령 예시 "`Stop-Process -Id <PID>`(두 번째 엔진 PID 먼저)"는 그대로 남아 있다. 바로 앞 문장에 적용 범위와 6.1 5번 예외가 있으므로 틀린 지시는 아니지만, 명령만 보고 따르는 사람을 위해 묶음 I에서 명령을 채울 때 그 괄호에도 "6.1 Windows '확인 불가'면 첫 엔진 먼저"를 붙이기 바란다. 한 명령 `Stop-Process -Id <첫>,<늦은>`이 주어진 순서대로 끝내는지는 `[가정]`이다(두 프로세스가 거의 함께 끝나므로 어느 쪽이든 위험 상태가 오래 가지 않음). 시행 때 기록으로 확인한다.
+- R-6 (참고) main이 기준점 뒤 `docs/qa-out-status.md`·`docs/qa/pending.md`에 줄을 더했다. 머지 때 표 끝 줄이 겹칠 수 있으니 두 쪽 줄을 모두 남기는지 확인한다(내용 판정과 무관).
+- 남는 위험(후속, 1차 재검토와 같음): 늦은 엔진 알림 본문 "이 엔진을 끄세요"(`EngineSelfCheck.java:233-234`)는 그대로다. 운영 중 Windows에서 알림대로 늦은 엔진만 강제 종료하면 "가상" 상태가 될 수 있다 `[추론]`. 8장 R-1 줄의 다음 엔진 PR에서 문구·되찾기 동작과 D-142 정정을 risk-ops가 확인한다.
+
+## 판정
+승인
