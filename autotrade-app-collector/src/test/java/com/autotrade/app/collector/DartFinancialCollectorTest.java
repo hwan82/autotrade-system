@@ -211,6 +211,36 @@ class DartFinancialCollectorTest {
     }
 
     @Test
+    void 계정_응답을_공시마다_읽어_만들어도_한꺼번에_읽은_결과와_같다() throws IOException {
+        DartFinancialCollector c1 = collector(new FakeHttp(server(false)), seoulNoon("2026-03-20"), 1000);
+        c1.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        DartFinancialCollector c = collector(new FakeHttp(server(true)), seoulNoon("2026-04-02"), 1000);
+        c.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 4, 1));
+        DartSnapshotBuilder.Result all = DartSnapshotBuilder.build(inputs(c));
+
+        List<String> asked = new ArrayList<>();
+        DartSnapshotBuilder.Result streamed = DartSnapshotBuilder.build(c.filings(), no -> {
+            asked.add(no);
+            return c.accountsOf(no);
+        });
+
+        assertThat(streamed.filings()).isEqualTo(all.filings());
+        assertThat(streamed.stats()).isEqualTo(all.stats());
+        assertThat(streamed.stats().pending()).isZero();
+        // 공시 하나에 한 번씩, 공시 순서대로 읽는다(미리 다 읽어 두지 않는다)
+        assertThat(asked).containsExactlyElementsOf(c.filings().stream().map(f -> f.path("rcept_no").asText()).toList());
+    }
+
+    @Test
+    void 계정_응답을_읽다_실패하면_스냅샷을_만들지_않고_그_오류로_멈춘다() throws IOException {
+        DartFinancialCollector c = collector(new FakeHttp(server(false)), seoulNoon("2026-03-20"), 1000);
+        c.collect(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 19));
+        assertThatThrownBy(() -> DartSnapshotBuilder.build(c.filings(), no -> {
+            throw new IOException("읽기 실패 " + no);
+        })).isInstanceOf(IOException.class).hasMessageStartingWith("읽기 실패 ");
+    }
+
+    @Test
     void 요청_제한_020이면_그날_멈추고_키는_어디에도_남지_않는다() {
         FakeHttp limited = new FakeHttp((u, n) -> FakeHttp.ok("{\"status\":\"020\",\"message\":\"사용한도를 초과하였습니다.\"}"));
         DartFinancialCollector c = collector(limited, seoulNoon("2026-03-20"), 1000);

@@ -242,11 +242,8 @@ public final class CollectorMain {
         }
         guard.checkSession();
         guard.checkDisk(List.of(o.snapshotDir));
-        List<DartSnapshotBuilder.Input> inputs = new ArrayList<>();
-        for (var f : collector.filings()) {
-            inputs.add(new DartSnapshotBuilder.Input(f, collector.accountsOf(f.path("rcept_no").asText())));
-        }
-        DartSnapshotBuilder.Result built = DartSnapshotBuilder.build(inputs);
+        // 계정 응답은 공시마다 읽어 바로 줄인다: 전부 올리면 전체 캐시(10만 건)에서 힙이 모자란다
+        DartSnapshotBuilder.Result built = DartSnapshotBuilder.build(collector.filings(), collector::accountsOf);
         if (built.filings().isEmpty()) {
             System.out.println("받은 공시가 없어 스냅샷을 만들지 않습니다");
             return 0;

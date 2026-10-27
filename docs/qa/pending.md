@@ -80,5 +80,7 @@
 | 2026-10-24 | PR #238 검토해줘 | docs/reviews/pr-238/qa.md | 실전 관련 PR(장애 대응 절차: 7단계 실행·시험 절차서 뼈대 I1, 3-R 상세 절차, 사용자 결정 D-140 후속 문구 고침, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-25 | PR #238 재검토해줘 | docs/reviews/pr-238/qa.md(재검토 절) | 실전 관련 PR 재검토(1차 수정 필요 A12 F1·F2와 권고 Q1~Q4를 절차서 6장·1장·3장에 반영, 브랜치 claude/project-thread-vodfc0) |
 | 2026-10-26 | PR #240 재검토해줘 | docs/reviews/pr-240/qa.md | 실전 관련 PR: QA 1차 발견 1(늦게 뜬 엔진 응답 멈춤 뒤 진행 중 활성화 OPEN)과 권고 Q1~Q5 반영. 브랜치 `claude/project-thread-uv9uq5` |
+| 2026-10-26 | PR #239 검토해줘 | docs/reviews/pr-239/qa.md | 실전 관련 PR(문서만, 코드 무변경): ADR-015·D-141 실전 엔진 저장소 설계(7단계 묶음 B0), Q-062 사용자 결정(파일 원장). 브랜치 `claude/project-thread-e0mn61` |
+| 2026-10-26 | PR #239 재검토해줘 | docs/reviews/pr-239/qa.md | 실전 관련 PR(문서만): QA 1차 발견 1(차단 조건이 PANIC·enterProtective의 OFF → PROTECTIVE 상향도 막도록 범위 정의)·발견 2(keyFloor 원본 위치 표기)·권고 Q1~Q5 반영, main 합침. architect 재검토 3 R3-1로 차단을 (가) 전면 차단·(나) 대사 대기로 나눔(73425a04), architect·risk-ops 재검토 4 승인(6da7c3eb·f7bf3bf1). D-140 ① 범위는 사용자 확인 항목(ADR-015 8장). 브랜치 `claude/project-thread-e0mn61` |
 | 2026-10-26 | PR #243 검토해줘 | docs/reviews/pr-243/qa.md | 실전 관련 PR(장애 대응 절차, 문서만): 7단계 절차서 I1 보완, D-142가 넘긴 3-R 하트비트 폴더 변형·늦게 뜬 엔진 확인·해시 다시 만들기 안내, C6·C10 현재형. 브랜치 `claude/project-thread-wqsuqu` |
 | 2026-10-27 | PR #243 재검토해줘 | docs/reviews/pr-243/qa.md(재검토 절) | 실전 관련 PR 재검토(문서만): QA 1차 발견 1(Windows "확인 불가" 종료 순서)과 권고 Q1~Q3 반영. 브랜치 `claude/project-thread-wqsuqu` |

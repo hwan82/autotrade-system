@@ -451,12 +451,17 @@ class LiveJudgementTest {
     @Test
     void run_all_raises_a_later_group_failure_without_waiting_for_earlier_groups() {
         // PR #180 architect N2: 뒤 묶음이 먼저 실패하면 앞 묶음이 끝날 때까지 기다리지 않는다. 앞 묶음은 판정 문처럼
-        // 멈춤 신호를 확인 지점에서 보고 멈춘다(실행기는 스레드 중단을 보지 않으므로 취소만으로는 멈추지 않는다)
+        // 멈춤 신호를 확인 지점에서 보고 멈춘다(실행기는 스레드 중단을 보지 않으므로 취소만으로는 멈추지 않는다).
+        // PR #238 QA R3: G2가 G1 시작 전에 실패하면 runAll의 취소로 G1이 아예 돌지 않아 stoppedByGate가 거짓이 된다.
+        // G2는 G1이 돌기 시작한 것을 (상한을 두고) 확인한 뒤 실패한다. runAll은 풀을 닫으며 돌던 작업이 끝나기를
+        // 기다리므로, 던진 뒤의 단언은 G1이 끝난 상태를 본다
+        java.util.concurrent.CountDownLatch firstStarted = new java.util.concurrent.CountDownLatch(1);
         java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
         RunGate gate = LiveJudgement.abortable(RunGate.NONE, failed);
         java.util.concurrent.atomic.AtomicBoolean ranToEnd = new java.util.concurrent.atomic.AtomicBoolean();
         java.util.concurrent.atomic.AtomicBoolean stoppedByGate = new java.util.concurrent.atomic.AtomicBoolean();
         List<java.util.concurrent.Callable<String>> tasks = List.of(() -> {
+            firstStarted.countDown();
             for (int i = 0; i < 4_000; i++) { // 확인 지점 사이 5ms, 멈추지 않으면 20초
                 try {
                     gate.check();
@@ -469,6 +474,9 @@ class LiveJudgementTest {
             ranToEnd.set(true);
             return "G1";
         }, () -> {
+            if (!firstStarted.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new AssertionError("G1이 10초 안에 시작하지 않음");
+            }
             throw new IllegalArgumentException("G2 입력 오류");
         });
         assertThatThrownBy(() -> LiveJudgement.runAll(tasks, "T", () -> failed.set(true)))
