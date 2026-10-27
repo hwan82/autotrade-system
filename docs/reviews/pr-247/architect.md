@@ -65,33 +65,3 @@
 
 ### 판정
 승인
-
-## 재검토 2026-10-27
-- 대상: PR #247 / 커밋 4283eb6f / `git diff origin/main...HEAD` 전체(37파일 +2632 −27, origin/main f80f4caa가 조상임을 확인), 그리고 독립 QA 원문(`qa.md`, 수정 필요 A4·A12·A14 발견 1) 뒤 바뀐 것: `git diff 7e21527c 9027e0de`(코드·문서 14파일 +404 −70)와 main 합침 4283eb6f(이 PR 파일은 `docs/qa/pending.md`·`docs/decisions/README.md` 줄 합침만, 코드 충돌 해결 없음)
-- 점검표: B
-- 직접 실행한 것: `./gradlew build --rerun-tasks --no-daemon`(저장소 밖 미러 init 스크립트) → BUILD SUCCESSFUL in 5m 53s, 138 작업 모두 실행, EXIT=0. 테스트 결과 XML 합계 2,051건, 실패·오류·건너뜀 0. `KisOrderClientTest` 16/16, `KisAccountQueriesTest` 10/10, `KisOrderReconcilerTest` 17/17, `KisTokenGateTest` 1/1, `TokenCacheTest` 1/1, `ArchitectureTest` 20/20. `JdkHttpPort.java:43`이 응답 헤더 이름을 소문자로 바꾸는지 확인(`date` 조회가 맞음). `git diff origin/main...HEAD`에서 지워진 `@Test` 줄 0건.
-
-| # | 결과 | 근거 |
-|---|---|---|
-| B1 | 통과 | 위 직접 빌드(`--rerun-tasks`) 성공 |
-| B2 | 통과 | 의존 방향 변경 없음: `broker-kis`는 원래 `autotrade-marketdata`(`TokenCache`)·`autotrade-domain`(`OrderRequest`)에 의존한다. 새 코드는 모두 `com.autotrade.broker.kis.order` 안이고 ArchUnit 규칙 변경 없음(`ArchitectureTest` 이번 수정에서 무변경, 20/20 통과). `ZonedDateTime.parse`(`KisAccountQueries.java:102`)는 시계를 읽지 않아 시계 금지 규칙과 무관 |
-| B3 | 통과 | `BrokerPlugin`·`OrderGateway`·스키마·설정 키·REST API 변경 없음. 바뀐 형태(`KisOrderResult.Unknown`에 시각 2개, `Fingerprint` record → `of`로만 만드는 클래스, `KisDailyOrders.serverClock`, `KisSession.post`·`invalidateToken(String)`)는 미연결 플러그인 내부 타입이라 ADR 계약이 아니다. ADR·명세에 옛 형태(`requestTimeout`·고정 시계 오차) 서술 남은 곳 없음(grep). `TokenCache.invalidateIfCurrent`(`TokenCache.java:63`)는 marketdata 모듈의 공개 메서드 추가(호환 유지)로 D-145 검토 반영에 기록됨 |
-| B4 | 통과 | 시뮬레이션 코드 변경 없음. 새 시각은 모두 세션 주입 시계(`KisSession.java:106`, `KisOrderClient.java:163`, `KisAccountQueries` `session.clock()`). 골든 포함 전체 빌드 통과 |
-| B5 | 통과 | 금액·수량 표현 변경 없음(`BigDecimal`·`long`). 시각 계산은 `Instant`·`Duration` |
-| B6 | 통과 | 새 동작마다 테스트: S1 `우리_시계가_61초_빠르면_잰_시계_차이만큼_창을_옮겨_접수된_주문을_놓치지_않는다`(3분 빠름·창 밖 행 포함), `서버_시각을_읽지_못한_조회로는_찾음도_없음도_내지_않는다`, `시계_차이_하한은_응답_받은_시각_기준이라_차이를_작게_재지_않는다`, `첫_쪽_응답의_Date_헤더로_서버_시계를_잰다`(읽지 못하는 Date → null), S3 `모름_결과의_보내기_시작_시각은_토큰_발급_뒤_실제_POST_직전이다`, S2 `옛_토큰의_늦은_만료_응답은_그_사이_받은_새_토큰을_버리지_않아_손절_매도가_막히지_않는다`, `TokenCacheTest`. 바뀐 테스트 1건(`보낸_시각의_한국_날짜와_주문_날짜가_다르면…` → `응답_시각이_보내기_시작보다_앞서면…`)은 주문 날짜를 이제 보내기 시각에서 정해 어긋날 수 없게 된 데 따른 교체이고 약화가 아니다 |
-| B7 | 실패(별도 검토 필요) | 증권사 주문 연동 코드와 보호 경로(`autotrade-broker-*`, `autotrade-marketdata/*`)를 바꾼다. **risk-ops 검토 필요**(A 점검표, 이 수정에 대한 risk-ops 재검토), 독립 QA 재검토, 사용자 머지 대상 |
-| B8 | 통과 | 새 결과 문자열은 TR·예외 클래스 이름·HTTP 상태·코드만(`KisOrderClient.java` `unknown(...)` 호출부). 테스트 값은 자리표시자·가짜 토큰(`TOKEN-ONE`/`TWO`). CI gitleaks는 이 컨테이너에서 확인하지 않았다 |
-
-### 독립 QA 발견 처리(설계 관점 확인)
-- S3(호출자 시각): 해결. 보내기 시작 시각은 `pace()` 뒤 실제 `http.post` 직전에 세션 시계로 잰다(`KisSession.java:106`). `Fingerprint`는 공개 생성자 없이 `Fingerprint.of(OrderRequest, Unknown)`으로만 만들어 호출자가 시각을 넣을 길이 없다(같은 패키지 테스트만 생성자 사용). 반영 대기는 `sendEndedAt + SETTLE`로 센다(`KisOrderReconciler.java` `find`). 간격 대기 중 중단은 POST 전이라 `NOT_SENT`가 맞다(`KisOrderClient.java:155`). `:147`의 IOException·`started == null` 분기는 지금 `pace()`·`headers()`가 IOException을 내지 않아 도달하지 않지만 방어로서 해가 없다.
-- S1(시계 오차): 해결(일정한 오차에 대해). `offsetLowerBound = serverDate − receivedAt`(`KisDailyOrders.java:47`)은 Date 절사(실제 ≥ serverDate)와 찍힌 순간의 우리 시각 ≤ receivedAt에서 나온 올바른 하한이고, 응답이 느릴수록 창이 넓어지는(안전한) 쪽이다. `ord_tmd ≥ sendStartedAt + 실제 차이 ≥ sendStartedAt + 하한`이므로 Date 시계와 주문시각 시계가 같다면 창이 우리 주문을 놓치지 않고, 그 차이·절사는 `CLOCK_SKEW` 60초가 덮는다(그 근거는 D-145 연결 조건 2로 실측). Date 없음·파싱 실패는 `Indeterminate`.
-- 반영 대기 30초: 코드로 고칠 수 없는 가정이며, D-145 위험 1이 "틀리면 중복 주문 쪽"으로 사실대로 고쳐졌고 연결 조건 1(Q-015 실측 전 `NotFound`로 재발주 금지)이 생겼다. 이 PR은 어디에도 연결되지 않으므로(`KisPlugin.orderGateway` 빈 값 유지) 이 처리 방식을 받아들인다. 연결 조건이 실제로 강제되는지는 묶음 E 검토에서 본다.
-- Q1(S2): 해결. 만료 응답을 받은 요청에 쓴 토큰과 지금 캐시 토큰이 같을 때만 버린다(`TokenCache.java:63` `synchronized`, `KisOrderClient.java:177`, `KisAccountQueries.java:203`). `KisTokenGate` 60초 하한과의 상호작용도 테스트로 고정.
-
-### 재검토에서 본 것(점검표 밖, 권고·머지 막지 않음)
-- N5. **시계 계단 이동은 남는다.** 시계 차이는 조회 시점에 재고 그것을 보내기 시각(그보다 최소 30초 앞)에 적용한다. 그 사이 PC 시계가 NTP 보정으로 뒤로 크게(60초 넘게) 움직이면, 빠른 시계로 잰 `sendStartedAt`에 보정 뒤 차이(≈0)를 더해 S1과 같은 방식으로 `NotFound`가 틀릴 수 있다. 반영 대기 판정도 같은 비단조 시계(`Instant`)를 쓴다. 드문 경우이고 지금은 연결 조건 1 때문에 `NotFound`로 재발주하지 않지만, 연결 조건 1은 반영 지연만 말한다. 묶음 E 연결 조건에 "보내기 시점의 시계 차이도 잰다(주문·토큰 응답의 `Date`를 세션에 기록) 그리고 보내기 시점과 조회 시점의 차이가 여유를 넘게 다르면 `Indeterminate`"를 더하거나, 보내기~조회 경과를 단조 시계(`System.nanoTime` 계열 주입)로 함께 재기를 권한다. D-145 위험 1 "PC 시계가 몇 분 어긋나도 창이 따라 옮겨진다"는 일정한 오차에 대해서만 맞다.
-- N6. 서버 시계는 첫 쪽 응답에서만 잰다(`KisAccountQueries` `serverClock[0] == null`). 첫 쪽에서 토큰 재시도가 일어나도 마지막 응답과 그 뒤 시각으로 재므로 하한 성질은 유지된다. 문제 없음.
-- N7. `TokenCache`는 data-engineer 소유 모듈(marketdata)의 공개 API다. 추가만 있고 기존 `invalidate()` 사용처(키움·토스·`KisRestClient`)는 그대로라 이번 변경의 영향은 없다. 시세 쪽 클라이언트도 같은 경쟁이 있을 수 있으므로(`KisRestClient.java:125`) 후속으로 `invalidateIfCurrent`로 옮길지 data-engineer가 판단하기를 권한다.
-
-### 판정
-승인

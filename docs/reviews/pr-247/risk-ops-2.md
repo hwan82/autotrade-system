@@ -47,3 +47,63 @@
 
 ## 판정
 승인
+
+## 재검토 2026-10-27
+- 대상: PR #247 / 브랜치 `claude/project-thread-truegb` 헤드 `4283eb6f`(독립 QA 반영 `9027e0de` + main 합침) / main 대비 diff 전체. 앞 원문(위, [risk-ops.md](risk-ops.md))과 독립 QA 원문 [qa.md](qa.md)(판정 수정 필요, 발견 1 S1·S3, 권고 Q1~Q5)를 보고 다시 봄
+- 점검표: A
+- 직접 실행한 것
+  - `./gradlew build --rerun-tasks --no-daemon`(공개 미러 init 스크립트, 사용자 결정 2026-10-16): **BUILD SUCCESSFUL in 5m 53s, 138 작업 모두 실행**. 결과 XML: `:autotrade-broker-kis:test` 74건(직전 68 + 6), `:autotrade-risk:test` 57건, `:autotrade-architecture-test:test` 47건, `:autotrade-app-engine:test` 109건, `:autotrade-marketdata:test` 164건(새 `TokenCacheTest#실패한_요청의_토큰이_지금_토큰일_때만_버린다` 포함). 실패·오류·건너뜀 0.
+  - `git show 9027e0de`(코드 6파일, 시험 5파일, D-145·README), `4283eb6f` 합침 내용(main 쪽 #239·#249 문서·UI, `pending.md` 줄 합침). `git diff --stat origin/main...HEAD -- autotrade-risk autotrade-app-engine autotrade-app-gateway autotrade-domain autotrade-app-lab autotrade-app-collector`: 0줄. `autotrade-marketdata`는 `TokenCache.invalidateIfCurrent` 더하기(+12)와 그 시험뿐.
+  - 임시 탐침 `RiskOpsProbeTest`(커밋하지 않고 지움, `git status` 깨끗): 아래 N1의 P1·P2.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | Guard·`RealOrderGateways`·명령 채널 무변경(위 `--stat` 0줄). `KisPlugin.orderGateway` 빈 값 유지. `:autotrade-risk:test`·`:autotrade-app-engine:test` 재실행 통과 |
+| A2 | 통과 | `ArchitectureTest` 이번 커밋 무변경. `PLUGIN_ORDER_CODE_STAYS_IN_PLUGIN`·`KIS_TOKEN_ISSUER_STAYS_IN_PLUGIN` 유지, 재실행 통과. 운영 코드에서 `KisOrderResult.Unknown`·`Fingerprint` 생성은 플러그인 안 2곳뿐(KisOrderClient.java:165, KisOrderReconciler.java:98, grep). 리플렉션 한계는 D-145 연결 조건 4로 기록(G2 이월 유지) |
+| A3 | 통과 | 앞과 같음(생성 때 받은 계좌 하나, KRX만) |
+| A4 | **실패** | QA S3는 고쳐짐: 보내기 시작 시각을 `KisSession.post`가 `pace()` 뒤 POST 직전에 알리고(KisSession.java `post`의 `started.accept`), `Unknown`이 시작·끝 시각을 담고, `Fingerprint`는 공개 생성자 없이 `Fingerprint.of(주문, Unknown)`으로만 만든다. 반영 대기는 응답 받은 시각부터(`KisOrderReconciler.find` `sendEndedAt().plus(SETTLE)`). 간격 대기 중 실패는 `NOT_SENT`. 시험 `KisOrderClientTest#모름_결과의_보내기_시작_시각은_토큰_발급_뒤_실제_POST_직전이다` 통과. QA S1(**일정한** 시계 차이)도 고쳐짐: 일별 체결 첫 쪽 `Date`로 차이 하한을 재 창을 옮기고 `Date`가 없으면 모름(`우리_시계가_61초_빠르면_…`, `서버_시각을_읽지_못한_…`, `시계_차이_하한은_…` 통과, 하한 계산 `ServerClock.offsetLowerBound` = `serverDate − receivedAt`이 절사·왕복 시간에서 보수적임을 직접 확인). 그러나 시계 차이를 **보낸 시점이 아니라 조회 시점에** 재므로, 보내기와 조회 사이에 PC 시계가 바로잡히면(시간 동기화의 단계 보정) 창이 틀리고 접수된 주문에 `NotFound`가 나온다 → 아래 N1(탐침 P1) |
+| A5 | 해당 없음 | 멱등 키 발급·영속·연결은 묶음 E(D-145 "안 한 것" 1행, ADR-015가 main에 들어온 사실로 갱신됨) |
+| A6 | 통과(이 PR 범위) | 블랙리스트·수동 보유 경로 무변경, 연결 없음. 특징 대조 "찾음"의 남의 주문 묶기 위험은 `byOrderNo=false`·D-145 위험 2로 묶음 E에 넘김(앞과 같음) |
+| A7 | 통과(이 PR 범위) | QA Q1·앞 G4 고쳐짐: `TokenCache.invalidateIfCurrent`(synchronized, 값이 같을 때만 비움), 주문(`KisOrderClient.interpret`)·조회(`KisAccountQueries.call`) 모두 실패한 요청에 쓴 토큰을 넘김. 시험 `KisOrderClientTest#옛_토큰의_늦은_만료_응답은_그_사이_받은_새_토큰을_버리지_않아_손절_매도가_막히지_않는다`, `TokenCacheTest#실패한_요청의_토큰이_지금_토큰일_때만_버린다` 통과. 시세 경로(`KisRestClient` 등)의 기존 `invalidate()`는 그대로(이 PR 범위 밖) |
+| A8 | 통과 | 엔진·게이트웨이·실험실 코드 무변경, 연결 없음 |
+| A9 | 통과(이 PR 범위) | 보호 시세·서버 측 손절 무변경. QA가 짚은 손절 매도 60초 `NOT_SENT` 경로(S2)는 위 A7대로 막힘. 토큰 무효 뒤 PANIC 조회 순서(QA Q4)는 D-145 연결 조건 3 |
+| A10 | 통과 | 새 시험도 자리 표시자만, 새 `Unknown` 사유 문자열은 TR·종류·HTTP 상태만. `Date` 헤더 값은 결과·로그에 싣지 않음 |
+| A11 | 통과 | 보호 시험 무변경(이번 커밋에 `autotrade-architecture-test` 없음), 고정 값 변경 없음. 새 동작마다 시험이 있다(S1·S3·S2·`Date` 없음·하한 계산). 단 N1의 경계(보내기와 조회 사이 시계 단계 보정)는 시험이 없다 |
+| A12 | **실패** | 장애표 4번(broker-and-fault-design.md:163 "미접수일 때만 새 키로 1회 재발주")과 장애 테스트 4번 "중복 주문 0건"의 전제("없음"이면 정말 없음)가 N1 입력에서 깨진다. D-145 연결 조건 1·2(반영 지연, 게이트웨이 `Date`↔`ORD_TMD` 시계 차이 실측)는 이 경우를 덮지 않는다 |
+| A13 | 통과 | 국내 전용, 날짜·시각 `Asia/Seoul`(주문 날짜는 이제 실제 POST 시작 시각의 한국 날짜로 정함), 가격 원 정수 |
+| A14 | **실패** | D-145 위험 1(D-145-kis-order-client.md "시계 차이 자체와 보내기 시각은 이제 재서 쓰므로 PC 시계가 몇 분 어긋나도 창이 따라 옮겨진다")과 클래스 주석("시계 오차는 가정하지 않고 잰다", KisOrderReconciler.java 18-30행)은 차이가 보내기~조회 사이 **일정할 때만** 참이다. 안전 성질을 실제보다 넓게 적었다(N1). 그 밖에 QA A14의 "모름으로 기운다" 문장은 사실대로 고쳐졌고, Q5(ADR-015 옛 문구)·`pending.md` 충돌은 해소됨 |
+
+## QA·앞 검토 지적 처리 확인
+| 항목 | 처리 | 확인 |
+|---|---|---|
+| QA 발견 1 S3 호출자 시각 | 고침 | 코드·시험(위 A4) |
+| QA 발견 1 S1 시계 오차 | 일정한 차이는 고침, 보내기~조회 사이 차이 변화는 남음 | 탐침 P2(일정 차이 → `Found`), P1(뒤로 단계 보정 → `NotFound`), 아래 N1 |
+| QA 발견 1 SETTLE 30초 | 근거 없음을 사실대로 적고 실측 전 `NotFound` 재발주 금지(연결 조건 1) | 문서 확인 |
+| QA Q1(S2)·앞 G4 | 고침 | 위 A7 |
+| QA Q2 | Q-015 확인 항목에 더함 | 문서 확인 |
+| QA Q3·앞 G2 | 연결 조건 4 | 문서 확인, 연결 PR 승인 조건으로 다시 본다 |
+| QA Q4 | 연결 조건 3 | 문서 확인 |
+| QA Q5 | 고침 | 문서·합침 확인 |
+
+## 점검표 밖 발견
+
+### 수정 필요
+**N1. 시계 차이를 조회 때 한 번만 재서, 보낸 뒤 PC 시계가 바로잡히면 "없음"이 틀린다** (KisOrderReconciler.java `find`: `windowStart = sendStartedAt + day.serverClock().offsetLowerBound() − CLOCK_SKEW`, `settled = sendEndedAt + SETTLE`)
+- `sendStartedAt`·`sendEndedAt`은 보낼 때의 벽시계, 차이 하한은 조회 때의 벽시계로 잰다. 둘 사이 차이가 같다는 가정이 코드·문서 어디에도 확인되지 않는다. 우리 시계가 61초 빠른 PC(QA S1과 같은 PC)는 바로 그 때문에 시간 동기화가 언젠가 시계를 단계로 되돌린다 `[추론]`(Windows 시간 서비스는 차이가 크면 서서히가 아니라 한 번에 맞춘다 `[가정]`, 확인 못 함).
+- 탐침(임시 시험, 지움): 우리 시계 61초 빠른 상태에서 09:30:00(우리)에 보냄, 실제 접수 `ord_tmd` 09:28:59, 10초 뒤 시간 초과. 조회 전에 시계가 바로잡혀 조회 응답 `Date`로 잰 차이가 0.
+  - P1: 그 접수 행 하나만 있는 완전한 조회(우리 시계 09:30:40) → **`NotFound`**. 창 시작 = 09:30:00 + 0 − 60초 = 09:29:00이라 09:28:59 행이 창 밖. 재발주하면 중복 주문.
+  - P2(대조): 시계가 그대로 61초 빠르면 같은 입력이 `Found`.
+  - 반대 방향(계산으로 확인, 탐침 없음): PC가 느렸다가 앞으로 바로잡히면 창은 넓어지지만, 반영 대기 비교(`queriedFrom ≥ sendEndedAt + SETTLE`)가 보낼 때와 조회 때의 서로 다른 벽시계를 견주게 되어 실제 경과가 보정 폭만큼 줄어든다(예: 30초 이상 앞으로 바로잡히면 실제로는 응답 직후 조회여도 통과). 그때 아직 반영 안 된 주문의 0행 조회는 `NotFound`.
+- 즉 뒤로 바로잡히면 창이, 앞으로 바로잡히면 반영 대기가 틀리고, 둘 다 "없음"(중복 주문) 쪽으로 틀린다. `KisOrderClient.unknown`이 `now`가 `startedAt`보다 앞서면 조용히 `startedAt`으로 맞추는 것(KisOrderClient.java:165)도 같은 단계 보정을 감춘다.
+- 고칠 것(최소, 하나를 고르고 이유를 D-145에 적는다):
+  1. 단조 시계로 단계 보정을 감지한다: `Unknown`에 POST 시작 때의 `System.nanoTime()`(또는 주입 가능한 단조 시계) 값을 함께 담고, 조회 때 "벽시계 경과 − 단조 경과"가 허용치(예: 1~2초)를 넘으면 `Indeterminate`. 반영 대기도 단조 경과로 센다.
+  2. 또는 보낼 때도 차이를 잰다(직전 조회·토큰 응답의 `Date`로 보낸 시점 하한을 남겨 두고, 조회 때 잰 값과 크게 다르면 `Indeterminate`, 같으면 둘 중 작은 하한을 쓴다).
+  - 어느 쪽이든 P1과 앞으로 바로잡히는 경우를 고정하는 시험을 더하고, D-145 위험 1·클래스 주석을 "보내기~조회 사이 시계 차이가 바뀌면 …, 그래서 …로 막는다"로 사실대로 고친다.
+- 연결 전이라 지금 실제 피해는 없고 D-145 연결 조건 1로 `NotFound` 재발주도 실측 전까지 막혀 있다. 그러나 연결 조건 1·2를 채워도 이 경우는 남고, 이 PR이 연결 PR이 기댈 안전 성질을 문서로 확정하므로 이 PR에서 고친다(QA 발견 1과 같은 판단).
+
+### 권고(판정에 넣지 않음)
+- **G6.** `ServerClock`은 첫 쪽 응답 하나로 잰다. 토큰 만료 재호출이 끼면 `receivedAt`이 늦어져 하한이 더 작아질 뿐(안전 쪽)이다. 문제 없음, 기록만.
+- **G7.** `KisDailyOrders`는 공개 record라 연결 코드가 `serverClock`을 임의로 넣어 만들 수 있다. 연결 PR에서 `find`에 넘기는 값은 `KisAccountQueries.dailyOrders`가 만든 것만 쓰는지 다시 본다.
+
+## 판정
+수정 필요(N1 보내기~조회 사이 PC 시계 단계 보정 시 "없음"이 틀림 — 점검표 A4·A12·A14 실패)
