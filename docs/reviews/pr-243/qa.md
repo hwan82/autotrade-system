@@ -55,3 +55,42 @@
 
 ## 판정
 수정 필요(A12: 발견 1)
+
+## 재검토 2026-10-27
+- 대상: PR #243 / 브랜치 `claude/project-thread-wqsuqu` / 헤드 3deffef4(1차 뒤 46b90149 반영, 306e657f architect 재검토, 2ef73c90 risk-ops 재검토 2, 3deffef4 main 병합) / main 대비 전체 diff(병합 기준점 f80f4caa, 그 뒤 main df6ca58f는 DART 수집만이라 충돌 없음 `git merge-tree` 확인): `docs/runbooks/stage-7-real-trading-tests.md`, `docs/team/stage-7-readiness-plan.md`, `docs/qa/pending.md`, `docs/qa-out-status.md`, `docs/reviews/pr-243/{architect,risk-ops,qa}.md`. 코드·설정·보호 경로 변경 없음.
+- 점검표: A 전체 + B1, B6
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks` (3deffef4): 1회째 BUILD SUCCESSFUL(138 tasks 모두 실행, 미러 없이). 테스트 결과 XML 합계 2,005건, 실패 0·오류 0·건너뜀 0
+  - 1차 보고서(e9326203)가 이 브랜치에서 바뀌지 않았음 확인(`git diff e9326203 HEAD -- docs/reviews/pr-243/qa.md` 빈 결과).
+  - main 병합 뒤 `pending.md`·`qa-out-status.md`는 main 대비 줄 추가만(main 줄 삭제 없음).
+  - 새 인용 줄 대조: `ControlServer.java:211`(`silence`의 `checker.shutdownNow()`), `:649-652`(`close`의 Windows 소켓 삭제 분기), `ControlClient.java:91-107`. 맞음.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | 1차와 같음. 바뀐 문구는 종료 순서·기록 규칙뿐이고 Guard 기본값·재기동 OFF에 닿지 않음 |
+| A2 | 해당 없음 | 문서만 |
+| A3 | 해당 없음 | 문서만 |
+| A4 | 해당 없음 | 문서만 |
+| A5 | 해당 없음 | 문서만 |
+| A6 | 해당 없음 | 문서만 |
+| A7 | 해당 없음 | 문서만 |
+| A8 | 해당 없음 | 문서만 |
+| A9 | 해당 없음 | 문서만. 6장 5-3 서버 측 손절 유지 그대로 |
+| A10 | 통과 | 새 문구에 키·계좌번호·토큰·해시 값 없음(PID만) |
+| A11 | 해당 없음 | 테스트·보호 경로·고정 값 변경 없음 |
+| A12 | 통과 | 발견 1 해소: 6.1 5번 Windows "확인 불가"에서 첫 엔진 먼저(또는 `Stop-Process -Id <첫>,<늦은>`으로 함께) 끄고 이유를 코드로 적음, 6장 5-1에 "두 번째 먼저"는 기동이 끝나지 않았거나 응답을 멈추지 않은 두 번째 엔진에만 적용한다고 범위를 둠, 6.1 7번 정리도 같은 순서. 코드로 다시 따라감: 첫 엔진 F를 먼저 끄면(Ctrl+C면 `close` 650-651행이 Windows에서 남은 소켓 파일을 지우고, 강제 종료면 소켓이 남아도 연결 실패) 실험실 `notRunningOrUnknown`은 잠금 파일 PID(늦은 엔진 L, 살아 있음)로 UNKNOWN 유지 → L까지 끄면 엔진이 없으므로 NOT_RUNNING이 맞는 표시. L은 `silence` 뒤 자가 확인이 멈춰(211행) 잠금을 다시 잡지 않음. 두 종료 사이 "가상" 금지 상태가 생기지 않음 |
+| A13 | 해당 없음 | 문서만 |
+| A14 | 통과 | Q2 반영(준비 계획 I1 행 E1~E6). D-142 남은 위험 정정은 8장 R-1 줄(발견 1·Q3 포함)로 다음 엔진 PR 몫, 1차와 같음 |
+| B1 | 통과 | 직접 실행 `./gradlew build --rerun-tasks`(3deffef4) BUILD SUCCESSFUL, 2,005건 실패 0 |
+| B6 | 해당 없음 | 새 동작 없음(문서만). 테스트 삭제·건너뛰기·약화 없음 |
+
+## 점검표 밖 발견 (재검토)
+- 1차 권고 반영 확인: Q1(6.1 3번 거부 때 기동 로그 시각 기록, "공존 재현 못 함"이면 8장 ②줄을 처리로 바꾸지 않고 하네스로 Windows에서 다시 봄, 8장 ②줄 상태 칸), Q2(E1~E6), Q3(6.1 5번·8장 R-1 줄을 "강제 종료일 때"로 좁히고 Ctrl+C 뒤 죽은 잠금 PID가 남는다고 기록), Q4(architect A-2는 다음 I1 PR, 확인만).
+- 시도한 시나리오:
+  - S6: Windows "확인 불가"에서 F를 `Stop-Process`(강제)로 먼저 끔 → 소켓·잠금 파일 남음, 잠금 PID = L(살아 있음) → UNKNOWN 유지 → L 종료 → NOT_RUNNING. 엔진 없음과 일치. 문제 없음.
+  - S7: "확인 불가"인데 잠금 파일 PID가 F인 경우(L이 잠금을 잡지 못한 채 공존 판정이 난 변형) → F를 먼저 끄면 NOT_RUNNING("가상")이지만 남은 L은 계좌가 모두 OFF라 OPEN 계좌를 숨기지 않음. 금지 상태 아님. 절차가 잠금 파일 PID를 먼저 기록하게 해 두어 사후 판별 가능.
+  - S8: 한 명령 `Stop-Process -Id <첫>,<늦은>`은 목록 순서로 처리되므로 첫 엔진 먼저와 같다 `[추론]`(PowerShell 동작, 시행 때 확인). 문제 없음.
+- 권고 Q5 (판정에 넣지 않음): 6.1 5번의 "첫 엔진 먼저"는 L이 이미 `silence`했다는 전제에 기댄다. 끄기 전에 4번에서 기록한 L의 "실전 엔진이 두 개 돕니다" 알림(또는 엔진 로그의 응답 멈춤 줄)이 있는지 확인하는 한 줄을 시행 PR에서 넣으면 전제가 기록으로 남는다. 없으면 4번의 15초 초과 규칙대로 이미 멈췄어야 하므로 위험은 작다.
+
+## 판정
+승인
