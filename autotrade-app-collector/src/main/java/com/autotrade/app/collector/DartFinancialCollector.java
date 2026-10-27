@@ -37,6 +37,12 @@ public final class DartFinancialCollector {
     static final int PENDING_DAYS = 14;
     static final Set<String> LISTED_CLASSES = Set.of("Y", "K", "N");
     private static final Pattern PERIOD = Pattern.compile("\\((\\d{4})\\.(\\d{2})\\)");
+    /**
+     * 사업보고서와 그 정정("[기재정정]", "[첨부정정]", "[첨부추가]" 등)만. OpenDART 공시검색은 {@code pblntf_detail_ty=A001}을
+     * 줘도 분기·반기보고서와 "사업보고서제출기한연장신고서"를 함께 돌려준다(2026-10-27 실캐시 [사실]: 공시 104,599건 중 약 70%가
+     * 분기·반기). 연간 계정(11011)을 그 공시 값으로 오해하지 않도록 이름으로 거른다.
+     */
+    private static final Pattern ANNUAL_NAME = Pattern.compile("^(\\[[^\\]]+\\])?사업보고서\\s*\\(\\d{4}\\.\\d{2}\\)$");
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final OpenDartClient client;
@@ -175,7 +181,13 @@ public final class DartFinancialCollector {
                 && item.path("stock_code").asText("").strip().matches("[0-9A-Z]{6}")
                 && item.path("rcept_no").asText("").matches("\\d{14}")
                 && item.path("rcept_dt").asText("").matches("\\d{8}")
+                && annualReport(item.path("report_nm").asText(""))
                 && businessYear(item.path("report_nm").asText("")) > 0;
+    }
+
+    /** 사업보고서(정정 포함)인지. 분기·반기보고서, 제출기한연장신고서는 아니다. */
+    static boolean annualReport(String reportName) {
+        return ANNUAL_NAME.matcher(reportName.strip()).matches();
     }
 
     /** 보고서명 "사업보고서 (2024.12)"의 연도. 없으면 0. 3월 결산 등도 괄호 안 연도를 사업연도로 본다 `[가정]`. */
@@ -184,7 +196,10 @@ public final class DartFinancialCollector {
         return m.find() ? Integer.parseInt(m.group(1)) : 0;
     }
 
-    /** 공시 목록(접수일, 접수번호 순). */
+    /**
+     * 공시 목록(접수일, 접수번호 순). 캐시에 남은 옛 항목도 {@link #accept}로 다시 걸러, 이 거르기 전에 받아 둔 분기·반기보고서는
+     * 스냅샷과 계정 호출에서 빠진다(캐시 파일은 지우지 않는다).
+     */
     public List<JsonNode> filings() throws IOException {
         Path f = dir.resolve("filings");
         if (!Files.exists(f)) {
@@ -193,7 +208,10 @@ public final class DartFinancialCollector {
         List<JsonNode> out = new ArrayList<>();
         try (Stream<Path> files = Files.list(f)) {
             for (Path p : files.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().toList()) {
-                out.add(JSON.readTree(p.toFile()));
+                JsonNode item = JSON.readTree(p.toFile());
+                if (accept(item)) {
+                    out.add(item);
+                }
             }
         }
         out.sort(Comparator.comparing((JsonNode n) -> n.path("rcept_dt").asText()).thenComparing(n -> n.path("rcept_no").asText()));
