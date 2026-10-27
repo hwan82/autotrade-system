@@ -201,7 +201,7 @@
 
 | 순서 | 내용 | 모듈 | 실전 관련 | 선행 |
 |---|---|---|---|---|
-| G0 | LIVE01 녹화로 정규장 종목별 이벤트 간격 분포(T_quiet 근거)를 내는 측정(실험 명령 또는 리플레이 점검 보고서 한 절) | `autotrade-app-gateway`(점검 명령) 또는 문서 | 아니오 | 없음, LIVE01 첫 주 녹화 |
+| G0 | LIVE01 녹화로 정규장 종목별 이벤트 간격 분포(T_quiet 근거)를 내는 측정(실험 명령 또는 리플레이 점검 보고서 한 절). 구현: 점검 명령 `feedGaps`([D-147](../decisions/D-147-feed-gap-stats.md)) | `autotrade-app-gateway`(점검 명령) 또는 문서 | 아니오 | 없음, LIVE01 첫 주 녹화 |
 | G1 | `enginefeed` 서버·받는 쪽·줄 형식, 엔진 소켓 열기, 관심·상태·생존 줄, 지연 측정 시험 | `autotrade-marketdata`, `autotrade-app-gateway` | 예(marketdata 보호 경로) | 이 ADR 머지 |
 | G2 | `SourcePlanner` 등급 P0~P3, 관심 적용·60초 유지·차분 등록 확인, 엔진 없음 바이트 동일 시험 | `autotrade-app-gateway` | 예 | G1 |
 | G3 | 구독 거절 종목 알림(소스 → 허브), 거절 재배분·재시도 간격 | `autotrade-marketdata`(live), 증권사 프로토콜 | 예 | G2, Q-015 거절 응답 확인 |
