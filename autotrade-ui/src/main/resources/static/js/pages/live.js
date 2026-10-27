@@ -39,6 +39,9 @@ export async function livePage() {
   let busy = false;
   // 등록 파일 목록은 모든 실험 폴더를 읽으므로 폴링마다 읽지 않는다. 화면에 들어올 때, 새로 읽기, 명령 뒤, 세션이 끝나 목록으로 돌아올 때만
   let regs = null;
+  // 마지막으로 그린 내용. 3초 폴링이 같은 내용을 다시 그리지 않게 한다: 다시 그리면 버튼이 새 요소로 바뀌어 누르는 도중의 클릭이
+  // 사라지고 스크롤이 튄다(LIVE01 2026-10-27 사용자 PC에서 "이어서 시작"을 못 누름)
+  let shown = '';
   const refresh = async (withRegistrations = true) => {
     const view = await get('/api/live/status');
     const active = view.experimentId !== '';
@@ -49,7 +52,13 @@ export async function livePage() {
     ]);
     if (needRegs) regs = fresh;
     if (active) regs = null;
+    const key = JSON.stringify([view, gaps, regs]);
+    if (key === shown) return;
+    shown = key;
+    // 내용이 바뀌어 다시 그릴 때도 보던 위치를 지킨다
+    const y = window.scrollY;
     host.replaceChildren(active ? sessionView(view, gaps, act) : idleView(view, regs, act));
+    window.scrollTo(0, y);
   };
   // 명령 하나가 끝날 때까지 다른 명령 버튼을 막는다(두 번 누름 방지)
   const act = async (label, fn) => {
@@ -63,6 +72,7 @@ export async function livePage() {
       message.replaceChildren(h('p', { class: 'notice warn' }, `${label}: ${e.message}`));
     } finally {
       busy = false;
+      shown = ''; // 명령 때 막은 버튼을 다시 그려 풀어 준다(내용이 같아도)
       await refresh().catch(e => toast(e.message, true));
     }
   };
@@ -77,7 +87,7 @@ export async function livePage() {
         h('h1', {}, '실시간 모의'),
         h('p', { class: 'muted' }, '게이트웨이가 받은 실시간 시세로 가상 계좌들을 돌립니다. 모의 계좌만 다루며 실전 주문은 나가지 않습니다.')),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn secondary', type: 'button', onclick: () => refresh().catch(e => toast(e.message, true)) }, '새로 읽기'))),
+        h('button', { class: 'btn secondary', type: 'button', onclick: () => { shown = ''; refresh().catch(e => toast(e.message, true)); } }, '새로 읽기'))),
     message, host);
 }
 

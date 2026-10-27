@@ -127,3 +127,29 @@ test('실험 생성 화면의 공시 스냅샷 칸이 dart-disclosures 목록을
   await expect(disc).toHaveValue(DISC);
   errors.expectNone();
 });
+
+test('세션이 없을 때 3초 폴링이 같은 등록 목록을 다시 그리지 않아 이어서 시작 버튼과 스크롤이 그대로다', async ({ page }) => {
+  // LIVE01 2026-10-27: 폴링마다 목록을 새로 그려 스크롤이 튀고 "이어서 시작"을 못 눌렀다
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 900, height: 400 });
+  const idle = { experimentId: '', restoring: false, session: null, feedState: 'NEW', feedError: '', feedReconnects: 0,
+    inboxQueued: 0, inboxDropped: 0, stopReason: '', stopKind: 'NONE', prepare: null, dailySelections: false, nextDay: null };
+  const regs = Array.from({ length: 12 }, (_, i) => ({
+    id: `EXP-20261026-E2EIDLE${String(i).padStart(2, '0')}`, question: '스크롤 시험용 등록', period: '2026-10-26 ~ 2026-12-18',
+    profiles: ['kr-orb-30@1'], symbols: 10, hasJournal: true, finished: false, error: null,
+  }));
+  let statusReads = 0;
+  await page.route('**/api/live/status', r => { statusReads++; return r.fulfill({ json: idle }); });
+  await page.route('**/api/live/registrations', r => r.fulfill({ json: regs }));
+  await page.goto(`${BASE}/#/live`);
+  const last = page.getByRole('button', { name: '이어서 시작' }).last();
+  await last.scrollIntoViewIfNeeded();
+  await last.evaluate(b => { b.dataset.e2eMark = 'kept'; });
+  const y = await page.evaluate(() => window.scrollY);
+  expect(y).toBeGreaterThan(0);
+  const before = statusReads;
+  await expect.poll(() => statusReads, { timeout: 10000 }).toBeGreaterThan(before + 1); // 폴링이 두 번 이상 돈 뒤
+  await expect(last).toHaveAttribute('data-e2e-mark', 'kept'); // 같은 버튼 요소가 남아 있다
+  expect(await page.evaluate(() => window.scrollY)).toBe(y);
+  errors.expectNone();
+});
