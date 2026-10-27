@@ -95,3 +95,34 @@
 
 ### 판정
 승인
+
+## 재검토 2026-10-27 (2)
+- 대상: PR #247 / 커밋 7c94601e / `git diff origin/main...HEAD` 전체(38파일 +2828 −27, origin/main df6ca58f 기준), 그리고 risk-ops 재검토 원문(`risk-ops-2.md` `## 재검토 2026-10-27`, 수정 필요 N1) 뒤 바뀐 것: `git show 7c94601e`(코드 7파일·시험 3파일·D-145, +156 −50). 그 사이 `1ad76e66`은 이 파일 30줄 복구뿐(코드 무변경) 확인
+- 점검표: B
+- 직접 실행한 것
+  - `./gradlew build --rerun-tasks --no-daemon`(저장소 밖 공개 미러 init 스크립트) → BUILD SUCCESSFUL in 5m 2s, EXIT=0. 테스트 결과 XML 합계 2,052건, 실패·오류·건너뜀 0. `KisOrderReconcilerTest` 18/18(새 `보낸_뒤_조회_전에_PC_시계가_단계로_바뀌면_찾음도_없음도_내지_않는다` 포함), `KisOrderClientTest` 16/16, `KisAccountQueriesTest` 10/10, `KisTokenGateTest` 1/1, `TokenCacheTest` 1/1, `ArchitectureTest` 20/20
+  - `git diff origin/main...HEAD -- '*.java'`에서 지워진 `@Test` 줄 0건
+  - 임시 탐침 `ArchProbeTest`(커밋하지 않고 지움, `git status` 깨끗): 아래 N8
+
+| # | 결과 | 근거 |
+|---|---|---|
+| B1 | 통과 | 위 직접 빌드(`--rerun-tasks`) 성공 |
+| B2 | 통과 | 의존 방향·ArchUnit 규칙 무변경(`ArchitectureTest` 이번 커밋 무변경, 20/20). 새 `Stamp`는 `com.autotrade.broker.kis.order` 안(`Stamp.java`), 소유 표 범위 안. `System.nanoTime`은 `NO_SYSTEM_TIME`(`ArchitectureTest.java:134-146`) 금지 목록에 없고, 세션 생성자에 `LongSupplier`로 주입되며 실전 팩토리 한 곳에서만 쓴다(`KisSession.java:66`) |
+| B3 | 통과 | `BrokerPlugin`·`OrderGateway`·스키마·설정 키·REST API 변경 없음. 바뀐 형태(`KisOrderResult.Unknown(String, Stamp, Stamp)`, `KisDailyOrders.queried`, `KisSession` 생성자 인자)는 아직 어디에도 연결되지 않은 플러그인 내부 타입이고, 기존 접근자(`sendStartedAt()`·`sendEndedAt()`·`queriedFrom()`)는 위임 메서드로 남겼다. D-145 검토 반영·위험 1이 바뀐 동작대로 고쳐졌다 |
+| B4 | 통과 | 시뮬레이션 코드 변경 없음. 벽시계는 세션 주입 `Clock`, 단조 시계는 주입 `LongSupplier`(시험은 `OrderFakes.MutableClock.monoNanos`). 골든 포함 전체 빌드 통과 |
+| B5 | 통과 | 금액·수량 표현 변경 없음. 시각 차이는 `Duration`·`long` 나노초 |
+| B6 | 통과 | 새 동작 시험: 뒤로 61초 보정(행 있음·없음 모두 → 모름), 앞으로 뛰어 단조 경과 5초(→ 모름), 2초 안 차이(→ 없음 유지) — `KisOrderReconcilerTest.java:219`. 바뀐 시험은 `Instant` → `Stamp` 형식 교체(`at(...)`가 단계 없는 순간을 만든다)뿐이고 단언 약화 없음. 단 아래 N8 경계(조회 중 단계 보정)와 `MutableClock.stepWall`을 쓰는 클라이언트 경유 시험은 없다(`stepWall`은 정의만 있고 호출 0건) |
+| B7 | 실패(별도 검토 필요) | 증권사 주문 연동 코드(`autotrade-broker-kis/.../order`)를 바꾼다. **risk-ops 검토 필요**(N1 처리 확인), 독립 QA 재검토, 사용자 머지 대상 |
+| B8 | 통과 | 새 결과 문자열은 단계 폭 초 단위 숫자뿐(`KisOrderReconciler` "PC 시계가 N초 바뀜"). 비밀값 없음. CI gitleaks는 이 컨테이너에서 확인하지 않았다 |
+
+### risk-ops N1·앞 권고 N5 처리(설계 관점 확인)
+- 해결(보내기 시작 ~ 조회 시작 구간). `KisSession.stamp()`(`KisSession.java:79`)가 벽시계와 단조 시계를 같은 순간에 읽고, 보내기 시작(`:114`, `pace()` 뒤 POST 직전)·응답 끝(`KisOrderClient.java:163`)·조회 시작(`KisAccountQueries.java:80`)에 남긴다. `find`는 보내기 시작 → 조회 시작의 "벽시계 경과 − 단조 경과"가 2초를 넘으면 모름(`KisOrderReconciler.java:194`), 반영 대기는 응답 끝 → 조회 시작의 단조 경과로 센다(`:199`). 앞으로·뒤로 단계 모두 모름 쪽이고, 절전(벽시계만 흐름)도 모름·더 긴 대기 쪽이라 안전하다. 앞 `unknown()`의 조용한 시각 고정(`now.isBefore(startedAt)`)이 없어지고 생성자가 단조 순서로 검사한다.
+- 2초 문턱은 `[추론]`으로 표시되어 있다. NTP 점진 보정(slew)은 보통 초당 0.5ms 안팎이라 수 분 안 조회 구간에서 2초에 닿지 않는다 `[추론]`. 문턱보다 작은 단계(≤2초)는 `CLOCK_SKEW` 60초 여유가 덮는다.
+
+### 재검토에서 본 것(점검표 밖, 권고·머지 막지 않음)
+- N8. **조회 시작 ~ 첫 쪽 응답 사이의 단계 보정은 감지하지 않는다.** 단계 검사는 조회 시작 `Stamp`까지만 본다(`:194`). 시계 차이 하한은 첫 쪽 응답 뒤 `session.clock().instant()`(벽시계만, `KisAccountQueries.java:182`)로 잰 `receivedAt`에서 나온다. 그 사이(간격 대기·토큰 발급·GET·토큰 만료 재호출) PC 시계가 뒤로 바로잡히면 하한이 `min(경과, 보정 폭)`만큼 커져 창 시작이 늦어진다. 탐침(61초 빠른 PC, 조회 시작 뒤 첫 쪽 응답 전에 61초 뒤로 보정, 접수 행 09:28:59): 경과 0·5·30초 → `Found`(하한 −61·−56·−31초, 여유가 줄어듦), 경과 62·75초 → **`NotFound`**. 지금 다른 클라이언트의 HTTP 타임아웃이 10초(`GatewayMain.java:58`)라 이 쪽 경과가 60초를 넘기는 어렵고, 연결 조건 1로 `NotFound` 재발주도 막혀 있어 머지를 막지 않는다. 다만 이 경과는 `CLOCK_SKEW` 60초(게이트웨이↔주문시각 시계 차이용 여유, 연결 조건 2 실측 대상)를 그대로 깎는다. 고치기 쉽다: 첫 쪽 응답 순간도 `Stamp`로 남겨(`ServerClock`에 담거나 `pages`가 `session.stamp()`를 넘김) 단계 검사를 보내기 시작 → 첫 쪽 응답까지로 넓힌다. 이 PR이나 묶음 E 연결 조건에서 처리하기를 권한다(risk-ops 판단).
+- N9. **`Stamp`의 단조 값은 같은 JVM 안에서만 비교할 수 있다**(`Stamp.java` 주석, `System.nanoTime` 명세). 묶음 E가 `Unknown`을 영속해 재기동 뒤 대조하면 단조 값이 무의미해진다. 지금 코드는 이 경우 대개 큰 차이로 모름이 되어 안전하지만, 같은 부팅 안 재기동(운영체제 단조 시계가 이어지면 우연히 맞을 수 있음)이나 연결 코드가 벽시계만 저장하고 `new Stamp(wall, 임의값)`로 되살리는 경우(공개 record 생성자)는 검사를 우회한다. 묶음 E 연결 조건에 "재기동 뒤에는 특징 대조로 `NotFound`를 내지 않는다(JVM 시작 식별자를 `Unknown`에 담아 다르면 모름)"를 더하기를 권한다. 재부팅 뒤 미확정 주문이 특징 대조로는 끝내 확정되지 않는 운영상 영향(주문번호·수동 확인 경로 필요)도 함께 적을 것.
+- N10. `OrderFakes.MutableClock.stepWall`이 정의만 있고 쓰이지 않는다. 클라이언트·조회를 실제로 거치는 시험(보내기 → `stepWall(−61초)` → `dailyOrders` → `find`)을 하나 두면 `Stamp`를 세션이 빠짐없이 남기는지까지 고정된다. N8을 고칠 때 함께 쓰면 좋다.
+
+### 판정
+승인
