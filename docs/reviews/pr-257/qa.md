@@ -62,3 +62,62 @@
 
 ## 판정
 수정 필요(발견 1: 관심 종목을 바꾸면 그 전에 큐 넘침으로 버린 종목의 `CONSUMER_OVERFLOW` 공백 줄이 사라져, 엔진이 버린 구간을 종목 단위로 알 수 없음. A9·A14 실패, 재현함). 고친 뒤 실패 경우 시험을 넣고 재검토를 요청한다. 실전 관련 PR이므로 머지는 사용자가 직접 한다.
+
+## 재검토 2026-11-02
+- 대상: PR #257 / 헤드 `240f4b4d`(브랜치 `claude/project-thread-in425x`). 1차 판정 뒤 커밋: `ce8650c4`(main 합치기), `c2530f00`(QA 수정 필요 반영, 코드), `7a071ff6`·`f6aa5a38`(architect·risk-ops 재검토 원문), `240f4b4d`(main 합치기·pending·처리 기록) / main 대비 diff 전체 다시 읽음(merge-base = main `12e88baa`, 25파일 +3,717: 운영 6파일·시험 5파일, 보호 테스트 `EngineFeedBoundaryTest`와 위반 예제 5개, ADR-016 8장, D-148, 결정 색인, `pending.md`, `qa-out-status.md`, 검토 원문 3)
+- 점검표: A 전체 + B1, B6
+- 직접 실행한 것:
+  - `./gradlew build --rerun-tasks --console=plain` (헤드 `240f4b4d`): Maven Central 429로 의존성 받기 실패가 이어진 뒤 18회째 **BUILD SUCCESSFUL in 3m 56s, 138 작업 모두 실행**, 미러 없이. 시험 결과 XML 합계 2,111건, 실패·오류·건너뜀 0. `:autotrade-marketdata` 198건, `:autotrade-architecture-test` 50건, `:autotrade-app-engine` 109건, `:autotrade-risk` 57건. 지연 시험 출력: `publish p50=326ns p99=1458ns p99.9=6186ns 최대=3042346ns, 콜백→해석 p50=400µs p99=1665µs 최대=8857µs (25600건)`(기준 p99.9 50µs, p99 10ms, 최대 200ms 안).
+  - PR 헤드 CI(`240f4b4d`, 실행 41369948229): `Gradle build`·`DB schema (PostgreSQL 16)`·`Secret scan and collector boundary`·`Lab screens (Playwright)` 4건 모두 success. 1차 때 CI 0건 문제는 풀림.
+  - `git merge --no-commit` (지금 main `52d5d365`, #248·#259 머지 뒤): **`docs/qa/pending.md`·`docs/qa-out-status.md` 충돌**(둘 다 표 줄 추가끼리, 코드 충돌 없음). 임시 작업 트리에서 양쪽 줄을 다 남기고 `:autotrade-marketdata:test :autotrade-architecture-test:test :autotrade-app-engine:test :autotrade-app-gateway:test` → BUILD SUCCESSFUL. 작업 트리는 지움.
+  - QA 임시 시험 3건(`EngineFeedServerTest`에 붙여 돌린 뒤 되돌림, `git status` 깨끗 확인). 준비는 1차 재현과 같음(큐 50, 엔진이 읽지 않는 동안 A·B에 20만 건, 관심 1 = protect `{A, B}`), 관심을 바꾼 뒤 읽기 시작해 A·B에 새 이벤트:
+    - `QA-257R-1` A를 protect → entry로 옮김(`rev 2` protect `{B}` entry `{A}`): `[KRX:000660:CONSUMER_OVERFLOW, KRX:005930:CONSUMER_OVERFLOW]` 통과.
+    - `QA-257R-2` 관심을 세 번 연달아 바꿈(`{A,B,C}` → protect `{A}` entry `{B}` → `{A,B}`): A·B 모두 공백 통과.
+    - `QA-257R-3` B를 뺐다가 다시 넣음(`{A}` → `{A,B}`): A만 공백, B 없음(D-148 결정 10의 의도대로) 통과.
+  - 되돌림 시험: `slots`를 `m.put(s, new Slot())`(고치기 전)로 바꾸면 위 3건 모두 실패(`QA-257R-1 []`, `QA-257R-2 []`, `QA-257R-3 []`)하고, 개발 쪽 새 시험 `넘침_뒤_관심이_바뀌어도_남는_종목은_다시_읽을_때_공백이_먼저_온다`도 같이 돈다. 원복 뒤 `git status` 깨끗.
+  - `git diff origin/main...HEAD | grep -inE "appkey|appsecret|password|accountno|bearer "`: 검토 원문 안의 A10 설명 줄 두 건뿐.
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | `RealTradingGuard`·`autotrade-risk`·엔진 실행부 무변경(diff 목록). Guard 시험 포함 `:autotrade-risk` 57건·`:autotrade-app-engine` 109건 통과 |
+| A2 | 통과 | 주문 경로·`ArchitectureTest` 무변경. 새 코드(`applyInOrder`·`BoundedLines`·`pendingRejection`)에 주문 포트 의존 없음(import), 기존 규칙 통과 |
+| A3 | 해당 없음 | 시세 전달만. 주문·증권사 선택 없음 |
+| A4 | 해당 없음 | 주문 타임아웃 경로 없음 |
+| A5 | 해당 없음 | 멱등 키 없음 |
+| A6 | 해당 없음 | 관심 줄은 구독 요청이고 주문 판단에 쓰이지 않음(`InterestSink`) |
+| A7 | 해당 없음 | 계좌 큐·토큰 버킷 무변경 |
+| A8 | 통과(G1 범위) | 실행부 미연결(`grep -rn enginefeed` 운영 코드 사용처는 `marketdata.enginefeed` 안뿐). `publish`는 여전히 잠금 없이 `route`를 읽고 `offer`(EngineFeedServer.java:180-198), 새 `applyLock`(:330)은 연결 읽기 스레드·타이머만 잡는다. 지연 출력 기준 안. 타이머가 `applyLock`을 기다리며 생존 줄이 밀릴 수 있는 점은 risk-ops R1·architect M1과 같은 판단(G2 조건, 엔진 쪽은 3초 무생존 → 보호 폴링으로 안전 쪽) |
+| A9 | 통과 | 1차 발견 1 해소. 같은 연결이면 남는 종목은 앞 `Slot`을 이어 씀(EngineFeedServer.java:316·:361). 위 QA 임시 시험 3건(옮김·연달아 변경·뺐다 다시 넣음)과 개발 쪽 새 시험 통과, 고치기 전 코드로 되돌리면 모두 실패(직접 확인). 연결이 바뀌면 `route = null`(:373-374) 뒤 새 칸이라 앞 연결 칸이 넘어가지 않음 |
+| A10 | 통과 | diff에 키·계좌번호·토큰 없음(위 grep). 새 오류 메시지는 상한 바이트 수만(`BoundedLines`, EngineFeedClient.java:272-274), 로그는 예외 클래스 이름만(`applyInOrder`) |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음. `EngineFeedBoundaryTest`에 규칙 `ENGINE_OPENS_NO_MARKET_STREAM`(:95) 추가와 위반 예제 `EngineOpensBrokerStream` 추가뿐, 실제 클래스 통과와 예제 위반 검출(`marketData`·`MarketDataSource` 잡고 `pollingQuotes`는 안 잡음) 둘 다 단언, 통과. 고정 값(지문·허용 목록·소유 표) 갱신 없음. 기존 시험 2건 변경은 기다리는 상태 줄을 rev 0 → rev 1로 좁힌 것이라 단언 약화가 아님(diff) |
+| A12 | 통과(G1 범위) | 장애표·장애 테스트 문서 무변경, 실행부 미연결. 장애표 #15 입력인 종목별 넘침 공백이 관심 변경 뒤에도 남음(A9). 밀린 상태 줄도 거부 이유를 실어(:409-415, 시험 `큐가_차서_밀린_상태_줄도_거부_이유를_싣는다`) ADR-016 2.8 "관심 줄 거부: 긴급" 알림 입력이 남음(1차 S2 해소) |
+| A13 | 해당 없음 | 시장별 분기 없음. 위반 예제의 `Market.KRX`는 규칙 고정용 |
+| A14 | 통과 | D-148 결정 10~15가 코드와 일치(10 `slots(…, before)`, 11 `pendingRejection`, 12 `applyInOrder` 세대 확인, 13 `OptionalLong`(EngineFeedClient.java:124), 14 `BoundedLines`, 15 `ENGINE_OPENS_NO_MARKET_STREAM`). 검증 절이 Q2 경합 재현 시험 없음을 스스로 적음. ADR-016 8장·결정 색인 ⑨ 갱신 |
+| B1 | 통과 | 위 직접 빌드 BUILD SUCCESSFUL(2,111건, 실패 0), PR 헤드 CI 4건 success, 지금 main과 합친 트리의 관련 4개 모듈 시험 통과 |
+| B6 | 통과 | 1차 발견 1과 권고 Q1·Q2·Q4·Q5마다 시험 추가(넘침+관심 변경, 밀린 거부, 늦은 apply 버림, `interest()` 빈 값, 바이트 상한 초과·나뉜 줄), 건너뜀·삭제 없음. 발견 1 시험은 고치기 전 코드에서 실패(직접 확인). Q2의 만료·재접속 경합 재현 시험은 없고 D-148이 G2로 넘김(아래 Q8) |
+
+### 1차 발견·권고 처리
+- **발견 1**: 해소(A9).
+- **Q1**(밀린 상태 줄 거부 이유): 해소. 받아들인 관심 뒤에는 지움(:312).
+- **Q2**(`sink.apply` 순서): 해소(G1 범위). 세대를 `applyLock` 안에서 다시 보고 늦은 호출을 버린다. 최신 세대를 정한 스레드는 반드시 자기 `applyInOrder`를 부르므로 마지막 관심이 빠지는 경우는 없다 `[추론: 코드 경로]`. 경합 재현 시험은 G2(Q8).
+- **Q3**(엔진의 플러그인 시세 소스): 해소. 남는 범위는 risk-ops R3(순수 모듈을 거친 구독)과 같은 판단, G4에서 확인.
+- **Q4**: 해소(`OptionalLong.empty()`). **Q5**: 해소(바이트 상한 읽기, 나뉜 줄 시험). **Q6**: 쓰기 스레드 Javadoc 겹침은 해소. 단 아래 Q9.
+- **R1**(main 충돌): `ce8650c4`·`240f4b4d`로 해소됐으나, 그 뒤 main이 `52d5d365`로 나아가 새로 충돌(아래 R2).
+
+### 점검표 밖 위험 시나리오(재검토)
+- **S7 넘침 뒤 보호 → 진입으로 옮김**: 남는 종목 판정이 `i.all()`이라 protect·entry 사이 이동에도 칸이 이어진다(`QA-257R-1` 통과).
+- **S8 넘침 뒤 관심을 짧은 간격으로 여러 번 바꿈**: 중간 관심에서 잠깐 빠지지 않는 한 칸이 이어진다(`QA-257R-2` 통과). 중간에 한 번이라도 빠지면 S9.
+- **S9 넘침 뒤 뺐다가 곧 다시 넣은 종목**: 공백 줄이 없다(`QA-257R-3`, D-148 결정 10 의도). 빼기 전 큐 넘침으로 버린 `STATUS`(VI·거래정지)를 엔진은 끝내 모른다. 새로 든 종목도 들기 전 상태를 모르는 것은 같으므로 G1 계약 위반은 아니다 `[추론]`. G4 엔진이 다시 든 종목을 처음 받는 종목처럼 다뤄 상태를 REST로 확인하고 `served` 전까지 보호 폴링을 유지해야 한다는 risk-ops R2에 동의한다(Q7).
+- **S10 만료 직후 재접속과 늦은 연결의 `apply`**: 만료(세대 g+1) → 새 연결 관심(g+2) 순서면 어느 쪽이 먼저 `applyLock`을 잡든 마지막 결과는 새 관심이다(g+1 호출은 세대가 달라 버림, 먼저 돌면 곧 g+2가 덮음) `[추론: 코드 경로, 재현 안 함]`.
+
+### 권고 (수정 요구 아님)
+- **Q7**: G4 엔진 PR에서 "관심에 (다시) 든 종목은 `served` 확인과 REST 상태 확인 전까지 진입 금지·보호 폴링"을 시험으로 고정한다(S9, risk-ops R2).
+- **Q8**: G2에서 구독 계획을 붙일 때 만료 직전 재접속 경합 시험과 `sink.apply` 소요 상한(엔진 3초 무생존 기준 대비)을 함께 넣는다(risk-ops R1, architect M1·M2와 같음).
+- **Q9**(사소): EngineFeedServer.java:775 주석 `/** 시험용: 지금 연결에서 넣지 못한 생존 줄 수. */`가 새 `interestGenerationForTest()` 위로 밀려 `heartbeatsDroppedForTest()`는 주석이 없다. `EngineOpensBrokerStream.java`의 쓰지 않는 `import java.util.Set`(architect M3).
+
+### 그 밖
+- **R2**: 지금 main(`52d5d365`)과 `docs/qa/pending.md`·`docs/qa-out-status.md`가 충돌한다(표 줄 추가끼리, 양쪽 줄 다 남기면 됨, 합친 트리 시험 통과). 머지 전에 main을 다시 합치고 CI가 도는지 확인한다.
+- architect·risk-ops 재검토 원문 판정은 둘 다 승인이다. 이 보고서는 그 원문과 별개로 위 항목을 다시 확인했다.
+
+### 판정
+승인(재검토 2026-11-02, 헤드 `240f4b4d`). 1차 발견 1 해소(직접 재현 시험·되돌림 시험으로 확인), 실패·확인 못 함 항목 없음. 머지 전 R2(main 충돌) 해결 필요. 실전 관련 PR이므로 머지는 사용자가 직접 한다.
