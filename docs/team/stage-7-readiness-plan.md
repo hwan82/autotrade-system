@@ -65,7 +65,7 @@
 | B5 | 블랙리스트 영속화(전역, AUTO_ASSET 감지, 해제 2차 확인, 차단 감사, RSK-12, TST-07 A6) | ADR-002, ADR-006 6장 | 부분 | `BlacklistEntry`·`BlacklistSnapshot`·`BlacklistType`과 가상 경로 적용만 | risk-ops, ui-dev | B0, 보유 조회 | 예 | B |
 | B6 | OFF 계좌 미확정 주문을 재기동 긴급 알림에 포함(TST-07 (5) F-6) | TST-07 (5) | 안 됨 | 미확정 주문 조회 없음 | risk-ops | B3·B4 | 예 | B |
 | B7 | 포지션별 진입 조합 해시 영속·복구(STR-19) | 기획서 STR-19 | 안 됨 | 엔진에 Selection 참조 0건 | risk-ops | B0 | 예 | B |
-| B0 | **실전 엔진 저장소 설계**(무엇을 PostgreSQL에, 무엇을 파일에, 재기동 복구 순서) | B1·B4·B5·B7의 공통 선행 [추론] | 안 됨 | ADR 없음 | architect, risk-ops | 없음 | 예(설계 ADR은 문서) | B |
+| B0 | **실전 엔진 저장소 설계**(무엇을 PostgreSQL에, 무엇을 파일에, 재기동 복구 순서) | B1·B4·B5·B7의 공통 선행 [추론] | 처리됨 | [ADR-015](../adr/ADR-015-real-engine-store.md)·[D-141](../decisions/D-141-real-engine-store.md)(PR #239 머지, Q-062 파일 원장 사용자 결정). 구현은 B1~B7 | architect, risk-ops | 없음 | 예(설계 ADR은 문서) | B |
 | K1 | 실전 주문 파이프라인 Guard → RiskChain → 멱등 키 → 상태머신 → `GuardedOrderGateway`, 체인 밖 submit 금지 ArchUnit(SIM-12) | D-032 | 부분 | 출구(`RealOrderGateways`, `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`)만 | risk-ops, architect | B3·B4 | 예 | C |
 | K2 | 계좌 한도·킬스위치(RSK-03), 서킷브레이커 3단계(RSK-04), 같은 종목 여러 계좌 동시 보유 금지(RSK-05, D-011) | 기획서 RSK-03~05 | 부분/안 됨 | `RiskChain`은 가상 엔진만, `CircuitBreaker` 없음 | risk-ops | **Q-008** 값 | 예 | C |
 | K3 | 외부 호출 폭주 방지: 계좌·API 그룹별 호출 상한(ORD-04), 주문 실패 3회 정지(ORD-08), 레이트리밋 #14(TST-07 (6)) | TST-07 (6) | 부분 | 토스 시세 `TossRateLimiter`만 | risk-ops | 묶음 D | 예 | C |
@@ -74,8 +74,8 @@
 | K6 | CFG-06 ③ 실전 한도 변경 2차 확인 거부 시험 | D-081 ① | 안 됨 | 한도 키 없음(`RuntimeConfig.java:24`) | risk-ops | Q-008 | 예 | C |
 | K7 | 실전 경로 리플렉션 금지·외부 jar 허용 목록(TST-07 (9)) | D-086 | **처리됨** | `RealPathReflectionTest`(PR #108·#109·#110·#112) | architect | — | 예 | — |
 | K8 | 플러그인 로딩용 `ALLOWED_SERVICE_LOADERS`, 감시 자동 재기동용 `ALLOWED_PROCESS_LAUNCHERS` 채우기 | D-086, D-092 | 안 됨(의도) | `RealPathReflectionTest.java:111,114` 빈 집합 | architect, risk-ops | 플러그인 로딩 PR, 감시 재기동 PR | 예(보호 테스트) | D, F |
-| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 부분 | 대응표 [tst-06-checklist-map.md](tst-06-checklist-map.md)([D-144](../decisions/D-144-stage7-bundle0-docs.md) ③, 경고 W-01~W-11·W-20~W-24, 차단 B-01뿐). 화면 경고는 H | risk-ops, ui-dev | 없음 | 예 | 0, H |
-| K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 부분 | 검토 끝([D-144](../decisions/D-144-stage7-bundle0-docs.md) ④, [k10-os-credential-store-review.md](../research/k10-os-credential-store-review.md)): 파일 방식 유지 + 권한·위치 경고. 남은 것: 경고 코드 K10-a(보호 경로, 실전 관련 PR, 실전 활성화 결정 전), 운영 절차는 I | risk-ops | 없음 | 예 | 0, K10-a, I |
+| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 부분 | 대응표 [tst-06-checklist-map.md](tst-06-checklist-map.md)([D-144](../decisions/D-144-stage7-bundle0-docs.md) ③, 경고 W-01~W-12·W-20~W-24(W-12는 2026-10-27 QA Q3로 추가), 차단 B-01뿐). 화면 경고는 H | risk-ops, ui-dev | 없음 | 예 | 0, H |
+| K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 부분 | 검토 끝([D-144](../decisions/D-144-stage7-bundle0-docs.md) ④, [k10-os-credential-store-review.md](../research/k10-os-credential-store-review.md)): 파일 방식 유지 + 권한·위치 경고. 남은 것: 경고 코드 K10-a(보호 경로, 실전 관련 PR, 실전 활성화 결정 전. 머지 전까지 활성화 화면 정적 경고 W-12로 보임, [대응표](tst-06-checklist-map.md) 5.2), 운영 절차는 I | risk-ops | 없음 | 예 | 0, K10-a, I |
 
 ### 2.4 증권사 연동(ADR-003, broker-and-fault-design.md)
 
