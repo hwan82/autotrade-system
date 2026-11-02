@@ -127,6 +127,8 @@ public final class EngineFeedServer implements AutoCloseable {
     private Interest applied;
     /** 관심이 바뀔 때마다 는다. 유지 시간 만료 작업이 그 사이 새 관심이 왔는지 본다. */
     private long interestGeneration;
+    /** 구독 계획 호출을 한 줄로 세운다({@link #applyInOrder}). this 잠금보다 먼저 잡는다. */
+    private final Object applyLock = new Object();
     private SortedMap<Symbol, String> served = Collections.emptySortedMap();
     private SortedMap<Symbol, Unserved> unserved = Collections.emptySortedMap();
     // ---- 타이머 스레드에서만 쓴다 ----
@@ -298,6 +300,7 @@ public final class EngineFeedServer implements AutoCloseable {
 
     /** 연결의 읽기 스레드에서 부른다. */
     private void onInterest(Connection c, Interest i) {
+        long generation;
         synchronized (this) {
             if (current != c || c.stopped) {
                 return;
@@ -306,18 +309,35 @@ public final class EngineFeedServer implements AutoCloseable {
                 return; // 줄어들거나 같은 rev는 무시(같은 연결 안에서만 비교)
             }
             c.rev = i.rev();
+            c.pendingRejection = null; // 받아들인 줄 뒤에는 앞 거부를 다시 알리지 않는다
             applied = i;
-            interestGeneration++;
-            route = new Route(c, slots(i.all()));
+            generation = ++interestGeneration;
+            Route before = route;
+            route = new Route(c, slots(i.all(), before != null && before.connection() == c ? before.slots() : Map.of()));
         }
-        try {
-            sink.apply(i.protect(), i.entry());
-        } catch (RuntimeException e) {
-            LOG.log(Level.ERROR, "관심 종목 적용 중 오류: {0}", e.getClass().getName());
-        }
+        applyInOrder(generation, i.protect(), i.entry(), "관심 종목 적용 중 오류: {0}");
         synchronized (this) {
             if (current == c) {
                 sendStatusLocked(null);
+            }
+        }
+    }
+
+    /**
+     * 구독 계획에 관심을 넘긴다. 연결 읽기 스레드(새 관심)와 타이머(유지 만료)가 부르므로 한 줄로 세우고, 그 사이 더 새 관심이
+     * 정해졌으면 늦은 호출은 버린다(QA Q2: "새 관심 → 빈 관심" 순서 뒤집힘 방지).
+     */
+    void applyInOrder(long generation, SortedSet<Symbol> protect, SortedSet<Symbol> entry, String error) {
+        synchronized (applyLock) {
+            synchronized (this) {
+                if (interestGeneration != generation) {
+                    return;
+                }
+            }
+            try {
+                sink.apply(protect, entry);
+            } catch (RuntimeException e) {
+                LOG.log(Level.ERROR, error, e.getClass().getName());
             }
         }
     }
@@ -331,9 +351,14 @@ public final class EngineFeedServer implements AutoCloseable {
         }
     }
 
-    private static Map<Symbol, Slot> slots(Set<Symbol> symbols) {
+    /**
+     * 새 관심의 넘침 칸. 같은 연결의 앞 관심에 있던 종목은 앞 칸을 그대로 써서, 넘침 뒤 아직 나가지 않은 공백 줄을 잃지 않는다
+     * (QA 발견 1). 새로 든 종목(빠졌다 다시 든 종목 포함)은 새 칸이다: 관심 밖에 있는 동안 그 종목 이벤트는 엔진에 가지 않으므로
+     * 넘칠 것도 없다.
+     */
+    private static Map<Symbol, Slot> slots(Set<Symbol> symbols, Map<Symbol, Slot> before) {
         Map<Symbol, Slot> m = new HashMap<>();
-        symbols.forEach(s -> m.put(s, new Slot()));
+        symbols.forEach(s -> m.put(s, before.getOrDefault(s, new Slot())));
         return Map.copyOf(m);
     }
 
@@ -358,33 +383,36 @@ public final class EngineFeedServer implements AutoCloseable {
     }
 
     private void expire(long generation) {
+        long cleared;
         synchronized (this) {
             if (closed || interestGeneration != generation || applied == null) {
                 return;
             }
             applied = null;
-            interestGeneration++;
+            cleared = ++interestGeneration;
         }
         LOG.log(Level.WARNING, "엔진이 {0}초 안에 다시 붙지 않아 엔진 관심 종목을 비웁니다", settings.retention().toSeconds());
-        try {
-            sink.apply(Collections.emptySortedSet(), Collections.emptySortedSet());
-        } catch (RuntimeException e) {
-            LOG.log(Level.ERROR, "관심 종목 비우기 중 오류: {0}", e.getClass().getName());
-        }
+        applyInOrder(cleared, Collections.emptySortedSet(), Collections.emptySortedSet(), "관심 종목 비우기 중 오류: {0}");
     }
 
     // ---- 상태·생존 줄 ----
 
-    /** 지금 연결에 상태 줄을 넣는다. 큐가 차면 다음 생존 줄 차례에 다시 넣는다. */
+    /**
+     * 지금 연결에 상태 줄을 넣는다. 큐가 차면 다음 생존 줄 차례에 그때 상태로 다시 넣는다. 그때까지 나가지 못한 거부 이유는
+     * 다시 넣는 줄에도 싣는다(QA Q1). 그 사이 관심 줄을 받아들이면 거부 이유는 지운다.
+     */
     private void sendStatusLocked(Rejection rejected) {
         Connection c = current;
         if (c == null || !c.greeted) {
             return;
         }
+        Rejection why = rejected != null ? rejected : c.pendingRejection;
         c.statusPending = false;
-        String line = EngineFeedProtocol.statusLine(statusLocked(c, rejected));
+        c.pendingRejection = null;
+        String line = EngineFeedProtocol.statusLine(statusLocked(c, why));
         if (!c.queue.offer(Item.control(line))) {
             c.statusPending = true;
+            c.pendingRejection = why;
         }
     }
 
@@ -505,6 +533,8 @@ public final class EngineFeedServer implements AutoCloseable {
         /** 엔진 인사를 받고 게이트웨이 인사를 넣었다(this 잠금 아래에서 바꾼다). */
         private volatile boolean greeted;
         private boolean statusPending;
+        /** 큐가 차서 아직 나가지 못한 거부 이유(this 잠금). */
+        private Rejection pendingRejection;
         private long heartbeatsDropped;
         private volatile boolean stopped;
         private volatile boolean writing;
@@ -604,7 +634,6 @@ public final class EngineFeedServer implements AutoCloseable {
             }
         }
 
-        /** 쓰기 스레드. 이벤트 줄은 여기서 인코딩한다. */
         /** 쓰기 스레드. 이벤트 줄은 여기서 인코딩하고, 밀린 줄은 {@link #BATCH_BYTES}까지 모아 한 번에 쓴다. */
         void write() {
             long seq = 0;
@@ -700,7 +729,7 @@ public final class EngineFeedServer implements AutoCloseable {
         }
     }
 
-    /** 종목 하나의 넘침 칸. 관심이 바뀔 때만 만든다. */
+    /** 종목 하나의 넘침 칸. 관심에 새로 든 종목만 새로 만들고, 같은 연결에서 관심에 남는 종목은 앞 칸을 이어 쓴다. */
     private static final class Slot {
         volatile Instant since;
     }
@@ -744,6 +773,10 @@ public final class EngineFeedServer implements AutoCloseable {
     }
 
     /** 시험용: 지금 연결에서 넣지 못한 생존 줄 수. */
+    synchronized long interestGenerationForTest() {
+        return interestGeneration;
+    }
+
     synchronized long heartbeatsDroppedForTest() {
         return current == null ? 0 : current.heartbeatsDropped;
     }

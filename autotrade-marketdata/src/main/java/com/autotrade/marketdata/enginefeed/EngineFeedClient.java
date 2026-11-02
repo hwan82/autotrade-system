@@ -9,20 +9,19 @@ import com.autotrade.marketdata.enginefeed.EngineFeedProtocol.Interest;
 import com.autotrade.marketdata.enginefeed.EngineFeedProtocol.StatusLine;
 import com.autotrade.marketdata.recording.RecordingCodec;
 import com.fasterxml.jackson.databind.JsonNode;
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Executors;
@@ -118,23 +117,24 @@ public final class EngineFeedClient implements AutoCloseable {
     /**
      * 관심 종목을 정한다(전체 교체). 연결돼 있으면 바로 보낸다.
      *
-     * @return 이 연결에서 보낸 {@code rev}. 연결이 없어 보내지 못했으면 0(다시 붙으면 {@code rev} 1로 보낸다)
+     * @return 이 연결에서 보낸 {@code rev}. 연결이 없거나 쓰기에 실패해 보내지 못했으면 빈 값(다시 붙으면 {@code rev} 1로
+     *     보낸다). 빈 값을 0으로 바꿔 "기다릴 rev"로 쓰지 않는다: rev 0 상태 줄은 이 연결의 관심 적용 전 보기다(QA Q4)
      * @throws EngineFeedProtocol.ProtocolException 상한을 넘으면(보내지 않고 앞 관심을 그대로 둔다)
      */
-    public long interest(Set<Symbol> protect, Set<Symbol> entry) {
+    public OptionalLong interest(Set<Symbol> protect, Set<Symbol> entry) {
         // 상한 검사를 먼저 해서 넘으면 앞 관심을 그대로 둔다
         new Interest(1, new TreeSet<>(protect), new TreeSet<>(entry));
         synchronized (writeLock) {
             wantProtect = Set.copyOf(protect);
             wantEntry = Set.copyOf(entry);
             if (writable == null) {
-                return 0;
+                return OptionalLong.empty();
             }
             try {
-                return sendInterestLocked();
+                return OptionalLong.of(sendInterestLocked());
             } catch (IOException e) {
                 closeQuietly(writable);
-                return 0;
+                return OptionalLong.empty();
             }
         }
     }
@@ -196,8 +196,7 @@ public final class EngineFeedClient implements AutoCloseable {
 
     /** 인사를 확인하고 줄을 받는다. 연결이 정상으로 끝나면 이유를 돌려주고, 형식 오류는 예외로 끝난다. */
     private String receive(SocketChannel ch) throws IOException {
-        BufferedReader in = new BufferedReader(new InputStreamReader(Channels.newInputStream(ch), StandardCharsets.UTF_8),
-                64 * 1024);
+        BoundedLines in = new BoundedLines(ch);
         ScheduledFuture<?> timeout = timer.schedule(() -> closeQuietly(ch), helloTimeout.toMillis(), TimeUnit.MILLISECONDS);
         String helloText;
         try {
@@ -222,9 +221,6 @@ public final class EngineFeedClient implements AutoCloseable {
         RecordingCodec codec = new RecordingCodec();
         String line;
         while (!closed && (line = in.readLine()) != null) {
-            if (line.length() > EngineFeedProtocol.MAX_LINE) {
-                throw new IOException("줄이 너무 깁니다");
-            }
             JsonNode n = EngineFeedProtocol.readTree(line);
             if (EngineFeedProtocol.isEventLine(n)) {
                 listener.onEvent(codec.decode(line));
@@ -237,6 +233,53 @@ public final class EngineFeedClient implements AutoCloseable {
             }
         }
         return "게이트웨이가 연결을 닫았습니다";
+    }
+
+    /**
+     * 바이트 상한({@link EngineFeedProtocol#MAX_LINE}) 줄 읽기. 상한을 넘으면 줄 끝까지 모으지 않고 바로 실패한다(architect N1,
+     * QA Q5: 다 읽은 뒤 글자 수로 재면 끝없는 줄에 메모리를 쓴다).
+     */
+    private static final class BoundedLines {
+        private final SocketChannel ch;
+        private final ByteBuffer buf = ByteBuffer.allocate(64 * 1024);
+        private final ByteArrayOutputStream out = new ByteArrayOutputStream(4096);
+
+        BoundedLines(SocketChannel ch) {
+            this.ch = ch;
+            buf.flip();
+        }
+
+        /** 다음 줄. 연결이 끝나면 null(끝에 줄바꿈 없이 남은 조각은 버린다). */
+        String readLine() throws IOException {
+            out.reset();
+            while (true) {
+                if (!buf.hasRemaining()) {
+                    buf.clear();
+                    int n = ch.read(buf);
+                    buf.flip();
+                    if (n < 0) {
+                        return null;
+                    }
+                    continue;
+                }
+                int start = buf.position();
+                int limit = buf.limit();
+                int end = start;
+                byte[] a = buf.array();
+                while (end < limit && a[end] != '\n') {
+                    end++;
+                }
+                if (out.size() + (end - start) > EngineFeedProtocol.MAX_LINE) {
+                    throw new IOException("줄이 너무 깁니다(" + EngineFeedProtocol.MAX_LINE + "바이트 넘음)");
+                }
+                out.write(a, start, end - start);
+                if (end < limit) {
+                    buf.position(end + 1);
+                    return out.toString(StandardCharsets.UTF_8);
+                }
+                buf.position(limit);
+            }
+        }
     }
 
     private static void write(SocketChannel ch, String text) throws IOException {

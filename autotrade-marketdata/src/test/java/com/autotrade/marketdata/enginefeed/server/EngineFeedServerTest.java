@@ -362,6 +362,114 @@ class EngineFeedServerTest {
     }
 
     @Test
+    void 넘침_뒤_관심이_바뀌어도_남는_종목은_다시_읽을_때_공백이_먼저_온다() throws Exception {
+        // QA 발견 1: 관심을 바꿀 때 남는 종목의 넘침 칸을 새로 만들면 아직 나가지 않은 공백 줄이 사라진다
+        EngineFeedServer.Settings small = new EngineFeedServer.Settings(50, Duration.ofMillis(500), Duration.ofSeconds(30),
+                Duration.ofSeconds(30), Duration.ofSeconds(30), Duration.ofSeconds(30));
+        EngineFeedServer server = server(small);
+        Engine e = new Engine(false).hello();
+        e.interest(1, Set.of(A, B), Set.of());
+        await(() -> sinkCalls.size() == 1);
+        for (int i = 1; i <= 200_000; i++) {
+            server.publish("KIWOOM-WS", tick(i % 2 == 0 ? A : B, i));
+        }
+        assertThat(server.droppedCount()).isPositive();
+
+        // 엔진이 읽지 못하는 동안 관심을 바꾼다: A는 남고 B는 빠지고 C가 든다
+        e.interest(2, Set.of(A, C), Set.of());
+        await(() -> sinkCalls.size() == 2);
+
+        e.startReading();
+        List<String> got = new CopyOnWriteArrayList<>();
+        // 밀린 줄을 다 받을 때까지 기다린다(새로 든 C가 빠지는 중인 큐에 막혀 넘치지 않게)
+        int seen = -1;
+        while (seen != got.size()) {
+            seen = got.size();
+            Thread.sleep(300);
+            e.lines.drainTo(got);
+        }
+        long seq = 300_000;
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (got.stream().noneMatch(l -> l.startsWith("{\"seq\"") && !l.contains("\"GAP\"") && l.contains("KRX:005930")
+                && new RecordingCodec().decode(l).sourceSequence() > 300_000)
+                && System.nanoTime() < deadline) {
+            server.publish("KIWOOM-WS", tick(A, ++seq));
+            server.publish("KIWOOM-WS", tick(B, ++seq));
+            server.publish("KIWOOM-WS", tick(C, ++seq));
+            Thread.sleep(20);
+            e.lines.drainTo(got);
+        }
+        List<RecordingCodec.Line> lines = got.stream().filter(l -> l.startsWith("{\"seq\""))
+                .map(l -> new RecordingCodec().decode(l)).toList();
+        // 관심 변경 뒤 새로 나간 공백(끝 시각이 새 이벤트 수신 시각)만 본다. 넘치는 동안 큐가 조금씩 빠지며 나간 앞 공백은 뺀다
+        Instant changed = T.plusMillis(300_000);
+        List<RecordingCodec.Line> gaps = lines.stream()
+                .filter(l -> l.event() instanceof DataGap && l.event().exchangeTime().isAfter(changed)).toList();
+        assertThat(gaps.stream().map(g -> g.event().symbol()))
+                .as("남는 종목 A만 공백을 받는다(빠진 B는 이벤트가 오지 않고, 새로 든 C는 넘친 적이 없다)")
+                .containsExactly(A);
+        assertThat(((DataGap) gaps.getFirst().event()).reason()).isEqualTo(DataGap.GapReason.CONSUMER_OVERFLOW);
+        long firstNewA = lines.stream().filter(l -> l.event() instanceof TradeTick t && t.symbol().equals(A)
+                && l.sourceSequence() > 300_000).findFirst().orElseThrow().seq();
+        assertThat(gaps.getFirst().seq()).as("공백은 넘침 뒤 A의 다음 이벤트 바로 앞에 온다").isEqualTo(firstNewA - 1);
+        assertThat(lines).noneMatch(l -> l.event().symbol().equals(B) && l.event().exchangeTime().isAfter(changed));
+        assertThat(lines).noneMatch(l -> l.event() instanceof DataGap && l.event().symbol().equals(C));
+    }
+
+    @Test
+    void 구독_계획_호출은_한_줄로_서고_더_새_관심이_정해진_뒤의_늦은_호출은_버린다() throws Exception {
+        // QA Q2: 유지 만료(타이머)와 새 관심(연결 읽기)이 구독 계획을 거꾸로 부르지 않게 한다
+        EngineFeedServer server = server(FAST);
+        Engine e = new Engine(true).hello();
+        e.interest(1, Set.of(A), Set.of());
+        await(() -> sinkCalls.size() == 1);
+        long now = server.interestGenerationForTest();
+        server.applyInOrder(now - 1, set(), set(), "늦은 호출 {0}");
+        assertThat(sinkCalls).as("앞 세대 호출은 구독 계획에 닿지 않는다").containsExactly("[KRX:005930]|[]");
+        server.applyInOrder(now, set(A), set(), "같은 세대 {0}");
+        assertThat(sinkCalls).containsExactly("[KRX:005930]|[]", "[KRX:005930]|[]");
+    }
+
+    @Test
+    void 큐가_차서_밀린_상태_줄도_거부_이유를_싣는다() throws Exception {
+        // QA Q1: 거부 이유를 실은 상태 줄이 큐에 못 들어가면, 다시 넣는 줄에도 같은 이유를 싣는다
+        EngineFeedServer.Settings tiny = new EngineFeedServer.Settings(20, Duration.ofMillis(500), Duration.ofSeconds(30),
+                Duration.ofMillis(100), Duration.ofSeconds(30), Duration.ofSeconds(30));
+        EngineFeedServer server = server(tiny);
+        Engine e = new Engine(false).hello();
+        e.interest(1, Set.of(A), Set.of());
+        await(() -> sinkCalls.size() == 1);
+        List<com.autotrade.domain.market.PriceLevel> asks = new ArrayList<>();
+        List<com.autotrade.domain.market.PriceLevel> bids = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            asks.add(new com.autotrade.domain.market.PriceLevel(new BigDecimal(60000 + i), 1000 + i));
+            bids.add(new com.autotrade.domain.market.PriceLevel(new BigDecimal(59999 - i), 1000 + i));
+        }
+        for (int i = 1; i <= 2_000; i++) {
+            server.publish("K", new com.autotrade.domain.market.OrderBookSnapshot(A, i, T, T, asks, bids));
+        }
+        await(() -> server.heartbeatsDroppedForTest() >= 3);
+        e.send("{\"x\":\"" + "a".repeat(20_000) + "\"}"); // 큐가 차 있어 거부 상태 줄은 밀린다
+        long dropped = server.heartbeatsDroppedForTest();
+        await(() -> server.heartbeatsDroppedForTest() >= dropped + 3); // 여전히 차 있음
+
+        e.startReading();
+        // 앞서 큐에 든 상태 줄(rev 0·1)은 거부 이유가 없다. 거부 이유를 실은 줄이 와야 한다
+        Status s = statusOf(e.next(l -> l.startsWith("{\"status\"") && !l.contains("\"rejected\":null")));
+        assertThat(s.rejected()).as("다시 넣은 상태 줄도 거부 이유를 싣는다").isEqualTo(Rejection.LINE_TOO_LONG);
+        assertThat(s.rev()).isEqualTo(1);
+
+        // 그 뒤 받아들인 관심의 상태 줄은 앞 거부를 다시 싣지 않는다
+        e.interest(2, Set.of(A, B), Set.of());
+        Status next = statusOf(e.next(l -> l.startsWith("{\"status\"") && l.contains("\"rev\":2")));
+        assertThat(next.rejected()).isNull();
+    }
+
+    private static Status statusOf(String line) {
+        return ((StatusLine) EngineFeedProtocol.parseGatewayControl(tree(line))).status();
+    }
+
+    @Test
     void 한_줄_쓰기가_멈춤_한도를_넘으면_연결을_끊는다() throws Exception {
         EngineFeedServer server = server(FAST);
         Engine e = new Engine(false).hello();
@@ -508,7 +616,7 @@ class EngineFeedServerTest {
         EngineFeedServer server = server(FAST);
         Engine e = new Engine(true).hello();
         e.interest(1, Set.of(A), Set.of());
-        e.status();
+        e.next(l -> l.startsWith("{\"status\"") && l.contains("\"rev\":1")); // rev 0(인사 직후) 말고 관심 적용 뒤
         server.publish("KIWOOM-WS", null);
         server.publish(null, tick(A, 1));
         assertThat(server.publishErrorCount()).isEqualTo(2);
@@ -583,7 +691,7 @@ class EngineFeedServerTest {
         EngineFeedServer server = server(FAST);
         Engine e = new Engine(true).hello();
         e.interest(1, Set.of(A, B), Set.of());
-        e.status();
+        e.next(l -> l.startsWith("{\"status\"") && l.contains("\"rev\":1")); // rev 0(인사 직후) 말고 관심 적용 뒤
         List<MarketEvent> sent = List.of(tick(A, 11), tick(B, 12), tick(A, 13));
         sent.forEach(ev -> server.publish("KIWOOM-WS", ev));
         RecordingCodec codec = new RecordingCodec();

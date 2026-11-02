@@ -136,7 +136,7 @@ class EngineFeedClientServerTest {
         EngineFeedServer server = keep(EngineFeedServer.open(socket(), CLOCK, (p, e) -> sink.add(p + "|" + e), FAST));
         Recorder r = new Recorder();
         EngineFeedClient c = client(r);
-        assertThat(c.interest(Set.of(A), Set.of(B))).as("연결 전에는 보내지 못한다").isZero();
+        assertThat(c.interest(Set.of(A), Set.of(B))).as("연결 전에는 보내지 못한다(0이 아닌 빈 값)").isEmpty();
         c.start();
         await(() -> c.state() == ConnectionState.CONNECTED);
         await(() -> !r.statuses.isEmpty() && r.last().rev() == 1);
@@ -152,7 +152,7 @@ class EngineFeedClientServerTest {
         assertThat(r.events.getFirst().sourceSequence()).isEqualTo(3);
         await(() -> r.heartbeats.size() >= 2);
 
-        assertThat(c.interest(Set.of(A, B), Set.of())).isEqualTo(2);
+        assertThat(c.interest(Set.of(A, B), Set.of())).hasValue(2);
         await(() -> r.last().rev() == 2);
     }
 
@@ -165,7 +165,7 @@ class EngineFeedClientServerTest {
         c.start();
         await(() -> c.state() == ConnectionState.CONNECTED);
         c.interest(Set.of(A), Set.of());
-        assertThat(c.interest(Set.of(A, B), Set.of())).isEqualTo(2);
+        assertThat(c.interest(Set.of(A, B), Set.of())).hasValue(2);
         await(() -> r.last().rev() == 2);
 
         first.close(); // 게이트웨이 재기동
@@ -220,6 +220,51 @@ class EngineFeedClientServerTest {
     }
 
     @Test
+    void 게이트웨이_줄이_바이트_상한을_넘으면_줄_끝을_기다리지_않고_끊는다() throws Exception {
+        Files.createDirectories(socket().getParent());
+        try (ServerSocketChannel fake = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+            fake.bind(UnixDomainSocketAddress.of(socket()));
+            Recorder r = new Recorder();
+            EngineFeedClient c = client(r);
+            c.start();
+            try (SocketChannel ch = fake.accept()) {
+                write(ch, EngineFeedProtocol.gatewayHelloLine());
+                await(() -> r.calls.contains("connected"));
+                // 줄바꿈 없는 긴 조각: 상한(64KB)을 넘는 순간 끊어야 한다(줄 끝까지 모으지 않음)
+                ByteBuffer chunk = ByteBuffer.wrap("x".repeat(EngineFeedProtocol.MAX_LINE + 1).getBytes(StandardCharsets.UTF_8));
+                while (chunk.hasRemaining()) {
+                    ch.write(chunk);
+                }
+                await(() -> !r.disconnects.isEmpty());
+            }
+            assertThat(r.disconnects.getFirst()).contains("줄이 너무 깁니다");
+            assertThat(r.events).isEmpty();
+        }
+    }
+
+    @Test
+    void 줄이_여러_번에_나눠_와도_한_줄로_모은다() throws Exception {
+        Files.createDirectories(socket().getParent());
+        try (ServerSocketChannel fake = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+            fake.bind(UnixDomainSocketAddress.of(socket()));
+            Recorder r = new Recorder();
+            EngineFeedClient c = client(r);
+            c.start();
+            try (SocketChannel ch = fake.accept()) {
+                write(ch, EngineFeedProtocol.gatewayHelloLine());
+                // 여러 번 나눠 와도 한 줄로 모은다(읽기 버퍼 경계)
+                String hb = EngineFeedProtocol.heartbeatLine(new Heartbeat(T, new java.util.TreeMap<>(), 0));
+                byte[] b = (hb + "\n").getBytes(StandardCharsets.UTF_8);
+                ch.write(ByteBuffer.wrap(b, 0, 5));
+                Thread.sleep(50);
+                ch.write(ByteBuffer.wrap(b, 5, b.length - 5));
+                await(() -> !r.heartbeats.isEmpty());
+            }
+            assertThat(r.heartbeats.getFirst().at()).isEqualTo(T);
+        }
+    }
+
+    @Test
     void 상한을_넘는_관심은_보내지_않고_앞_관심을_둔다() throws Exception {
         List<String> sink = new CopyOnWriteArrayList<>();
         keep(EngineFeedServer.open(socket(), CLOCK, (p, e) -> sink.add(p + "|" + e), FAST));
@@ -232,7 +277,7 @@ class EngineFeedClientServerTest {
         IntStream.rangeClosed(1, 65).forEach(i -> tooMany.add(Symbol.krx(String.format("%06d", i))));
         assertThatThrownBy(() -> c.interest(tooMany, Set.of())).isInstanceOf(EngineFeedProtocol.ProtocolException.class);
         await(() -> r.statuses.stream().anyMatch(s -> s.rev() == 1));
-        assertThat(c.interest(Set.of(A), Set.of(B))).isEqualTo(2);
+        assertThat(c.interest(Set.of(A), Set.of(B))).hasValue(2);
         await(() -> sink.size() == 2);
         assertThat(sink).containsExactly("[KRX:005930]|[]", "[KRX:005930]|[KRX:000660]");
     }

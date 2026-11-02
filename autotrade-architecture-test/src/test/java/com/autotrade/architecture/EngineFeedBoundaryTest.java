@@ -4,8 +4,12 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.autotrade.app.engine.archfixture.EngineActsAsGateway;
+import com.autotrade.app.engine.archfixture.EngineOpensBrokerStream;
 import com.autotrade.app.gateway.archfixture.GatewayActsAsEngine;
 import com.autotrade.app.lab.archfixture.LabActsAsEngine;
+import com.autotrade.broker.BrokerPlugin;
+import com.autotrade.domain.market.Market;
+import com.autotrade.marketdata.MarketDataSource;
 import com.autotrade.marketdata.enginefeed.EngineFeedClient;
 import com.autotrade.marketdata.enginefeed.archfixture.ClientReachesGateway;
 import com.autotrade.marketdata.recording.RecordingCodec;
@@ -31,6 +35,9 @@ import org.junit.jupiter.api.Test;
  *       순수 모듈 어디서도 엔진 행세(받는 쪽)나 게이트웨이 행세(서버)를 하지 않는다. ADR-016은 실험실·수집기·실험 명령을 적었고,
  *       허용 목록 방식으로 감시와 순수 모듈(우회 경로)까지 막는다.</li>
  *   <li>엔진 받는 쪽은 실전 엔진만 쓴다(게이트웨이의 엔진 행세 금지).</li>
+ *   <li>실전 엔진은 증권사 플러그인의 시세 소스({@link BrokerPlugin#marketData}, {@link MarketDataSource}와 그 구현)를 쓰지
+ *       않는다. 1번 규칙은 {@code marketdata.live} 직접 의존만 보므로 플러그인이 주는 {@code MarketDataSource}로 WebSocket을
+ *       여는 길을 따로 막는다(ADR-016 2.1, PR #257 QA S4·Q3). 보호 폴링({@code pollingQuotes})은 허용이다.</li>
  * </ol>
  * 이 파일은 보호 테스트다(프로젝트 지침 11장). 바꾸는 PR은 실전 관련 PR이다.
  */
@@ -85,10 +92,18 @@ class EngineFeedBoundaryTest {
             .orShould().dependOnClassesThat().areAssignableTo(EngineFeedClient.Listener.class)
             .because("엔진 받는 쪽은 실전 엔진만 쓴다(ADR-016 2.2, 받는 쪽은 하나)");
 
+    static final ArchRule ENGINE_OPENS_NO_MARKET_STREAM = noClasses()
+            .that().resideInAPackage(ENGINE)
+            .should().dependOnClassesThat().areAssignableTo(MarketDataSource.class)
+            .orShould().callMethod(BrokerPlugin.class, "marketData", Market.class)
+            .because("실전 엔진은 시세용 WebSocket을 직접 열지 않는다. 시세는 게이트웨이 전용 소켓, 보호 종목은 보호 폴링으로 받는다"
+                    + "(ADR-016 2.1)");
+
     @Test
     void 실전_엔진은_게이트웨이_부품을_쓰지_않는다() {
         ENGINE_IS_NOT_A_GATEWAY.check(ArchitectureTest.PRODUCTION);
         ENGINE_FEED_CLIENT_STAYS_CLIENT.check(ArchitectureTest.PRODUCTION);
+        ENGINE_OPENS_NO_MARKET_STREAM.check(ArchitectureTest.PRODUCTION);
     }
 
     @Test
@@ -106,6 +121,11 @@ class EngineFeedBoundaryTest {
         assertThat(engineReport).contains("EngineFeedServer", "FeedClient", "StreamingMarketDataSource", "MarketEventRecorder")
                 .doesNotContain("RecordingCodec", "EngineFeedClient", "EngineFeedProtocol");
         assertThat(details(ONLY_GATEWAY_OPENS_ENGINE_FEED_SERVER.evaluate(engine))).contains("EngineFeedServer");
+
+        // 엔진: 플러그인 시세 소스를 받으면 위반, 보호 폴링은 허용
+        JavaClasses stream = new ClassFileImporter().importClasses(EngineOpensBrokerStream.class);
+        assertThat(details(ENGINE_OPENS_NO_MARKET_STREAM.evaluate(stream))).contains("marketData", "MarketDataSource")
+                .doesNotContain("pollingQuotes", "PollingQuoteSource");
 
         // 실험실: 받는 쪽(엔진 행세)과 서버(게이트웨이 행세) 모두 위반
         JavaClasses lab = new ClassFileImporter().importClasses(LabActsAsEngine.class);
