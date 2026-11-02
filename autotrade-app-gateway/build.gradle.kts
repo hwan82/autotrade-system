@@ -42,6 +42,20 @@ tasks.register<JavaExec>("replayCheck") {
     })
 }
 
+// 시세 수신 간격 분포(ADR-016 G0, D-147): 녹화로 종목 단위·소스 단위 이벤트 간격을 매매 단계별로 재서 실전 엔진 T_quiet·소스 3초 기준의
+// 근거를 낸다. 녹화 파일만 읽고 네트워크·주문을 쓰지 않으며, 리플레이 점검과 같은 관문(정지 요청 파일·장 시간 보호, D-085)을 쓴다.
+// 사용: ./gradlew :autotrade-app-gateway:feedGaps --args="2026-10-26..2026-10-30 --out=feed-gaps.md" [-PallowDuringSession]
+tasks.register<JavaExec>("feedGaps") {
+    group = "verification"
+    description = "녹화일들의 종목·소스별 시세 수신 간격 분포를 매매 단계별로 낸다(실전 엔진 T_quiet 근거, 장 시간 보호·정지 요청 확인)"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.gateway.FeedGapStatsMain")
+    workingDir = rootProject.projectDir // 보고서 상대 경로는 저장소 루트 기준
+    argumentProviders.add(CommandLineArgumentProvider {
+        replayAllowDuringSession.orNull?.let { listOf("--allow-during-session=$it") } ?: emptyList()
+    })
+}
+
 // 종목명 표 만들기: 한국투자 공개 종목 마스터 파일을 받아 <설정 폴더>/symbols/KRX.csv를 만든다(키·주문 API 안 씀).
 // 사용: ./gradlew :autotrade-app-gateway:symbolMaster
 tasks.register<JavaExec>("symbolMaster") {
