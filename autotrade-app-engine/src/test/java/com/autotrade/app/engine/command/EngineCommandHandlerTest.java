@@ -67,10 +67,17 @@ class EngineCommandHandlerTest {
     private Set<String> configured = Set.of("KIS-US-1", "KIWOOM-KR-1");
     private EngineCommandHandler.Limits limits = EngineCommandHandler.Limits.DEFAULT;
     private LongSupplier ticker = nanos::get;
+    /** 켜면 OPEN 올림 감사 기록이 실패한다(저장소 차단·상한 초과 흉내). */
+    private volatile boolean failOpenAudit;
 
     @BeforeEach
     void setUp() {
-        guard = new RealTradingGuard(List.of(KIS, KIWOOM), clock, guardAudit::add);
+        guard = new RealTradingGuard(List.of(KIS, KIWOOM), clock, t -> {
+            if (failOpenAudit && t.to() == GuardState.OPEN) {
+                throw new IllegalStateException("OPEN 감사 기록 실패 흉내");
+            }
+            guardAudit.add(t);
+        });
         issuer = guard.confirmationIssuer();
     }
 
@@ -489,6 +496,28 @@ class EngineCommandHandlerTest {
         ControlResponse r = send(holder[0], ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
 
         assertThat(r.message()).contains("중단");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+    }
+
+    @Test
+    void 마지막_단계의_OPEN_올림이_적용되지_않으면_활성화_실패로_OFF가_되고_2차_확인을_다시_받아야_한다() {
+        // PR #248 독립 QA Q3: Guard는 같은 활성화에서 마지막 단계를 다시 통과시킬 수 있으므로(RealTradingGuardTest) 처리기가
+        // 활성화를 실패로 끝내 새 2차 확인 없이 OPEN이 되지 않게 한다(D-146 결정 6)
+        failOpenAudit = true;
+        EngineCommandHandler h = handler();
+
+        ControlResponse r = send(h, ControlRequest.activate("KIS-US-1", "KIS-US-1", PASSWORD));
+
+        assertThat(r.message()).contains("활성화 실패").contains("전이 미적용").contains("2차 확인을 다시 받아야");
+        assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
+        GuardTransition last = guardAudit.getLast();
+        assertThat(last.from()).isEqualTo(GuardState.ACTIVATING);
+        assertThat(last.to()).isEqualTo(GuardState.OFF);
+        assertThat(last.reason()).as("처리기 분기가 사유를 남긴다(예기치 않은 중단이 아님)").contains("전이 미적용")
+                .doesNotContain("예기치 않은");
+        assertThat(commandAudit).contains("ACTIVATE KIS-US-1 ACTIVATION_FAILED").doesNotContain("ACTIVATE KIS-US-1 OPEN");
+        // 기록이 다시 되더라도 같은 활성화의 마지막 단계를 다시 통과시킬 길이 없다
+        failOpenAudit = false;
         assertThat(guard.state(KIS.id())).isEqualTo(GuardState.OFF);
     }
 
