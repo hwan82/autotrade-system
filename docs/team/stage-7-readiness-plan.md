@@ -52,7 +52,7 @@
 | P7 | 재기동 직후 보유 남은 OFF 계좌의 PANIC | ADR-006 7장 | 안 됨(미확정) | 결정 로그 미확정 Q-016 | risk-ops → 사용자 | **Q-016** | 예 | E |
 | P8 | 장 외 시간 PANIC 때 Guard OFF 여부 | ADR-006 7장 | 안 됨(미확정) | Q-017. 구현은 이미 추천안(매도 미완이면 OFF 안 함) | risk-ops → 사용자 | **Q-017** | 예 | E(기획서 문구) |
 | P9 | PANIC과 실전 출구의 블랙리스트·수동 보유 제외(TST-07 (1) F-2) | ADR-006 2.5, TST-07 (1) | 안 됨 | `R/guard/GuardedOrderGateway.java` `submit`은 Guard 검사만. `BlacklistSnapshot`·`RiskChain`은 가상 엔진에서만 사용 | risk-ops | B5 블랙리스트 영속화 | 예 | C |
-| P10 | D-037 근거 정리(PR #25 매도 불가 규칙, "미체결 매수만 취소"로 좁힌 사실을 보충 행으로) | ADR-006 6장, QA pr-25 4 | 안 됨 | README D-037 행 그대로 | pm-lead | 다음 결정 기록(4장 결정 기록 PR) | 아니오 | 0 |
+| P10 | D-037 근거 정리(PR #25 매도 불가 규칙, "미체결 매수만 취소"로 좁힌 사실을 보충 행으로) | ADR-006 6장, QA pr-25 4 | 처리됨 | [D-144](../decisions/D-144-stage7-bundle0-docs.md) ①: PR #18·#25 근거 분리, D-023 문구를 좁힌 사실, VI 예시는 D-140 ④로 대체 | pm-lead | 없음 | 아니오 | 0 |
 
 ### 2.3 실전 엔진 상태·주문 원장·리스크(ADR-002, TST-07)
 
@@ -65,7 +65,7 @@
 | B5 | 블랙리스트 영속화(전역, AUTO_ASSET 감지, 해제 2차 확인, 차단 감사, RSK-12, TST-07 A6) | ADR-002, ADR-006 6장 | 부분 | `BlacklistEntry`·`BlacklistSnapshot`·`BlacklistType`과 가상 경로 적용만 | risk-ops, ui-dev | B0, 보유 조회 | 예 | B |
 | B6 | OFF 계좌 미확정 주문을 재기동 긴급 알림에 포함(TST-07 (5) F-6) | TST-07 (5) | 안 됨 | 미확정 주문 조회 없음 | risk-ops | B3·B4 | 예 | B |
 | B7 | 포지션별 진입 조합 해시 영속·복구(STR-19) | 기획서 STR-19 | 안 됨 | 엔진에 Selection 참조 0건 | risk-ops | B0 | 예 | B |
-| B0 | **실전 엔진 저장소 설계**(무엇을 PostgreSQL에, 무엇을 파일에, 재기동 복구 순서) | B1·B4·B5·B7의 공통 선행 [추론] | 안 됨 | ADR 없음 | architect, risk-ops | 없음 | 예(설계 ADR은 문서) | B |
+| B0 | **실전 엔진 저장소 설계**(무엇을 PostgreSQL에, 무엇을 파일에, 재기동 복구 순서) | B1·B4·B5·B7의 공통 선행 [추론] | 처리됨 | [ADR-015](../adr/ADR-015-real-engine-store.md)·[D-141](../decisions/D-141-real-engine-store.md)(PR #239 머지, Q-062 파일 원장 사용자 결정). 구현은 B1~B7 | architect, risk-ops | 없음 | 예(설계 ADR은 문서) | B |
 | K1 | 실전 주문 파이프라인 Guard → RiskChain → 멱등 키 → 상태머신 → `GuardedOrderGateway`, 체인 밖 submit 금지 ArchUnit(SIM-12) | D-032 | 부분 | 출구(`RealOrderGateways`, `ONLY_GUARD_FACTORY_OPENS_REAL_ORDER_GATEWAY`)만 | risk-ops, architect | B3·B4 | 예 | C |
 | K2 | 계좌 한도·킬스위치(RSK-03), 서킷브레이커 3단계(RSK-04), 같은 종목 여러 계좌 동시 보유 금지(RSK-05, D-011) | 기획서 RSK-03~05 | 부분/안 됨 | `RiskChain`은 가상 엔진만, `CircuitBreaker` 없음 | risk-ops | **Q-008** 값 | 예 | C |
 | K3 | 외부 호출 폭주 방지: 계좌·API 그룹별 호출 상한(ORD-04), 주문 실패 3회 정지(ORD-08), 레이트리밋 #14(TST-07 (6)) | TST-07 (6) | 부분 | 토스 시세 `TossRateLimiter`만 | risk-ops | 묶음 D | 예 | C |
@@ -74,8 +74,8 @@
 | K6 | CFG-06 ③ 실전 한도 변경 2차 확인 거부 시험 | D-081 ① | 안 됨 | 한도 키 없음(`RuntimeConfig.java:24`) | risk-ops | Q-008 | 예 | C |
 | K7 | 실전 경로 리플렉션 금지·외부 jar 허용 목록(TST-07 (9)) | D-086 | **처리됨** | `RealPathReflectionTest`(PR #108·#109·#110·#112) | architect | — | 예 | — |
 | K8 | 플러그인 로딩용 `ALLOWED_SERVICE_LOADERS`, 감시 자동 재기동용 `ALLOWED_PROCESS_LAUNCHERS` 채우기 | D-086, D-092 | 안 됨(의도) | `RealPathReflectionTest.java:111,114` 빈 집합 | architect, risk-ops | 플러그인 로딩 PR, 감시 재기동 PR | 예(보호 테스트) | D, F |
-| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 안 됨 | 대응표·화면 경고 없음 [추론] | risk-ops, ui-dev | 없음 | 예 | 0, H |
-| K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 안 됨 | `RuntimeConfigStore.java:77` 주석 "7단계 전 risk-ops 검토" | risk-ops | 없음 | 예 | 0 |
+| K9 | 원본 점검표 34항목 → 요구 ID 대응표, 미충족 항목을 활성화 화면에 경고(TST-06) | 기획서 TST-06 | 부분 | 대응표 [tst-06-checklist-map.md](tst-06-checklist-map.md)([D-144](../decisions/D-144-stage7-bundle0-docs.md) ③, 경고 W-01~W-12·W-20~W-24(W-12는 2026-10-27 QA Q3로 추가), 차단 B-01뿐). 화면 경고는 H | risk-ops, ui-dev | 없음 | 예 | 0, H |
+| K10 | OS 자격 증명 저장소(DPAPI·Keychain) 재검토 | ADR-001 | 부분 | 검토 끝([D-144](../decisions/D-144-stage7-bundle0-docs.md) ④, [k10-os-credential-store-review.md](../research/k10-os-credential-store-review.md)): 파일 방식 유지 + 권한·위치 경고. 남은 것: 경고 코드 K10-a(보호 경로, 실전 관련 PR, 실전 활성화 결정 전. 머지 전까지 활성화 화면 정적 경고 W-12로 보임, [대응표](tst-06-checklist-map.md) 5.2), 운영 절차는 I | risk-ops | 없음 | 예 | 0, K10-a, I |
 
 ### 2.4 증권사 연동(ADR-003, broker-and-fault-design.md)
 
@@ -91,13 +91,13 @@
 | D8 | 토스 R1(token-revoked 역할별 정책: 엔진 즉시 재발급+긴급 알림), R2(5xx 연속 DEGRADED), R3(429 지수 백오프), R7(짧은 토큰 수명 하한·경보), R8(보호 폴링 몫), R9(폴링 실패에도 손절 감시 공백 0), R10(쉼 뒤 회복), QA N1·N2 | ADR-003, 메모 pr41 | 부분/안 됨 | `TossRestClient.REVOKED_COOLDOWN` 10분 단일 정책, `withRefreshAtHalfLife`만 | data-engineer, risk-ops | 없음 | 예 | D-T |
 | D9 | 엔진 밖 모든 프로세스 토스 호출기 생성 금지를 설정 검사·ArchUnit으로 강제(1-0, D-059, R0a) | broker-and-fault-design.md 7.1, D-059 | 부분 | 게이트웨이 `reservedForRealTrading`·`plugin(TOSS)` 빈 값은 있음. gateway·lab·watchdog·collector의 금지 의존 목록에 broker-toss 없음 [추론] | risk-ops, architect | 토스 연결 PR | 예 | D-T |
 | D10 | 보호 시세 경로: 키움·KIS `pollingQuotes` 추가(R4), `PollingQuoteSource` 신선도·폐기 계약(R5), 캘린더 범위 밖 예외가 손절을 막지 않음(R6) | ADR-003 | 부분/안 됨 | `pollingQuotes`는 토스뿐, 엔진 미연결 | data-engineer, risk-ops | 없음 | 예 | D, E |
-| D11 | 게이트웨이 `unservedHeld` 알림, 구독 거절 재배분·경보 | ADR-003 | 안 됨 | ERROR 로그·건수만 | data-engineer, risk-ops | 알림 수준 결정 | 예 | G |
-| D12 | 게이트웨이 → 실전 엔진 시세 전달(무손실·지연, 엔진의 `marketdata.feed` 금지, 수신 꼬리 지연, ADR-010 QA R1·R3) | ADR-010 | 안 됨 | 엔진에 feed 참조 없음 | data-engineer, architect, risk-ops | 없음(설계 지금 가능) | 예 | G |
+| D11 | 게이트웨이 `unservedHeld` 알림, 구독 거절 재배분·경보 | ADR-003 | 설계 [ADR-016](../adr/ADR-016-real-engine-market-feed.md) 2.8(D-143, 2026-10-26), 구현 G3·G4 안 됨 | ERROR 로그·건수만 | data-engineer, risk-ops | 알림 수준 결정 | 예 | G |
+| D12 | 게이트웨이 → 실전 엔진 시세 전달(무손실·지연, 엔진의 `marketdata.feed` 금지, 수신 꼬리 지연, ADR-010 QA R1·R3) | ADR-010 | 설계 [ADR-016](../adr/ADR-016-real-engine-market-feed.md)(D-143, 2026-10-26), 구현 G1·G2·G4 안 됨 | 엔진에 feed 참조 없음 | data-engineer, architect, risk-ops | 없음(설계 지금 가능) | 예 | G |
 | D13 | watchlist 구독 상한(실전 보유 종목 몫 남김, ADR-012 F4) | ADR-012 0번·F4, D-122 | 안 됨 | 임시값 100종목(D-122), 게이트웨이에 상한 키 없음 | risk-ops | **Q-060**, Q-061 | 예 | G |
 | D14 | 키움 후속: WS 경로 확정, LOGIN 실패 분류, 토큰 8031·8103 반복 ERROR, 재시도 시험 | 메모 pr40 | 부분 | 경로 둘 다 보관, `KiwoomReturnCode.TOKEN_CODES` | data-engineer | Q-015 첫 실접속 로그 | 예 | D-K |
 | D15 | Q-015 키움·KIS 실제 접속 확인(필드, PING, 무응답 시간, VI 메시지, KIS wss·접속키 1분 제한, 키움 토큰 무효화) | 결정 로그 Q-015 | 안 됨(미확정) | 실측 전. kis-news 토큰 403은 PR #234에서 결과 코드 표시 중 | data-engineer, risk-ops | **사용자 PC 실측** | 예 | 사용자 |
 | D16 | Q-011 위탁수수료·SEC fee·TAF 공식 확인, 실전 체결 대사로 D-021 갱신 | 결정 로그 Q-011 | 안 됨 | — | data-engineer, risk-ops | 실전 체결 내역 | 예 | 7단계 뒤 |
-| D17 | Q-047 정리: PR #47 머지로 확정됐는데 결정 로그 "미확정" 표에 남아 있음 | 결정 로그 | 부분 | README 미확정 표의 Q-047 행 | pm-lead | 없음 | 아니오 | 0 |
+| D17 | Q-047 정리: PR #47 머지로 확정됐는데 결정 로그 "미확정" 표에 남아 있음 | 결정 로그 | 처리됨 | [D-144](../decisions/D-144-stage7-bundle0-docs.md) ②: 닫힌 미확정 표로 옮김 | pm-lead | 없음 | 아니오 | 0 |
 
 ### 2.5 감시 프로세스·알림
 
@@ -140,7 +140,7 @@
 | S4 | 중기 보유 실전 위험: 액면분할·권리락 때 손절 기준가·서버 측 손절 재설정, 당일 유효 조건주문 매일 재설정, 장기 거래정지 | D-041 | 안 됨 | — | risk-ops | Q-002, Q-058 | 예 | E |
 | S5 | 재무 신선도 상한·장전 가정값 확정, 활성화 점검에 "OS 예약 작업·최근 상태 파일 OK" | ADR-007 | 안 됨 | 값 `[가정]` | risk-ops, data-engineer | 없음 | 예 | I |
 | S6 | 엔진의 캘린더 판정에서 보호용·거래용 분리(손절은 막히지 않게) | 메모 pr53 | 안 됨 | 엔진에 `ExchangeCalendar` 참조 없음 | risk-ops | 없음 | 예 | E |
-| I1 | **7단계 실행·시험 절차서**(runbook): 설치본 대조(`-javaagent`·`-D`·`-XX:+DisableAttachMechanism`, 감시 JDK 고정), 장 시간 보호 해제값 확인, 카카오 재동의 수신 확인, 재기동 뒤 보호 모드 절차, Windows 값 대조, 7.1 합격 기준값 | D-086, D-095, D-100, 메모 pr52·pr105·pr135·run-manual | 부분 | 뼈대 [stage-7-real-trading-tests.md](../runbooks/stage-7-real-trading-tests.md)(2026-10-24): 후속 추적표 8장, 명령·기준값·시행 전 결정 E1~E5 남음 | risk-ops | 없음 | 예 | I |
+| I1 | **7단계 실행·시험 절차서**(runbook): 설치본 대조(`-javaagent`·`-D`·`-XX:+DisableAttachMechanism`, 감시 JDK 고정), 장 시간 보호 해제값 확인, 카카오 재동의 수신 확인, 재기동 뒤 보호 모드 절차, Windows 값 대조, 7.1 합격 기준값 | D-086, D-095, D-100, 메모 pr52·pr105·pr135·run-manual | 부분 | 뼈대 [stage-7-real-trading-tests.md](../runbooks/stage-7-real-trading-tests.md)(2026-10-24, 2026-10-26 D-142 후속 반영: 3-R 하트비트 폴더 변형 6.1, 해시 반복 P11, 엔진 긴급 알림 N4): 후속 추적표 8장, 명령·기준값·시행 전 결정 E1~E6 남음 | risk-ops | 없음 | 예 | I |
 | I2 | TST-07 대응표(항목마다 실패 테스트 이름) | 기획서 TST-07 | 안 됨 | — | risk-ops | 각 묶음 | 예 | I |
 | I3 | 실전 계좌 잔고·거래 내역·대사 상태 화면(UI-05·UI-08), 서버 측 손절 미지원 경고 | stage-5-readiness, D-079 | 안 됨 | 엔진 스냅샷에 필드 없음 | ui-dev, risk-ops | 묶음 E | 예 | H |
 | I4 | Q-010 해외 장애 O1~O8을 해외 실전 조건으로, 미국 실전 | 결정 로그 Q-010 | 안 됨(미확정) | — | risk-ops → 사용자 | 국내 실전 뒤 | 예 | 범위 밖 |

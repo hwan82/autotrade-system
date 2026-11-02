@@ -20,6 +20,8 @@ dependencies {
     implementation(project(":autotrade-marketdata"))
     implementation(project(":autotrade-strategy"))
     implementation(project(":autotrade-risk"))
+    // 실전 엔진 저장소(ADR-015, D-146): Guard·명령 감사 원장, 쓰기 잠금. 실전 엔진만 쓴다(ArchitectureTest)
+    implementation(project(":autotrade-real-store"))
     implementation(project(":autotrade-broker-api"))
     implementation(project(":autotrade-config"))
     implementation(project(":autotrade-control"))

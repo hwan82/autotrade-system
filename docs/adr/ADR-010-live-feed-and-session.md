@@ -106,10 +106,10 @@
 | 실시간 모의 화면(세션 시작·멈춤·끝냄, 계좌별 진행) | 화면 `#/live`(PR #96, 3초 폴링, 계좌 요약과 최근 공백) | 잔고 상세·거래 내역·대사 상태(UI-08), SSE(UI-01)는 D-079 이연 그대로 |
 | 사용자 PC(Windows)에서 소켓 열기·권한·경로 길이 | 컨테이너(Linux)만 검증 | 6단계 첫 운용일 확인(절차서) |
 | 재기동 시간 단축(계좌 상태 스냅샷, 대안 G) | 기록 재실행(별도 스레드, 하루씩) | 몇 주 분량 재기동 측정 후 필요하면 |
-| 실전 엔진 클래스패스의 전달 패키지(`marketdata.feed`)를 ArchUnit으로 막을지 | 엔진은 쓰지 않음 | 7단계 전 risk-ops·architect (risk-ops PR #87 N5) |
-| 같은 OS 사용자의 다른 프로세스가 받는 쪽 4자리를 차지 | 소켓 600으로 다른 사용자만 막음 | 위험 낮음, 7단계 엔진 전달 설계 때 같이 본다 (N6) |
+| 실전 엔진 클래스패스의 전달 패키지(`marketdata.feed`)를 ArchUnit으로 막을지 | 엔진은 쓰지 않음 | 7단계 전 risk-ops·architect (risk-ops PR #87 N5). 설계: [ADR-016](ADR-016-real-engine-market-feed.md) 2.2(엔진은 `enginefeed`만, ArchUnit) |
+| 같은 OS 사용자의 다른 프로세스가 받는 쪽 4자리를 차지 | 소켓 600으로 다른 사용자만 막음 | 위험 낮음, 7단계 엔진 전달 설계 때 같이 본다 (N6). 엔진은 별도 소켓(받는 쪽 1)이라 이 4자리와 무관: [ADR-016](ADR-016-real-engine-market-feed.md) 2.2·4장 |
 | 실시간 모의 대 같은 날 게이트웨이 녹화 리플레이 차이 | 주간 점검 명령 `runLiveWeeklyCheck`(D-088): 줄 단위 입력 대조, 빠진 이벤트 원인별 수, 공백 출처, 누계 계좌 대조, 종목별 중간가 체결 틱 수·거래량 비중(D-118, 참고. 분모는 정규장 접속 매매 체결, 시간외·단일가 체결은 따로, 합계 행, BOOK-V6 이전 기록 날짜 표시)을 `experiments/<ID>/weekly/<날짜>.md`로 | 실측 결과 해석(strategy-researcher) |
-| 실전 엔진 시세 전달 | 없음 | 7단계(risk-ops·data-engineer) |
+| 실전 엔진 시세 전달 | 없음 | 7단계(risk-ops·data-engineer). 설계: [ADR-016](ADR-016-real-engine-market-feed.md)(D-143) |
 | 미국 시장 세션 | KRX만 | `UsMarketRules`·비용 표 연결 때 |
 
 ## 6. 검증

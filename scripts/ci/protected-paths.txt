@@ -15,6 +15,8 @@ autotrade-marketdata/*
 autotrade-strategy/*
 autotrade-notification-jar/*
 autotrade-monitor-agent-jar/*
+# 실전 엔진 저장소(ADR-015, D-146): Guard·명령 감사 원장, 쓰기 잠금
+autotrade-real-store/*
 # 수집기 안 증권사 키·POST 호출(한국투자 뉴스 제목, D-136, PR #222 risk-ops 발견 2, QA R3 키 읽기·넘기기)
 autotrade-app-collector/src/main/java/com/autotrade/app/collector/KisNewsClient.java
 autotrade-app-collector/src/main/java/com/autotrade/app/collector/HttpGetter.java

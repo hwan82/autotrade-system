@@ -9,7 +9,7 @@ application {
 }
 
 processIsolation {
-    forbiddenProjects.set(listOf(":autotrade-sim", ":autotrade-app-lab", ":autotrade-ui", ":autotrade-risk", ":autotrade-strategy", ":autotrade-control", ":autotrade-app-collector", ":autotrade-app-experiment", ":autotrade-selection"))
+    forbiddenProjects.set(listOf(":autotrade-sim", ":autotrade-app-lab", ":autotrade-ui", ":autotrade-risk", ":autotrade-strategy", ":autotrade-control", ":autotrade-app-collector", ":autotrade-app-experiment", ":autotrade-selection", ":autotrade-real-store"))
     forbiddenGroups.set(listOf("org.springframework"))
 }
 
@@ -36,6 +36,20 @@ tasks.register<JavaExec>("replayCheck") {
     description = "녹화일을 두 번 리플레이해 결과가 같은지 보고 종목별 체결 요약을 낸다(장 시간 보호·정지 요청 확인)"
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.autotrade.app.gateway.ReplayCheckMain")
+    workingDir = rootProject.projectDir // 보고서 상대 경로는 저장소 루트 기준
+    argumentProviders.add(CommandLineArgumentProvider {
+        replayAllowDuringSession.orNull?.let { listOf("--allow-during-session=$it") } ?: emptyList()
+    })
+}
+
+// 시세 수신 간격 분포(ADR-016 G0, D-147): 녹화로 종목 단위·소스 단위 이벤트 간격을 매매 단계별로 재서 실전 엔진 T_quiet·소스 3초 기준의
+// 근거를 낸다. 녹화 파일만 읽고 네트워크·주문을 쓰지 않으며, 리플레이 점검과 같은 관문(정지 요청 파일·장 시간 보호, D-085)을 쓴다.
+// 사용: ./gradlew :autotrade-app-gateway:feedGaps --args="2026-10-26..2026-10-30 --out=feed-gaps.md" [-PallowDuringSession]
+tasks.register<JavaExec>("feedGaps") {
+    group = "verification"
+    description = "녹화일들의 종목·소스별 시세 수신 간격 분포를 매매 단계별로 낸다(실전 엔진 T_quiet 근거, 장 시간 보호·정지 요청 확인)"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.autotrade.app.gateway.FeedGapStatsMain")
     workingDir = rootProject.projectDir // 보고서 상대 경로는 저장소 루트 기준
     argumentProviders.add(CommandLineArgumentProvider {
         replayAllowDuringSession.orNull?.let { listOf("--allow-during-session=$it") } ?: emptyList()

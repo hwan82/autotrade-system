@@ -47,6 +47,7 @@
 | autotrade-marketdata | MarketDataSource, MarketEventListener, Subscription | O | domain |
 | autotrade-strategy | StrategyProfile(내용 해시), TradingStyle | O | domain |
 | autotrade-risk | RiskPolicy, RiskDecision, RiskChain(가상·실전 공통 검증 체인), BlacklistSnapshot·BlacklistEntry·BlacklistType, RealTradingGuard 골격(`guard`, ADR-002) | O | domain |
+| autotrade-real-store | 실전 엔진 저장소([ADR-015](ADR-015-real-engine-store.md), [D-146](../decisions/D-146-real-store-b1.md)): EngineStore(원장 열기·복구 검사·`writer.lock`·기동·종료 기록), StoreGuardAuditLog(Guard 감사 어댑터), RecoveryReport, ForceProbe. 실전 엔진만 의존(ArchUnit·`processIsolation`), 실전 경로 허용 목록(D-086) 안 | O (Jackson만) | risk(domain) |
 | autotrade-sim | ExperimentRunner, ExperimentSpec, ClockMode, ExperimentResult, RunResult | O | domain, strategy, marketdata, risk |
 | autotrade-broker-api | BrokerPlugin, BrokerCapability, BrokerStatus | O | domain, marketdata |
 | autotrade-config | RuntimeConfig, ConfigLoader, ConfigPaths, SecretPaths, RuntimeConfigStore, RuntimeConfigHolder, Secret, ProcessStartup | O (Jackson만) | domain |

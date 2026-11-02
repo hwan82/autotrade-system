@@ -23,9 +23,9 @@ import java.util.Set;
  * </ul>
  * 응답 메시지 원문은 로그·예외에 옮기지 않고 코드와 고정 안내 문구만 쓴다(안전 불변식 9).
  */
-final class KisErrorCode {
+public final class KisErrorCode {
 
-    enum Kind {
+    public enum Kind {
         OK,
         /** 토큰 만료·무효. 토큰을 새로 받아 한 번 더 부른다. */
         TOKEN_EXPIRED,
@@ -51,7 +51,7 @@ final class KisErrorCode {
     }
 
     /** 응답 JSON에서 읽는다. {@code rt_cd}가 "0"이면 정상. 결과 코드는 {@code msg_cd}, 없으면 {@code error_code}. */
-    static KisErrorCode of(JsonNode body) {
+    public static KisErrorCode of(JsonNode body) {
         String code = body.path("msg_cd").asText("").strip();
         if (code.isEmpty()) {
             code = body.path("error_code").asText("").strip();
@@ -60,15 +60,15 @@ final class KisErrorCode {
         return new KisErrorCode(ok, code.matches("[A-Za-z0-9_]{1,20}") ? code : "");
     }
 
-    boolean ok() {
+    public boolean ok() {
         return ok;
     }
 
-    String code() {
+    public String code() {
         return code;
     }
 
-    Kind kind() {
+    public Kind kind() {
         if (ok) {
             return Kind.OK;
         }
@@ -85,7 +85,7 @@ final class KisErrorCode {
     }
 
     /** 로그·예외용 설명. 코드와 고정 안내만 담는다. */
-    String describe() {
+    public String describe() {
         String hint = switch (kind()) {
             case TOKEN_EXPIRED -> " 토큰 만료·무효";
             case RATE_LIMITED -> " 초당 호출 한도 초과";
