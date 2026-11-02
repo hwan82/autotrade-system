@@ -90,3 +90,4 @@
 | 2026-10-26 | PR #243 검토해줘 | docs/reviews/pr-243/qa.md | 실전 관련 PR(장애 대응 절차, 문서만): 7단계 절차서 I1 보완, D-142가 넘긴 3-R 하트비트 폴더 변형·늦게 뜬 엔진 확인·해시 다시 만들기 안내, C6·C10 현재형. 브랜치 `claude/project-thread-wqsuqu` |
 | 2026-10-27 | PR #243 재검토해줘 | docs/reviews/pr-243/qa.md(재검토 절) | 실전 관련 PR 재검토(문서만): QA 1차 발견 1(Windows "확인 불가" 종료 순서)과 권고 Q1~Q3 반영. 브랜치 `claude/project-thread-wqsuqu` |
 | 2026-10-27 | PR #253 검토해줘 | docs/reviews/pr-253/qa.md | 실전 관련 PR(문서만, 코드 무변경): PR #246 독립 QA 권고 Q1~Q3 반영 — 장애표 #13에 VI 마감 시각 초과 시 매도 불가, TST-06 대응표 I-8·W-04 근거 ADR-015 뒤로, 정적 경고 W-12(K10-a) 추가, PR #246 QA 처리 기록. 브랜치 `claude/project-thread-npk3vh` |
+| 2026-11-02 | PR #258 검토해줘 | docs/reviews/pr-258/qa.md | 실전 관련 PR(문서만, 보호 경로 `docs/qa/checklists.md`): PR #253 독립 QA 권고 Q1·Q2 반영 — 결정 색인 D-144 행 W-12 표기, 대응표 7장 B행 "16개"는 결정 당시 수, QA 점검표 D9(활성화 판정 때 W-12 해제 확인), PR #253 QA 처리 기록. 브랜치 `claude/project-thread-npk3vh` |
