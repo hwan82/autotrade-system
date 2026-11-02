@@ -36,3 +36,40 @@
 
 ## 판정
 승인
+
+## 재검토 2026-11-02
+- 대상: PR #257 / 머리 `c2530f00`(독립 QA 수정 필요 반영 커밋, 그 앞 `ce8650c4`는 main 합치기) / main 대비 diff 전체(`git diff origin/main...HEAD`, 24개 파일). 이번에 바뀐 코드는 `EngineFeedServer.java`·`EngineFeedClient.java`·`EngineFeedBoundaryTest.java`·새 위반 예제 `EngineOpensBrokerStream.java`와 시험 2파일, 문서는 D-148(결정 10~15)·ADR-016 8장·결정 README
+- 점검표: A
+- 직접 실행한 것:
+  - `./gradlew build --no-daemon --console=plain`(머리 `c2530f00`): **BUILD SUCCESSFUL in 5m 14s, 138 작업 모두 실행**. 시험 결과 XML 합계 2,111건, 실패·오류·건너뜀 0. `autotrade-marketdata` 198, `autotrade-architecture-test` 50, `autotrade-risk` 57, `autotrade-app-engine` 109건. 지연 시험 출력 `publish p50=303ns p99=1133ns p99.9=5083ns 최대=50045ns, 콜백→해석 p50=329µs p99=1508µs 최대=15991µs (25600건)`(기준 안).
+  - 고친 것을 되돌려 새 시험이 실제로 잡는지 확인(작업 트리에서만 바꾸고 원복, `git status` 깨끗 확인): `slots`를 늘 `new Slot()`으로, `sendStatusLocked`의 `c.pendingRejection` 승계를 뺀 코드로 `:autotrade-marketdata:test --tests '*EngineFeedServerTest'` → **21건 중 2건 실패**: `넘침_뒤_관심이_바뀌어도_남는_종목은_다시_읽을_때_공백이_먼저_온다`, `큐가_차서_밀린_상태_줄도_거부_이유를_싣는다`. 원복 뒤 전체 빌드는 위와 같이 통과.
+  - `git diff origin/main...HEAD | grep -inE "appkey|appsecret|password|accountno|bearer "`: 앞 검토 원문의 A10 줄 한 건뿐.
+  - `grep -rn "marketData(" autotrade-app-engine/src/main`: 없음. 엔진 Gradle 의존에 증권사 플러그인 구현 모듈 없음(`autotrade-app-engine/build.gradle.kts:19-28`).
+
+| # | 결과 | 근거 |
+|---|---|---|
+| A1 | 통과 | RealTradingGuard·`autotrade-risk`·엔진 실행부·설정 변경 없음(diff 목록). `:autotrade-risk:test` 57건·`:autotrade-app-engine:test` 109건 통과 |
+| A2 | 통과 | 주문 경로·`ArchitectureTest` 변경 없음. 새 코드에 주문 포트 의존 없음(`EngineFeedServer.java`·`EngineFeedClient.java` import), 기존 규칙 통과 |
+| A3 | 해당 없음 | 시세 전달만. 주문·증권사 선택 코드 없음 |
+| A4 | 해당 없음 | 주문 타임아웃·재전송 경로 없음 |
+| A5 | 해당 없음 | 멱등 키 코드 없음 |
+| A6 | 해당 없음 | 관심 줄은 구독 요청일 뿐 주문 판단에 쓰이지 않음(`InterestSink`) |
+| A7 | 해당 없음 | 계좌 큐·토큰 버킷 무변경 |
+| A8 | 통과(G1 범위) | 실행부 미연결(사용처는 `marketdata.enginefeed` 안뿐). `publish`는 여전히 잠금 없이 `route` 읽고 `offer`(`EngineFeedServer.java:180-198`), 지연 시험 기준 안. 새 `applyLock`은 연결 읽기 스레드·타이머만 잡고 수신 스레드는 잡지 않음(`:330-343`). 받는 쪽 `interest()`의 막힘·읽기 시간 한도 없음(앞 발견 1·2)은 그대로 G4 조건. 새 G2 조건은 아래 재검토 발견 R1 |
+| A9 | 통과(G1 범위) | QA 발견 1 고침 확인: 같은 연결이면 남는 종목은 앞 `Slot`을 이어 씀(`EngineFeedServer.java:316`, `slots` `:359-364`), `Slot`은 연결의 큐와 짝이라(`Route(connection, slots)` `:741`) 다른 연결로 넘어가지 않음. 시험 `넘침_뒤_관심이_바뀌어도_남는_종목은_다시_읽을_때_공백이_먼저_온다` 통과, 고치기 전 코드에서 실패(위 직접 확인). 빠졌다 다시 든 종목을 새 칸으로 두는 판단(D-148 결정 10)은 받아들인다: 관심 밖 구간은 엔진에 원래 안 오므로 공백이 아니다. 단 남는 위험은 R2. 보호 폴링·서버 측 손절 코드 무변경 |
+| A10 | 통과 | diff에 키·계좌번호·토큰 없음(위 grep). 새 오류 메시지는 상한 바이트 수만 담음(`EngineFeedClient.java` `BoundedLines.readLine`), 로그는 예외 클래스 이름만(`applyInOrder`) |
+| A11 | 통과 | 보호 테스트 삭제·약화 없음. `EngineFeedBoundaryTest`에 규칙 `ENGINE_OPENS_NO_MARKET_STREAM` 추가만(`EngineFeedBoundaryTest.java:95-100`), 실제 클래스 검사(`실전_엔진은_게이트웨이_부품을_쓰지_않는다`)와 위반 예제 `EngineOpensBrokerStream`을 잡고 허용(`pollingQuotes`)은 잡지 않는지(`규칙은_위반을_실제로_잡아낸다`) 둘 다 단언, 통과. 고정 값(지문·허용 목록·소유 표) 갱신 없음, `com.autotrade.app.engine.archfixture`는 기존 예제 패키지. 기존 시험 2건 변경(`publish_안의_예외는…`, `이벤트_줄_순번은…`)은 기다리는 상태 줄을 rev 0 → rev 1로 좁힌 것으로 단언을 약하게 하지 않음(diff). 새 동작마다 실패 경우 시험 있음(넘침+관심 변경, 밀린 거부, 늦은 apply 버림, 바이트 상한 초과, 나뉜 줄, `interest()` 빈 값). Q2 경합 재현 시험이 없음은 D-148 검증 절에 스스로 적음 |
+| A12 | 통과(G1 범위) | 장애표·장애 테스트 문서·코드 무변경, 실행부 미연결이라 지금 동작 불변. 넘침 공백 계약(#15 symbol-gap 입력)이 관심 변경 뒤에도 지켜짐(A9). 거부 이유가 밀려도 사라지지 않아 ADR-016 2.8 "관심 줄 거부: 긴급" 알림 입력이 남음(`sendStatusLocked` `:404-418`, 시험 `큐가_차서_밀린_상태_줄도_거부_이유를_싣는다`, 고치기 전 실패 확인) |
+| A13 | 해당 없음 | 시장별 분기 없음. 위반 예제의 `Market.KRX`는 규칙 고정용 |
+| A14 | 통과 | D-148 결정 10~15가 코드와 일치: 10 `slots(…, before)`, 11 `pendingRejection`(`:537`, 승계 `:409-415`, 받아들인 관심에서 지움 `:312`), 12 `applyInOrder`(세대 확인 뒤 버림), 13 `OptionalLong`(`EngineFeedClient.interest`), 14 `BoundedLines`(`MAX_LINE` 바이트 상한), 15 `ENGINE_OPENS_NO_MARKET_STREAM`. 상태 줄 "결정 1~15", ADR-016 8장 구현 기록, 결정 README ⑨ 갱신. 결정 README는 main과 합쳐 D-147·D-148 두 행이 함께 있음(QA R1) |
+
+## 재검토 점검표 밖 발견
+
+모두 이번 머지를 막지 않는다(어느 프로세스에도 연결되지 않아 실전 영향 없음). 연결하는 G2·G4 PR에서 risk-ops가 확인한다. 앞 검토 발견 1~3(G4 조건)은 이번 커밋이 다루지 않았고 그대로 남는다.
+
+- **R1 [G2 조건] `applyLock` 아래에서 `sink.apply`가 느리면 타이머가 기다린다.** `expire`는 단일 타이머 스레드(`EngineFeedServer.java:110-111`)에서 돌고, 같은 타이머가 생존 줄(`tick`)·소켓 확인·멈춤 확인을 한다(`:150-154`). 만료와 새 관심이 겹쳐 연결 읽기 스레드가 `applyLock`을 잡고 느린 `sink.apply`를 하는 동안 `expire`의 `applyInOrder`가 그 잠금을 기다리면 생존 줄이 그만큼 멈춘다. 엔진은 생존 줄 3초 없음으로 보호 폴링으로 가므로 안전 쪽이고, 고치기 전에도 `expire`가 타이머에서 `sink.apply`를 직접 불렀으므로 새로 생긴 위험은 좁다. G2에서 구독 계획을 붙일 때 `sink.apply` 소요 상한(또는 D-148 결정 12의 되돌릴 조건대로 실행기)과 "만료 직전 재접속" 시험을 함께 넣는다.
+- **R2 [G4 조건] 빠졌다 곧 다시 든 종목은 앞 넘침과 놓친 `STATUS`를 모른다.** 결정 10대로 다시 든 종목은 새 칸이라, 빠지기 전 버린 체결·`STATUS`(VI·거래정지)에 대한 공백 줄이 없다. 관심 밖 구간을 공백으로 보지 않는 것은 맞지만, G4 엔진은 "다시 든 종목"을 처음 받는 종목과 같이 다뤄 상태(VI 등)를 REST로 다시 확인한 뒤 진입하고, 보호 종목이면 `served` 확인 전까지 보호 폴링을 유지해야 한다.
+- **R3 [참고] `ENGINE_OPENS_NO_MARKET_STREAM`의 범위.** 규칙은 `com.autotrade.app.engine..`의 직접 의존·`BrokerPlugin.marketData` 호출만 본다. 구현 플러그인 타입으로 부르는 길은 엔진이 구현 모듈에 의존하지 않아 지금 없고(엔진 `build.gradle.kts:19-28`), 얻은 소스를 쓰면 `MarketDataSource` 의존으로 잡힌다. 엔진이 쓰는 순수 모듈(`autotrade-strategy`·`autotrade-risk`)을 거쳐 `MarketDataSource`를 구독하는 길은 이 규칙 밖이다. G4에서 엔진이 순수 모듈에 시세 소스를 넘기는지 확인한다.
+
+## 판정
+승인
