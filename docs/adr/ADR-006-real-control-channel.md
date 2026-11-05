@@ -220,7 +220,7 @@ JSON 한 줄(UTF-8, 줄바꿈 포함 최대 64KB) 요청 하나에 응답 하나
 | 감시 프로세스 긴급 PANIC 경로(MON-02, 엔진 정지 시) | risk-ops | 7단계 |
 | 재기동 후 보유 계좌 보호 모드 진입(`enterProtective`) 명령과 화면 | risk-ops + ui-dev | 보유 조회가 생기는 7단계 |
 | 블랙리스트 관리, 잔고·거래 내역, 모니터링 화면(UI-05 나머지, UI-08) | ui-dev | 블랙리스트 영속화(RSK-12)·엔진 스냅샷 이후 |
-| 영속 감사 로그(명령·Guard 전이) | risk-ops + architect | 7단계 |
+| 영속 감사 로그(명령·Guard 전이) | risk-ops + architect | 7단계. **[ADR-015](ADR-015-real-engine-store.md)·[D-146](../decisions/D-146-real-store-b1.md)로 처리(B1)**: 명령 감사는 공통 `audit/commands` 원장, Guard 감사는 계좌 `audit` 원장 |
 | 서버 측 손절 지원 여부 표시(RSK-06, ENV-03) | ui-dev | Q-002 이후 |
 | SSE로 상태 밀어 주기 | ui-dev | 후속 |
 | 계좌별 비동기 PANIC(계좌끼리 서로 기다리지 않음), 활성화 비동기화 | risk-ops | 7단계 완료 조건. **D-142로 처리(묶음 A)** |

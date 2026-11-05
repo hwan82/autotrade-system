@@ -241,8 +241,31 @@ class RealTradingGuardTest {
     @Test
     void 감사_기록에_실패하면_올라가지_않는다() {
         audit.failing = true;
-        assertThatThrownBy(() -> guard.beginActivation(confirm(KIS_KR))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> guard.beginActivation(confirm(KIS_KR)))
+                .isInstanceOfSatisfying(RaiseNotAppliedException.class,
+                        e -> assertThat(e.reason()).isEqualTo(RaiseNotAppliedException.Reason.AUDIT_NOT_RECORDED))
+                .hasCauseInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("전이 미적용");
         assertThat(guard.state(KIS_KR)).isEqualTo(GuardState.OFF);
+        // 보호 모드 상향과 OPEN 상향도 같다(ADR-015 2.5)
+        assertThatThrownBy(() -> guard.enterProtective(confirm(KIS_KR))).isInstanceOf(RaiseNotAppliedException.class);
+        assertThat(guard.state(KIS_KR)).isEqualTo(GuardState.OFF);
+        audit.failing = false;
+        guard.beginActivation(confirm(KIS_KR));
+        for (ActivationStep step : ActivationStep.values()) {
+            if (step == ActivationStep.FIRST_RECONCILIATION) {
+                audit.failing = true;
+                assertThatThrownBy(() -> guard.completeStep(KIS_KR, step)).isInstanceOf(RaiseNotAppliedException.class);
+            } else {
+                guard.completeStep(KIS_KR, step);
+            }
+        }
+        assertThat(guard.state(KIS_KR)).isEqualTo(GuardState.ACTIVATING);
+        assertThat(guard.check(order(KIS_KR, OrderIntent.ENTRY)).isApproved()).isFalse();
+        // 실패한 뒤에도 "올림 진행 중"이 남지 않는다: 다시 기록되면 마지막 단계를 다시 통과시킬 수 있다
+        audit.failing = false;
+        guard.completeStep(KIS_KR, ActivationStep.FIRST_RECONCILIATION);
+        assertThat(guard.state(KIS_KR)).isEqualTo(GuardState.OPEN);
     }
 
     @Test
@@ -350,7 +373,7 @@ class RealTradingGuardTest {
         raiser.start();
         try {
             assertThat(auditEntered.await(5, TimeUnit.SECONDS)).isTrue();
-            // 상향 전이가 계좌 잠금을 잡고 감사 기록에서 멈춘 동안에도 판정·취소 허용·허가 검사는 바로 돌아온다
+            // 상향 전이가 감사 기록에서 멈춘 동안에도 판정·취소 허용·허가 검사는 바로 돌아온다
             assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
                 assertThat(slow.check(order(KIWOOM_KR, OrderIntent.STOP_LOSS)).isApproved()).isTrue();
                 assertThat(slow.check(order(KIWOOM_KR, OrderIntent.ENTRY)).isApproved()).isFalse();
@@ -362,6 +385,231 @@ class RealTradingGuardTest {
             raiser.join();
         }
         assertThat(slow.state(KIWOOM_KR)).isEqualTo(GuardState.ACTIVATING);
+    }
+
+    // ---- 올림 감사는 계좌 잠금 밖(ADR-015 2.5, TST-07 (3) F-4) ----
+
+    /** 지정한 계좌의 올림 감사만 멈춰 세우는 감사 로그. 내림·보정 기록과 다른 계좌는 바로 기록한다. */
+    private static final class BlockingRaiseAudit implements GuardAuditLog {
+        final AccountId account;
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final List<GuardTransition> records = new java.util.concurrent.CopyOnWriteArrayList<>();
+        volatile boolean blocking;
+
+        BlockingRaiseAudit(AccountId account) {
+            this.account = account;
+        }
+
+        @Override
+        public void record(GuardTransition t) {
+            if (blocking && t.account().equals(account) && t.isRaise()) {
+                entered.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            records.add(t);
+        }
+    }
+
+    private record Raising(RealTradingGuard guard, BlockingRaiseAudit audit, SecondConfirmation.Issuer issuer) {
+    }
+
+    private Raising raising() {
+        BlockingRaiseAudit blocking = new BlockingRaiseAudit(KIS_KR);
+        RealTradingGuard g = new RealTradingGuard(ACCOUNTS, clock, blocking);
+        return new Raising(g, blocking, g.confirmationIssuer());
+    }
+
+    private SecondConfirmation confirm(Raising r, AccountId account) {
+        clock.advance(Duration.ofSeconds(1));
+        return r.issuer().issue(account, "BAE", clock.instant());
+    }
+
+    /** 올림을 다른 스레드에서 시작해 감사 기록에서 멈춘 것을 확인하고, 그 스레드가 던진 예외를 담을 칸을 돌려준다. */
+    private static java.util.concurrent.atomic.AtomicReference<Throwable> startBlockedRaise(Raising r, Runnable raise,
+            List<Thread> threads) throws InterruptedException {
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+        r.audit().blocking = true;
+        Thread t = new Thread(() -> {
+            try {
+                raise.run();
+            } catch (Throwable e) {
+                thrown.set(e);
+            }
+        });
+        threads.add(t);
+        t.start();
+        assertThat(r.audit().entered.await(5, TimeUnit.SECONDS)).isTrue();
+        return thrown;
+    }
+
+    @ParameterizedTest
+    @EnumSource(names = {"SHUTDOWN", "DEACTIVATE", "FAIL_ACTIVATION"})
+    void 올림_감사가_멈춘_동안_같은_계좌의_내림은_바로_끝나고_올림은_적용되지_않는다(Lowering lowering) throws Exception {
+        // 보호 모드에서 다시 여는 중 OPEN 올림이 감사 기록에서 멈춘 동안 같은 계좌를 내린다
+        Raising r = raising();
+        r.guard().enterProtective(confirm(r, KIS_KR));
+        r.guard().beginActivation(confirm(r, KIS_KR));
+        for (ActivationStep step : ActivationStep.values()) {
+            if (step != ActivationStep.FIRST_RECONCILIATION) {
+                r.guard().completeStep(KIS_KR, step);
+            }
+        }
+        List<Thread> threads = new java.util.ArrayList<>();
+        var thrown = startBlockedRaise(r, () -> r.guard().completeStep(KIS_KR, ActivationStep.FIRST_RECONCILIATION), threads);
+        GuardState lowered = lowering == Lowering.SHUTDOWN ? GuardState.OFF : GuardState.PROTECTIVE;
+        try {
+            // 계좌 잠금을 잡고 기다리지 않으므로 같은 계좌의 킬스위치·내리기·활성화 실패가 기록을 기다리지 않는다
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> lowering.apply(r.guard(), KIS_KR));
+            assertThat(r.guard().state(KIS_KR)).isEqualTo(lowered);
+        } finally {
+            r.audit().release.countDown();
+            for (Thread t : threads) {
+                t.join();
+            }
+        }
+        // 올림은 적용되지 않았다(내림이 먼저라 내려간 상태 그대로)
+        assertThat(r.guard().state(KIS_KR)).isEqualTo(lowered);
+        assertThat(thrown.get()).isInstanceOfSatisfying(RaiseNotAppliedException.class,
+                e -> assertThat(e.reason()).isEqualTo(RaiseNotAppliedException.Reason.LOWERED_FIRST));
+        assertThat(r.guard().check(order(KIS_KR, OrderIntent.ENTRY)).isApproved()).isFalse();
+        // 감사 원장에는 올림 기록 뒤 "전이 미적용(내림이 먼저)" 보정 기록이 남는다(상태를 바꾸지 않는 기록: from = to)
+        GuardTransition note = r.audit().records.get(r.audit().records.size() - 1);
+        assertThat(note.reason()).startsWith(RealTradingGuard.NOT_APPLIED_LOWERED_FIRST);
+        assertThat(note.from()).isEqualTo(note.to()).isEqualTo(lowered);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Lowering.class)
+    void OFF에서_시작한_올림을_기록하는_중_킬스위치가_오면_상태가_그대로여도_올림은_버린다(Lowering lowering) throws Exception {
+        // OFF 계좌의 킬스위치는 전이가 없다. 예전(잠금 안 기록)에는 올림 뒤에 적용되어 계좌를 내렸으므로, 지금도 올림을 버려야 한다
+        Raising r = raising();
+        List<Thread> threads = new java.util.ArrayList<>();
+        SecondConfirmation c = confirm(r, KIS_KR);
+        var thrown = startBlockedRaise(r, () -> r.guard().beginActivation(c), threads);
+        try {
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> lowering.apply(r.guard(), KIS_KR));
+        } finally {
+            r.audit().release.countDown();
+            for (Thread t : threads) {
+                t.join();
+            }
+        }
+        assertThat(thrown.get()).isInstanceOfSatisfying(RaiseNotAppliedException.class,
+                e -> assertThat(e.reason()).isEqualTo(RaiseNotAppliedException.Reason.LOWERED_FIRST));
+        assertThat(r.guard().state(KIS_KR)).isEqualTo(GuardState.OFF);
+        // 버린 뒤에는 표시가 남지 않아 다음 확인으로 다시 열 수 있다
+        r.audit().blocking = false;
+        r.guard().beginActivation(confirm(r, KIS_KR));
+        assertThat(r.guard().state(KIS_KR)).isEqualTo(GuardState.ACTIVATING);
+    }
+
+    enum Lowering {
+        SHUTDOWN {
+            @Override
+            void apply(RealTradingGuard g, AccountId a) {
+                g.shutdown(a, "BAE", "킬스위치");
+            }
+        },
+        DEACTIVATE {
+            @Override
+            void apply(RealTradingGuard g, AccountId a) {
+                g.deactivate(a, "BAE", "내리기");
+            }
+        },
+        FAIL_ACTIVATION {
+            @Override
+            void apply(RealTradingGuard g, AccountId a) {
+                g.failActivation(a, "단계 실패");
+            }
+        },
+        HOLDINGS_CLEARED {
+            @Override
+            void apply(RealTradingGuard g, AccountId a) {
+                g.holdingsCleared(a);
+            }
+        };
+
+        abstract void apply(RealTradingGuard g, AccountId a);
+    }
+
+    @Test
+    void OPEN_올림을_기록하는_사이_내렸다가_다시_올려도_앞선_올림이_새_활성화를_건너뛰지_않는다() throws Exception {
+        // risk-ops PR #239 N-1의 ABA: ACTIVATING(출발 PROTECTIVE)에서 OPEN 올림 기록 대기 → 내리기로 PROTECTIVE → 새 활성화로 다시
+        // ACTIVATING(같은 출발·같은 세대). 상태만 비교하면 앞선 OPEN 올림이 새 활성화의 단계를 건너뛰고 적용된다
+        Raising r = raising();
+        r.guard().enterProtective(confirm(r, KIS_KR));
+        r.guard().beginActivation(confirm(r, KIS_KR));
+        for (ActivationStep step : ActivationStep.values()) {
+            if (step != ActivationStep.FIRST_RECONCILIATION) {
+                r.guard().completeStep(KIS_KR, step);
+            }
+        }
+        List<Thread> threads = new java.util.ArrayList<>();
+        var thrown = startBlockedRaise(r, () -> r.guard().completeStep(KIS_KR, ActivationStep.FIRST_RECONCILIATION), threads);
+        SecondConfirmation again = confirm(r, KIS_KR);
+        try {
+            r.guard().deactivate(KIS_KR, "BAE", "내리기");
+            assertThat(r.guard().state(KIS_KR)).isEqualTo(GuardState.PROTECTIVE);
+            // 앞선 올림이 기록을 기다리는 동안 같은 계좌의 새 올림은 거절된다(감사 줄도 남기지 않음)
+            int before = r.audit().records.size();
+            assertThatThrownBy(() -> r.guard().beginActivation(again))
+                    .isInstanceOf(GuardClosedException.class).hasMessageContaining("다른 올림");
+            assertThat(r.audit().records).hasSize(before);
+        } finally {
+            r.audit().release.countDown();
+            for (Thread t : threads) {
+                t.join();
+            }
+        }
+        assertThat(thrown.get()).isInstanceOf(RaiseNotAppliedException.class);
+        assertThat(r.guard().state(KIS_KR)).isEqualTo(GuardState.PROTECTIVE);
+        assertThat(r.guard().check(order(KIS_KR, OrderIntent.ENTRY)).isApproved()).isFalse();
+    }
+
+    @Test
+    void 같은_계좌의_두_올림이_겹치면_하나만_진행되고_다른_하나는_거절된다() throws Exception {
+        Raising r = raising();
+        List<Thread> threads = new java.util.ArrayList<>();
+        SecondConfirmation first = confirm(r, KIS_KR);
+        SecondConfirmation second = confirm(r, KIS_KR);
+        var thrown = startBlockedRaise(r, () -> r.guard().enterProtective(first), threads);
+        try {
+            assertThatThrownBy(() -> r.guard().beginActivation(second)).isInstanceOf(GuardClosedException.class);
+            assertThatThrownBy(() -> r.guard().enterProtective(second)).isInstanceOf(GuardClosedException.class);
+        } finally {
+            r.audit().release.countDown();
+            for (Thread t : threads) {
+                t.join();
+            }
+        }
+        assertThat(thrown.get()).isNull();
+        assertThat(r.guard().state(KIS_KR)).isEqualTo(GuardState.PROTECTIVE);
+        assertThat(r.audit().records).filteredOn(t -> t.to() == GuardState.PROTECTIVE || t.to() == GuardState.ACTIVATING)
+                .hasSize(1);
+    }
+
+    @Test
+    void 한_계좌의_올림_감사가_멈춰도_다른_계좌_킬스위치는_바로_끝난다() throws Exception {
+        Raising r = raising();
+        r.guard().enterProtective(confirm(r, KIWOOM_KR));
+        List<Thread> threads = new java.util.ArrayList<>();
+        SecondConfirmation c = confirm(r, KIS_KR);
+        startBlockedRaise(r, () -> r.guard().beginActivation(c), threads);
+        try {
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> r.guard().shutdown(KIWOOM_KR, "BAE", "킬스위치"));
+            assertThat(r.guard().state(KIWOOM_KR)).isEqualTo(GuardState.OFF);
+        } finally {
+            r.audit().release.countDown();
+            for (Thread t : threads) {
+                t.join();
+            }
+        }
+        assertThat(r.guard().state(KIS_KR)).isEqualTo(GuardState.ACTIVATING);
     }
 
     // ---- 계좌 격리 ----

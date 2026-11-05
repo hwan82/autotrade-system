@@ -7,7 +7,7 @@ import com.autotrade.app.engine.command.EngineCommandHandler;
 import com.autotrade.app.engine.command.OperatorAuthenticator;
 import com.autotrade.app.engine.command.OperatorPasswordHash;
 import com.autotrade.app.engine.command.PanicLiquidator;
-import com.autotrade.app.engine.order.LoggingGuardAuditLog;
+import com.autotrade.app.engine.command.StoreCommandAuditLog;
 import com.autotrade.config.ConfigLoader;
 import com.autotrade.config.ConfigPaths;
 import com.autotrade.config.KakaoMode;
@@ -17,12 +17,20 @@ import com.autotrade.config.RuntimeConfig;
 import com.autotrade.control.ControlServer;
 import com.autotrade.control.ControlSocket;
 import com.autotrade.domain.account.AccountRef;
+import com.autotrade.marketdata.rules.BundledMarketRules;
 import com.autotrade.monitor.Heartbeat;
 import com.autotrade.monitor.HeartbeatWriter;
 import com.autotrade.notification.EventRoutes;
 import com.autotrade.notification.NotificationQueue;
 import com.autotrade.notification.NotificationSetup;
 import com.autotrade.notification.Severity;
+import com.autotrade.realstore.EngineStore;
+import com.autotrade.realstore.ForceProbe;
+import com.autotrade.realstore.RecoveryReport;
+import com.autotrade.realstore.StoreGuardAuditLog;
+import com.autotrade.realstore.StorePaths;
+import com.autotrade.realstore.StoreRefusal;
+import com.autotrade.risk.guard.GuardAuditLog;
 import com.autotrade.risk.guard.RealTradingGuard;
 import java.io.Console;
 import java.io.IOException;
@@ -32,7 +40,9 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
@@ -49,7 +59,11 @@ import java.util.function.Supplier;
  * 오류"로 표시하지 않고 프로그램 오류로 알린 뒤 종료 코드 1. 어느 경우든 엔진은 뜨지 않고, Guard는 메모리 상태라 다음 기동도 모든 계좌
  * OFF로 시작한다.
  *
- * <p>{@code hash-password} 인자로 실행하면 운영자 비밀번호 해시를 만들어 출력하고 끝난다(ADR-006 2.4).
+ * <p>{@code hash-password} 인자로 실행하면 운영자 비밀번호 해시를 만들어 출력하고 끝난다(ADR-006 2.4). {@code store-probe} 인자로
+ * 실행하면 설정 폴더 디스크의 강제 기록 시간을 재어 출력하고 끝난다(ADR-015 3장 되돌릴 조건 (1), D-146). 엔진이 꺼져 있을 때 돌린다.
+ *
+ * <p>Guard 전이 감사와 명령 감사는 실전 엔진 저장소(ADR-015) 원장에 남긴다. 저장소는 명령 채널(engine.lock) 다음에 연다. 쓰기 잠금을
+ * 못 잡으면(다른 엔진·남은 프로세스) 기동을 거부하고, 원장 손상은 기동을 막지 않고 그 계좌(또는 모든 계좌)의 올리는 전이를 막는다.
  *
  * <p>시스템 시계를 만드는 곳은 이 진입점뿐이다. 나머지 코드는 주입받은 {@link Clock}만 쓴다(ArchitectureTest).
  */
@@ -57,6 +71,9 @@ public final class EngineMain {
 
     static final String PROCESS = "engine";
     static final String HASH_PASSWORD = "hash-password";
+    static final String STORE_PROBE = "store-probe";
+    /** 강제 기록 실측 횟수(ADR-015 3장). */
+    static final int STORE_PROBE_SAMPLES = 200;
     /** 기동 실패: 명령 채널을 열지 못함이나 프로그램 오류(D-107). JVM이 처리되지 않은 예외로 끝낼 때와 같은 값이다. */
     static final int EXIT_START_FAILED = 1;
     /** 사람이 고칠 설정 오류로 기동 거부(설정 폴더 경로, D-107). 감시의 같은 뜻 코드(D-106)와 같은 값이다. */
@@ -69,6 +86,9 @@ public final class EngineMain {
     public static void main(String[] args) {
         if (args.length == 1 && HASH_PASSWORD.equals(args[0])) {
             System.exit(hashPassword(System.console()));
+        }
+        if (args.length == 1 && STORE_PROBE.equals(args[0])) {
+            System.exit(storeProbe(ConfigPaths.defaultLocation(), Clock.systemUTC()));
         }
         Engine engine = launch(ConfigPaths::defaultLocation, Clock.systemUTC(), EngineMain::setup, System::exit);
         if (engine == null) {
@@ -138,7 +158,9 @@ public final class EngineMain {
             throws IOException {
         LoadedConfig loaded = ProcessStartup.start(PROCESS, paths, clock);
         RuntimeConfig config = loaded.config();
-        RealTradingGuard guard = startGuard(config, clock);
+        // 저장소가 열리기 전까지 올리는 전이는 모두 거절된다(어댑터가 막음). Guard는 원장을 읽기 전에 만든다(ADR-015 2.7 ①)
+        StoreGuardAuditLog guardAudit = new StoreGuardAuditLog();
+        RealTradingGuard guard = startGuard(config, clock, guardAudit);
         // 알림은 전용 스레드 하나에서만 보내고, 엔진 스레드는 큐에 넣기만 한다(D-100, 절대 규칙 6)
         NotificationQueue notifications = startNotifications(setup.apply(config.notification()), paths, clock,
                 guard.accounts().size());
@@ -146,6 +168,7 @@ public final class EngineMain {
         ControlServer server = null;
         HeartbeatWriter heartbeat = null;
         EngineSelfCheck selfCheck = null;
+        EngineStore store = null;
         try {
             Path configDir = paths.runtimeFile().getParent();
             long pid = ProcessHandle.current().pid();
@@ -155,8 +178,9 @@ public final class EngineMain {
                 throw new IOException("다른 실전 엔진(PID " + other.get().pid() + ")이 돌고 있습니다(하트비트 "
                         + other.get().writtenAt() + "). 잠금 파일이나 run 폴더가 지워졌을 수 있습니다");
             }
-            handler = commandHandler(config, guard, clock, loaded.warning(),
-                    new NotifyingCommandAuditLog(CommandAuditLog.LOGGING, notifications),
+            StoreCommandAuditLog commandAudit =
+                    new StoreCommandAuditLog(new NotifyingCommandAuditLog(CommandAuditLog.LOGGING, notifications));
+            handler = commandHandler(config, guard, clock, loaded.warning(), commandAudit,
                     until -> notifications.offer(EventRoutes.OPERATOR_LOCKED, PROCESS, "실전 2차 확인 잠김",
                             "비밀번호·확인 문구가 " + OperatorAuthenticator.MAX_FAILURES + "번 연속 틀려 " + until
                                     + "까지 실전 활성화·PANIC SELL 확인을 받지 않습니다. 보호 모드 고정은 됩니다. 직접 시도한 것이 아니면"
@@ -165,6 +189,10 @@ public final class EngineMain {
                     (event, detail) -> notifications.offer(EventRoutes.CONTROL_CHANNEL, PROCESS,
                             controlChannelTitle(event), detail));
             LOG.log(Level.INFO, "실전 제어 명령 채널을 열었습니다(로컬 소켓, 네트워크 포트 없음)");
+            // 잠금 순서 engine.lock(명령 채널) → writer.lock(저장소). 쓰기 잠금을 못 잡으면 StoreRefusal로 기동 거부(ADR-015 2.9)
+            store = openStore(configDir, config, guard, clock, pid, notifications);
+            guardAudit.attach(store);
+            commandAudit.attach(store);
             Instant startedAt = clock.instant();
             // 하트비트 쓰기 실패는 로그만 남기고 엔진을 멈추지 않는다(HeartbeatWriter)
             heartbeat = HeartbeatWriter.start(configDir, PROCESS, clock, HeartbeatWriter.DEFAULT_INTERVAL);
@@ -190,7 +218,7 @@ public final class EngineMain {
                 // 설정 경고 문구는 값을 싣지 않는다(실전 운영 화면에도 나가는 문구, PR #100·#101)
                 notifications.offer(EventRoutes.CONFIG_WARNING, PROCESS, "실전 엔진 설정 파일 경고", loaded.warning());
             }
-            return new Engine(guard, handler, server, heartbeat, selfCheck, notifications);
+            return new Engine(guard, handler, server, store, heartbeat, selfCheck, notifications);
         } catch (IOException | RuntimeException e) {
             // 연 순서의 반대로 닫는다(architect PR #240 N3)
             if (selfCheck != null) {
@@ -198,6 +226,9 @@ public final class EngineMain {
             }
             if (heartbeat != null) {
                 heartbeat.close();
+            }
+            if (store != null) {
+                store.close();
             }
             if (server != null) {
                 server.close();
@@ -207,6 +238,69 @@ public final class EngineMain {
             }
             notifications.close();
             throw e;
+        }
+    }
+
+    /**
+     * 실전 엔진 저장소를 연다(ADR-015 2.7 ②~⑤). 복구 결과는 로그에 남기고, 사람이 볼 것이 있으면(비정상 종료, 전면 차단, 손상 경고,
+     * 장애 표시) 긴급 알림을 낸다. 비밀값 가리기에는 설정의 계좌번호·증권사 키·알림 비밀값을 넘긴다(값은 로그에 남기지 않는다).
+     */
+    static EngineStore openStore(Path configDir, RuntimeConfig config, RealTradingGuard guard, Clock clock, long pid,
+            NotificationQueue notifications) throws IOException {
+        EngineStore store = EngineStore.open(new EngineStore.Options(configDir, guard.accounts(),
+                ref -> BundledMarketRules.of(ref.market()), clock, pid, () -> secretValues(config),
+                (title, body) -> notifications.offer(EventRoutes.ENGINE_STORE, PROCESS, title, body),
+                EngineStore.Limits.DEFAULT));
+        RecoveryReport report = store.report();
+        for (String line : report.lines()) {
+            LOG.log(report.needsAttention() ? Level.WARNING : Level.INFO, "엔진 저장소: " + line);
+        }
+        if (report.needsAttention()) {
+            notifications.offer(EventRoutes.ENGINE_STORE, PROCESS, "실전 엔진 저장소 복구 결과 확인 필요",
+                    String.join(" / ", report.lines()));
+        }
+        return store;
+    }
+
+    /** 원장 기록 직전에 가릴 값(ADR-015 2.4). 비어 있는 값은 뺀다. */
+    static List<String> secretValues(RuntimeConfig config) {
+        List<String> values = new ArrayList<>();
+        config.realTrading().accountNumbers().values().forEach(v -> values.add(v.reveal()));
+        config.brokers().asMap().values().forEach(k -> {
+            values.add(k.appKey().reveal());
+            values.add(k.appSecret().reveal());
+        });
+        values.add(config.realTrading().operatorPasswordHash().reveal());
+        values.add(config.notification().slack().webhookUrl().reveal());
+        RuntimeConfig.Kakao kakao = config.notification().kakao();
+        values.add(kakao.accessToken().reveal());
+        values.add(kakao.restApiKey().reveal());
+        values.add(kakao.refreshToken().reveal());
+        values.add(kakao.clientSecret().reveal());
+        values.removeIf(String::isEmpty);
+        return values;
+    }
+
+    /**
+     * 설정 폴더 디스크의 강제 기록 시간을 잰다(ADR-015 3장, D-146). 저장소 폴더 옆의 임시 파일에 쓰고 지운다. 원장은 건드리지 않는다.
+     * 종료 코드 0(결과 출력) 또는 1(잴 수 없음).
+     */
+    static int storeProbe(ConfigPaths paths, Clock clock) {
+        Path dir = paths.runtimeFile().getParent().resolve(StorePaths.ROOT + "-probe");
+        try {
+            ForceProbe.Result r = ForceProbe.run(dir, STORE_PROBE_SAMPLES, System::nanoTime, clock.instant());
+            System.out.println(r.line());
+            System.out.println("올림 감사 상한 2초, 기동·종료 기록 상한 2초와 비교해 99% 값이 상한의 절반을 넘으면 개발 쪽에 알려 주세요");
+            return 0;
+        } catch (IOException | RuntimeException e) {
+            System.err.println("강제 기록 시간을 재지 못했습니다: " + StartFailure.oneLine(e.getMessage()));
+            return 1;
+        } finally {
+            try {
+                java.nio.file.Files.deleteIfExists(dir);
+            } catch (IOException ignored) {
+                // 빈 폴더가 남아도 된다
+            }
         }
     }
 
@@ -257,8 +351,13 @@ public final class EngineMain {
      * 설정의 실전 계좌로 Guard를 만든다. 모든 계좌는 OFF로 시작하며, 설정 어디에도 이를 바꿀 키가 없다(CFG-02, ADR-002).
      */
     static RealTradingGuard startGuard(RuntimeConfig config, Clock clock) {
+        // 저장소를 붙이지 않은 어댑터: 올리는 전이는 모두 거절되고 내림은 프로세스 로그에 남는다
+        return startGuard(config, clock, new StoreGuardAuditLog());
+    }
+
+    static RealTradingGuard startGuard(RuntimeConfig config, Clock clock, GuardAuditLog audit) {
         RuntimeConfig.RealTrading realTrading = config.realTrading();
-        RealTradingGuard guard = new RealTradingGuard(realTrading.accountRefs(), clock, new LoggingGuardAuditLog());
+        RealTradingGuard guard = new RealTradingGuard(realTrading.accountRefs(), clock, audit);
         LOG.log(Level.INFO, "실전 계좌 {0}개, RealTradingGuard 모두 OFF로 시작", guard.accounts().size());
         for (AccountRef account : guard.accounts()) {
             if (!realTrading.isConfigured(account.id().value())) {
@@ -350,6 +449,7 @@ public final class EngineMain {
 
         static final String SETTINGS_HEADLINE = "실전 엔진 설정이 틀려 기동하지 않습니다";
         static final String CHANNEL_HEADLINE = "실전 제어 명령 채널을 열지 못해 기동을 중단합니다";
+        static final String STORE_HEADLINE = "실전 엔진 저장소를 열지 못해 기동을 중단합니다";
         // 괄호로 끝나지 않게 한다: 표준 오류 줄이 첫머리 뒤에 "(실전 엔진이 뜨지 않았습니다)"를 붙인다(PR #151 QA R1)
         static final String PROGRAM_ERROR_HEADLINE =
                 "실전 엔진이 기동 중 프로그램 오류로 멈췄습니다. 설정 파일 문제가 아니니 로그의 예외를 개발 쪽에 알려 주세요";
@@ -357,6 +457,10 @@ public final class EngineMain {
         static StartFailure of(Exception e) {
             if (e instanceof EngineRefusal) {
                 return new StartFailure(EXIT_BAD_SETTINGS, SETTINGS_HEADLINE, oneLine(e.getMessage()), false);
+            }
+            if (e instanceof StoreRefusal) {
+                // 쓰기 잠금을 다른 프로세스가 잡음·저장소 폴더가 심볼릭 링크 등(ADR-015 2.9). 설정 파일 문제가 아니다
+                return new StartFailure(EXIT_START_FAILED, STORE_HEADLINE, oneLine(e.getMessage()), false);
             }
             if (e instanceof IOException) {
                 return new StartFailure(EXIT_START_FAILED, CHANNEL_HEADLINE, oneLine(e.getMessage()), false);
@@ -435,15 +539,17 @@ public final class EngineMain {
 
     /**
      * 실행 중인 엔진. 닫으면 자가 확인을 멈추고, 진행 중인 계좌 작업(활성화·청산)을 최대 5초 기다려 마친 뒤 명령 채널을 닫고(진행 중인
-     * 연결은 응답을 마침, C7) 하트비트 파일을 지운다(정상 종료 표시). 알림 큐는 남은 알림을 최대 3초 보내 보고 나머지는 로그에만
+     * 연결은 응답을 마침, C7), 저장소 원장을 비우고 정상 종료 기록을 쓴 뒤 쓰기 잠금을 놓고(ADR-015 2.5), 하트비트 파일을 지운다(정상
+     * 종료 표시). 알림 큐는 남은 알림을 최대 3초 보내 보고 나머지는 로그에만
      * 남긴다. Guard는 메모리 상태라 함께 사라진다.
      */
-    record Engine(RealTradingGuard guard, EngineCommandHandler handler, ControlServer server, HeartbeatWriter heartbeat,
-            EngineSelfCheck selfCheck, NotificationQueue notifications) implements AutoCloseable {
+    record Engine(RealTradingGuard guard, EngineCommandHandler handler, ControlServer server, EngineStore store,
+            HeartbeatWriter heartbeat, EngineSelfCheck selfCheck, NotificationQueue notifications) implements AutoCloseable {
         @Override
         public void close() {
             // 앞 단계가 실패해도 뒤 단계는 한다. 채널 닫기가 실패해도 정상 종료 표시는 남긴다(멈춤으로 오인되지 않게, architect PR #116 R1)
-            closeAll(selfCheck, handler, server, heartbeat, notifications);
+            // 저장소는 명령 처리기·채널 뒤에 닫는다: 처리기 닫기 중의 내림 감사까지 원장에 남긴다. 알림 큐는 저장소 알림 뒤에 닫는다
+            closeAll(selfCheck, handler, server, store, heartbeat, notifications);
         }
 
         private static void closeAll(AutoCloseable... steps) {
